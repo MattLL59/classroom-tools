@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>Story Scene Builder V11</title>
+    <title>Story Scene Builder V12</title>
     <style>
         /* --- GENERAL STYLES --- */
         * { box-sizing: border-box; }
@@ -107,7 +107,7 @@
         #middle-ring .text-label { width: 70px; left: -35px; top: 25px; font-size: 12px; }
         #inner-ring .text-label { width: 50px; left: -25px; top: 35px; font-size: 11px; }
 
-        /* POINTER (Fixed Alignment: 250px center - 20px border = 230px left) */
+        /* POINTER */
         .arrow { position: absolute; top: -15px; left: 230px; z-index: 20; border-left: 20px solid transparent; border-right: 20px solid transparent; border-top: 30px solid #333; }
 
         /* --- WORKBENCH --- */
@@ -132,14 +132,24 @@
             width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-family: sans-serif; font-size: 16px; resize: vertical;
         }
 
-        .btn-row { display: flex; justify-content: space-between; margin-top: 10px; gap: 10px; }
+        /* Button Layout */
+        .btn-row { display: flex; justify-content: space-between; margin-top: 10px; gap: 5px; flex-wrap: wrap; }
 
         button.action-btn {
-            flex: 1; padding: 12px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; color: white; font-weight: bold;
+            flex: 1; padding: 10px; font-size: 14px; border: none; border-radius: 5px; cursor: pointer; color: white; font-weight: bold; white-space: nowrap;
         }
 
-        .btn-download { background-color: #28a745; }
-        .btn-clear { background-color: #dc3545; }
+        /* Color coding for save options */
+        .btn-word { background-color: #2b579a; } /* Word Blue */
+        .btn-word:hover { background-color: #1e3f72; }
+        
+        .btn-txt { background-color: #6c757d; } /* Grey */
+        .btn-txt:hover { background-color: #545b62; }
+        
+        .btn-pdf { background-color: #dc3545; } /* PDF Red */
+        .btn-pdf:hover { background-color: #c82333; }
+
+        .btn-clear { background-color: #333; flex: 0.5; } /* Smaller clear button */
         
         /* CONTROLS */
         .controls-area { display: flex; gap: 10px; justify-content: center; margin-top: 0px; margin-bottom: 10px; flex-wrap: wrap;}
@@ -151,43 +161,36 @@
         /* ========================================= */
         /* === MOBILE RESPONSIVE STYLES === */
         /* ========================================= */
-        
         @media (max-width: 768px) {
-            body {
-                flex-direction: column;
-                overflow-y: auto;
-                height: auto;
-            }
-
-            .sidebar {
-                width: 100%;
-                height: auto;
-                border-right: none;
-                border-top: 5px solid #ddd;
-                order: 2; 
-                padding-bottom: 50px;
-            }
-
-            .main-content {
-                width: 100%;
-                overflow: visible;
-                order: 1;
-                height: auto;
-                min-height: auto;
-            }
-
-            .wheel-wrapper {
-                min-height: 360px; 
-                margin-bottom: 0px;
-            }
-            
-            .wheel-container {
-                transform: scale(0.65); 
-                transform-origin: center top;
-            }
-
+            body { flexDirection: column; overflow-y: auto; height: auto; }
+            .sidebar { width: 100%; height: auto; border-right: none; border-top: 5px solid #ddd; order: 2; padding-bottom: 50px; }
+            .main-content { width: 100%; overflow: visible; order: 1; height: auto; min-height: auto; }
+            .wheel-wrapper { min-height: 360px; margin-bottom: 0px; }
+            .wheel-container { transform: scale(0.65); transform-origin: center top; }
             .controls-area { margin-top: -20px; }
             .prompt-display { font-size: 16px; }
+        }
+
+        /* ========================================= */
+        /* === PRINT STYLES (For PDF Export) === */
+        /* ========================================= */
+        @media print {
+            body { background-color: white; overflow: visible; height: auto; display: block; }
+            .sidebar, .wheel-wrapper, .controls-area, .btn-row, .btn-clear { display: none !important; }
+            .main-content { width: 100%; align-items: flex-start; padding: 0; }
+            .workbench { width: 100%; max-width: 100%; border: none; box-shadow: none; background: white; padding: 0; margin: 0; }
+            textarea { border: none; height: auto; resize: none; font-size: 14pt; font-family: 'Times New Roman', serif; }
+            .prompt-display { text-align: left; font-size: 16pt; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+            
+            /* Add a header for the printed page */
+            .workbench::before {
+                content: "Story Planning Worksheet";
+                display: block;
+                font-size: 24pt;
+                font-weight: bold;
+                margin-bottom: 20px;
+                color: #333;
+            }
         }
     </style>
 </head>
@@ -236,10 +239,14 @@
 
         <div class="workbench">
             <div id="generated-prompt" class="prompt-display">Align the wheels...</div>
+            
             <textarea id="student-notes" placeholder="Type your story plan here..."></textarea>
+            
             <div class="btn-row">
                 <button class="action-btn btn-clear" onclick="document.getElementById('student-notes').value = ''">Clear</button>
-                <button class="action-btn btn-download" onclick="downloadDoc()">💾 Save Doc</button>
+                <button class="action-btn btn-word" onclick="downloadWord()">Save Doc</button>
+                <button class="action-btn btn-pdf" onclick="printPdf()">Save PDF</button>
+                <button class="action-btn btn-txt" onclick="downloadTxt()">Save Txt</button>
             </div>
         </div>
     </div>
@@ -286,11 +293,7 @@
             for (var i = 0; i < count; i++) {
                 var spoke = document.createElement('div');
                 spoke.className = 'ring-spoke';
-                
-                // FIX: Remove the + (step / 2) offset.
-                // i * step ensures Item 0 is exactly at 0 degrees (Top).
                 var rotation = (i * step);
-                
                 spoke.style.transform = 'rotate(' + rotation + 'deg)';
 
                 var label = document.createElement('div');
@@ -316,7 +319,6 @@
             updatePrompt();
         }
 
-        // Drag logic
         var activeRing = null; var startAngle = 0; var container = document.querySelector('.wheel-container');
         function getMouseAngle(e) {
             var rect = container.getBoundingClientRect();
@@ -343,16 +345,14 @@
         }, {passive: false});
 
         window.addEventListener('mousemove', function(e){
-            if(!activeRing) return; 
-            e.preventDefault();
+            if(!activeRing) return; e.preventDefault();
             rotations[activeRing.id] = getMouseAngle(e) - startAngle;
             activeRing.style.transform = 'rotate(' + rotations[activeRing.id] + 'deg)';
             updatePrompt();
         });
         
         window.addEventListener('touchmove', function(e){
-            if(!activeRing) return; 
-            e.preventDefault();
+            if(!activeRing) return; e.preventDefault();
             rotations[activeRing.id] = getMouseAngle(e) - startAngle;
             activeRing.style.transform = 'rotate(' + rotations[activeRing.id] + 'deg)';
             updatePrompt();
@@ -367,9 +367,6 @@
             var step = 360 / total;
             var angle = rotation % 360;
             if (angle < 0) angle += 360;
-            
-            // FIX: Simplified index calculation to match new 0-degree start
-            // We round to the nearest whole step
             return Math.round(((360 - angle) % 360) / step) % total;
         }
 
@@ -387,21 +384,50 @@
             document.getElementById('generated-prompt').innerHTML = promptHTML;
         }
 
-        // --- EXPORT TO WORD DOC ---
-        function downloadDoc() {
+        // --- SAVE FUNCTIONS ---
+        function getCommonData() {
             var prompt = document.getElementById('generated-prompt').innerText;
             var notes = document.getElementById('student-notes').value;
-            if(notes.trim() === "") { alert("Please write some notes before saving!"); return; }
+            if(notes.trim() === "") { alert("Please write some notes before saving!"); return null; }
+            return { prompt: prompt, notes: notes };
+        }
+
+        // 1. Save as WORD
+        function downloadWord() {
+            var data = getCommonData();
+            if(!data) return;
             var content = `
                 <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
                 <head><meta charset='utf-8'><title>Story Plan</title></head>
-                <body><h1>Story Planning Worksheet</h1><h3>Prompt:</h3><p>${prompt}</p><h3>Student Notes:</h3><p>${notes.replace(/\n/g, "<br>")}</p></body>
+                <body><h1>Story Planning Worksheet</h1><h3>Prompt:</h3><p>${data.prompt}</p><h3>Student Notes:</h3><p>${data.notes.replace(/\n/g, "<br>")}</p></body>
                 </html>`;
             var blob = new Blob(['\ufeff', content], { type: 'application/msword' });
             var url = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(content);
             var link = document.createElement('a'); link.href = url; link.download = 'Story_Plan.doc';
             document.body.appendChild(link); link.click(); document.body.removeChild(link);
         }
+
+        // 2. Save as TEXT
+        function downloadTxt() {
+            var data = getCommonData();
+            if(!data) return;
+            var content = "STORY PLANNING WORKSHEET\n\nPROMPT:\n" + data.prompt + "\n\nSTUDENT NOTES:\n" + data.notes;
+            var blob = new Blob([content], { type: 'text/plain' });
+            var url = window.URL.createObjectURL(blob);
+            var link = document.createElement('a'); link.href = url; link.download = 'Story_Plan.txt';
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
+        // 3. Save as PDF (Print)
+        function printPdf() {
+            // Simple check to remind them to write something, but allow printing blank if they really want
+            var notes = document.getElementById('student-notes').value;
+            if(notes.trim() === "") { 
+                if(!confirm("Your notes are empty. Do you still want to print?")) return;
+            }
+            window.print();
+        }
+
         updatePrompt();
     </script>
 </body>
