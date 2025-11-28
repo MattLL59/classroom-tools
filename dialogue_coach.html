@@ -1,113 +1,283 @@
-def get_differentiated_prompts(mode):
-    """Returns a list of prompts based on the selected difficulty mode."""
-    if mode == '1':
-        # Foundation Mode (EL3 - Grade 3 Focus)
-        return {
-            'A': {"text": "Describe a character meeting an unexpected pet. (Focus: Simple Nouns & Verbs)", "word_count": 200},
-            'B': {"text": "Write a short dialogue between two people trying to agree on a movie. (Focus: Basic Punctuation)", "word_count": 150},
-            'C': {"text": "The wind howled... write a story about what happened next. (Focus: Clear Beginning/Middle/End)", "word_count": 250}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dialogue Coach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
         }
-    else:
-        # Higher Mode (Grade 4 - Grade 9 Focus)
-        return {
-            'A': {"text": "Write a story that ends: '... and the teacher never found out.' (Focus: Ambiguity and Pacing)", "word_count": 300},
-            'B': {"text": "The day that changed everything. (Focus: Complex Sentence Structure and Tension)", "word_count": 300},
-            'C': {"text": "Write a tense conversation using varied dialogue tags. (Focus: Advanced Punctuation and Voice)", "word_count": 350}
+        .container {
+            max-width: 800px;
+        }
+        .feedback-area {
+            min-height: 50px;
+            transition: all 0.3s ease;
+        }
+        textarea {
+            min-height: 400px;
+            resize: vertical;
+        }
+        .nudge {
+            background-color: #fef2f2;
+            border-left: 4px solid #ef4444;
+            color: #b91c1c;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="container mx-auto bg-white p-6 rounded-xl shadow-2xl">
+        
+        <!-- Navigation: Back to Toolkit (Links to index.html) -->
+        <a href="index.html" class="inline-block text-blue-600 font-semibold mb-4 hover:underline">
+            &larr; Back to Toolkit
+        </a>
+
+        <header class="mb-6 border-b pb-4">
+            <h1 class="text-3xl font-extrabold text-blue-800">Dialogue Coach</h1>
+            <p class="text-gray-600 mt-2">Practice dialogue rules in real-time.</p>
+        </header>
+
+        <!-- Spelling Instruction Banner -->
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 flex items-start">
+            <span class="text-2xl mr-3">✍️</span>
+            <div>
+                <h4 class="font-bold text-yellow-800">How to Fix Spelling:</h4>
+                <p class="text-sm text-yellow-800">
+                    Errors have a <span class="underline decoration-red-500 decoration-wavy font-bold">red wavy line</span>. 
+                    <strong>Right-click</strong> the word to select the correct spelling.
+                </p>
+            </div>
+        </div>
+
+        <!-- Writing Area -->
+        <div class="mb-6">
+            <label for="writing-area" class="block text-lg font-semibold text-gray-700 mb-2">Write Your Dialogue Here:</label>
+            <textarea id="writing-area" 
+                      spellcheck="true"
+                      lang="en"
+                      class="w-full border-2 border-gray-300 rounded-lg p-4 focus:outline-none focus:ring-4 focus:ring-blue-200 text-lg leading-relaxed"
+                      placeholder="Start typing... &#10;Example: &quot;Hello,&quot; she said."></textarea>
+        </div>
+
+        <!-- Feedback Area -->
+        <div id="feedback-container" class="feedback-area">
+            <!-- Feedback messages will appear here -->
+        </div>
+
+        <!-- Quick Rules -->
+        <div class="mt-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 class="text-lg font-bold text-gray-700">Quick Rules:</h3>
+            <ul class="list-disc list-inside text-gray-600 mt-2 space-y-1">
+                <li>New speaker = <strong>New paragraph</strong> (Enter key twice).</li>
+                <li>Punctuation goes <strong>inside</strong> the quotes.</li>
+                <li>Close quotes <strong>before</strong> the speaker's name.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- THE LOGIC SCRIPT (Crucial for the app to work) -->
+    <script>
+        const writingArea = document.getElementById('writing-area');
+        const feedbackContainer = document.getElementById('feedback-container');
+
+        function debounce(func, timeout = 500) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => { func.apply(this, args); }, timeout);
+            };
         }
 
-def check_dialogue_logic(text):
-    """
-    Simulates a simple Contextual Suggestion check.
-    Rule: Checks for two potential speakers' lines without a paragraph break.
-    (This is a very basic check, as complex parsing is needed for a real app.)
-    """
-    lines = text.split('\n')
-    suggestion_needed = False
-    
-    for i in range(len(lines) - 1):
-        line1 = lines[i].strip()
-        line2 = lines[i+1].strip()
-        
-        # A rough check for dialogue tags to simulate two speakers back-to-back
-        dialogue_tags = ["said", "replied", "asked", "whispered", "insisted"]
-        
-        has_tag1 = any(tag in line1.lower() for tag in dialogue_tags)
-        has_tag2 = any(tag in line2.lower() for tag in dialogue_tags)
-        
-        # If two lines containing dialogue tags are typed without a blank line between them, trigger the rule.
-        if has_tag1 and has_tag2 and lines[i+1] != "":
-            suggestion_needed = True
-            break
+        function checkDialogueRules(text) {
+            let feedbackMessages = [];
+            const lines = text.split('\n');
             
-    if suggestion_needed:
-        return ("⚠️ **Contextual Suggestion (Punctuation):** It looks like you have two characters speaking back-to-back. "
-                "Remember the golden rule for dialogue: **start a new paragraph every time a new character speaks.**")
-    return None
+            const dialogueTagRegex = /\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled|screamed|cried)\b/i;
+            const simpleTagRegex = /\b(said|asked|replied)\b/i; 
+            const quoteRegex = /"/;
+            
+            let simpleTagCounter = 0; 
+            let previousLineWasDialogue = false; 
 
-def main():
-    print("✨ Welcome to the Basic Creative Writing Coach Prototype! ✨")
-    
-    # 1. MODE SELECTION (DIFFERENTIATION)
-    print("\n--- 1. Mode Selection ---")
-    print("1: Foundation/Retake (EL3 - Grade 3 Focus)")
-    print("2: Higher/Advanced (Grade 4 - Grade 9 Focus)")
-    mode = input("Select a mode (1 or 2): ")
-    
-    if mode not in ['1', '2']:
-        print("Invalid selection. Exiting.")
-        return
+            // --- GLOBAL CHECKS ---
 
-    prompts = get_differentiated_prompts(mode)
+            // Rule 1: Punctuation Inside Quotes
+            // Checks for punctuation marks that should be commas when followed by a dialogue tag.
+            const punctuationErrorRegex = /"\.(?=\s*\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled)\b)/gi;
+            if (punctuationErrorRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Punctuation Check", 
+                    "You used a period inside the quotes followed by a tag.", 
+                    "Use a **comma** instead.<br><em>Wrong: \"Go away.\" he said.<br>Right: \"Go away,\" he said.</em>"
+                ));
+            }
 
-    # 2. PROMPT SELECTION
-    print("\n--- 2. Prompt Selection ---")
-    for key, data in prompts.items():
-        print(f"[{key}] {data['text']} (Goal: {data['word_count']} words)")
-        
-    prompt_choice = input("Select a prompt (A, B, or C): ").upper()
-    
-    if prompt_choice not in prompts:
-        print("Invalid prompt choice. Exiting.")
-        return
+            // Rule 2: Lowercase Start inside Quotes
+            // Checks for dialogue starting with a lowercase letter after the opening quote.
+            const lowercaseStartRegex = /"\s*[a-z]/g;
+            if (lowercaseStartRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Capitalization Check",
+                    "A sentence inside quotation marks usually starts with a capital letter.",
+                    "<em>Example: \"<span class='text-green-600 font-bold'>H</span>ello,\" she said.</em>"
+                ));
+            }
 
-    selected_prompt = prompts[prompt_choice]
-    print(f"\n--- 3. Writing Workspace ---")
-    print(f"📝 Prompt: {selected_prompt['text']}")
-    print(f"🎯 Goal: {selected_prompt['word_count']} words.")
-    print("--- Start Writing (Type 'DONE' on a new line when finished) ---")
+            // Rule 3: Lets vs Let's Check
+            // Specifically looks for the common contraction error.
+            const letsRegex = /"\s*Lets\b/g;
+            if (letsRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Grammar Check: Lets vs Let's",
+                    "Did you mean **Let's** (short for Let us)?",
+                    "<em>'Lets' (without apostrophe) means to allow something.</em>"
+                ));
+            }
 
-    # 3. WRITING SIMULATION
-    content = []
-    while True:
-        line = input()
-        if line.upper() == 'DONE':
-            break
-        content.append(line)
-        
-    student_text = '\n'.join(content)
-    word_count = len(student_text.split())
+            // Rule 4: Tag Inside Quotes (The Run-on Quote Detector)
+            // Checks if the dialogue tag itself is inside the quotes, e.g., "Hello he said"
+            const tagInsideQuotesRegex = /\b(said|asked|replied|whispered|shouted)\s*"/i;
+            const pronounTagInsideQuotesRegex = /\b(he|she|they|I|we)\s+(said|asked|replied|whispered|shouted)\s*"/i;
+            if (tagInsideQuotesRegex.test(text) || pronounTagInsideQuotesRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Structure Check: Tag Inside Quotes",
+                    "It looks like you put the dialogue tag <strong>inside</strong> the quotation marks.",
+                    "Close the quotes <strong>before</strong> the tag.<br><em>Right: \"Let's go,\" he said.</em>"
+                ));
+            }
 
-    # 4. REVIEW AND FEEDBACK
-    print("\n--- 4. Review and Feedback ---")
-    
-    # Word Count Check
-    print(f"Word Count: {word_count} words.")
-    if word_count < selected_prompt['word_count'] * 0.8: # Tolerance of 20%
-        print(f"⚠️ **Exam Constraint:** Your response ({word_count} words) is significantly short of the goal ({selected_prompt['word_count']} words).")
-    
-    # Contextual Suggestion Check
-    dialogue_feedback = check_dialogue_logic(student_text)
-    if dialogue_feedback:
-        print(f"\n{dialogue_feedback}")
-    else:
-        print("\n✅ Good work on your basic dialogue structure and paragraphing!")
+            // Rule 5: Missing Punctuation before closing quote
+            // Checks for a word immediately followed by the closing quote and a dialogue tag, indicating missing internal punctuation.
+            const missingPuncRegex = /[a-z0-9]\s*"(?=\s*(he|she|it|they|we|I|said|asked))/i;
+            if (missingPuncRegex.test(text)) {
+                 feedbackMessages.push(createNudge(
+                    "Missing Punctuation",
+                    "You closed the quote without any punctuation inside.",
+                    "You usually need a <strong>comma</strong>.<br><em>Example: \"Hello<span class='text-red-600 font-bold'>,</span>\" she said.</em>"
+                ));
+            }
+            
+            // Rule 6: Invalid Punctuation (Typo Check)
+            // Catches symbols that aren't valid end-of-word punctuation in dialogue.
+            const invalidPuncRegex = /[a-z]+[£$%^&*@#]/i;
+            if (invalidPuncRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Typo / Punctuation Check",
+                    "I see a symbol (like £ or $) where punctuation should be.",
+                    "Did you hit the wrong key? Try <strong>?</strong> or <strong>!</strong> instead."
+                ));
+            }
 
-    # Hybrid Workflow Reminder
-    print("\n--- Hybrid Workflow Reminder ---")
-    print("📌 **Action Required:** Your digital draft is complete. Now, transfer this piece by hand to your notebook to practice your handwriting and exam presentation.")
-    
-    print("\nPrototype complete. Thank you for testing!")
+            // Rule 7: Your vs You're
+            // Checks for the common confusion when "your" is used as a predicate adjective (e.g., your ugly).
+            const yourUglyRegex = /\byour\s+(ugly|beautiful|stupid|smart|funny|mean|kind|nice|bad|good|right|wrong)\b/i;
+            if (yourUglyRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Grammar Check: Your vs You're",
+                    "You wrote 'your' followed by a description.",
+                    "Did you mean **You're** (You are)?"
+                ));
+            }
 
-# Run the main function
-if __init__ == "__main__":
-    main()
+            // --- LINE BY LINE CHECKS ---
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                const nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+
+                if (line.length === 0) {
+                    previousLineWasDialogue = false;
+                    simpleTagCounter = 0; 
+                    continue;
+                }
+
+                const hasTag = dialogueTagRegex.test(line);
+                const hasQuotes = quoteRegex.test(line);
+
+                // Check 8: Missing Quotation Marks
+                if (hasTag && !hasQuotes) {
+                    // Only trigger if it doesn't look like an indirect quote (like 'He said that...')
+                    if (!/\bthat\b/i.test(line)) {
+                        feedbackMessages.push(createNudge(
+                            "Missing Quotation Marks?",
+                            `I see a dialogue tag like '${line.match(dialogueTagRegex)[0]}' but no quotation marks.`,
+                            "Wrap spoken words in double quotes."
+                        ));
+                    }
+                }
+
+                if (hasQuotes || hasTag) {
+                    // Overuse of 'Said' counter logic
+                    if (simpleTagRegex.test(line)) {
+                        simpleTagCounter++;
+                    } else {
+                        simpleTagCounter = 0; 
+                    }
+
+                    if (simpleTagCounter >= 3) {
+                        feedbackMessages.push(createNudge(
+                            "Vocabulary Nudge",
+                            "You've used 'said' (or similar) three times in a row.",
+                            "Try a stronger verb like <em>whispered, demanded, or insisted</em>."
+                        ));
+                        // Reset counter after providing the suggestion
+                        simpleTagCounter = 0; 
+                    }
+
+                    // Check 9: Paragraph Break Nudge (New Speaker)
+                    if (previousLineWasDialogue && (hasQuotes || hasTag) && nextLine.length > 0) {
+                         feedbackMessages.push(createNudge(
+                            "Paragraph Break Nudge",
+                            `Line ${i+1} and ${i+2} seem to have different speakers together.`,
+                            "<strong>New Speaker = New Paragraph.</strong> Press Enter twice."
+                        ));
+                        previousLineWasDialogue = false; 
+                    } else {
+                        previousLineWasDialogue = true;
+                    }
+                } else {
+                    previousLineWasDialogue = false;
+                    simpleTagCounter = 0;
+                }
+            }
+            
+            // Render Feedback
+            if (feedbackMessages.length > 0) {
+                // Ensure only unique messages are shown
+                const uniqueMessages = Array.from(new Set(feedbackMessages));
+                feedbackContainer.innerHTML = uniqueMessages.join('');
+            } else if (text.length > 20) {
+                 feedbackContainer.innerHTML = '<div class="p-3 mt-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-lg font-semibold flex items-center"><span class="text-xl mr-2">✅</span> <span>Looking good! No punctuation errors found. Check for red underlines for spelling.</span></div>';
+            } else {
+                feedbackContainer.innerHTML = '';
+            }
+        }
+
+        function createNudge(title, problem, fix) {
+            return `
+            <div class="nudge">
+                <div class="uppercase tracking-wide text-sm font-bold mb-1">${title}</div>
+                <div class="font-normal text-red-900 mb-1">${problem}</div>
+                <div class="text-sm bg-white/50 p-2 rounded mt-1 text-red-800">${fix}</div>
+            </div>
+            `;
+        }
+
+        // Event listener with debounce to prevent constant checking while typing
+        writingArea.addEventListener('input', debounce(() => {
+            checkDialogueRules(writingArea.value);
+        }, 500));
+
+        // Initial check on load
+        checkDialogueRules(writingArea.value);
+    </script>
+</body>
+</html>
