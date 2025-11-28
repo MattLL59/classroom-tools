@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dialogue Coach Toolkit</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+        }
+        .container {
+            max-width: 800px;
+        }
+        .feedback-area {
+            min-height: 50px;
+            transition: all 0.3s ease;
+        }
+        textarea {
+            min-height: 400px;
+            resize: vertical;
+        }
+        .nudge {
+            background-color: #fef2f2;
+            border-left: 4px solid #ef4444;
+            color: #b91c1c;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-weight: 700;
+        }
+        .info-tip {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            color: #1e40af;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="container mx-auto bg-white p-6 rounded-xl shadow-2xl">
+        <header class="mb-6 border-b pb-4">
+            <h1 class="text-3xl font-extrabold text-blue-800">Dialogue Coach Toolkit</h1>
+            <p class="text-gray-600 mt-2">Practice dialogue rules in real-time. This tool checks for punctuation, style, and paragraphing errors.</p>
+        </header>
+
+        <!-- Spelling Instruction Banner -->
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 flex items-start">
+            <span class="text-2xl mr-3">✍️</span>
+            <div>
+                <h4 class="font-bold text-yellow-800">How to Fix Spelling:</h4>
+                <p class="text-sm text-yellow-800">
+                    This tool uses your browser's spellchecker. Errors will have a <span class="underline decoration-red-500 decoration-wavy font-bold">red wavy line</span>. 
+                    <strong>Right-click</strong> the word to select the correct spelling.
+                </p>
+            </div>
+        </div>
+
+        <!-- Writing Area -->
+        <div class="mb-6">
+            <label for="writing-area" class="block text-lg font-semibold text-gray-700 mb-2">Write Your Dialogue Here:</label>
+            <textarea id="writing-area" 
+                      spellcheck="true"
+                      lang="en"
+                      class="w-full border-2 border-gray-300 rounded-lg p-4 focus:outline-none focus:ring-4 focus:ring-blue-200 text-lg leading-relaxed"
+                      placeholder="Start typing... &#10;Example: &quot;Hello,&quot; she said."></textarea>
+        </div>
+
+        <!-- Feedback Area -->
+        <div id="feedback-container" class="feedback-area">
+            <!-- Feedback messages will appear here -->
+        </div>
+
+        <!-- Educational Reminder Card -->
+        <div class="mt-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 class="text-lg font-bold text-gray-700">Quick Rules:</h3>
+            <ul class="list-disc list-inside text-gray-600 mt-2 space-y-1">
+                <li>New speaker = <strong>New paragraph</strong> (Enter key twice).</li>
+                <li>Use <strong>quotation marks</strong> (" ") for spoken words.</li>
+                <li>Punctuation goes <strong>inside</strong> the quotes.</li>
+                <li>Close quotes <strong>before</strong> the speaker's name (e.g., "Hello," she said).</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const writingArea = document.getElementById('writing-area');
+        const feedbackContainer = document.getElementById('feedback-container');
+
+        function debounce(func, timeout = 500) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => { func.apply(this, args); }, timeout);
+            };
+        }
+
+        function checkDialogueRules(text) {
+            let feedbackMessages = [];
+            const lines = text.split('\n');
+            
+            // Regex definitions
+            const dialogueTagRegex = /\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled|screamed|cried)\b/i;
+            const simpleTagRegex = /\b(said|asked|replied)\b/i; 
+            const quoteRegex = /"/;
+            
+            let simpleTagCounter = 0; 
+            let previousLineWasDialogue = false; 
+
+            // --- GLOBAL CHECKS ---
+
+            // Rule 1: Punctuation Inside Quotes (Period followed by Tag)
+            const punctuationErrorRegex = /"\.(?=\s*\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled)\b)/gi;
+            if (punctuationErrorRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Punctuation Check", 
+                    "You used a period inside the quotes followed by a tag.", 
+                    "Use a **comma** instead if the sentence continues with a tag.<br><em>Wrong: \"Go away.\" he said.<br>Right: \"Go away,\" he said.</em>"
+                ));
+            }
+
+            // Rule 2: Lowercase Start inside Quotes
+            const lowercaseStartRegex = /"\s*[a-z]/g;
+            if (lowercaseStartRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Capitalization Check",
+                    "A sentence inside quotation marks usually starts with a capital letter.",
+                    "<em>Example: \"<span class='text-green-600 font-bold'>H</span>ello,\" she said.</em>"
+                ));
+            }
+
+            // Rule 6: Lets vs Let's Check
+            const letsRegex = /"\s*Lets\b/g;
+            if (letsRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Grammar Check: Lets vs Let's",
+                    "You wrote 'Lets' at the start of your dialogue.",
+                    "Did you mean **Let's** (short for Let us)?<br><em>'Lets' (without apostrophe) means to allow something.</em>"
+                ));
+            }
+
+            // Rule 7: Tag Inside Quotes (New Detection Logic)
+            // Looks for: [text] [tag]" OR [text] [tag] [pronoun]"
+            // Example: "Let's go he said" or "Let's go said he" (archaic but possible error pattern)
+            const tagInsideQuotesRegex = /\b(said|asked|replied|whispered|shouted)\s*"/i;
+            const pronounTagInsideQuotesRegex = /\b(he|she|they|I|we)\s+(said|asked|replied|whispered|shouted)\s*"/i;
+            
+            if (tagInsideQuotesRegex.test(text) || pronounTagInsideQuotesRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Structure Check: Tag Inside Quotes",
+                    "It looks like you put the dialogue tag (e.g., 'said') <strong>inside</strong> the quotation marks.",
+                    "Close the quotes <strong>before</strong> the tag.<br><em>Wrong: \"Let's go he said\"<br>Right: \"Let's go,\" he said.</em>"
+                ));
+            }
+
+            // Rule 8: Missing Punctuation before closing quote (Enhanced)
+            // Looks for: [letter] [quote] -- ignoring if there is a tag immediately inside which Rule 7 catches
+            // We check this generally to catch cases like: "Hello" he said.
+            // But we must be careful not to flag "Hello," (which is correct).
+            const missingPuncRegex = /[a-z0-9]\s*"(?=\s*(he|she|it|they|we|I|said|asked))/i;
+            if (missingPuncRegex.test(text)) {
+                 feedbackMessages.push(createNudge(
+                    "Missing Punctuation",
+                    "You closed the quote without any punctuation inside.",
+                    "You usually need a <strong>comma</strong> before the closing quote.<br><em>Example: \"Hello<span class='text-red-600 font-bold'>,</span>\" she said.</em>"
+                ));
+            }
+            
+            // Rule 9: Invalid Punctuation (Typo Check)
+            // Checks for £, $, %, etc at the end of a word
+            const invalidPuncRegex = /[a-z]+[£$%^&*@#]/i;
+            if (invalidPuncRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Typo / Punctuation Check",
+                    "I see a symbol (like £ or $) where punctuation should be.",
+                    "Did you hit the wrong key? Try <strong>?</strong> or <strong>!</strong> instead."
+                ));
+            }
+
+            // Rule 10: Your vs You're (Homophone Check)
+            const yourUglyRegex = /\byour\s+(ugly|beautiful|stupid|smart|funny|mean|kind|nice|bad|good|right|wrong)\b/i;
+            if (yourUglyRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Grammar Check: Your vs You're",
+                    "You wrote 'your' followed by a description.",
+                    "Did you mean **You're** (You are)?<br><em>'Your' shows ownership (Your bag). 'You're' describes someone (You're funny).</em>"
+                ));
+            }
+
+            // --- LINE BY LINE CHECKS ---
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                const nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+
+                if (line.length === 0) {
+                    previousLineWasDialogue = false;
+                    simpleTagCounter = 0; 
+                    continue;
+                }
+
+                const hasTag = dialogueTagRegex.test(line);
+                const hasQuotes = quoteRegex.test(line);
+
+                // Rule 3: Missing Quotes (Heuristic: Has tag, looks like speech, no quotes)
+                if (hasTag && !hasQuotes) {
+                    // Check if it's likely indirect speech (contains "that")
+                    if (!/\bthat\b/i.test(line)) {
+                        feedbackMessages.push(createNudge(
+                            "Missing Quotation Marks?",
+                            `I see a dialogue tag like '${line.match(dialogueTagRegex)[0]}' but no quotation marks.`,
+                            "If a character is speaking, wrap their words in double quotes.<br><em>Example: \"I am here,\" she said.</em>"
+                        ));
+                    }
+                }
+
+                if (hasQuotes || hasTag) {
+                    // Rule 4: Overuse of 'Said'
+                    if (simpleTagRegex.test(line)) {
+                        simpleTagCounter++;
+                    } else {
+                        simpleTagCounter = 0; 
+                    }
+
+                    if (simpleTagCounter >= 3) {
+                        feedbackMessages.push(createNudge(
+                            "Vocabulary Nudge",
+                            "You've used 'said' (or similar) three times in a row.",
+                            "Try a stronger verb like <em>whispered, demanded, or insisted</em>."
+                        ));
+                        simpleTagCounter = 0; 
+                    }
+
+                    // Rule 5: Paragraph Breaks
+                    if (previousLineWasDialogue && (hasQuotes || hasTag) && nextLine.length > 0) {
+                         feedbackMessages.push(createNudge(
+                            "Paragraph Break Nudge",
+                            `Line ${i+1} and ${i+2} seem to have different speakers together.`,
+                            "<strong>New Speaker = New Paragraph.</strong> Press Enter twice."
+                        ));
+                        previousLineWasDialogue = false; 
+                    } else {
+                        previousLineWasDialogue = true;
+                    }
+                } else {
+                    previousLineWasDialogue = false;
+                    simpleTagCounter = 0;
+                }
+            }
+            
+            // Render Feedback
+            if (feedbackMessages.length > 0) {
+                const uniqueMessages = Array.from(new Set(feedbackMessages));
+                feedbackContainer.innerHTML = uniqueMessages.join('');
+            } else if (text.length > 20) {
+                 feedbackContainer.innerHTML = '<div class="p-3 mt-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-lg font-semibold flex items-center"><span class="text-xl mr-2">✅</span> <span>Looking good! No punctuation errors found. Check for red underlines for spelling.</span></div>';
+            } else {
+                feedbackContainer.innerHTML = '';
+            }
+        }
+
+        // Helper to create HTML for nudges
+        function createNudge(title, problem, fix) {
+            return `
+            <div class="nudge">
+                <div class="uppercase tracking-wide text-sm font-bold mb-1">${title}</div>
+                <div class="font-normal text-red-900 mb-1">${problem}</div>
+                <div class="text-sm bg-white/50 p-2 rounded mt-1 text-red-800">${fix}</div>
+            </div>
+            `;
+        }
+
+        writingArea.addEventListener('input', debounce(() => {
+            checkDialogueRules(writingArea.value);
+        }, 500));
+
+        // Initial check
+        checkDialogueRules(writingArea.value);
+    </script>
+</body>
+</html>
