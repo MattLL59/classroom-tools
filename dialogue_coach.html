@@ -103,12 +103,22 @@
             
             const dialogueTagRegex = /\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled|screamed|cried)\b/i;
             const simpleTagRegex = /\b(said|asked|replied)\b/i; 
-            const quoteRegex = /"/;
+            const quoteRegex = /"/g; // Global regex for counting quotes
             
             let simpleTagCounter = 0; 
             let previousLineWasDialogue = false; 
 
             // --- GLOBAL CHECKS ---
+
+            // Rule 13: Open Quote Alert (NEW)
+            const quoteCount = (text.match(quoteRegex) || []).length;
+            if (quoteCount % 2 !== 0 && quoteCount > 0) {
+                feedbackMessages.push(createNudge(
+                    "Open Quote Alert", 
+                    "You have an odd number of quotation marks in your text.", 
+                    "This usually means a quote has been opened but not closed. Please check your text."
+                ));
+            }
 
             // Rule 1: Punctuation Inside Quotes
             const punctuationErrorRegex = /"\.(?=\s*\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled)\b)/gi;
@@ -141,18 +151,18 @@
             }
 
             // Rule 4: Tag Inside Quotes (The Run-on Quote Detector)
-            const tagInsideQuotesRegex = /\b(said|asked|replied|whispered|shouted)\s*"/i;
-            const pronounTagInsideQuotesRegex = /\b(he|she|they|I|we)\s+(said|asked|replied|whispered|shouted)\s*"/i;
-            if (tagInsideQuotesRegex.test(text) || pronounTagInsideQuotesRegex.test(text)) {
+            // Catches cases like: "Let's go he said" or "Hello he" said
+            const tagInsideQuotesRegex = /\b(said|asked|replied|whispered|shouted|he|she|they|I|we)\s*"\s*\b(said|asked|replied|whispered|shouted)\b/i;
+            if (tagInsideQuotesRegex.test(text)) {
                 feedbackMessages.push(createNudge(
                     "Structure Check: Tag Inside Quotes",
-                    "It looks like you put the dialogue tag <strong>inside</strong> the quotation marks.",
+                    "It looks like you put the dialogue tag or pronoun <strong>inside</strong> the quotation marks.",
                     "Close the quotes <strong>before</strong> the tag.<br><em>Right: \"Let's go,\" he said.</em>"
                 ));
             }
 
             // Rule 5: Missing Punctuation before closing quote
-            const missingPuncRegex = /[a-z0-9]\s*"(?=\s*(he|she|it|they|we|I|said|asked))/i;
+            const missingPuncRegex = /[a-z0-9]\s*"(?=\s*\b(he|she|it|they|we|I|said|asked))/i;
             if (missingPuncRegex.test(text)) {
                  feedbackMessages.push(createNudge(
                     "Missing Punctuation",
@@ -191,7 +201,7 @@
                 ));
             }
             
-            // Rule 12: Common Contraction/Possessive Errors
+            // Rule 12: Common Contraction/Possessive Errors (Its vs It's)
             const contractionItsRegex = /\bits\s+(ugly|beautiful|stupid|smart|funny|mean|kind|nice|bad|good|right|wrong)\b/i;
             if (contractionItsRegex.test(text)) {
                 feedbackMessages.push(createNudge(
@@ -201,6 +211,15 @@
                 ));
             }
             
+            // Rule 10: Suspicious Punctuation without Quotes
+            const suspiciousPuncRegex = /(?<!")[\?\!](?!\s*['"])/g;
+            if (suspiciousPuncRegex.test(text)) {
+                feedbackMessages.push(createNudge(
+                    "Suspicious Punctuation",
+                    "You used '?' or '!' but did not use quotes or a dialogue tag.",
+                    "Is this direct speech? If so, add quotation marks."
+                ));
+            }
 
             // --- LINE BY LINE CHECKS ---
             for (let i = 0; i < lines.length; i++) {
@@ -228,15 +247,6 @@
                     }
                 }
                 
-                // Rule 10: Suspicious Punctuation without Quotes
-                if ((line.includes('?') || line.includes('!')) && !hasQuotes && !hasTag && line.length > 5) {
-                    feedbackMessages.push(createNudge(
-                        "Suspicious Punctuation",
-                        "You used '?' or '!' but did not use quotes or a dialogue tag.",
-                        "Is this direct speech? If so, add quotation marks."
-                    ));
-                }
-
                 if (hasQuotes || hasTag) {
                     // Overuse of 'Said' counter logic
                     if (simpleTagRegex.test(line)) {
@@ -259,7 +269,7 @@
                     if (previousLineWasDialogue && (hasQuotes || hasTag) && nextLine.length > 0) {
                          feedbackMessages.push(createNudge(
                             "Paragraph Break Nudge",
-                            `Line ${i+1} and ${i+2} seem to have different speakers together.`,
+                            `It looks like two speakers are speaking on consecutive lines.`,
                             "<strong>New Speaker = New Paragraph.</strong> Press Enter twice."
                         ));
                         previousLineWasDialogue = false; 
@@ -275,16 +285,19 @@
             // Render Feedback
             if (feedbackMessages.length > 0) {
                 // Ensure only unique messages are shown
-                const uniqueMessages = Array.from(new Set(feedbackMessages));
+                const uniqueMessages = Array.from(new Set(feedbackMessages.map(msg => msg.replace(/<[^>]*>?/gm, ''))))
+                    .map(msg => createNudge('', msg.split('\n')[0], msg.split('\n')[1] || '')); // Recreate Nudges
+                
                 feedbackContainer.innerHTML = uniqueMessages.join('');
             } else if (text.length > 20) {
-                 feedbackContainer.innerHTML = '<div class="p-3 mt-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-lg font-semibold flex items-center"><span class="text-xl mr-2">✅</span> <span>Looking good! No punctuation errors found. Check for red underlines for spelling.</span></div>';
+                 feedbackContainer.innerHTML = '<div class="p-3 mt-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-lg font-semibold flex items-center"><span class="text-xl mr-2">✅</span> <span>Looking good! No major dialogue structure errors found. Check for red underlines for spelling.</span></div>';
             } else {
                 feedbackContainer.innerHTML = '';
             }
         }
 
         function createNudge(title, problem, fix) {
+            // Simple helper to create the visual feedback blocks
             return `
             <div class="nudge">
                 <div class="uppercase tracking-wide text-sm font-bold mb-1">${title}</div>
