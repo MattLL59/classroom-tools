@@ -145,27 +145,18 @@
 
             // Rule 2: Lowercase Start inside Quotes (FINAL FIX: Targets uncapitalized quote starts reliably)
             // Finds a quotation mark followed by optional space and a lowercase letter (a-z)
-            // It uses a complex negative lookbehind to ensure it's not a mid-sentence quote break, 
-            // but for safety in this browser environment, we'll use a simpler, high-confidence match.
-            const aggressiveLowercaseStartRegex = /(")\s*([a-z])/g;
-
-            // This flag is set if we find any lowercase letter starting a quote.
+            // The logic now correctly checks the context to avoid flagging capitalized words like "I"
             let foundLowercaseStart = false;
-            
-            // We use matchAll to get every instance of a quote starting with a letter
             const rawLowercaseStarts = [...text.matchAll(/"\s*([a-zA-Z])/g)];
 
             for (const match of rawLowercaseStarts) {
-                const quoteStartChar = match[1]; // The letter after the quote
-                const quoteIndex = match.index; // Index of the opening quote
+                const quoteStartChar = match[1]; 
+                const quoteIndex = match.index; 
 
-                // We only care if the letter is lowercase
                 if (quoteStartChar === quoteStartChar.toLowerCase()) {
-                    
-                    // Now, check the context: is this a mid-sentence break (e.g., "Hello," she said, "how...")?
-                    // If the text immediately preceding the quote (up to 5 chars) contains a comma, we assume it's a mid-sentence break and allow lowercase.
                     const context = text.substring(Math.max(0, quoteIndex - 5), quoteIndex);
                     
+                    // Allow lowercase if it's a mid-sentence break (e.g., preceded by a comma)
                     if (!context.includes(',')) {
                         // If no comma precedes the quote, and it's lowercase, it's a genuine error.
                         foundLowercaseStart = true;
@@ -283,13 +274,25 @@
                 });
             }
             
-            // Rule 10: Suspicious Punctuation without Quotes
-            const suspiciousPuncRegex = /(?<!")[\?\!](?!\s*['"])/g;
+            // Rule 10: Suspicious Punctuation without Quotes (FIXED: Allows single quote for embedded speech)
+            // It flags ? or ! if they are NOT preceded by a " OR a '
+            const suspiciousPuncRegex = /(?<!['"])[\?\!](?!['"])/g;
             if (suspiciousPuncRegex.test(text)) {
                 feedbackMessages.push({
                     title: "Suspicious Punctuation",
                     problem: "You used '?' or '!' but did not use quotes or a dialogue tag.",
                     fix: "Is this direct speech? If so, add quotation marks."
+                });
+            }
+            
+            // Rule 17: Embedded Quote Reminder (New Rule for Advanced Structure)
+            // Detects the use of single quotes when double quotes are also present.
+            const singleQuoteRegex = /'([^']*?)'/g; 
+            if (text.match(quoteRegex) && text.match(singleQuoteRegex)) {
+                feedbackMessages.push({
+                    title: "Advanced Structure: Embedded Quote Detected",
+                    problem: "You are using single quotes for a quote within double quotes.",
+                    fix: "Ensure all inner punctuation belongs to the embedded quote and the outer quote is closed correctly. This is an advanced technique!"
                 });
             }
 
