@@ -95,7 +95,7 @@
                 clearTimeout(timer);
                 timer = setTimeout(() => { func.apply(this, args); }, timeout);
             };
-        }
+        };
 
         // Helper to format the final HTML for a single message
         function createNudge(title, problem, fix) {
@@ -106,7 +106,7 @@
                 <div class="text-sm bg-white/50 p-2 rounded mt-1 text-red-800">${fix}</div>
             </div>
             `;
-        }
+        };
 
 
         function checkDialogueRules(text) {
@@ -143,12 +143,18 @@
                 });
             }
 
-            // Rule 2: Lowercase Start inside Quotes (FIXED: Checks precisely for lowercase immediately after quote)
-            const lowercaseStartRegex = /"\s*[a-z]/g;
-            if (lowercaseStartRegex.test(text)) {
-                feedbackMessages.push({
+            // Rule 2: Lowercase Start inside Quotes (REVISED: Targets uncapitalized quote starts reliably)
+            // Finds quote followed by optional space and a lowercase letter (not preceded by a period/question mark/exclamation point)
+            const uncapitalizedQuoteStartRegex = /((?:^|[.?!]\s*)"\s*|"\s*)\s*([a-z])/g;
+
+            // This more explicit pattern ignores quotes preceded by sentence-ending punctuation 
+            // but still flags a raw quote followed by a lowercase letter, which is usually wrong.
+            const hasLowercaseStartError = uncapitalizedQuoteStartRegex.test(text.replace(/["\?!]\s*"\s*[A-Z]/g, ''));
+            
+            if (hasLowercaseStartError) {
+                 feedbackMessages.push({
                     title: "Capitalization Check",
-                    problem: "A sentence inside quotation marks usually starts with a capital letter.",
+                    problem: "A new sentence or piece of dialogue inside quotation marks usually starts with a capital letter.",
                     fix: "<em>Example: \"<span class='text-green-600 font-bold'>H</span>ello,\" she said.</em>"
                 });
             }
@@ -163,13 +169,33 @@
                 });
             }
             
-            // Rule 14: Contraction Apostrophe Check (NEW: Catches Whats, Hes, Shes)
-            const contractionCheckRegex = /\b(Whats|Hes|Shes|Its)\b/g;
+            // Rule 14: Contraction Apostrophe Check (Whats, Hes, Shes, Its)
+            const contractionCheckRegex = /\b(Whats|Hes|Shes)\b/g;
             if (contractionCheckRegex.test(text)) {
                 feedbackMessages.push({
                     title: "Missing Apostrophe",
-                    problem: "You used a contraction (like 'Whats') without an apostrophe.",
+                    problem: "You used a common contraction (like 'Whats') without an apostrophe.",
                     fix: "Contractions need an apostrophe. Use **What's** or **He's**."
+                });
+            }
+
+            // Rule 15: Common Contracted Verb Errors (dont, cant, wont, isnt, etc.)
+            const commonContractionErrors = /\b(dont|cant|wont|isnt|arent|didnt|hasnt|wouldnt|shouldnt|couldnt)\b/gi;
+             if (commonContractionErrors.test(text)) {
+                feedbackMessages.push({
+                    title: "Missing Apostrophe",
+                    problem: "You used a common contracted verb (like 'dont') without an apostrophe.",
+                    fix: "Contractions need an apostrophe. Use **don't** or **can't**."
+                });
+            }
+
+            // Rule 16: Homophone Check (no vs know)
+            const noVsKnowRegex = /\b(dont|do\snot|didnt|did\snot|doesnt|does\snot)\s+no\b/gi;
+             if (noVsKnowRegex.test(text)) {
+                feedbackMessages.push({
+                    title: "Homophone Check (no/know)",
+                    problem: "You wrote 'no' after a negative verb (don't, didn't, etc.).",
+                    fix: "You likely meant to use **know** (to have information)."
                 });
             }
 
