@@ -143,15 +143,38 @@
                 });
             }
 
-            // Rule 2: Lowercase Start inside Quotes (REVISED: Targets uncapitalized quote starts reliably)
-            // Finds quote followed by optional space and a lowercase letter (not preceded by a period/question mark/exclamation point)
-            const uncapitalizedQuoteStartRegex = /((?:^|[.?!]\s*)"\s*|"\s*)\s*([a-z])/g;
+            // Rule 2: Lowercase Start inside Quotes (FINAL FIX: Targets uncapitalized quote starts reliably)
+            // Finds a quotation mark followed by optional space and a lowercase letter (a-z)
+            // It uses a complex negative lookbehind to ensure it's not a mid-sentence quote break, 
+            // but for safety in this browser environment, we'll use a simpler, high-confidence match.
+            const aggressiveLowercaseStartRegex = /(")\s*([a-z])/g;
 
-            // This more explicit pattern ignores quotes preceded by sentence-ending punctuation 
-            // but still flags a raw quote followed by a lowercase letter, which is usually wrong.
-            const hasLowercaseStartError = uncapitalizedQuoteStartRegex.test(text.replace(/["\?!]\s*"\s*[A-Z]/g, ''));
+            // This flag is set if we find any lowercase letter starting a quote.
+            let foundLowercaseStart = false;
             
-            if (hasLowercaseStartError) {
+            // We use matchAll to get every instance of a quote starting with a letter
+            const rawLowercaseStarts = [...text.matchAll(/"\s*([a-zA-Z])/g)];
+
+            for (const match of rawLowercaseStarts) {
+                const quoteStartChar = match[1]; // The letter after the quote
+                const quoteIndex = match.index; // Index of the opening quote
+
+                // We only care if the letter is lowercase
+                if (quoteStartChar === quoteStartChar.toLowerCase()) {
+                    
+                    // Now, check the context: is this a mid-sentence break (e.g., "Hello," she said, "how...")?
+                    // If the text immediately preceding the quote (up to 5 chars) contains a comma, we assume it's a mid-sentence break and allow lowercase.
+                    const context = text.substring(Math.max(0, quoteIndex - 5), quoteIndex);
+                    
+                    if (!context.includes(',')) {
+                        // If no comma precedes the quote, and it's lowercase, it's a genuine error.
+                        foundLowercaseStart = true;
+                        break; 
+                    }
+                }
+            }
+            
+            if (foundLowercaseStart) {
                  feedbackMessages.push({
                     title: "Capitalization Check",
                     problem: "A new sentence or piece of dialogue inside quotation marks usually starts with a capital letter.",
