@@ -170,16 +170,36 @@
                 });
             }
 
-            // Rule 18: Capitalized Tag Subject (FINAL FIX: "Hello," He said.)
-            // Checks for: " [comma] [quote] [optional space] [Capital Letter] [optional other letters] [space] [tag] "
-            const capitalizedTagSubjectRegex = /"\s*,\s*([A-Z]\w*)\s+\b(said|asked|replied|whispered|shouted|insisted|muttered|yelled|screamed|cried)\b/g;
+            // Rule 18: Capitalized Tag Subject (FINAL FIX: "Hello," He said.) - Multi-Step Logic
+            // This is the most robust attempt to catch the capitalized pronoun 'He' after the comma.
+            const tagSegments = text.split('",'); // Split by the pattern: closing quote and comma
+            if (tagSegments.length > 1) {
+                for (let i = 1; i < tagSegments.length; i++) {
+                    const tagStart = tagSegments[i].trim();
+                    const firstWordMatch = tagStart.match(/^(\s*(\w+))\b/); // Capture the first word after the comma
 
-            if (capitalizedTagSubjectRegex.test(text)) {
-                feedbackMessages.push({
-                    title: "Capitalization Error in Tag",
-                    problem: "The pronoun or non-proper name in the dialogue tag starts with a capital letter.",
-                    fix: "When dialogue ends with a comma, the following dialogue tag subject should be **lowercase**.<br><em>Right: \"Hello,\" he said.</em>"
-                });
+                    if (firstWordMatch && firstWordMatch[2]) {
+                        const firstWord = firstWordMatch[2];
+                        // Check if the first word is capitalized (not a proper noun, but a pronoun like He, She)
+                        if (firstWord.length > 1 && firstWord[0] === firstWord[0].toUpperCase()) {
+                            // Simple way to check if it's a known pronoun that should be lowercase
+                            const commonPronouns = ['He', 'She', 'It', 'They', 'We'];
+                            
+                            // Check for both pronouns OR common single-letter capitalized tags (like 'I' is already handled by rule 2)
+                            const isPronoun = commonPronouns.includes(firstWord);
+                            
+                            // Also ensure a dialogue tag follows this capitalized word
+                            if (isPronoun && dialogueTagRegex.test(tagStart)) {
+                                feedbackMessages.push({
+                                    title: "Capitalization Error in Tag",
+                                    problem: `The pronoun '${firstWord}' in the dialogue tag starts with a capital letter.`,
+                                    fix: "When dialogue ends with a comma, the following dialogue tag subject should be **lowercase**.<br><em>Right: \"Hello,\" he said.</em>"
+                                });
+                                break; 
+                            }
+                        }
+                    }
+                }
             }
 
 
