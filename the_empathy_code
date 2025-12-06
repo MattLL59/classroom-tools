@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Updated Viewport: Allows scaling (zooming) from 0.5x to 5.0x -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes">
+    <title>The Detective's Caseboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Roboto:wght@400;700&display=swap');
+
+        body {
+            background-color: #2d2d2d;
+            font-family: 'Roboto', sans-serif;
+            color: #e0e0e0;
+            /* Changed to auto to allow panning when zoomed in */
+            overflow-x: auto; 
+            /* Improved touch handling for zoom gestures */
+            touch-action: manipulation;
+        }
+
+        .typewriter {
+            font-family: 'Special Elite', cursive;
+        }
+
+        .folder-tab {
+            clip-path: polygon(0 0, 85% 0, 100% 100%, 0 100%);
+        }
+
+        .corkboard {
+            background-image: radial-gradient(#a0764e 15%, transparent 16%),
+            radial-gradient(#a0764e 15%, transparent 16%);
+            background-color: #5c4033;
+            background-position: 0 0, 20px 20px;
+            background-size: 40px 40px;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.7);
+        }
+
+        .polaroid {
+            background: white;
+            padding: 10px 10px 25px 10px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.4);
+            color: #333;
+            transform: rotate(-2deg);
+            transition: transform 0.2s;
+        }
+        .polaroid:hover {
+            transform: rotate(0deg) scale(1.05);
+            z-index: 10;
+        }
+
+        .red-string {
+            position: absolute;
+            height: 4px;
+            background-color: #d32f2f;
+            transform-origin: 0 50%;
+            pointer-events: none;
+            z-index: 50;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+            opacity: 0.8;
+        }
+
+        .evidence-card {
+            background-color: #fcf8e3;
+            border: 1px solid #dcdcdc;
+            color: #333;
+            cursor: pointer;
+        }
+        
+        .evidence-card.selected {
+            border: 3px solid #d32f2f;
+            background-color: #fff;
+        }
+
+        .matched {
+            opacity: 0.5;
+            pointer-events: none;
+            border-color: #4caf50 !important;
+        }
+        
+        /* Scrollbar for the report */
+        .report-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .report-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        .report-scroll::-webkit-scrollbar-thumb {
+            background: #888; 
+            border-radius: 4px;
+        }
+        .report-scroll::-webkit-scrollbar-thumb:hover {
+            background: #555; 
+        }
+
+        /* Animation classes */
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .slide-up { animation: slideUp 0.5s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-gray-900 p-2 md:p-4 shadow-lg z-10">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <i class="fas fa-user-secret text-2xl md:text-3xl text-yellow-500"></i>
+                <h1 class="text-xl md:text-2xl typewriter text-white tracking-widest">DETECTIVE'S TOOLKIT</h1>
+            </div>
+            <div id="score-board" class="hidden text-yellow-500 typewriter text-sm md:text-xl">
+                CASE: <span id="progress-text">0/0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow relative flex items-center justify-center p-2 md:p-4">
+        
+        <!-- INTRO SCREEN -->
+        <div id="screen-intro" class="text-center max-w-2xl bg-gray-800 p-8 rounded-lg shadow-2xl border-t-4 border-yellow-600">
+            <h2 class="text-3xl md:text-4xl typewriter mb-6 text-yellow-500">The Empathy Code</h2>
+            <p class="text-base md:text-lg mb-8 text-gray-300">
+                Detectives, we have a messy file. The evidence is mixed up with the insights. 
+                <br><br>
+                First, separate the <strong>FACTS</strong> from the <strong>FEELINGS</strong>. Then, connect the clues to solve the case.
+            </p>
+            <button onclick="startGame1()" class="bg-yellow-600 hover:bg-yellow-700 text-black font-bold py-3 px-8 rounded text-lg md:text-xl transition transform hover:scale-105 typewriter">
+                OPEN CASE FILE #1
+            </button>
+        </div>
+
+        <!-- GAME 1: SCRAMBLE (Sorting) -->
+        <div id="screen-game1" class="hidden w-full max-w-5xl">
+            <div class="text-center mb-4 md:mb-6">
+                <h2 class="text-xl md:text-3xl typewriter text-white">LEVEL 1: The Evidence Scramble</h2>
+                <p class="text-gray-400 text-sm md:text-base">Sort the cards: Is it **Evidence** (Text) or **Insight** (Meaning)?</p>
+            </div>
+
+            <div class="flex flex-col md:flex-row justify-between items-start gap-4 md:gap-8">
+                <!-- Drop Zone: Evidence -->
+                <div class="w-full md:w-1/3 h-48 md:h-96 bg-gray-700 rounded-lg border-dashed border-4 border-gray-600 flex flex-col items-center justify-center relative p-4 transition hover:bg-gray-600" onclick="sortCard('evidence')">
+                    <i class="fas fa-search text-4xl md:text-6xl text-gray-500 mb-2 md:mb-4"></i>
+                    <h3 class="text-xl md:text-2xl font-bold text-blue-300">EVIDENCE</h3>
+                    <p class="text-xs md:text-sm text-gray-400">What the text SAYS</p>
+                </div>
+
+                <!-- The Card Stack -->
+                <div class="w-full md:w-1/3 h-48 md:h-96 flex items-center justify-center relative perspective-1000">
+                    <div id="current-card" class="bg-white text-black p-4 md:p-8 rounded shadow-2xl w-full h-40 md:h-64 flex items-center justify-center text-center text-lg md:text-xl font-bold transform transition duration-300 cursor-pointer select-none polaroid">
+                        <span id="card-text">Loading...</span>
+                    </div>
+                </div>
+
+                <!-- Drop Zone: Insight -->
+                <div class="w-full md:w-1/3 h-48 md:h-96 bg-gray-700 rounded-lg border-dashed border-4 border-gray-600 flex flex-col items-center justify-center relative p-4 transition hover:bg-gray-600" onclick="sortCard('insight')">
+                    <i class="fas fa-lightbulb text-4xl md:text-6xl text-gray-500 mb-2 md:mb-4"></i>
+                    <h3 class="text-xl md:text-2xl font-bold text-yellow-300">INSIGHT</h3>
+                    <p class="text-xs md:text-sm text-gray-400">What it REVEALS</p>
+                </div>
+            </div>
+            
+            <div id="feedback-g1" class="h-8 md:h-12 text-center mt-2 md:mt-4 text-lg md:text-xl font-bold opacity-0 transition-opacity"></div>
+        </div>
+
+        <!-- INTERMISSION SCREEN -->
+        <div id="screen-intermission" class="hidden text-center max-w-2xl bg-gray-800 p-8 rounded-lg shadow-2xl border-t-4 border-red-600 slide-up">
+            <h2 class="text-2xl md:text-3xl typewriter mb-6 text-green-500">LEVEL 1 COMPLETE</h2>
+            <p class="text-base md:text-lg mb-8 text-gray-300">
+                Excellent sorting. Now comes the hard part. 
+                <br><br>
+                You must find the <strong>Red String</strong>. Connect the Evidence to the Method, and the Method to the Insight.
+            </p>
+            <button onclick="startGame2()" class="bg-red-700 hover:bg-red-800 text-white font-bold py-3 px-8 rounded text-lg md:text-xl transition transform hover:scale-105 typewriter">
+                START LEVEL 2
+            </button>
+        </div>
+
+        <!-- GAME 2: RED STRING (Matching) -->
+        <div id="screen-game2" class="hidden w-full h-full absolute inset-0 corkboard overflow-auto">
+            <div class="absolute top-2 md:top-4 left-0 w-full text-center z-40 pointer-events-none">
+                <h2 class="text-xl md:text-2xl typewriter text-white bg-black bg-opacity-50 inline-block px-4 py-1 rounded">LEVEL 2: Connect the Red String</h2>
+                <p class="text-white text-xs md:text-sm mt-1 bg-black bg-opacity-50 inline-block px-2">Select one from each column to link them.</p>
+            </div>
+
+            <!-- SVG Container for Red String Lines -->
+            <svg id="string-layer" class="absolute inset-0 w-full h-full pointer-events-none z-30"></svg>
+
+            <div class="container mx-auto h-full flex justify-between pt-20 pb-16 md:pb-10 px-1 md:px-4 gap-2 md:gap-8">
+                
+                <!-- Column 1: Evidence -->
+                <div class="w-1/3 flex flex-col space-y-2 md:space-y-4 z-40">
+                    <div class="text-center font-bold text-blue-200 bg-gray-900 p-1 md:p-2 rounded mb-2 shadow text-xs md:text-base">EVIDENCE</div>
+                    <div id="col-evidence" class="flex-grow flex flex-col gap-2 md:gap-4"></div>
+                </div>
+
+                <!-- Column 2: Method -->
+                <div class="w-1/4 flex flex-col space-y-2 md:space-y-4 z-40">
+                    <div class="text-center font-bold text-red-200 bg-gray-900 p-1 md:p-2 rounded mb-2 shadow text-xs md:text-base">METHOD</div>
+                    <div id="col-method" class="flex-grow flex flex-col justify-center gap-2 md:gap-6"></div>
+                </div>
+
+                <!-- Column 3: Insight -->
+                <div class="w-1/3 flex flex-col space-y-2 md:space-y-4 z-40">
+                    <div class="text-center font-bold text-yellow-200 bg-gray-900 p-1 md:p-2 rounded mb-2 shadow text-xs md:text-base">INSIGHT</div>
+                    <div id="col-insight" class="flex-grow flex flex-col gap-2 md:gap-4"></div>
+                </div>
+            </div>
+            
+            <!-- Verify Button -->
+            <div class="absolute bottom-2 md:bottom-6 right-2 md:right-6 z-50">
+                 <button id="check-link-btn" onclick="checkLink()" class="bg-gray-600 text-white font-bold py-2 px-4 md:py-3 md:px-6 rounded shadow-lg typewriter opacity-50 cursor-not-allowed text-sm md:text-base" disabled>
+                    VERIFY LINK
+                </button>
+            </div>
+        </div>
+
+        <!-- FINAL SCREEN -->
+        <div id="screen-final" class="hidden text-center max-w-4xl bg-white text-gray-900 p-4 md:p-10 rounded shadow-2xl border-4 border-black slide-up w-full m-2 md:m-4">
+            <h2 class="text-2xl md:text-4xl typewriter mb-4 text-red-700 underline">CASE SOLVED</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 text-left">
+                <!-- Left: Instructions -->
+                <div>
+                    <p class="font-serif text-base md:text-lg leading-relaxed mb-4">
+                        <strong>To:</strong> The Chief Inspector<br>
+                        <strong>From:</strong> Detective Student<br>
+                        <strong>Status:</strong> All connections verified.
+                    </p>
+                    <div class="bg-yellow-100 p-4 border border-yellow-300 font-bold text-sm md:text-base">
+                        <i class="fas fa-pencil-alt mr-2"></i> ACTION REQUIRED: <br>
+                        Use the "Case Files Summary" to complete your Final Report worksheet.
+                    </div>
+                    <button onclick="location.reload()" class="mt-4 md:mt-8 bg-gray-800 text-white font-bold py-2 px-6 rounded hover:bg-gray-700 w-full">
+                        Reset System
+                    </button>
+                </div>
+
+                <!-- Right: The Summary List -->
+                <div class="bg-gray-100 p-4 border border-gray-300 rounded shadow-inner h-64 md:h-96 overflow-y-auto report-scroll">
+                    <h3 class="text-lg md:text-xl font-bold mb-4 border-b border-gray-400 pb-2">📂 Case Files Summary</h3>
+                    <div id="final-report-content" class="space-y-4">
+                        <!-- Dynamic content injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- DATA ---
+        
+        // Game 1 Data
+        const sortData = [
+            { text: '"She drew in her breath."', type: 'evidence' },
+            { text: 'Mma Ramotswe is shocked and apprehensive.', type: 'insight' },
+            { text: 'Happy bluntly announces her "Daddy" arrived.', type: 'evidence' },
+            { text: '"Impostor looking for a retirement home."', type: 'evidence' },
+            { text: 'Happy is suspicious and tired of being used.', type: 'insight' },
+            { text: '"I\'ll find out. I\'ll find out."', type: 'evidence' },
+            { text: 'Mma Ramotswe is emphatic and determined.', type: 'insight' },
+            { text: 'Happy pauses in her story.', type: 'evidence' },
+            { text: 'Happy is finding it difficult to go on.', type: 'insight' }
+        ];
+
+        // Game 2 Data (The triplets)
+        const linkData = [
+            {
+                id: 1,
+                evidence: '"All he does is sit in his chair..."',
+                method: 'Description / Tone',
+                insight: 'Happy feels resentment at doing all the work.'
+            },
+            {
+                id: 2,
+                evidence: '"Can you find out...?"',
+                method: 'Dialogue / Question',
+                insight: 'Happy is desperate for help.'
+            },
+            {
+                id: 3,
+                evidence: 'Mma smiles and pays a compliment.',
+                method: 'Body Language / Action',
+                insight: 'Mma seems pleased and polite.'
+            },
+            {
+                id: 4,
+                evidence: '"Many men are like that."',
+                method: 'Dialogue / Statement',
+                insight: 'Mma expresses a cynical opinion about men.'
+            }
+        ];
+
+        // --- STATE ---
+        let currentLevel = 0;
+        let game1Index = 0;
+        let game1Score = 0;
+        let shuffledSortData = [];
+        
+        // Game 2 selection state
+        let selectedEvidence = null;
+        let selectedMethod = null;
+        let selectedInsight = null;
+        let solvedLinks = 0;
+
+        // --- INITIALIZATION ---
+        function startGame1() {
+            document.getElementById('screen-intro').classList.add('hidden');
+            document.getElementById('screen-game1').classList.remove('hidden');
+            document.getElementById('score-board').classList.remove('hidden');
+            
+            // Shuffle data
+            shuffledSortData = [...sortData].sort(() => Math.random() - 0.5);
+            game1Index = 0;
+            updateGame1Card();
+            updateScore(0, shuffledSortData.length);
+        }
+
+        // --- GAME 1 LOGIC ---
+        function updateGame1Card() {
+            if (game1Index >= shuffledSortData.length) {
+                // End of Game 1
+                setTimeout(() => {
+                    document.getElementById('screen-game1').classList.add('hidden');
+                    document.getElementById('screen-intermission').classList.remove('hidden');
+                }, 500);
+                return;
+            }
+            const cardText = document.getElementById('card-text');
+            cardText.innerText = shuffledSortData[game1Index].text;
+            
+            // Reset animation
+            const card = document.getElementById('current-card');
+            card.classList.remove('slide-up');
+            void card.offsetWidth; // Trigger reflow
+            card.classList.add('slide-up');
+        }
+
+        function sortCard(userChoice) {
+            const currentItem = shuffledSortData[game1Index];
+            const feedback = document.getElementById('feedback-g1');
+            
+            if (currentItem.type === userChoice) {
+                feedback.innerText = "CORRECT!";
+                feedback.className = "h-8 md:h-12 text-center mt-2 md:mt-4 text-lg md:text-xl font-bold text-green-400 fade-in";
+                game1Score++;
+            } else {
+                feedback.innerText = "Incorrect. Try to spot the difference.";
+                feedback.className = "h-8 md:h-12 text-center mt-2 md:mt-4 text-lg md:text-xl font-bold text-red-400 fade-in";
+            }
+            
+            feedback.style.opacity = '1';
+            setTimeout(() => { feedback.style.opacity = '0'; }, 1000);
+
+            game1Index++;
+            updateScore(game1Index, shuffledSortData.length);
+            updateGame1Card();
+        }
+
+        function updateScore(current, total) {
+            document.getElementById('progress-text').innerText = `${current}/${total}`;
+        }
+
+        // --- GAME 2 LOGIC ---
+        function startGame2() {
+            document.getElementById('screen-intermission').classList.add('hidden');
+            document.getElementById('screen-game2').classList.remove('hidden');
+            document.getElementById('progress-text').innerText = `0/${linkData.length}`;
+            
+            setupGame2Board();
+        }
+
+        function setupGame2Board() {
+            const colEvidence = document.getElementById('col-evidence');
+            const colMethod = document.getElementById('col-method');
+            const colInsight = document.getElementById('col-insight');
+
+            // Helper to create cards
+            const createCard = (text, type, id) => {
+                const div = document.createElement('div');
+                // Updated class list for responsive padding and text size
+                div.className = `evidence-card p-1 md:p-3 rounded shadow text-xs md:text-sm font-medium relative hover:bg-white transition-all`;
+                div.innerText = text;
+                div.dataset.type = type;
+                div.dataset.id = id;
+                div.onclick = () => selectItem(div, type, id);
+                return div;
+            };
+
+            // Shuffle each column independently
+            const evidences = [...linkData].sort(() => Math.random() - 0.5);
+            const methods = [...linkData].sort(() => Math.random() - 0.5);
+            const insights = [...linkData].sort(() => Math.random() - 0.5);
+
+            evidences.forEach(item => colEvidence.appendChild(createCard(item.evidence, 'evidence', item.id)));
+            methods.forEach(item => colMethod.appendChild(createCard(item.method, 'method', item.id)));
+            insights.forEach(item => colInsight.appendChild(createCard(item.insight, 'insight', item.id)));
+        }
+
+        function selectItem(element, type, id) {
+            if (element.classList.contains('matched')) return;
+
+            // Deselect previous in this column
+            const parent = element.parentElement;
+            Array.from(parent.children).forEach(child => child.classList.remove('selected'));
+
+            // Select new
+            element.classList.add('selected');
+
+            // Update state
+            if (type === 'evidence') selectedEvidence = { el: element, id: id };
+            if (type === 'method') selectedMethod = { el: element, id: id };
+            if (type === 'insight') selectedInsight = { el: element, id: id };
+
+            updateTempString();
+            checkButtonState();
+        }
+
+        function checkButtonState() {
+            const btn = document.getElementById('check-link-btn');
+            if (selectedEvidence && selectedMethod && selectedInsight) {
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                btn.classList.add('bg-green-600', 'hover:bg-green-700');
+                btn.disabled = false;
+            } else {
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                btn.disabled = true;
+            }
+        }
+
+        function checkLink() {
+            if (!selectedEvidence || !selectedMethod || !selectedInsight) return;
+
+            const isMatch = (selectedEvidence.id == selectedMethod.id) && (selectedMethod.id == selectedInsight.id);
+
+            if (isMatch) {
+                // Correct Match
+                drawPermanentString(selectedEvidence.el, selectedMethod.el, selectedInsight.el);
+                
+                // Mark as matched
+                selectedEvidence.el.classList.add('matched');
+                selectedMethod.el.classList.add('matched');
+                selectedInsight.el.classList.add('matched');
+
+                // Clear Selection
+                selectedEvidence.el.classList.remove('selected');
+                selectedMethod.el.classList.remove('selected');
+                selectedInsight.el.classList.remove('selected');
+
+                selectedEvidence = null; selectedMethod = null; selectedInsight = null;
+                
+                solvedLinks++;
+                updateScore(solvedLinks, linkData.length);
+                clearTempStrings();
+                checkButtonState();
+
+                if (solvedLinks === linkData.length) {
+                    setTimeout(() => {
+                        generateReport();
+                        document.getElementById('screen-game2').classList.add('hidden');
+                        document.getElementById('screen-final').classList.remove('hidden');
+                        document.getElementById('score-board').classList.add('hidden');
+                    }, 1500);
+                }
+
+            } else {
+                // Incorrect
+                alert("The Red String doesn't connect. These clues don't fit together perfectly. Try again.");
+                clearTempStrings();
+            }
+        }
+        
+        function generateReport() {
+            const container = document.getElementById('final-report-content');
+            container.innerHTML = '';
+            
+            // linkData is our source of truth for the correct triplets
+            linkData.forEach((item, index) => {
+                const reportItem = document.createElement('div');
+                reportItem.className = 'bg-white p-3 rounded shadow-sm text-sm border-l-4 border-red-500';
+                reportItem.innerHTML = `
+                    <div class="font-bold text-gray-400 text-xs mb-1">CONNECTION #${index + 1}</div>
+                    <div class="mb-1"><span class="font-bold text-blue-600">EVIDENCE:</span> ${item.evidence}</div>
+                    <div class="mb-1"><span class="font-bold text-red-600">METHOD:</span> ${item.method}</div>
+                    <div><span class="font-bold text-yellow-600">INSIGHT:</span> ${item.insight}</div>
+                `;
+                container.appendChild(reportItem);
+            });
+        }
+
+        // --- STRING VISUALIZATION ---
+        
+        function updateTempString() {
+            const svg = document.getElementById('string-layer');
+            const oldTemps = svg.querySelectorAll('.temp-string');
+            oldTemps.forEach(el => el.remove());
+
+            if (selectedEvidence && selectedMethod) {
+                drawLine(selectedEvidence.el, selectedMethod.el, 'temp-string', '#ffeb3b'); 
+            }
+            if (selectedMethod && selectedInsight) {
+                drawLine(selectedMethod.el, selectedInsight.el, 'temp-string', '#ffeb3b');
+            }
+        }
+
+        function clearTempStrings() {
+            const svg = document.getElementById('string-layer');
+            const oldTemps = svg.querySelectorAll('.temp-string');
+            oldTemps.forEach(el => el.remove());
+        }
+
+        function drawPermanentString(el1, el2, el3) {
+            drawLine(el1, el2, 'perm-string', '#d32f2f');
+            drawLine(el2, el3, 'perm-string', '#d32f2f');
+        }
+
+        function drawLine(startEl, endEl, className, color) {
+            const svg = document.getElementById('string-layer');
+            const svgRect = svg.getBoundingClientRect();
+            const rect1 = startEl.getBoundingClientRect();
+            const rect2 = endEl.getBoundingClientRect();
+
+            const x1 = (rect1.left + rect1.right) / 2 - svgRect.left;
+            const y1 = (rect1.top + rect1.bottom) / 2 - svgRect.top;
+            const x2 = (rect2.left + rect2.right) / 2 - svgRect.left;
+            const y2 = (rect2.top + rect2.bottom) / 2 - svgRect.top;
+
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', x1);
+            line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('stroke', color);
+            line.setAttribute('stroke-width', '4');
+            line.setAttribute('class', className);
+            if(className === 'temp-string') line.setAttribute('stroke-dasharray', '5,5');
+            
+            svg.appendChild(line);
+        }
+
+        window.addEventListener('resize', () => {
+             document.getElementById('string-layer').innerHTML = '';
+        });
+
+    </script>
+</body>
+</html>
