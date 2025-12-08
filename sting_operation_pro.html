@@ -268,30 +268,33 @@
             <!-- SECTION 2: SECURE EDITOR (Revealed on Login) -->
             <div id="editor-unlocked-screen" class="hidden">
                 
-                <!-- Security Settings -->
+                <!-- Security Settings (Auto-fill prevented) -->
                 <div class="bg-yellow-50 border border-yellow-200 p-4 rounded mb-6 flex flex-col md:flex-row gap-4">
                     <div class="flex-1">
                         <label class="admin-label">Admin Password (Login)</label>
-                        <input type="text" id="new-admin-pass" class="admin-input border-yellow-300" placeholder="Default: ChiefInspector">
+                        <!-- Added autocomplete="off" to prevent password manager interference -->
+                        <input type="text" id="new-admin-pass" class="admin-input border-yellow-300" placeholder="Default: ChiefInspector" autocomplete="off">
                     </div>
                     <div class="flex-1">
                         <label class="admin-label">Level 2 Unlock Code</label>
-                        <input type="text" id="new-level2-code" class="admin-input border-yellow-300" placeholder="Default: DETECTIVE">
+                        <!-- Added autocomplete="off" -->
+                        <input type="text" id="new-level2-code" class="admin-input border-yellow-300" placeholder="Default: DETECTIVE" autocomplete="off">
                     </div>
                     <div class="flex items-end">
                         <button onclick="saveSecuritySettings()" class="bg-yellow-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-yellow-700 h-10 w-full">UPDATE CODES</button>
                     </div>
                 </div>
 
-                <!-- Case Details -->
+                <!-- Case Details & Model Answers -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                     <div class="md:col-span-1">
                         <label class="admin-label">Case Title</label>
-                        <input type="text" id="edit-case-title" class="admin-input" placeholder="e.g. CASE #004: RAMOTSWE">
+                        <input type="text" id="edit-case-title" class="admin-input" placeholder="e.g. CASE #004: RAMOTSWE" autocomplete="off">
                     </div>
+                    <!-- SINGLE SOURCE OF TRUTH FOR MODEL ANSWERS -->
                     <div class="md:col-span-2">
-                        <label class="admin-label">Model Answers Text</label>
-                        <textarea id="edit-model-answers" class="admin-input h-20" placeholder="Paste model answers here..."></textarea>
+                        <label class="admin-label">Model Answers Text (Displayed in Modal)</label>
+                        <textarea id="edit-model-answers" class="admin-input h-20 bg-white border border-gray-300 p-2" placeholder="Paste all model answer text here. It will appear exactly like this in the modal."></textarea>
                     </div>
                 </div>
 
@@ -314,7 +317,7 @@
                         <button onclick="resetToDefaults()" class="text-red-500 text-sm font-bold hover:text-red-700">RESET DEFAULTS</button>
                     </div>
                     
-                    <!-- EXPORT BUTTON (NEW) -->
+                    <!-- EXPORT BUTTON -->
                     <button onclick="exportStandaloneFile()" class="bg-purple-700 text-white px-6 py-3 rounded font-bold text-lg shadow-lg hover:bg-purple-800 transform hover:scale-105 transition flex items-center gap-2">
                         <i class="fas fa-file-download"></i> DOWNLOAD AS STANDALONE FILE
                     </button>
@@ -396,36 +399,19 @@
             }
         };
 
-        // --- EXPORT LOGIC (NEW) ---
+        // --- EXPORT LOGIC ---
         function exportStandaloneFile() {
-            // 1. Gather all current settings from the Form (to be safe)
-            // Note: We reuse saveAllChanges logic to update the appConfig first
-            saveAllChanges(false); // false = don't reload
-
-            // 2. Serialize current config
+            saveAllChanges(false); 
             const configString = JSON.stringify(appConfig, null, 4);
-
-            // 3. Get entire HTML
             let htmlContent = document.documentElement.outerHTML;
-
-            // 4. Inject the new config into the DEFAULT_CONFIG slot
-            // We use the markers // -- CONFIG START -- and // -- CONFIG END --
             const regex = /\/\/ -- CONFIG START --([\s\S]*?)\/\/ -- CONFIG END --/;
             const newScriptBlock = `// -- CONFIG START --\n        const DEFAULT_CONFIG = ${configString};\n        // -- CONFIG END --`;
             
             htmlContent = htmlContent.replace(regex, newScriptBlock);
-
-            // 5. Clean up the HTML (Hide admin modal in the saved file)
-            // Simple replace to ensure modals are hidden by default in the file structure
-            // This is a bit hacky but works for client-side export
-            // We mainly rely on the JS init to hide things, which is fine.
-
-            // 6. Create Blob and Download
             const blob = new Blob([htmlContent], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             
-            // Sanitize filename
             const safeTitle = appConfig.caseTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase();
             a.href = url;
             a.download = `sting_op_${safeTitle}.html`;
@@ -678,8 +664,9 @@
             if(p && c) {
                 appConfig.adminPass = p;
                 appConfig.level2Code = c;
-                // No immediate alert, save happens with main save button usually, but here we can just update state
-                // alert("Codes stored pending save.");
+                // Immediate update to memory and storage
+                SafeStorage.setItem('stingOpConfig', JSON.stringify(appConfig));
+                alert("Security Codes Updated and Saved!");
             }
         }
 
@@ -734,6 +721,24 @@
             if(s) { playerState = JSON.parse(s); launchGame(); } 
         }
         function clearSaveData() { SafeStorage.removeItem('stingOpProgress'); location.reload(); }
+        function toggleModal(id) {
+            const m = document.getElementById(id);
+            if(m.classList.contains('hidden')) { m.classList.remove('hidden'); m.classList.add('flex'); 
+                if (id === 'admin-modal') {
+                     const hint = document.getElementById('default-pass-alert');
+                     if(appConfig.adminPass === "ChiefInspector") hint.classList.remove('hidden');
+                     else hint.classList.add('hidden');
+                }
+            }
+            else { m.classList.add('hidden'); m.classList.remove('flex'); 
+                if (id === 'admin-modal') {
+                    document.getElementById('editor-lock-screen').classList.remove('hidden');
+                    document.getElementById('editor-unlocked-screen').classList.add('hidden');
+                    document.getElementById('admin-password-input').value = "";
+                    document.getElementById('admin-auth-error').classList.add('hidden');
+                }
+            }
+        }
     </script>
 </body>
 </html>
