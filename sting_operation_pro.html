@@ -233,11 +233,11 @@
             <div id="report-content" class="space-y-4 h-96 overflow-y-auto pr-2 font-mono text-sm"></div>
             
             <div class="mt-4 flex gap-2">
+                 <button onclick="restartLevel2()" class="flex-1 bg-amber-100 hover:bg-amber-200 text-amber-900 py-2 rounded font-bold text-sm border border-amber-300">
+                    <i class="fas fa-redo mr-1"></i> REPLAY CASE (LEVEL 2)
+                </button>
                  <button onclick="clearSaveData()" class="flex-1 bg-red-100 hover:bg-red-200 text-red-800 py-2 rounded font-bold text-sm">
                     DELETE SAVE
-                </button>
-                <button onclick="location.reload()" class="flex-1 bg-gray-800 text-white py-2 rounded font-bold text-sm">
-                    RESTART
                 </button>
             </div>
         </div>
@@ -272,12 +272,10 @@
                 <div class="bg-yellow-50 border border-yellow-200 p-4 rounded mb-6 flex flex-col md:flex-row gap-4">
                     <div class="flex-1">
                         <label class="admin-label">Admin Password (Login)</label>
-                        <!-- Added autocomplete="off" to prevent password manager interference -->
                         <input type="text" id="new-admin-pass" class="admin-input border-yellow-300" placeholder="Default: ChiefInspector" autocomplete="off">
                     </div>
                     <div class="flex-1">
                         <label class="admin-label">Level 2 Unlock Code</label>
-                        <!-- Added autocomplete="off" -->
                         <input type="text" id="new-level2-code" class="admin-input border-yellow-300" placeholder="Default: DETECTIVE" autocomplete="off">
                     </div>
                     <div class="flex items-end">
@@ -291,7 +289,6 @@
                         <label class="admin-label">Case Title</label>
                         <input type="text" id="edit-case-title" class="admin-input" placeholder="e.g. CASE #004: RAMOTSWE" autocomplete="off">
                     </div>
-                    <!-- SINGLE SOURCE OF TRUTH FOR MODEL ANSWERS -->
                     <div class="md:col-span-2">
                         <label class="admin-label">Model Answers Text (Displayed in Modal)</label>
                         <textarea id="edit-model-answers" class="admin-input h-20 bg-white border border-gray-300 p-2" placeholder="Paste all model answer text here. It will appear exactly like this in the modal."></textarea>
@@ -353,13 +350,15 @@
                 {
                     tactic: "She borrows a nurse's uniform and sets off at speed.",
                     method: "Use of props / disguise",
-                    correctAnalysis: "It creates immediate authority and authenticity, forcing the man to trust her.",
+                    analysisL1: "It creates immediate authority, forcing the man to trust her.",
+                    analysisL2: "It establishes immediate authority and authenticity, forcing the man to trust her without question.",
                     wrongAnalysis: "It shows she likes dressing up in different clothes."
                 },
                 {
                     tactic: "She orders him: 'Inside! Four minutes left now!'",
                     method: "Imperative verbs / Countdown",
-                    correctAnalysis: "She takes total control of the situation, leaving him no choice but to obey.",
+                    analysisL1: "She takes total control of the situation.",
+                    analysisL2: "She takes total control of the situation, leaving him no choice but to obey.",
                     wrongAnalysis: "She is helpful by counting the time for him."
                 }
             ]
@@ -382,7 +381,17 @@
         try {
             const storedConfig = SafeStorage.getItem('stingOpConfig');
             if (storedConfig) {
-                appConfig = { ...DEFAULT_CONFIG, ...JSON.parse(storedConfig) };
+                // Ensure migration if old config exists without L1/L2
+                const loaded = JSON.parse(storedConfig);
+                if (loaded.missionData && loaded.missionData.length > 0 && !loaded.missionData[0].analysisL1) {
+                    // Migration: Map old 'correctAnalysis' to both L1/L2
+                    loaded.missionData = loaded.missionData.map(item => ({
+                        ...item,
+                        analysisL1: item.correctAnalysis || "N/A",
+                        analysisL2: item.correctAnalysis || "N/A"
+                    }));
+                }
+                appConfig = { ...DEFAULT_CONFIG, ...loaded };
             }
         } catch(e) {}
 
@@ -451,11 +460,14 @@
             document.querySelectorAll('.rating-star').forEach(s => s.classList.remove('active'));
             selectedOption = null;
 
+            // Determine Correct Analysis based on Level
+            const correctText = playerState.currentLevel === 1 ? data.analysisL1 : data.analysisL2;
+
             // Render Options
             const container = document.getElementById('options-container');
             container.innerHTML = '';
             const opts = [
-                { text: data.correctAnalysis, correct: true },
+                { text: correctText, correct: true },
                 { text: data.wrongAnalysis, correct: false }
             ].sort(() => Math.random() - 0.5);
 
@@ -463,7 +475,7 @@
                 const btn = document.createElement('button');
                 btn.className = "w-full text-left p-3 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 text-sm transition option-btn";
                 btn.innerText = opt.text;
-                btn.onclick = () => selectAnalysis(opt.correct, data, btn);
+                btn.onclick = () => selectAnalysis(opt.correct, data, btn, correctText);
                 container.appendChild(btn);
             });
 
@@ -471,7 +483,7 @@
             document.getElementById('feedback-box').className = "h-12 bg-gray-900 rounded border border-gray-700 flex items-center justify-center text-sm font-bold text-gray-500";
         }
 
-        function selectAnalysis(isCorrect, data, btn) {
+        function selectAnalysis(isCorrect, data, btn, analysisText) {
             if (selectedOption) return;
             if (isCorrect) {
                 btn.classList.replace('bg-gray-700', 'bg-green-700');
@@ -480,7 +492,7 @@
                 document.getElementById('feedback-box').className = "h-12 bg-green-900 rounded border border-green-700 flex items-center justify-center text-sm font-bold text-green-400";
                 document.getElementById('rating-section').style.opacity = '1';
                 document.getElementById('rating-section').classList.remove('pointer-events-none');
-                selectedOption = { data: data, analysis: data.correctAnalysis };
+                selectedOption = { data: data, analysis: analysisText };
             } else {
                 btn.classList.replace('bg-gray-700', 'bg-red-900');
                 btn.classList.replace('border-gray-600', 'border-red-700');
@@ -554,19 +566,36 @@
             const container = document.getElementById('report-content');
             container.innerHTML = '';
             playerState.log.forEach((entry, i) => {
-                container.innerHTML += `<div class="mb-4 border-b border-gray-200 pb-2"><strong>${i+1}. Point:</strong> ${entry.analysis}<br><strong>Method:</strong> The writer uses ${entry.method.toLowerCase()}.<br><strong>Evidence:</strong> This is shown when "${entry.tactic}".<br><em>(Effectiveness: ${entry.rating}/5 stars)</em></div>`;
+                const methodLine = entry.method ? `<strong>Method:</strong> The writer uses ${entry.method.toLowerCase()}.<br>` : '';
+                container.innerHTML += `<div class="mb-4 border-b border-gray-200 pb-2"><strong>${i+1}. Point:</strong> ${entry.analysis}<br>${methodLine}<strong>Evidence:</strong> This is shown when "${entry.tactic}".<br><em>(Effectiveness: ${entry.rating}/5 stars)</em></div>`;
             });
         }
 
         // --- AUTH & ADMIN ---
         function checkPasscode() {
             if (document.getElementById('passcode-input').value.toUpperCase() === appConfig.level2Code.toUpperCase()) {
-                playerState.currentLevel = 2; playerState.currentIndex = 0; playerState.log = [];
+                // INSTANT UPGRADE LOGIC
+                playerState.currentLevel = 2;
+                // Don't reset log, just upgrade state so showReport renders methods
                 SafeStorage.setItem('stingOpProgress', JSON.stringify(playerState));
+                
                 document.getElementById('screen-levelup').classList.add('hidden');
-                launchGame();
+                
+                // Show the report immediately with the new level 2 privileges (which reveals methods)
+                showReport();
+                
             } else {
                 document.getElementById('passcode-error').classList.remove('hidden');
+            }
+        }
+        
+        function restartLevel2() {
+            if(confirm("Replay the case to practice finding methods?")) {
+                playerState.currentIndex = 0; 
+                playerState.log = []; 
+                SafeStorage.setItem('stingOpProgress', JSON.stringify(playerState));
+                document.getElementById('screen-report').classList.add('hidden');
+                launchGame();
             }
         }
 
@@ -582,21 +611,14 @@
 
         function toggleModal(id) {
             const m = document.getElementById(id);
-            const isOpening = m.classList.contains('hidden');
-            
-            if(isOpening) { 
-                m.classList.remove('hidden'); m.classList.add('flex'); 
-                // Admin specific open logic
+            if(m.classList.contains('hidden')) { m.classList.remove('hidden'); m.classList.add('flex'); 
                 if (id === 'admin-modal') {
                      const hint = document.getElementById('default-pass-alert');
-                     // Only show hint if password is still the default
                      if(appConfig.adminPass === "ChiefInspector") hint.classList.remove('hidden');
                      else hint.classList.add('hidden');
                 }
             }
-            else { 
-                m.classList.add('hidden'); m.classList.remove('flex'); 
-                // Reset admin state on close
+            else { m.classList.add('hidden'); m.classList.remove('flex'); 
                 if (id === 'admin-modal') {
                     document.getElementById('editor-lock-screen').classList.remove('hidden');
                     document.getElementById('editor-unlocked-screen').classList.add('hidden');
@@ -633,12 +655,16 @@
                             <input type="text" class="admin-input q-method" value="${item.method.replace(/"/g, '&quot;')}">
                         </div>
                         <div>
-                            <label class="admin-label text-green-600">Correct Analysis</label>
-                            <textarea class="admin-input h-16 q-correct">${item.correctAnalysis}</textarea>
+                            <label class="admin-label text-blue-600">L1 Analysis (Simple Point)</label>
+                            <textarea class="admin-input h-16 q-analysisL1">${item.analysisL1 || ''}</textarea>
                         </div>
                         <div>
+                            <label class="admin-label text-amber-600">L2 Analysis (Advanced Evaluation)</label>
+                            <textarea class="admin-input h-16 q-analysisL2">${item.analysisL2 || ''}</textarea>
+                        </div>
+                        <div class="md:col-span-2">
                             <label class="admin-label text-red-600">Wrong Analysis (Distractor)</label>
-                            <textarea class="admin-input h-16 q-wrong">${item.wrongAnalysis}</textarea>
+                            <textarea class="admin-input h-12 q-wrong">${item.wrongAnalysis}</textarea>
                         </div>
                     </div>
                 `;
@@ -647,7 +673,7 @@
         }
 
         function addNewQuestion() {
-            appConfig.missionData.push({ tactic: "", method: "", correctAnalysis: "", wrongAnalysis: "" });
+            appConfig.missionData.push({ tactic: "", method: "", analysisL1: "", analysisL2: "", wrongAnalysis: "" });
             renderAdminUI();
         }
 
@@ -686,7 +712,8 @@
                 newQuestions.push({
                     tactic: row.querySelector('.q-tactic').value,
                     method: row.querySelector('.q-method').value,
-                    correctAnalysis: row.querySelector('.q-correct').value,
+                    analysisL1: row.querySelector('.q-analysisL1').value,
+                    analysisL2: row.querySelector('.q-analysisL2').value,
                     wrongAnalysis: row.querySelector('.q-wrong').value
                 });
             });
