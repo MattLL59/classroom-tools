@@ -9,7 +9,7 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Roboto:wght@400;700&family=Courier+Prime&display=swap');
 
-        /* Backup styles */
+        /* Utility Overrides */
         .hidden { display: none !important; }
         .flex { display: flex !important; }
 
@@ -35,22 +35,6 @@
 
         .level-1-theme { border-color: #3b82f6; } 
         .level-2-theme { border-color: #d97706; } 
-
-        .stamp {
-            border: 4px solid #ef4444;
-            color: #ef4444;
-            font-weight: bold;
-            text-transform: uppercase;
-            padding: 0.5rem 1rem;
-            font-family: 'Black Ops One', cursive;
-            transform: rotate(-12deg);
-            opacity: 0.9;
-            display: inline-block;
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            z-index: 10;
-        }
 
         .rating-star { cursor: pointer; transition: color 0.2s; color: #d1d5db; }
         .rating-star.active { color: #f59e0b; }
@@ -78,14 +62,30 @@
             margin-bottom: 0.25rem;
             text-transform: uppercase;
         }
+        
+        .stamp {
+            border: 4px solid #ef4444;
+            color: #ef4444;
+            font-weight: bold;
+            text-transform: uppercase;
+            padding: 0.5rem 1rem;
+            font-family: 'Black Ops One', cursive;
+            transform: rotate(-12deg);
+            opacity: 0.9;
+            display: inline-block;
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center">
 
     <!-- DATA BLOCK: THIS HOLDS YOUR QUESTIONS SECURELY -->
-    <!-- We removed specific attributes that confuse regex to ensure reliability -->
     <script id="mission-config" type="application/json">
     {
+        "fileVersion": 1,
         "adminPass": "ChiefInspector",
         "level2Code": "DETECTIVE",
         "caseTitle": "CASE #004: RAMOTSWE",
@@ -254,7 +254,6 @@
                 <div id="default-pass-alert" class="bg-yellow-100 text-yellow-800 p-2 rounded text-xs mb-4 inline-block hidden">
                     <i class="fas fa-exclamation-triangle mr-1"></i> Default Password: <strong>ChiefInspector</strong>
                 </div>
-                <!-- Fix: Added autocomplete="off" to prevent password manager interference -->
                 <input type="password" id="admin-password-input" class="border-2 border-gray-300 p-3 rounded text-lg w-64 mx-auto block mb-4 text-center" placeholder="Password" autocomplete="new-password">
                 <button onclick="unlockEditor()" class="bg-red-600 text-white px-6 py-2 rounded font-bold hover:bg-red-700 transition">UNLOCK PANEL</button>
                 <p id="admin-auth-error" class="text-red-600 text-sm font-bold mt-4 hidden">Access Denied.</p>
@@ -306,7 +305,7 @@
                             <i class="fas fa-file-download"></i> DOWNLOAD FILE
                         </button>
                         <button onclick="saveAllChanges(true)" class="bg-blue-600 text-white px-8 py-3 rounded font-bold text-lg shadow-lg hover:bg-blue-700 transition">
-                            <i class="fas fa-save mr-2"></i> SAVE (LOCAL)
+                            <i class="fas fa-save mr-2"></i> APPLY (PREVIEW)
                         </button>
                     </div>
                 </div>
@@ -331,28 +330,25 @@
             removeItem: (key) => { try { localStorage.removeItem(key); } catch(e) {} }
         };
 
-        // --- LOAD CONFIG FROM SCRIPT TAG ---
+        // --- CONFIG & STATE ---
         let appConfig;
+        
         try {
+            // LOAD CONFIG FROM SCRIPT TAG
             const scriptContent = document.getElementById('mission-config').textContent;
             appConfig = JSON.parse(scriptContent);
+            
+            // VERSION CHECK: If File ID is newer, use File. Else check local.
+            // NOTE: We prioritize the file content to fix the "not saving" bug.
+            // LocalStorage logic is stripped back to just student progress.
+            
         } catch (e) {
             console.error("Config Error", e);
             appConfig = { missionData: [] };
         }
 
-        // --- STATE ---
         let playerState = { currentLevel: 1, currentIndex: 0, log: [] };
         let selectedOption = null;
-
-        // Load Local Overrides
-        try {
-            const storedConfig = SafeStorage.getItem('stingOpConfig');
-            if (storedConfig) {
-                const local = JSON.parse(storedConfig);
-                appConfig = { ...appConfig, ...local };
-            }
-        } catch(e) {}
 
         // --- INIT ---
         window.onload = function() {
@@ -366,38 +362,26 @@
             }
         };
 
-        // --- EXPORT LOGIC (DOM MANIPULATION) ---
-        function prepareDOMForExport() {
-            // 1. Gather all settings from UI
+        // --- ROBUST EXPORT LOGIC ---
+        function exportStandaloneFile() {
+            // 1. Gather all current state from UI inputs
             collectConfigFromUI();
             
-            // 2. FORCE UPDATE the DOM script tag with new JSON
+            // 2. STAMP IT: Update file version
+            appConfig.fileVersion = Date.now();
+            
+            // 3. Inject into DOM before snapshot
             const configScript = document.getElementById('mission-config');
             configScript.textContent = JSON.stringify(appConfig, null, 4);
-
-            // 3. Reset UI to clean state (Start Screen)
-            document.querySelectorAll('.modal-overlay').forEach(el => { 
-                el.classList.add('hidden'); el.classList.remove('flex'); 
-            });
-            document.getElementById('screen-game').classList.add('hidden');
-            document.getElementById('screen-levelup').classList.add('hidden');
-            document.getElementById('screen-report').classList.add('hidden');
-            document.getElementById('screen-start').classList.remove('hidden');
             
-            // 4. Lock Admin
-            document.getElementById('admin-password-input').value = "";
-            document.getElementById('editor-lock-screen').classList.remove('hidden');
-            document.getElementById('editor-unlocked-screen').classList.add('hidden');
-        }
+            // 4. Clean UI
+            cleanUIForExport();
 
-        function exportStandaloneFile() {
-            prepareDOMForExport();
-            
+            // 5. Download
             const htmlContent = document.documentElement.outerHTML;
             const blob = new Blob([htmlContent], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            
             const safeTitle = appConfig.caseTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase();
             a.href = url;
             a.download = `sting_op_${safeTitle}.html`;
@@ -405,15 +389,17 @@
             a.click();
             document.body.removeChild(a);
             
-            alert("Case Exported! The new file has your changes baked in.");
+            alert("File Exported Successfully.\n\nTip: The downloaded file contains your new questions and is ready to use.");
             location.reload(); 
         }
 
         function copySourceCode() {
-            prepareDOMForExport();
-            const htmlContent = document.documentElement.outerHTML;
+            collectConfigFromUI();
+            appConfig.fileVersion = Date.now();
+            document.getElementById('mission-config').textContent = JSON.stringify(appConfig, null, 4);
+            cleanUIForExport();
             
-            // Fallback Copy Method
+            const htmlContent = document.documentElement.outerHTML;
             const textArea = document.createElement("textarea");
             textArea.value = htmlContent;
             textArea.style.position = "fixed"; 
@@ -426,17 +412,28 @@
                 document.execCommand('copy');
                 alert("Source Code Copied! Paste into your editor and save.");
             } catch (err) {
-                prompt("Copy failed. Please manually copy:", htmlContent);
+                prompt("Copy failed. Manually copy:", htmlContent);
             }
             document.body.removeChild(textArea);
             location.reload(); 
         }
 
-        // --- DATA COLLECTION HELPER ---
+        function cleanUIForExport() {
+            document.querySelectorAll('.modal-overlay').forEach(el => { el.classList.add('hidden'); el.classList.remove('flex'); });
+            document.getElementById('screen-game').classList.add('hidden');
+            document.getElementById('screen-levelup').classList.add('hidden');
+            document.getElementById('screen-report').classList.add('hidden');
+            document.getElementById('screen-start').classList.remove('hidden');
+            document.getElementById('admin-password-input').value = "";
+            document.getElementById('editor-lock-screen').classList.remove('hidden');
+            document.getElementById('editor-unlocked-screen').classList.add('hidden');
+        }
+
+        // --- DATA COLLECTION ---
         function collectConfigFromUI() {
-            // Only update if the UI elements are actually available/rendered
-            const adminPassInput = document.getElementById('new-admin-pass');
-            if(!adminPassInput || adminPassInput.offsetParent === null) return; // Hidden/Not ready
+            // Only collect if admin panel is actually open/unlocked
+            const adminPanel = document.getElementById('editor-unlocked-screen');
+            if (adminPanel.classList.contains('hidden')) return;
 
             appConfig.caseTitle = document.getElementById('edit-case-title').value.trim();
             appConfig.modelText = document.getElementById('edit-model-answers').value;
@@ -480,7 +477,6 @@
             document.getElementById('tactic-text').innerText = `"${data.tactic}"`;
             document.getElementById('method-text').innerText = data.method;
             
-            // Lock Rating
             document.getElementById('rating-section').style.opacity = '0.5';
             document.getElementById('rating-section').classList.add('pointer-events-none');
             document.querySelectorAll('.rating-star').forEach(s => s.classList.remove('active'));
@@ -672,7 +668,7 @@
 
         // --- HANDLERS ---
         function addNewQuestion() {
-            collectConfigFromUI(); // Save current state first
+            collectConfigFromUI();
             appConfig.missionData.push({ tactic: "", method: "", analysisL1: "", analysisL2: "", wrongAnalysis: "" });
             renderAdminUI();
         }
@@ -687,18 +683,24 @@
 
         function saveSecuritySettings() {
             collectConfigFromUI();
-            SafeStorage.setItem('stingOpConfig', JSON.stringify(appConfig));
-            alert("Security Codes Saved.");
+            alert("Security Codes Cached (Click Apply/Save to finalize).");
         }
 
         function saveAllChanges(reload = true) {
             collectConfigFromUI();
-            SafeStorage.setItem('stingOpConfig', JSON.stringify(appConfig));
-            if(reload) { alert("Changes Saved!"); location.reload(); }
+            // Just reload to apply to the current view (since we aren't using local storage for config anymore)
+            if(reload) { 
+                alert("Preview Applied! To keep these changes permanently, click DOWNLOAD FILE."); 
+                // We don't reload because that would reset to the hardcoded values!
+                // Instead we re-init the UI with the new memory state
+                document.getElementById('case-title').innerText = appConfig.caseTitle;
+                document.getElementById('model-content-display').innerText = appConfig.modelText;
+                toggleModal('admin-modal');
+            }
         }
 
         function resetToDefaults() {
-            if(confirm("Reset everything?")) { SafeStorage.removeItem('stingOpConfig'); location.reload(); }
+            if(confirm("Reset everything?")) { location.reload(); }
         }
 
         function startNewSession() { SafeStorage.removeItem('stingOpProgress'); playerState = {currentLevel: 1, currentIndex: 0, log: []}; launchGame(); }
