@@ -137,31 +137,31 @@
             "streakThreshold": 3
         },
         "starters": [
-            "The writer clearly shows anger when they use...",
-            "The writer creates a hostile tone by choosing...",
-            "The writer suggests the BBC is dangerous by saying..."
+            "The writer shows anger by using the phrase",
+            "The writer creates a hostile tone with the words",
+            "The writer suggests the BBC is dangerous by saying"
         ],
         "pairs": [
             {
                 "id": "p1",
                 "quote": "neighbour from hell",
-                "method": "the aggressive metaphor",
+                "method": "metaphor",
                 "explanation": "This implies the BBC is impossible to live next to.",
-                "distractor": "This suggests the BBC lives in a hot climate."
+                "distractor": "This shows the BBC lives in a house."
             },
             {
                 "id": "p2",
                 "quote": "taken an axe",
-                "method": "the violent imagery",
+                "method": "violent imagery",
                 "explanation": "This suggests they are destroying things deliberately.",
-                "distractor": "This shows they are doing gardening work."
+                "distractor": "This implies they are doing gardening."
             },
             {
                 "id": "p3",
                 "quote": "state-funded juggernaut",
-                "method": "the massive metaphor",
+                "method": "massive metaphor",
                 "explanation": "This implies the BBC is a massive, unstoppable monster.",
-                "distractor": "This suggests the BBC has many large trucks."
+                "distractor": "This suggests the BBC owns many trucks."
             }
         ]
     }
@@ -185,7 +185,7 @@
         <div id="error-overlay" onclick="this.style.display='none'">
             <i class="fas fa-exclamation-triangle" style="font-size: 3rem; margin-bottom: 10px;"></i>
             <h1>TRY AGAIN</h1>
-            <p>That doesn't match the evidence!</p>
+            <p>That choice is not correct.</p>
             <p style="font-size: 0.9rem; margin-top: 20px;">(Click to continue)</p>
         </div>
 
@@ -257,7 +257,7 @@
                 </div>
 
                 <div class="toggle-row">
-                    <label style="flex:1;"><strong>Max Level Cap:</strong><br><small>Prevent students going higher than this.</small></label>
+                    <label style="flex:1;"><strong>Max Level Cap:</strong></label>
                     <select id="edit-max-lvl" class="admin-input" style="width:auto;" onchange="updateSettings()">
                         <option value="1">Level 1 Only</option>
                         <option value="2">Cap at Level 2</option>
@@ -277,7 +277,11 @@
                     <input id="edit-app-title" class="admin-input" oninput="saveLocal()">
                 </div>
 
-                <h3>Content Editor</h3>
+                <h3>Sentence Starters</h3>
+                <div id="edit-starters-list"></div>
+                <button onclick="addStarter()" style="background:#eee; border:1px solid #ccc; padding:5px 10px; cursor:pointer;">+ Add Starter</button>
+
+                <h3 style="margin-top:30px;">Content Pairs (Correct & Wrong Answers)</h3>
                 <div id="edit-pairs-list"></div>
                 <button onclick="addPair()" style="background:#eee; border:1px solid #ccc; padding:5px 10px; cursor:pointer;">+ Add Content Pair</button>
 
@@ -296,8 +300,7 @@
 
     <script>
         // --- CORE CONFIG ---
-        // New Key to ensure fresh start
-        const STORAGE_KEY = 'eval_builder_v2';
+        const STORAGE_KEY = 'eval_builder_v3_clean'; 
         
         let config = {};
         let gameState = {
@@ -305,7 +308,7 @@
             streak: 0
         };
 
-        // SAFETY: DEFINE ADMIN FUNCTIONS FIRST so they always exist even if load fails
+        // --- SAFETY ADMIN FUNCTIONS ---
         function toggleAdmin() {
             const m = document.getElementById('admin-modal');
             m.style.display = (m.style.display === 'flex') ? 'none' : 'flex';
@@ -317,7 +320,6 @@
         }
 
         function unlockAdmin() {
-            // Safe check in case config isn't loaded yet
             const pass = config.adminPass || "teacher";
             if (document.getElementById('admin-pass-input').value === pass) {
                 document.getElementById('admin-lock').style.display = 'none';
@@ -329,24 +331,20 @@
         // --- LOAD CONFIG ---
         function loadConfig() {
             try {
-                // 1. Try Local Storage
                 const local = localStorage.getItem(STORAGE_KEY);
                 if (local) {
                     config = JSON.parse(local);
                 } else {
-                    // 2. Try Embedded JSON
-                    const embedded = document.getElementById('app-config').textContent;
-                    config = JSON.parse(embedded);
+                    config = JSON.parse(document.getElementById('app-config').textContent);
                 }
             } catch (e) { 
                 console.error("Config Crashed. Loading Safe Default.", e);
-                // 3. FALLBACK SAFE CONFIG
                 config = {
                     "appTitle": "Evaluation Builder",
                     "adminPass": "teacher",
                     "settings": { "startLevel": 1, "maxLevel": 3, "streakThreshold": 3 },
                     "starters": ["The writer shows..."],
-                    "pairs": [ { "id": "p1", "quote": "Example Quote", "method": "metaphor", "explanation": "Example explanation." } ]
+                    "pairs": [ { "id": "p1", "quote": "Quote", "method": "method", "explanation": "explain", "distractor": "wrong" } ]
                 };
             }
             applyConfig();
@@ -355,9 +353,7 @@
         function applyConfig() {
             document.title = config.appTitle;
             document.getElementById('display-title').innerText = config.appTitle;
-            // Ensure settings exist if migrating from old version
             if(!config.settings) config.settings = { startLevel: 1, maxLevel: 3, streakThreshold: 3 };
-            
             gameState.currentLevel = parseInt(config.settings.startLevel);
             updateScoreBoard();
             renderGame();
@@ -368,30 +364,18 @@
         let currentQuoteID = "";
 
         function renderGame() {
+            // Starters
             const sGrid = document.getElementById('starters-grid');
             sGrid.innerHTML = '';
             config.starters.forEach(text => {
                 sGrid.innerHTML += `<button class="option-btn btn-pink" onclick="pickStarter('${text.replace(/'/g, "\\'")}')">${text}</button>`;
             });
 
+            // Evidence
             const eGrid = document.getElementById('evidence-grid');
             eGrid.innerHTML = '';
             config.pairs.forEach(p => {
                 eGrid.innerHTML += `<button class="option-btn btn-white" onclick="pickEvidence('${p.id}')">"${p.quote}"</button>`;
-            });
-
-            const mGrid = document.getElementById('method-grid');
-            mGrid.innerHTML = '';
-            let shuffledMethods = [...config.pairs].sort(() => Math.random() - 0.5);
-            shuffledMethods.forEach(p => {
-                mGrid.innerHTML += `<button class="option-btn btn-yellow" onclick="checkMethod('${p.id}')">${p.method}</button>`;
-            });
-
-            const exGrid = document.getElementById('explain-grid');
-            exGrid.innerHTML = '';
-            let shuffledEx = [...config.pairs].sort(() => Math.random() - 0.5);
-            shuffledEx.forEach(p => {
-                exGrid.innerHTML += `<button class="option-btn btn-green" onclick="checkExplain('${p.id}')">${p.explanation}</button>`;
             });
         }
 
@@ -408,25 +392,81 @@
 
         function pickEvidence(id) {
             currentQuoteID = id;
+            
             if (gameState.currentLevel === 1) {
                 completeRound(id);
             } else if (gameState.currentLevel === 2) {
-                document.getElementById('explain-step-num').innerText = "3";
-                showSection('step-explain', 75);
+                prepareExplanationRound(id);
             } else {
-                showSection('step-method', 50);
+                prepareMethodRound(id);
             }
         }
 
-        function checkMethod(id) {
-            if (id === currentQuoteID) {
+        function prepareMethodRound(id) {
+            const pair = config.pairs.find(p => p.id === id);
+            const mGrid = document.getElementById('method-grid');
+            mGrid.innerHTML = '';
+            
+            // Pool: Correct Answer + Distractor + Random others
+            let options = [];
+            options.push({ text: pair.method, correct: true });
+            if(pair.distractor) options.push({ text: pair.distractor, correct: false });
+            
+            // Shuffle and Render
+            options.sort(() => Math.random() - 0.5);
+            
+            options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = "option-btn btn-yellow";
+                btn.innerText = opt.text;
+                btn.onclick = function() { checkMethod(opt.correct); };
+                mGrid.appendChild(btn);
+            });
+            
+            showSection('step-method', 50);
+        }
+
+        function checkMethod(isCorrect) {
+            if (isCorrect) {
                 document.getElementById('explain-step-num').innerText = "4";
-                showSection('step-explain', 75);
+                prepareExplanationRound(currentQuoteID);
             } else triggerError();
         }
 
-        function checkExplain(id) {
-            if (id === currentQuoteID) completeRound(id);
+        function prepareExplanationRound(id) {
+            const pair = config.pairs.find(p => p.id === id);
+            const exGrid = document.getElementById('explain-grid');
+            exGrid.innerHTML = '';
+            
+            let options = [];
+            options.push({ text: pair.explanation, correct: true });
+            // Add custom distractor if it exists, or random one
+            if(pair.distractor) options.push({ text: pair.distractor, correct: false });
+            
+            // Add one random other explanation for variety
+            const other = config.pairs.find(p => p.id !== id);
+            if(other) options.push({ text: other.explanation, correct: false });
+
+            options.sort(() => Math.random() - 0.5);
+            
+            options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = "option-btn btn-green";
+                btn.innerText = opt.text;
+                btn.onclick = function() { checkExplain(opt.correct); };
+                exGrid.appendChild(btn);
+            });
+
+            // Set Step Number
+            const stepNum = gameState.currentLevel === 2 ? "3" : "4";
+            document.getElementById('explain-step-num').innerText = stepNum;
+            
+            const pct = gameState.currentLevel === 2 ? 75 : 75;
+            showSection('step-explain', pct);
+        }
+
+        function checkExplain(isCorrect) {
+            if (isCorrect) completeRound(currentQuoteID);
             else triggerError();
         }
 
@@ -444,10 +484,11 @@
             const pair = config.pairs.find(p => p.id === id);
             let sentence = "";
 
+            // NO HARDCODED TEXT HERE - All Controlled by Starter/Data
             if (gameState.currentLevel === 1) {
-                sentence = `${currentStarter} the phrase <strong>"${pair.quote}"</strong>.`;
+                sentence = `${currentStarter} <strong>"${pair.quote}"</strong>.`;
             } else if (gameState.currentLevel === 2) {
-                sentence = `${currentStarter} the phrase <strong>"${pair.quote}"</strong>. ${pair.explanation}`;
+                sentence = `${currentStarter} <strong>"${pair.quote}"</strong>. ${pair.explanation}`;
             } else {
                 sentence = `${currentStarter} <strong>${pair.method}</strong> <strong>"${pair.quote}"</strong>. ${pair.explanation}`;
             }
@@ -489,17 +530,28 @@
             const badge = document.getElementById('level-badge');
             const lvl = gameState.currentLevel;
             badge.innerText = "LEVEL " + lvl;
-            if(lvl === 1) badge.style.background = "var(--level-1-color)";
-            if(lvl === 2) badge.style.background = "var(--level-2-color)";
-            if(lvl === 3) badge.style.background = "var(--level-3-color)";
+            badge.style.background = lvl === 1 ? "var(--level-1-color)" : lvl === 2 ? "var(--level-2-color)" : "var(--level-3-color)";
         }
 
+        // --- ADMIN EDITOR ---
         function renderAdminEditor() {
             document.getElementById('edit-app-title').value = config.appTitle;
             document.getElementById('edit-start-lvl').value = config.settings.startLevel;
             document.getElementById('edit-max-lvl').value = config.settings.maxLevel;
             document.getElementById('edit-streak').value = config.settings.streakThreshold;
 
+            // Starters
+            const sl = document.getElementById('edit-starters-list');
+            sl.innerHTML = '';
+            config.starters.forEach((s, i) => {
+                sl.innerHTML += `
+                <div style="display:flex; gap:5px; margin-bottom:5px;">
+                    <input class="admin-input" value="${s.replace(/"/g, '&quot;')}" oninput="updateStarter(${i}, this.value)">
+                    <button onclick="deleteStarter(${i})" style="color:red; border:none; background:white;">&times;</button>
+                </div>`;
+            });
+
+            // Pairs
             const pl = document.getElementById('edit-pairs-list');
             pl.innerHTML = '';
             config.pairs.forEach((p, i) => {
@@ -508,10 +560,15 @@
                     <button class="del-btn" onclick="deleteItem(${i})">Delete</button>
                     <label>Quote</label>
                     <input class="admin-input" value="${p.quote.replace(/"/g, '&quot;')}" oninput="updatePair(${i}, 'quote', this.value)">
-                    <label>Technique (Lvl 3)</label>
-                    <input class="admin-input" value="${p.method.replace(/"/g, '&quot;')}" oninput="updatePair(${i}, 'method', this.value)">
-                    <label>Explanation</label>
+                    
+                    <label>Method (Lvl 3)</label>
+                    <input class="admin-input" value="${p.method ? p.method.replace(/"/g, '&quot;') : ''}" oninput="updatePair(${i}, 'method', this.value)">
+                    
+                    <label>Correct Explanation</label>
                     <textarea class="admin-input" oninput="updatePair(${i}, 'explanation', this.value)">${p.explanation}</textarea>
+                    
+                    <label style="color:#e74c3c">Wrong Answer (Distractor)</label>
+                    <textarea class="admin-input" style="border-color:#e74c3c" oninput="updatePair(${i}, 'distractor', this.value)">${p.distractor || ''}</textarea>
                 </div>`;
             });
         }
@@ -523,13 +580,14 @@
             saveLocal();
         }
 
-        function updatePair(index, field, value) {
-            config.pairs[index][field] = value;
-            saveLocal();
-        }
+        function updateStarter(index, value) { config.starters[index] = value; saveLocal(); }
+        function deleteStarter(index) { if(confirm("Del?")) { config.starters.splice(index, 1); renderAdminEditor(); saveLocal(); } }
+        function addStarter() { config.starters.push("New Starter..."); renderAdminEditor(); saveLocal(); }
 
+        function updatePair(index, field, value) { config.pairs[index][field] = value; saveLocal(); }
+        
         function addPair() {
-            config.pairs.push({ id: "p"+Date.now(), quote: "New Quote", method: "the technique", explanation: "Explanation..." });
+            config.pairs.push({ id: "p"+Date.now(), quote: "New Quote", method: "method", explanation: "Correct Explanation", distractor: "Wrong Explanation" });
             renderAdminEditor(); saveLocal();
         }
 
@@ -543,7 +601,9 @@
         function saveLocal() {
             config.appTitle = document.getElementById('edit-app-title').value;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-            applyConfig();
+            // Apply immediately to background game if titles change
+            document.title = config.appTitle;
+            document.getElementById('display-title').innerText = config.appTitle;
         }
 
         function fullReset() {
