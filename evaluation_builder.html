@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evaluation Architect</title>
+    <title>Evaluation Architect: Progression</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
@@ -13,6 +13,9 @@
             --col-4-green: #90ee90;  /* Effect */
             --app-color: #2c3e50;
             --accent-color: #e74c3c;
+            --level-1: #3498db;
+            --level-2: #2ecc71;
+            --level-3: #9b59b6;
         }
 
         body {
@@ -33,6 +36,15 @@
             margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e0e0e0;
         }
         h1 { margin: 0; color: var(--app-color); font-size: 1.6rem; }
+        
+        #score-board {
+            background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px;
+            font-weight: bold; font-size: 0.9rem; display: flex; gap: 10px; align-items: center;
+        }
+        .level-badge {
+            padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white;
+        }
+
         .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; }
         .admin-btn:hover { color: var(--app-color); }
 
@@ -92,11 +104,13 @@
         .fragment { padding: 2px 5px; border-radius: 4px; }
 
         /* --- OVERLAYS --- */
-        #overlay {
+        #overlay, #levelup-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85); z-index: 100;
-            justify-content: center; align-items: center; text-align: center; color: white;
+            z-index: 100; justify-content: center; align-items: center; text-align: center; color: white;
         }
+        #overlay { background: rgba(231, 76, 60, 0.95); }
+        #levelup-overlay { background: rgba(46, 204, 113, 0.95); }
+        
         .shake { animation: shake 0.4s; }
 
         /* --- ADMIN MODAL --- */
@@ -118,6 +132,7 @@
         .input-row { display: flex; gap: 10px; margin-bottom: 5px; }
         .admin-input { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
         .del-btn { background: #ffdddd; border: 1px solid #ffaaaa; color: red; cursor: pointer; padding: 0 10px; border-radius: 4px; }
+        .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #eef; padding: 10px; border-radius: 5px; }
 
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
@@ -127,19 +142,22 @@
 
     <script id="app-config" type="application/json">
     {
-        "appTitle": "Evaluation Builder",
+        "appTitle": "Evaluation Architect",
         "adminPass": "teacher",
+        "settings": {
+            "startLevel": 1,
+            "maxLevel": 3,
+            "streakThreshold": 3
+        },
         "starters_evidence": [
             "The writer uses",
             "The author explicitly chooses",
-            "The writer includes",
             "The text presents"
         ],
         "starters_evaluative": [
             "to effectively suggest",
             "in order to imply",
-            "which creates the impression",
-            "to make the reader feel"
+            "which creates the impression"
         ],
         "content_pairs": [
             {
@@ -169,7 +187,13 @@
 
     <header>
         <h1>Evaluation Architect</h1>
-        <button class="admin-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <div id="score-board">
+                <span id="level-badge" class="level-badge" style="background:var(--level-1)">LEVEL 1</span>
+                <span>Streak: <span id="streak-val">0</span>/<span id="target-val">3</span></span>
+            </div>
+            <button class="admin-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
+        </div>
     </header>
 
     <div class="container" id="game-container">
@@ -209,7 +233,7 @@
         <div id="stage-final" class="stage-area">
             <h2 class="stage-title" style="color:green;">Construction Complete!</h2>
             <div style="font-size:3rem; margin:20px;">🎉</div>
-            <button class="choice-btn btn-white" onclick="resetGame()">Build Another Paragraph</button>
+            <button class="choice-btn btn-white" onclick="resetGame()">Next Question</button>
         </div>
 
         <div id="sentence-builder">
@@ -221,9 +245,19 @@
     <div id="overlay" onclick="closeOverlay()">
         <div id="overlay-msg">
             <i class="fas fa-times-circle" style="font-size:3rem; color:#e74c3c; margin-bottom:15px;"></i>
-            <h2>Incorrect Connection</h2>
+            <h2>Incorrect</h2>
             <p>That choice doesn't match your evidence.</p>
             <br><small>(Click to try again)</small>
+        </div>
+    </div>
+
+    <div id="levelup-overlay" onclick="closeLevelUp()">
+        <div class="overlay-content">
+            <i class="fas fa-arrow-up" style="font-size:4rem; color:#f1c40f; margin-bottom:20px;"></i>
+            <h2>LEVEL UP!</h2>
+            <p id="levelup-msg">You have unlocked the next stage.</p>
+            <br>
+            <button class="choice-btn btn-white">Continue</button>
         </div>
     </div>
 
@@ -242,6 +276,30 @@
 
             <div id="admin-edit" class="panel-body" style="display:none;">
                 
+                <h3 style="color:var(--app-color); border-bottom:2px solid #eee; padding-bottom:5px;">Progression Settings</h3>
+                <div class="toggle-row">
+                    <label style="flex:1;"><strong>Start Level:</strong></label>
+                    <select id="edit-start-lvl" class="admin-input" style="width:auto;" onchange="updateSettings()">
+                        <option value="1">Level 1 (Basic: Point + Evidence)</option>
+                        <option value="2">Level 2 (Standard: + Explanation)</option>
+                        <option value="3">Level 3 (Advanced: + Method)</option>
+                    </select>
+                </div>
+                <div class="toggle-row">
+                    <label style="flex:1;"><strong>Max Level:</strong></label>
+                    <select id="edit-max-lvl" class="admin-input" style="width:auto;" onchange="updateSettings()">
+                        <option value="1">Level 1</option>
+                        <option value="2">Level 2</option>
+                        <option value="3">Level 3</option>
+                    </select>
+                </div>
+                <div class="toggle-row">
+                    <label style="flex:1;"><strong>Wins to Level Up:</strong></label>
+                    <input type="number" id="edit-streak" class="admin-input" style="width:60px;" min="1" max="50" onchange="updateSettings()">
+                </div>
+
+                <hr style="margin:20px 0; border-top:1px solid #eee;">
+
                 <div class="section-box" style="border-left: 5px solid var(--col-1-pink);">
                     <span class="section-title">Panel 1: Evidence Starters (Generic)</span>
                     <div id="list-s1"></div>
@@ -272,12 +330,13 @@
 
     <script>
         // --- STORAGE KEY ---
-        const STORE_KEY = 'eval_builder_v8';
+        const STORE_KEY = 'eval_arch_v9';
         
         // --- STATE ---
         let config = {};
         let currentQuoteId = null;
         let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
+        let gameState = { currentLevel: 1, streak: 0 };
 
         // --- INIT ---
         function init() {
@@ -287,16 +346,16 @@
                 else config = JSON.parse(document.getElementById('app-config').textContent);
             } catch(e) {
                 console.error("Config Error", e);
-                // Safe default
                 config = JSON.parse(document.getElementById('app-config').textContent);
             }
+            gameState.currentLevel = parseInt(config.settings.startLevel);
+            updateScoreBoard();
             renderStage0();
         }
 
         // --- GAME LOGIC ---
         
         function renderStage0() {
-            // Pick Quote
             showStage('stage-0', 0);
             const grid = document.getElementById('grid-quotes');
             grid.innerHTML = '';
@@ -318,7 +377,7 @@
         }
 
         function renderStage1() {
-            // Evidence Starters (Generic)
+            // Evidence Starters (Generic) - ALL LEVELS
             showStage('stage-1', 20);
             const grid = document.getElementById('grid-s1');
             grid.innerHTML = '';
@@ -326,28 +385,39 @@
                 const btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s1';
                 btn.innerText = txt;
-                btn.onclick = () => { sentenceParts.s1 = txt; updateBuilder(); renderStage2(); };
+                btn.onclick = () => { 
+                    sentenceParts.s1 = txt; 
+                    updateBuilder(); 
+                    
+                    // --- PROGRESSION LOGIC ---
+                    if(gameState.currentLevel === 1) {
+                        // Level 1: Done
+                        finishGame();
+                    } else if(gameState.currentLevel === 2) {
+                        // Level 2: Skip Method, go to Evaluative
+                        renderStage3();
+                    } else {
+                        // Level 3: Go to Method
+                        renderStage2(); 
+                    }
+                };
                 grid.appendChild(btn);
             });
         }
 
         function renderStage2() {
-            // Method (Specific)
+            // Method (Specific) - LEVEL 3 ONLY
             showStage('stage-2', 40);
             const grid = document.getElementById('grid-s2');
             grid.innerHTML = '';
             
             const pair = config.content_pairs.find(p => p.id === currentQuoteId);
             
-            // Mix correct answer with random distractors
             let opts = [{ txt: pair.method, correct: true }];
-            
-            // Add a distractor (from other quotes or generic)
             const others = config.content_pairs.filter(p => p.id !== currentQuoteId);
             if(others.length > 0) opts.push({ txt: others[0].method, correct: false });
             if(others.length > 1) opts.push({ txt: others[1].method, correct: false });
             
-            // Shuffle
             opts.sort(() => Math.random() - 0.5);
 
             opts.forEach(o => {
@@ -355,15 +425,18 @@
                 btn.className = 'choice-btn btn-s2';
                 btn.innerText = o.txt;
                 btn.onclick = () => {
-                    if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); renderStage3(); }
-                    else showError();
+                    if(o.correct) { 
+                        sentenceParts.s2 = o.txt; 
+                        updateBuilder(); 
+                        renderStage3(); 
+                    } else showError();
                 };
                 grid.appendChild(btn);
             });
         }
 
         function renderStage3() {
-            // Evaluative Starters (Generic)
+            // Evaluative Starters (Generic) - LEVEL 2+3
             showStage('stage-3', 60);
             const grid = document.getElementById('grid-s3');
             grid.innerHTML = '';
@@ -377,7 +450,7 @@
         }
 
         function renderStage4() {
-            // Effect (Specific)
+            // Effect (Specific) - LEVEL 2+3
             showStage('stage-4', 80);
             const grid = document.getElementById('grid-s4');
             grid.innerHTML = '';
@@ -388,7 +461,6 @@
             opts.push({ txt: pair.effect, correct: true });
             if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
             
-            // Shuffle
             opts.sort(() => Math.random() - 0.5);
 
             opts.forEach(o => {
@@ -405,6 +477,16 @@
 
         function finishGame() {
             showStage('stage-final', 100);
+            
+            // Check Progression
+            gameState.streak++;
+            updateScoreBoard();
+            
+            if(gameState.streak >= config.settings.streakThreshold) {
+                if(gameState.currentLevel < config.settings.maxLevel) {
+                    setTimeout(triggerLevelUp, 500);
+                }
+            }
         }
 
         function resetGame() {
@@ -422,8 +504,12 @@
             
             let html = "";
             if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `;
+            // Only show Method if it exists (Level 3)
             if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `;
+            
             if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `;
+            
+            // Only show Evaluation if they exist (Level 2/3)
             if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `;
             if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`;
             
@@ -438,10 +524,29 @@
 
         function showError() {
             document.getElementById('overlay').style.display = 'flex';
-            document.getElementById('overlay-msg').classList.add('shake');
-            setTimeout(()=> document.getElementById('overlay-msg').classList.remove('shake'), 500);
+            document.getElementById('overlay').querySelector('.shake').classList.add('shake');
+            gameState.streak = 0; // Reset streak on fail
+            updateScoreBoard();
         }
         function closeOverlay() { document.getElementById('overlay').style.display = 'none'; }
+
+        function triggerLevelUp() {
+            gameState.currentLevel++;
+            gameState.streak = 0;
+            document.getElementById('levelup-msg').innerText = "You have reached Level " + gameState.currentLevel;
+            document.getElementById('levelup-overlay').style.display = 'flex';
+            updateScoreBoard();
+        }
+        function closeLevelUp() { document.getElementById('levelup-overlay').style.display = 'none'; }
+
+        function updateScoreBoard() {
+            document.getElementById('streak-val').innerText = gameState.streak;
+            document.getElementById('target-val').innerText = config.settings.streakThreshold;
+            const badge = document.getElementById('level-badge');
+            const l = gameState.currentLevel;
+            badge.innerText = "LEVEL " + l;
+            badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
+        }
 
         // --- ADMIN ---
         function openAdmin() {
@@ -461,12 +566,13 @@
         }
 
         function renderAdminUI() {
-            // S1 List
+            document.getElementById('edit-start-lvl').value = config.settings.startLevel;
+            document.getElementById('edit-max-lvl').value = config.settings.maxLevel;
+            document.getElementById('edit-streak').value = config.settings.streakThreshold;
+
             renderList('list-s1', config.starters_evidence, 'starters_evidence');
-            // S3 List
             renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
             
-            // Content
             const cList = document.getElementById('list-content');
             cList.innerHTML = '';
             config.content_pairs.forEach((p, i) => {
@@ -480,7 +586,7 @@
                     <div class="input-row"><label style="width:80px; font-size:0.8rem;">Quote:</label><input class="admin-input" value="${p.quote.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'quote', this.value)"></div>
                     <div class="input-row"><label style="width:80px; font-size:0.8rem;">Method:</label><input class="admin-input" style="border-color:var(--col-2-yellow);" value="${p.method.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)"></div>
                     <div class="input-row"><label style="width:80px; font-size:0.8rem;">Effect:</label><input class="admin-input" style="border-color:var(--col-4-green);" value="${p.effect.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'effect', this.value)"></div>
-                    <div class="input-row"><label style="width:80px; font-size:0.8rem; color:red;">Wrong:</label><input class="admin-input" style="border-color:red;" value="${p.distractor.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'distractor', this.value)"></div>
+                    <div class="input-row"><label style="width:80px; font-size:0.8rem; color:red;">Wrong:</label><input class="admin-input" style="border-color:red;" value="${p.distractor ? p.distractor.replace(/"/g, '&quot;') : ''}" onchange="updateContent(${i}, 'distractor', this.value)"></div>
                 `;
                 cList.appendChild(div);
             });
@@ -501,6 +607,13 @@
         }
 
         // --- ADMIN ACTIONS ---
+        function updateSettings() {
+            config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
+            config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
+            config.settings.streakThreshold = parseInt(document.getElementById('edit-streak').value);
+            save();
+        }
+
         function updateList(key, idx, val) { config[key][idx] = val; save(); }
         function delList(key, idx) { config[key].splice(idx, 1); save(); renderAdminUI(); }
         function addItem(type) { 
@@ -523,14 +636,15 @@
 
         function save() {
             localStorage.setItem(STORE_KEY, JSON.stringify(config));
-            // Reset game to apply changes
-            renderStage0();
+            // Apply immediate changes
+            gameState.currentLevel = config.settings.startLevel;
+            updateScoreBoard();
+            resetGame();
         }
 
         function exportApp() {
             const json = JSON.stringify(config, null, 4);
             document.getElementById('app-config').textContent = json;
-            // Hide admin UI
             document.getElementById('admin-modal').style.display = 'none';
             document.getElementById('admin-lock').style.display = 'flex';
             document.getElementById('admin-edit').style.display = 'none';
