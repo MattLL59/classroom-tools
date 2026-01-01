@@ -34,7 +34,6 @@
             if (input === storedPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
-                // Delay render slightly to ensure DOM is ready
                 setTimeout(renderAdminUI, 50);
             } else {
                 alert("Incorrect Password");
@@ -95,7 +94,7 @@
         .panel-header { padding: 15px; background: #eee; display: flex; justify-content: space-between; font-weight: bold; }
         .panel-body { padding: 20px; overflow-y: auto; flex-grow: 1; }
         .section-box { border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .section-title { font-weight: bold; margin-bottom: 10px; display: block; color: var(--app-color); text-transform: uppercase; font-size: 0.9rem; letter-spacing: 1px; }
+        .section-title { font-weight: bold; margin-bottom: 10px; display: block; color: var(--app-color); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; }
         
         .input-row { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
         .admin-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
@@ -254,7 +253,7 @@
                         <button onclick="downloadWordDoc()" style="background:#2980b9; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Download Word Doc</button>
                     </div>
                     <div style="display:flex; gap:10px;">
-                        <button onclick="saveLocal(true)" style="background:#3498db; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Save Settings</button>
+                        <button id="save-btn" onclick="triggerSave()" style="background:#3498db; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold; width:150px;">Save Settings</button>
                         <button onclick="exportApp()" style="background:#27ae60; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Download App</button>
                     </div>
                 </div>
@@ -278,7 +277,7 @@
     </div>
 
     <script>
-        var STORE_KEY = 'eval_arch_v42';
+        var STORE_KEY = 'eval_arch_v43';
         
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -296,7 +295,6 @@
                     try {
                         var loadedConfig = JSON.parse(local);
                         config = Object.assign({}, defaultConfig, loadedConfig);
-                        // Ensure arrays exist to prevent crash
                         if(!config.content_pairs) config.content_pairs = defaultConfig.content_pairs;
                         if(!config.starters_evidence) config.starters_evidence = defaultConfig.starters_evidence;
                         if(!config.starters_evaluative) config.starters_evaluative = defaultConfig.starters_evaluative;
@@ -319,16 +317,6 @@
                 renderWorksheets();
                 
             } catch(e) { console.error(e); }
-        }
-
-        // --- SAFE DOM HELPERS ---
-        function safeSetVal(id, val) {
-            var el = document.getElementById(id);
-            if(el) el.value = val;
-        }
-        function safeSetCheck(id, val) {
-            var el = document.getElementById(id);
-            if(el) el.checked = val;
         }
 
         // --- GAME LOGIC ---
@@ -619,7 +607,6 @@
         function renderList(elId, arr, key) {
             var el = document.getElementById(elId);
             el.innerHTML = '';
-            // Ensure array exists
             if (!arr) arr = [];
             arr.forEach(function(txt, i) {
                 var row = document.createElement('div');
@@ -632,12 +619,22 @@
             });
         }
 
+        // --- SAFE DOM HELPERS ---
+        function safeSetVal(id, val) {
+            var el = document.getElementById(id);
+            if(el) el.value = val;
+        }
+        function safeSetCheck(id, val) {
+            var el = document.getElementById(id);
+            if(el) el.checked = val;
+        }
+
         // --- UPDATE HANDLERS ---
         function updateSettings() {
             config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
             config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
             config.settings.streakThreshold = parseInt(document.getElementById('edit-streak').value);
-            saveLocal(false);
+            // Auto save silent
         }
 
         function updateWS() {
@@ -650,15 +647,14 @@
                 s3_mode: document.getElementById('s3-mode').value,
                 s4_mode: document.getElementById('s4-mode').value
             };
-            saveLocal(false);
+            // Auto save silent
         }
 
-        function updateList(key, idx, val) { config[key][idx] = val; saveLocal(false); }
-        function delList(key, idx) { config[key].splice(idx, 1); saveLocal(true); } 
+        function updateList(key, idx, val) { config[key][idx] = val; }
+        function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); } 
         
         function addItem(type) { 
             try {
-                // Initialize if missing
                 if (!config.starters_evidence) config.starters_evidence = [];
                 if (!config.starters_evaluative) config.starters_evaluative = [];
 
@@ -666,51 +662,65 @@
                 if(text) {
                     if(type==='s1') config.starters_evidence.push(text);
                     if(type==='s3') config.starters_evaluative.push(text);
-                    saveLocal(true); 
+                    renderAdminUI(); 
                 }
-            } catch(e) {
-                alert("Error adding item: " + e.message);
-            }
+            } catch(e) { alert("Error: " + e.message); }
         }
 
-        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(false); }
+        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; }
         function delContent(idx) { 
             if(confirm("Delete this quote set?")) {
                 config.content_pairs.splice(idx, 1);
-                saveLocal(true); 
+                renderAdminUI();
             }
         }
         function addContent() {
             try {
                 if (!config.content_pairs) config.content_pairs = [];
-                
                 config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" });
-                saveLocal(true);
-                
+                renderAdminUI();
                 setTimeout(function() {
                     var list = document.getElementById('list-content');
                     if(list && list.lastElementChild) list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
                 }, 200);
-            } catch(e) {
-                alert("Error adding content: " + e.message);
-            }
+            } catch(e) { alert("Error adding content: " + e.message); }
         }
 
-        function saveLocal(render) {
-            if(render === undefined) render = true;
-            config.appTitle = document.getElementById('edit-app-title').value;
-            config.adminPass = document.getElementById('edit-admin-pass').value;
-            config.topic = document.getElementById('edit-topic').value;
-            localStorage.setItem(STORE_KEY, JSON.stringify(config));
-            
-            gameState.currentLevel = config.settings.startLevel;
-            updateScoreBoard();
-            document.getElementById('topic-display').innerText = "Question: " + (config.topic || "Analysis");
-            
-            if(render) {
+        // --- TRIGGER SAVE WITH FEEDBACK ---
+        function triggerSave() {
+            try {
+                config.appTitle = document.getElementById('edit-app-title').value;
+                config.adminPass = document.getElementById('edit-admin-pass').value;
+                config.topic = document.getElementById('edit-topic').value;
+                
+                // Explicitly call update settings to capture dropdowns
+                updateSettings();
+                updateWS();
+
+                localStorage.setItem(STORE_KEY, JSON.stringify(config));
+                
+                // VISUAL FEEDBACK
+                var btn = document.getElementById('save-btn');
+                var originalText = btn.innerText;
+                var originalColor = btn.style.background;
+                
+                btn.innerText = "Saved!";
+                btn.style.background = "#27ae60"; // Green
+                
+                setTimeout(function() {
+                    btn.innerText = originalText;
+                    btn.style.background = originalColor;
+                }, 1000);
+
+                // Re-render Game
+                gameState.currentLevel = config.settings.startLevel;
+                updateScoreBoard();
+                document.getElementById('topic-display').innerText = "Question: " + (config.topic || "Analysis");
                 renderStage0();
                 renderWorksheets();
-                renderAdminUI();
+
+            } catch(e) {
+                alert("Save Failed! Storage might be full.\n" + e.message);
             }
         }
 
