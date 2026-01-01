@@ -320,8 +320,6 @@
                     </div>
                 </div>
 
-                <hr style="margin:20px 0; border-top:1px solid #eee;">
-
                 <h3 style="color:var(--app-color); border-bottom:2px solid #eee; padding-bottom:5px;">Game Settings</h3>
                 <div class="toggle-row">
                     <label style="flex:1;"><strong>Start Level:</strong></label>
@@ -329,6 +327,14 @@
                         <option value="1">Level 1 (Basic)</option>
                         <option value="2">Level 2 (Standard)</option>
                         <option value="3">Level 3 (Advanced)</option>
+                    </select>
+                </div>
+                <div class="toggle-row">
+                    <label style="flex:1;"><strong>Max Level:</strong></label>
+                    <select id="edit-max-lvl" class="admin-input" style="width:auto;" onchange="updateSettings()">
+                        <option value="1">Level 1</option>
+                        <option value="2">Level 2</option>
+                        <option value="3">Level 3</option>
                     </select>
                 </div>
                 <div class="toggle-row">
@@ -405,7 +411,8 @@
 
     <script>
         // --- STORAGE KEY ---
-        const STORE_KEY = 'eval_arch_v14';
+        // NEW KEY to prevent loading broken data from previous version
+        const STORE_KEY = 'eval_arch_v15';
         
         // --- STATE ---
         // Initialize with default safe config
@@ -425,7 +432,7 @@
         let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         let gameState = { currentLevel: 1, streak: 0 };
 
-        // --- SAFETY ADMIN FUNCTIONS ---
+        // --- SAFETY ADMIN FUNCTIONS (Global Scope) ---
         function openAdmin() {
             document.getElementById('admin-pass-input').value = "";
             document.getElementById('admin-modal').style.display = 'flex';
@@ -435,6 +442,7 @@
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
         
         function unlockAdmin() {
+            // Fail-safe password if config is corrupted
             const pass = (config && config.adminPass) ? config.adminPass : "teacher";
             if (document.getElementById('admin-pass-input').value === pass) {
                 document.getElementById('admin-lock').style.display = 'none';
@@ -446,15 +454,17 @@
         // --- INIT ---
         function init() {
             try {
+                // Try Local Storage first
                 const local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     config = JSON.parse(local);
                 } else {
+                    // Try Embedded JSON
                     const embedded = document.getElementById('app-config').textContent;
                     config = JSON.parse(embedded);
                 }
                 
-                // Validate Config Structure
+                // Validate Config Structure (Repair if broken)
                 if(!config.settings) config.settings = { startLevel: 1, maxLevel: 3, streakThreshold: 3 };
                 if(!config.worksheetSettings) config.worksheetSettings = { showTask1: true, showTask2: true, provideS1: true, provideS2: true, provideQuote: true, provideS3: true, provideS4: true };
                 if(!config.content_pairs) config.content_pairs = [];
@@ -470,6 +480,8 @@
                 
             } catch(e) {
                 console.error("Config Error", e);
+                alert("Error loading settings. Admin menu is still accessible to fix content.");
+                // Config remains as default safe object defined at top
                 renderStage0();
             }
         }
@@ -644,9 +656,8 @@
             badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
         }
 
-        // --- WORKSHEET GENERATOR (SCAFFOLDING LOGIC) ---
+        // --- WORKSHEET GENERATOR ---
         function renderWorksheets() {
-            // Logic for Task 1 Visibility
             const task1Container = document.getElementById('ws-task-container-1');
             if(!config.worksheetSettings.showTask1) {
                 task1Container.style.display = 'none';
@@ -669,7 +680,6 @@
                 ws1.innerHTML = tableHTML;
             }
 
-            // Logic for Task 2 Visibility & Scaffolding
             const task2Container = document.getElementById('ws-task-container-2');
             if(!config.worksheetSettings.showTask2) {
                 task2Container.style.display = 'none';
@@ -679,12 +689,10 @@
                 ws2.innerHTML = '';
                 
                 const s = config.worksheetSettings;
-                // Get a random starter if configured, else default blank
                 const randS1 = config.starters_evidence[0] || "The writer uses";
                 const randS3 = config.starters_evaluative[0] || "to suggest";
 
                 config.content_pairs.forEach(p => {
-                    // Decide content based on toggles
                     const t_s1 = s.provideS1 ? randS1 : "__________________";
                     const t_s2 = s.provideS2 ? p.method : "__________________";
                     const t_q = s.provideQuote ? `<strong>"${p.quote}"</strong>` : `<strong>"__________________"</strong>`;
@@ -716,7 +724,6 @@
             
             const footer = "</body></html>";
             
-            // We only want visible content
             let contentHTML = "";
             if(config.worksheetSettings.showTask1) contentHTML += document.getElementById("ws-task-container-1").innerHTML;
             if(config.worksheetSettings.showTask2) contentHTML += document.getElementById("ws-task-container-2").innerHTML;
@@ -739,7 +746,6 @@
             document.getElementById('edit-max-lvl').value = config.settings.maxLevel;
             document.getElementById('edit-streak').value = config.settings.streakThreshold;
             
-            // Checkbox States
             document.getElementById('ws-task1').checked = config.worksheetSettings.showTask1;
             document.getElementById('ws-task2').checked = config.worksheetSettings.showTask2;
             document.getElementById('ws-prov-s1').checked = config.worksheetSettings.provideS1;
