@@ -5,6 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Evaluation Architect</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <script>
+        // Global Config Object
+        var config = {};
+
+        function openAdmin() {
+            document.getElementById('admin-pass-input').value = "";
+            document.getElementById('admin-modal').style.display = 'flex';
+            document.getElementById('admin-lock').style.display = 'flex';
+            document.getElementById('admin-edit').style.display = 'none';
+        }
+
+        function closeAdmin() { 
+            document.getElementById('admin-modal').style.display = 'none'; 
+        }
+
+        function forceReset() {
+            if(confirm("Factory Reset: This will wipe all saved data and reload.")) {
+                localStorage.clear();
+                window.location.reload();
+            }
+        }
+
+        function unlockAdmin() {
+            var input = document.getElementById('admin-pass-input').value.trim();
+            // Default password logic if config isn't loaded yet
+            var storedPass = (config && config.adminPass) ? config.adminPass : "teacher";
+            
+            if (input === storedPass || input === "teacher" || input === "admin") {
+                document.getElementById('admin-lock').style.display = 'none';
+                document.getElementById('admin-edit').style.display = 'block';
+                // Try to render UI if the function exists
+                if(typeof renderAdminUI === 'function') { renderAdminUI(); }
+            } else {
+                alert("Incorrect Password");
+            }
+        }
+    </script>
+
     <style>
         :root {
             --col-1-pink: #ff99cc; --col-2-yellow: #ffeb3b; --col-3-blue: #85c1e9; --col-4-green: #90ee90;
@@ -22,11 +61,9 @@
         .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; }
         .admin-btn:hover { color: var(--app-color); }
         
-        /* VISIBLE RESET BUTTON */
-        .reset-btn-top { 
-            background: #e74c3c; color: white; padding: 8px 15px; text-decoration: none; 
-            border-radius: 4px; font-weight: bold; cursor: pointer; border: 2px solid #c0392b;
-            margin-right: 15px; font-size: 0.8rem;
+        .reset-btn { 
+            background: #c0392b; color: white; border: none; padding: 8px 12px; 
+            border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;
         }
 
         .container { flex-grow: 1; max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
@@ -35,6 +72,8 @@
         
         .stage-area { display: none; animation: fadeIn 0.4s; flex-grow: 1; text-align: center; }
         .stage-area.active { display: block; }
+        h2.stage-title { font-size: 1.4rem; margin-bottom: 10px; color: #444; }
+        p.stage-subtitle { color: #777; margin-bottom: 20px; font-style: italic; }
         
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
         button.choice-btn { padding: 20px; border: 2px solid transparent; border-radius: 10px; font-size: 1.1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; color: #333; }
@@ -55,10 +94,12 @@
         .panel-body { padding: 20px; overflow-y: auto; flex-grow: 1; }
         .section-box { border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         .section-title { font-weight: bold; margin-bottom: 10px; display: block; color: var(--app-color); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; }
+        
         .input-row { display: flex; gap: 10px; margin-bottom: 5px; }
         .admin-input { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
         .del-btn { background: #ffdddd; border: 1px solid #ffaaaa; color: red; cursor: pointer; padding: 0 10px; border-radius: 4px; }
         .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #eef; padding: 10px; border-radius: 5px; }
+        
         .scaffold-row { display: grid; grid-template-columns: 1fr 2fr; align-items: center; margin-bottom: 10px; border-bottom: 1px dashed #ccc; padding-bottom: 5px; }
         .scaffold-label { font-weight: bold; font-size: 0.9rem; color:#444; }
         .scaffold-select { padding: 5px; width: 100%; border: 1px solid #999; border-radius: 4px; background: white; }
@@ -76,8 +117,6 @@
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             td { padding: 15px; vertical-align: middle; }
         }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
     </style>
 </head>
 <body>
@@ -108,7 +147,7 @@
                 <span id="level-badge" class="level-badge" style="background:var(--level-1)">LEVEL 1</span>
                 <span>Streak: <span id="streak-val">0</span>/<span id="target-val">3</span></span>
             </div>
-            <button onclick="localStorage.clear(); location.reload();" class="reset-btn-top">⚠ FACTORY RESET</button>
+            <button onclick="forceReset()" class="reset-btn">⚠ RESET</button>
             <button class="admin-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
         </div>
     </header>
@@ -137,7 +176,7 @@
             </div>
             <div id="admin-edit" class="panel-body" style="display:none;">
                 <div class="section-box" style="border-left: 5px solid #2ecc71;">
-                    <span class="section-title">Worksheet Scaffolding</span>
+                    <span class="section-title">Worksheet Scaffolding (Print Mode)</span>
                     <div class="toggle-row" style="margin-bottom:15px;">
                         <label style="margin-right:15px;"><input type="checkbox" id="ws-task1" onchange="updateWS()"> Include Matching Task</label>
                         <label><input type="checkbox" id="ws-task2" onchange="updateWS()"> Include Sentence Task</label>
@@ -210,46 +249,67 @@
     </div>
 
     <script>
-        // --- SCRIPT MOVED TO BOTTOM TO PREVENT WHITESCREEN ---
-        const STORE_KEY = 'eval_arch_v36_final'; 
+        // --- STORAGE KEY ---
+        var STORE_KEY = 'eval_arch_v37';
         
-        let config = {};
-        let currentQuoteId = null;
-        let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
-        let gameState = { currentLevel: 1, streak: 0 };
+        var currentQuoteId = null;
+        var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
+        var gameState = { currentLevel: 1, streak: 0 };
 
-        // INIT
-        try {
-            const local = localStorage.getItem(STORE_KEY);
-            const defaultConfig = JSON.parse(document.getElementById('app-config').textContent);
-            if(local) {
-                try {
-                    const loadedConfig = JSON.parse(local);
-                    config = { ...defaultConfig, ...loadedConfig };
-                    if(!config.worksheetSettings || !config.worksheetSettings.s1_mode) config.worksheetSettings = defaultConfig.worksheetSettings;
-                } catch(e) { config = defaultConfig; }
-            } else {
-                config = defaultConfig;
+        // WAIT FOR DOM
+        window.onload = function() {
+            init();
+        };
+
+        function init() {
+            try {
+                var local = localStorage.getItem(STORE_KEY);
+                var defaultConfig = JSON.parse(document.getElementById('app-config').textContent);
+                
+                if(local) {
+                    try {
+                        var loadedConfig = JSON.parse(local);
+                        // MERGE to config global
+                        config = Object.assign({}, defaultConfig, loadedConfig);
+                        if(loadedConfig.worksheetSettings) {
+                            config.worksheetSettings = Object.assign({}, defaultConfig.worksheetSettings, loadedConfig.worksheetSettings);
+                        } else {
+                            config.worksheetSettings = defaultConfig.worksheetSettings;
+                        }
+                    } catch(jsonErr) {
+                        config = defaultConfig;
+                    }
+                } else {
+                    config = defaultConfig;
+                }
+                
+                document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
+                document.title = config.appTitle || "Evaluation Architect";
+                gameState.currentLevel = parseInt(config.settings.startLevel);
+                
+                updateScoreBoard();
+                renderStage0();
+                renderWorksheets();
+                
+            } catch(e) {
+                console.error(e);
             }
-            document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
-            document.title = config.appTitle || "Evaluation Architect";
-            gameState.currentLevel = parseInt(config.settings.startLevel);
-            updateScoreBoard();
-            renderStage0();
-            renderWorksheets();
-        } catch(e) { console.error(e); }
+        }
 
-        // GAME LOGIC
+        // --- GAME LOGIC ---
         function renderStage0() {
             showStage('stage-0', 0);
-            const grid = document.getElementById('grid-quotes');
+            var grid = document.getElementById('grid-quotes');
             grid.innerHTML = '';
-            if(!config.content_pairs || config.content_pairs.length === 0) { grid.innerHTML = "<p style='color:#777;'>No content loaded.</p>"; return; }
-            config.content_pairs.forEach(p => {
-                const btn = document.createElement('button');
+            if(!config.content_pairs || config.content_pairs.length === 0) {
+                grid.innerHTML = "<p style='color:#777;'>No content loaded.</p>";
+                return;
+            }
+            config.content_pairs.forEach(function(p) {
+                var btn = document.createElement('button');
                 btn.className = 'choice-btn btn-white';
                 btn.innerHTML = `"${p.quote}"`;
-                btn.onclick = () => startBuild(p.id, p.quote);
+                btn.onclick = function() { startBuild(p.id, p.quote); };
                 grid.appendChild(btn);
             });
             updateBuilder();
@@ -264,13 +324,13 @@
 
         function renderStage1() {
             showStage('stage-1', 20);
-            const grid = document.getElementById('grid-s1');
+            var grid = document.getElementById('grid-s1');
             grid.innerHTML = '';
-            config.starters_evidence.forEach(txt => {
-                const btn = document.createElement('button');
+            config.starters_evidence.forEach(function(txt) {
+                var btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s1';
                 btn.innerText = txt;
-                btn.onclick = () => { 
+                btn.onclick = function() { 
                     sentenceParts.s1 = txt; updateBuilder(); 
                     if(gameState.currentLevel === 1) finishGame();
                     else if(gameState.currentLevel === 2) renderStage3();
@@ -282,49 +342,50 @@
 
         function renderStage2() {
             showStage('stage-2', 40);
-            const grid = document.getElementById('grid-s2');
+            var grid = document.getElementById('grid-s2');
             grid.innerHTML = '';
-            const pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            let opts = [{ txt: pair.method, correct: true }];
-            const others = config.content_pairs.filter(p => p.id !== currentQuoteId);
+            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
+            var opts = [{ txt: pair.method, correct: true }];
+            var others = config.content_pairs.filter(function(p) { return p.id !== currentQuoteId; });
             if(others.length > 0) opts.push({ txt: others[0].method, correct: false });
             if(others.length > 1) opts.push({ txt: others[1].method, correct: false });
-            opts.sort(() => Math.random() - 0.5);
-            opts.forEach(o => {
-                const btn = document.createElement('button');
+            opts.sort(function() { return Math.random() - 0.5; });
+            opts.forEach(function(o) {
+                var btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s2';
                 btn.innerText = o.txt;
-                btn.onclick = () => { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); renderStage3(); } else showError(); };
+                btn.onclick = function() { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); renderStage3(); } else showError(); };
                 grid.appendChild(btn);
             });
         }
 
         function renderStage3() {
             showStage('stage-3', 60);
-            const grid = document.getElementById('grid-s3');
+            var grid = document.getElementById('grid-s3');
             grid.innerHTML = '';
-            config.starters_evaluative.forEach(txt => {
-                const btn = document.createElement('button');
+            config.starters_evaluative.forEach(function(txt) {
+                var btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s3';
                 btn.innerText = txt;
-                btn.onclick = () => { sentenceParts.s3 = txt; updateBuilder(); renderStage4(); };
+                btn.onclick = function() { sentenceParts.s3 = txt; updateBuilder(); renderStage4(); };
                 grid.appendChild(btn);
             });
         }
 
         function renderStage4() {
             showStage('stage-4', 80);
-            const grid = document.getElementById('grid-s4');
+            var grid = document.getElementById('grid-s4');
             grid.innerHTML = '';
-            const pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            let opts = [{ txt: pair.effect, correct: true });
+            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
+            var opts = [];
+            opts.push({ txt: pair.effect, correct: true });
             if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
-            opts.sort(() => Math.random() - 0.5);
-            opts.forEach(o => {
-                const btn = document.createElement('button');
+            opts.sort(function() { return Math.random() - 0.5; });
+            opts.forEach(function(o) {
+                var btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s4';
                 btn.innerText = o.txt;
-                btn.onclick = () => { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); };
+                btn.onclick = function() { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); };
                 grid.appendChild(btn);
             });
         }
@@ -345,12 +406,12 @@
         }
 
         function updateBuilder() {
-            const b = document.getElementById('sentence-builder');
+            var b = document.getElementById('sentence-builder');
             if(!sentenceParts.s1 && !sentenceParts.quote) {
                 b.innerHTML = '<span style="color:#ccc; font-style:italic;">Your sentence will appear here...</span>';
                 return;
             }
-            let html = "";
+            var html = "";
             if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `;
             if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `;
             if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `;
@@ -360,7 +421,7 @@
         }
 
         function showStage(id, pct) {
-            document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.stage-area').forEach(function(el) { el.classList.remove('active'); });
             document.getElementById(id).classList.add('active');
             document.getElementById('progress-bar').style.width = pct + '%';
         }
@@ -384,71 +445,54 @@
         function updateScoreBoard() {
             document.getElementById('streak-val').innerText = gameState.streak;
             document.getElementById('target-val').innerText = config.settings.streakThreshold;
-            const badge = document.getElementById('level-badge');
-            const l = gameState.currentLevel;
+            var badge = document.getElementById('level-badge');
+            var l = gameState.currentLevel;
             badge.innerText = "LEVEL " + l;
             badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
         }
 
         function renderWorksheets() {
-            const task1Container = document.getElementById('ws-task-container-1');
+            var task1Container = document.getElementById('ws-task-container-1');
             if(!config.worksheetSettings.showTask1) {
                 task1Container.style.display = 'none';
             } else {
                 task1Container.style.display = 'block';
-                const ws1 = document.getElementById('ws-task-1');
+                var ws1 = document.getElementById('ws-task-1');
                 ws1.innerHTML = '';
-                let rightSide = [...config.content_pairs].sort(() => Math.random() - 0.5);
-                let tableHTML = `<table style="width:100%; border:none; border-collapse:collapse;">`;
-                config.content_pairs.forEach((p, i) => {
+                var rightSide = [].concat(config.content_pairs).sort(function() { return Math.random() - 0.5; });
+                var tableHTML = `<table style="width:100%; border:none; border-collapse:collapse;">`;
+                config.content_pairs.forEach(function(p, i) {
                     tableHTML += `<tr style="height: 50px;"><td style="width:40%; border:none; padding:15px; vertical-align:middle;"><strong>"${p.quote}"</strong></td><td style="width:20%; border:none;"></td><td style="width:40%; border:none; padding:15px; vertical-align:middle;">${rightSide[i].effect}</td></tr>`;
                 });
                 tableHTML += `</table>`;
                 ws1.innerHTML = tableHTML;
             }
 
-            const task2Container = document.getElementById('ws-task-container-2');
+            var task2Container = document.getElementById('ws-task-container-2');
             if(!config.worksheetSettings.showTask2) {
                 task2Container.style.display = 'none';
             } else {
                 task2Container.style.display = 'block';
-                const ws2 = document.getElementById('ws-task-2');
+                var ws2 = document.getElementById('ws-task-2');
                 ws2.innerHTML = '';
-                const s = config.worksheetSettings;
-                const randS1 = config.starters_evidence[0] || "The writer uses";
-                const randS3 = config.starters_evaluative[0] || "to suggest";
-                const blank = "__________________";
+                var s = config.worksheetSettings;
+                var randS1 = config.starters_evidence[0] || "The writer uses";
+                var randS3 = config.starters_evaluative[0] || "to suggest";
+                var blank = "__________________";
 
-                config.content_pairs.forEach(p => {
-                    const t_s1 = s.s1_mode === 'text' ? randS1 : (s.s1_mode === 'line' ? blank : "");
-                    const t_s2 = s.s2_mode === 'text' ? p.method : (s.s2_mode === 'line' ? blank : "");
-                    const t_q = s.quote_mode === 'text' ? `<strong>"${p.quote}"</strong>` : (s.quote_mode === 'line' ? `<strong>"${blank}"</strong>` : "");
-                    const t_s3 = s.s3_mode === 'text' ? randS3 : (s.s3_mode === 'line' ? blank : "");
-                    const t_s4 = s.s4_mode === 'text' ? p.effect : (s.s4_mode === 'line' ? "__________________________________" : "");
-                    const parts = [t_s1, t_s2, t_q, t_s3, t_s4].filter(p => p !== "");
+                config.content_pairs.forEach(function(p) {
+                    var t_s1 = s.s1_mode === 'text' ? randS1 : (s.s1_mode === 'line' ? blank : "");
+                    var t_s2 = s.s2_mode === 'text' ? p.method : (s.s2_mode === 'line' ? blank : "");
+                    var t_q = s.quote_mode === 'text' ? `<strong>"${p.quote}"</strong>` : (s.quote_mode === 'line' ? `<strong>"${blank}"</strong>` : "");
+                    var t_s3 = s.s3_mode === 'text' ? randS3 : (s.s3_mode === 'line' ? blank : "");
+                    var t_s4 = s.s4_mode === 'text' ? p.effect : (s.s4_mode === 'line' ? "__________________________________" : "");
+                    var parts = [t_s1, t_s2, t_q, t_s3, t_s4].filter(function(p) { return p !== ""; });
                     ws2.innerHTML += `<div class="ws-gap-fill">(Sentence starter) ${parts.join(" ")}.</div>`;
                 });
             }
         }
 
-        function openAdmin() {
-            document.getElementById('admin-pass-input').value = "";
-            document.getElementById('admin-modal').style.display = 'flex';
-            document.getElementById('admin-lock').style.display = 'flex';
-            document.getElementById('admin-edit').style.display = 'none';
-        }
-        function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
-        
-        function unlockAdmin() {
-            let input = document.getElementById('admin-pass-input').value.trim();
-            let configPass = (config && config.adminPass) ? config.adminPass : "teacher";
-            if (input === configPass || input === "teacher" || input === "admin") {
-                document.getElementById('admin-lock').style.display = 'none';
-                document.getElementById('admin-edit').style.display = 'block';
-                renderAdminUI();
-            } else alert("Incorrect Password");
-        }
-
+        // --- ADMIN UI RENDERER ---
         function renderAdminUI() {
             document.getElementById('edit-start-lvl').value = config.settings.startLevel;
             document.getElementById('edit-max-lvl').value = config.settings.maxLevel;
@@ -459,19 +503,19 @@
             document.getElementById('ws-task1').checked = config.worksheetSettings.showTask1;
             document.getElementById('ws-task2').checked = config.worksheetSettings.showTask2;
             
-            document.getElementById('s1-mode').value = config.worksheetSettings.s1_mode;
-            document.getElementById('s2-mode').value = config.worksheetSettings.s2_mode;
-            document.getElementById('quote-mode').value = config.worksheetSettings.quote_mode;
-            document.getElementById('s3-mode').value = config.worksheetSettings.s3_mode;
-            document.getElementById('s4-mode').value = config.worksheetSettings.s4_mode;
+            document.getElementById('s1-mode').value = config.worksheetSettings.s1_mode || 'text';
+            document.getElementById('s2-mode').value = config.worksheetSettings.s2_mode || 'line';
+            document.getElementById('quote-mode').value = config.worksheetSettings.quote_mode || 'text';
+            document.getElementById('s3-mode').value = config.worksheetSettings.s3_mode || 'line';
+            document.getElementById('s4-mode').value = config.worksheetSettings.s4_mode || 'line';
 
             renderList('list-s1', config.starters_evidence, 'starters_evidence');
             renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
             
-            const cList = document.getElementById('list-content');
+            var cList = document.getElementById('list-content');
             cList.innerHTML = '';
-            config.content_pairs.forEach((p, i) => {
-                const div = document.createElement('div');
+            config.content_pairs.forEach(function(p, i) {
+                var div = document.createElement('div');
                 div.style.cssText = "border:1px solid #eee; padding:10px; margin-bottom:10px; background:#f9f9f9; border-radius:4px;";
                 div.innerHTML = `
                     <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
@@ -488,10 +532,10 @@
         }
 
         function renderList(elId, arr, key) {
-            const el = document.getElementById(elId);
+            var el = document.getElementById(elId);
             el.innerHTML = '';
-            arr.forEach((txt, i) => {
-                const row = document.createElement('div');
+            arr.forEach(function(txt, i) {
+                var row = document.createElement('div');
                 row.className = 'input-row';
                 row.innerHTML = `
                     <input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)">
@@ -501,6 +545,7 @@
             });
         }
 
+        // --- UPDATE HANDLERS ---
         function updateSettings() {
             config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
             config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
@@ -523,43 +568,58 @@
 
         function updateList(key, idx, val) { config[key][idx] = val; saveLocal(false); }
         function delList(key, idx) { config[key].splice(idx, 1); saveLocal(true); } 
+        
         function addItem(type) { 
-            const text = prompt("Enter text:");
+            var text = prompt("Enter text for new starter:");
             if(text) {
                 if(type==='s1') config.starters_evidence.push(text);
                 if(type==='s3') config.starters_evaluative.push(text);
                 saveLocal(true); 
             }
         }
+
         function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(false); }
         function delContent(idx) { 
-            if(confirm("Delete?")) { config.content_pairs.splice(idx, 1); saveLocal(true); }
+            if(confirm("Delete this quote set?")) {
+                config.content_pairs.splice(idx, 1);
+                saveLocal(true); 
+            }
         }
         function addContent() {
             config.content_pairs.push({ id: "c"+Date.now(), quote:"Quote", method:"method", effect:"effect", distractor:"wrong" });
             saveLocal(true);
-            setTimeout(() => { document.getElementById('list-content').lastElementChild.scrollIntoView({ behavior: 'smooth' }); }, 100);
+            setTimeout(function() {
+                var list = document.getElementById('list-content');
+                if(list && list.lastElementChild) list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
         }
 
-        function saveLocal(render = true) {
+        function saveLocal(render) {
+            if(render === undefined) render = true;
             config.appTitle = document.getElementById('edit-app-title').value;
             config.adminPass = document.getElementById('edit-admin-pass').value;
             localStorage.setItem(STORE_KEY, JSON.stringify(config));
+            
             gameState.currentLevel = config.settings.startLevel;
             updateScoreBoard();
-            if(render) { renderStage0(); renderWorksheets(); renderAdminUI(); }
+            
+            if(render) {
+                renderStage0();
+                renderWorksheets();
+                renderAdminUI();
+            }
         }
 
         function downloadWordDoc() {
-            const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Aptos', sans-serif; } .ws-page { page-break-after: always; padding: 40px; } .ws-header { text-align: left; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; } .ws-title { font-size: 14pt; font-weight: bold; margin-bottom: 5px; font-family: 'Aptos', sans-serif; } .ws-instruction { font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; } .ws-gap-fill { line-height: 2.5; font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; } table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } td { padding: 15px; vertical-align: middle; border: none; font-family: 'Aptos', sans-serif; }</style></head><body>";
-            const footer = "</body></html>";
-            let contentHTML = "";
+            var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Aptos', sans-serif; } .ws-page { page-break-after: always; padding: 40px; } .ws-header { text-align: left; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; } .ws-title { font-size: 14pt; font-weight: bold; margin-bottom: 5px; font-family: 'Aptos', sans-serif; } .ws-instruction { font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; } .ws-gap-fill { line-height: 2.5; font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; } table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } td { padding: 15px; vertical-align: middle; border: none; font-family: 'Aptos', sans-serif; }</style></head><body>";
+            var footer = "</body></html>";
+            var contentHTML = "";
             if(config.worksheetSettings.showTask1) contentHTML += document.getElementById("ws-task-container-1").innerHTML;
             if(config.worksheetSettings.showTask2) contentHTML += document.getElementById("ws-task-container-2").innerHTML;
-            const sourceHTML = header + contentHTML + footer;
-            const blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
+            var sourceHTML = header + contentHTML + footer;
+            var blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement("a");
             document.body.appendChild(link);
             link.href = url;
             link.download = 'evaluation_worksheet.doc';
@@ -568,15 +628,16 @@
         }
 
         function exportApp() {
-            const json = JSON.stringify(config, null, 4);
+            var json = JSON.stringify(config, null, 4);
             document.getElementById('app-config').textContent = json;
             document.getElementById('admin-modal').style.display = 'none';
             document.getElementById('admin-lock').style.display = 'flex';
             document.getElementById('admin-edit').style.display = 'none';
-            const html = document.documentElement.outerHTML;
-            const blob = new Blob([html], {type:'text/html'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
+            
+            var html = document.documentElement.outerHTML;
+            var blob = new Blob([html], {type:'text/html'});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
             a.href = url;
             a.download = 'evaluation_architect.html';
             document.body.appendChild(a);
