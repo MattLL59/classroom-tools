@@ -411,11 +411,10 @@
 
     <script>
         // --- STORAGE KEY ---
-        // NEW KEY to prevent loading broken data from previous version
-        const STORE_KEY = 'eval_arch_v15';
+        // Changed to v16 to force clean load for all users
+        const STORE_KEY = 'eval_arch_v16';
         
         // --- STATE ---
-        // Initialize with default safe config
         let config = {
             "appTitle": "Evaluation Architect",
             "adminPass": "teacher",
@@ -442,7 +441,6 @@
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
         
         function unlockAdmin() {
-            // Fail-safe password if config is corrupted
             const pass = (config && config.adminPass) ? config.adminPass : "teacher";
             if (document.getElementById('admin-pass-input').value === pass) {
                 document.getElementById('admin-lock').style.display = 'none';
@@ -454,20 +452,19 @@
         // --- INIT ---
         function init() {
             try {
-                // Try Local Storage first
+                // Try Local Storage
                 const local = localStorage.getItem(STORE_KEY);
                 if(local) {
-                    config = JSON.parse(local);
+                    const loadedConfig = JSON.parse(local);
+                    // MERGE with defaults to prevent crashes if new keys are missing
+                    config = { ...config, ...loadedConfig };
+                    if(!config.worksheetSettings) config.worksheetSettings = { showTask1: true, showTask2: true, provideS1: true, provideS2: true, provideQuote: true, provideS3: true, provideS4: true };
                 } else {
                     // Try Embedded JSON
                     const embedded = document.getElementById('app-config').textContent;
-                    config = JSON.parse(embedded);
+                    const loadedConfig = JSON.parse(embedded);
+                    config = { ...config, ...loadedConfig };
                 }
-                
-                // Validate Config Structure (Repair if broken)
-                if(!config.settings) config.settings = { startLevel: 1, maxLevel: 3, streakThreshold: 3 };
-                if(!config.worksheetSettings) config.worksheetSettings = { showTask1: true, showTask2: true, provideS1: true, provideS2: true, provideQuote: true, provideS3: true, provideS4: true };
-                if(!config.content_pairs) config.content_pairs = [];
                 
                 // Apply Settings
                 document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
@@ -480,8 +477,7 @@
                 
             } catch(e) {
                 console.error("Config Error", e);
-                alert("Error loading settings. Admin menu is still accessible to fix content.");
-                // Config remains as default safe object defined at top
+                alert("Settings reset due to version update.");
                 renderStage0();
             }
         }
@@ -745,6 +741,7 @@
             document.getElementById('edit-start-lvl').value = config.settings.startLevel;
             document.getElementById('edit-max-lvl').value = config.settings.maxLevel;
             document.getElementById('edit-streak').value = config.settings.streakThreshold;
+            document.getElementById('edit-app-title').value = config.appTitle;
             
             document.getElementById('ws-task1').checked = config.worksheetSettings.showTask1;
             document.getElementById('ws-task2').checked = config.worksheetSettings.showTask2;
@@ -767,10 +764,10 @@
                         <strong>Content Pair #${i+1}</strong>
                         <button class="del-btn" onclick="delContent(${i})">Delete</button>
                     </div>
-                    <div class="input-row"><label style="width:80px; font-size:0.8rem;">Quote:</label><input class="admin-input" value="${p.quote.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'quote', this.value)"></div>
-                    <div class="input-row"><label style="width:80px; font-size:0.8rem;">Method:</label><input class="admin-input" style="border-color:var(--col-2-yellow);" value="${p.method.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)"></div>
-                    <div class="input-row"><label style="width:80px; font-size:0.8rem;">Effect:</label><input class="admin-input" style="border-color:var(--col-4-green);" value="${p.effect.replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'effect', this.value)"></div>
-                    <div class="input-row"><label style="width:80px; font-size:0.8rem; color:red;">Wrong:</label><input class="admin-input" style="border-color:red;" value="${p.distractor ? p.distractor.replace(/"/g, '&quot;') : ''}" onchange="updateContent(${i}, 'distractor', this.value)"></div>
+                    <div class="input-row"><label style="width:80px; font-size:0.8rem;">Quote:</label><input class="admin-input" value="${p.quote.replace(/"/g, '&quot;')}" oninput="updateContent(${i}, 'quote', this.value)"></div>
+                    <div class="input-row"><label style="width:80px; font-size:0.8rem;">Method:</label><input class="admin-input" style="border-color:var(--col-2-yellow);" value="${p.method.replace(/"/g, '&quot;')}" oninput="updateContent(${i}, 'method', this.value)"></div>
+                    <div class="input-row"><label style="width:80px; font-size:0.8rem;">Effect:</label><input class="admin-input" style="border-color:var(--col-4-green);" value="${p.effect.replace(/"/g, '&quot;')}" oninput="updateContent(${i}, 'effect', this.value)"></div>
+                    <div class="input-row"><label style="width:80px; font-size:0.8rem; color:red;">Wrong:</label><input class="admin-input" style="border-color:red;" value="${p.distractor ? p.distractor.replace(/"/g, '&quot;') : ''}" oninput="updateContent(${i}, 'distractor', this.value)"></div>
                 `;
                 cList.appendChild(div);
             });
@@ -783,7 +780,7 @@
                 const row = document.createElement('div');
                 row.className = 'input-row';
                 row.innerHTML = `
-                    <input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)">
+                    <input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" oninput="updateList('${key}', ${i}, this.value)">
                     <button class="del-btn" onclick="delList('${key}', ${i})">X</button>
                 `;
                 el.appendChild(row);
@@ -832,6 +829,7 @@
         }
 
         function saveLocal(notify=false) {
+            config.appTitle = document.getElementById('edit-app-title').value;
             localStorage.setItem(STORE_KEY, JSON.stringify(config));
             gameState.currentLevel = config.settings.startLevel;
             updateScoreBoard();
