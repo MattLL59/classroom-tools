@@ -143,13 +143,10 @@
             #worksheet-area { display: block; font-family: 'Aptos', sans-serif; color: black; }
             
             .ws-page { page-break-after: always; padding: 40px; }
-            /* Updated Header Styles */
             .ws-header { text-align: left; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; }
             .ws-title { font-size: 14pt; font-weight: bold; margin-bottom: 5px; font-family: 'Aptos', sans-serif; }
-            .ws-instruction { font-size: 11pt; margin-bottom: 20px; }
-            
-            .ws-gap-fill { line-height: 2.5; font-size: 12pt; margin-bottom: 30px; }
-            
+            .ws-instruction { font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; }
+            .ws-gap-fill { line-height: 2.5; font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             td { padding: 15px; vertical-align: middle; }
         }
@@ -172,6 +169,7 @@
         "worksheetSettings": {
             "showTask1": true,
             "showTask2": true,
+            "blankStyle": "line",
             "provideS1": true,
             "provideS2": true,
             "provideQuote": true,
@@ -301,7 +299,6 @@
                 <p>Password:</p>
                 <input type="password" id="admin-pass-input" style="padding:10px; font-size:1.2rem;">
                 <button onclick="unlockAdmin()" style="margin-top:10px; padding:10px 20px; background:var(--app-color); color:white; border:none; border-radius:4px; cursor:pointer;">Unlock</button>
-                
                 <button onclick="fullReset()" style="margin-top:40px; font-size:0.8rem; color:#999; background:none; border:none; text-decoration:underline; cursor:pointer;">
                     Forgot Password? Factory Reset App
                 </button>
@@ -311,8 +308,15 @@
                 
                 <div class="section-box" style="border-left: 5px solid #2ecc71;">
                     <span class="section-title">Worksheet Scaffolding (Print Mode)</span>
-                    <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Uncheck items to replace them with blank lines on the worksheet.</p>
                     
+                    <div style="margin-bottom:15px;">
+                        <label><strong>When element is hidden:</strong></label>
+                        <select id="ws-blank-style" class="admin-input" style="width:auto;" oninput="updateWS()">
+                            <option value="line">Show Blank Line (____)</option>
+                            <option value="none">Remove Completely</option>
+                        </select>
+                    </div>
+
                     <div class="toggle-row">
                         <label style="margin-right:15px;"><input type="checkbox" id="ws-task1" oninput="updateWS()"> Include Matching Task</label>
                         <label><input type="checkbox" id="ws-task2" oninput="updateWS()"> Include Sentence Task</label>
@@ -423,8 +427,8 @@
 
     <script>
         // --- STORAGE KEY ---
-        // Changed to v18 for updates
-        const STORE_KEY = 'eval_arch_v18';
+        // V19 to ensure clean slate
+        const STORE_KEY = 'eval_arch_v19';
         
         // --- STATE ---
         let config = {
@@ -432,7 +436,7 @@
             "adminPass": "teacher",
             "settings": { "startLevel": 1, "maxLevel": 3, "streakThreshold": 3 },
             "worksheetSettings": {
-                "showTask1": true, "showTask2": true,
+                "showTask1": true, "showTask2": true, "blankStyle": "line",
                 "provideS1": true, "provideS2": true, "provideQuote": true, "provideS3": true, "provideS4": true
             },
             "starters_evidence": ["The writer uses"],
@@ -443,7 +447,7 @@
         let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         let gameState = { currentLevel: 1, streak: 0 };
 
-        // --- SAFETY ADMIN FUNCTIONS (Global Scope) ---
+        // --- SAFETY ADMIN FUNCTIONS ---
         function openAdmin() {
             document.getElementById('admin-pass-input').value = "";
             document.getElementById('admin-modal').style.display = 'flex';
@@ -464,20 +468,17 @@
         // --- INIT ---
         function init() {
             try {
-                // Try Local Storage
                 const local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     const loadedConfig = JSON.parse(local);
                     config = { ...config, ...loadedConfig };
-                    if(!config.worksheetSettings) config.worksheetSettings = { showTask1: true, showTask2: true, provideS1: true, provideS2: true, provideQuote: true, provideS3: true, provideS4: true };
+                    if(!config.worksheetSettings) config.worksheetSettings = { showTask1: true, showTask2: true, blankStyle:"line", provideS1: true, provideS2: true, provideQuote: true, provideS3: true, provideS4: true };
                 } else {
-                    // Try Embedded JSON
                     const embedded = document.getElementById('app-config').textContent;
                     const loadedConfig = JSON.parse(embedded);
                     config = { ...config, ...loadedConfig };
                 }
                 
-                // Apply Settings
                 document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
                 document.title = config.appTitle || "Evaluation Architect";
                 gameState.currentLevel = parseInt(config.settings.startLevel);
@@ -488,13 +489,11 @@
                 
             } catch(e) {
                 console.error("Config Error", e);
-                alert("Settings reset due to version update.");
                 renderStage0();
             }
         }
 
-        // --- GAME LOGIC ---
-        
+        // --- GAME LOGIC (Unchanged) ---
         function renderStage0() {
             showStage('stage-0', 0);
             const grid = document.getElementById('grid-quotes');
@@ -543,23 +542,17 @@
             showStage('stage-2', 40);
             const grid = document.getElementById('grid-s2');
             grid.innerHTML = '';
-            
             const pair = config.content_pairs.find(p => p.id === currentQuoteId);
             let opts = [{ txt: pair.method, correct: true }];
             const others = config.content_pairs.filter(p => p.id !== currentQuoteId);
             if(others.length > 0) opts.push({ txt: others[0].method, correct: false });
             if(others.length > 1) opts.push({ txt: others[1].method, correct: false });
-            
             opts.sort(() => Math.random() - 0.5);
-
             opts.forEach(o => {
                 const btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s2';
                 btn.innerText = o.txt;
-                btn.onclick = () => {
-                    if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); renderStage3(); }
-                    else showError();
-                };
+                btn.onclick = () => { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); renderStage3(); } else showError(); };
                 grid.appendChild(btn);
             });
         }
@@ -581,21 +574,16 @@
             showStage('stage-4', 80);
             const grid = document.getElementById('grid-s4');
             grid.innerHTML = '';
-            
             const pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            let opts = [{ txt: pair.effect, correct: true });
+            let opts = [];
+            opts.push({ txt: pair.effect, correct: true });
             if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
-            
             opts.sort(() => Math.random() - 0.5);
-
             opts.forEach(o => {
                 const btn = document.createElement('button');
                 btn.className = 'choice-btn btn-s4';
                 btn.innerText = o.txt;
-                btn.onclick = () => {
-                    if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); }
-                    else showError();
-                };
+                btn.onclick = () => { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); };
                 grid.appendChild(btn);
             });
         }
@@ -662,7 +650,7 @@
             badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
         }
 
-        // --- WORKSHEET GENERATOR ---
+        // --- WORKSHEET GENERATOR (SCAFFOLDING LOGIC) ---
         function renderWorksheets() {
             const task1Container = document.getElementById('ws-task-container-1');
             if(!config.worksheetSettings.showTask1) {
@@ -697,12 +685,16 @@
                 const s = config.worksheetSettings;
                 const randS1 = config.starters_evidence[0] || "The writer uses";
                 const randS3 = config.starters_evaluative[0] || "to suggest";
+                
+                // DECIDE: Blank Line or Nothing?
+                const blank = s.blankStyle === 'none' ? "" : "__________________";
 
                 config.content_pairs.forEach(p => {
-                    const t_s1 = s.provideS1 ? randS1 : "__________________";
-                    const t_s2 = s.provideS2 ? p.method : "__________________";
+                    // Logic: If provided, use text. If not, use 'blank' var (which is either line or empty string)
+                    const t_s1 = s.provideS1 ? randS1 : blank;
+                    const t_s2 = s.provideS2 ? p.method : blank;
                     const t_q = s.provideQuote ? `<strong>"${p.quote}"</strong>` : `<strong>"__________________"</strong>`;
-                    const t_s3 = s.provideS3 ? randS3 : "__________________";
+                    const t_s3 = s.provideS3 ? randS3 : blank;
                     const t_s4 = s.provideS4 ? p.effect : "__________________________________";
 
                     ws2.innerHTML += `
@@ -719,7 +711,7 @@
             "xmlns='http://www.w3.org/TR/REC-html40'>"+
             "<head><meta charset='utf-8'><title>Worksheet</title>"+
             "<style>"+
-            "body { font-family: 'Aptos', sans-serif; }"+ /* APTOS FONT */
+            "body { font-family: 'Aptos', sans-serif; }"+ 
             ".ws-page { page-break-after: always; padding: 20px; }"+
             ".ws-header { text-align: left; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; }"+
             ".ws-title { font-size: 14pt; font-weight: bold; font-family: 'Aptos', sans-serif; }"+
@@ -757,6 +749,8 @@
             
             document.getElementById('ws-task1').checked = config.worksheetSettings.showTask1;
             document.getElementById('ws-task2').checked = config.worksheetSettings.showTask2;
+            document.getElementById('ws-blank-style').value = config.worksheetSettings.blankStyle || "line";
+            
             document.getElementById('ws-prov-s1').checked = config.worksheetSettings.provideS1;
             document.getElementById('ws-prov-s2').checked = config.worksheetSettings.provideS2;
             document.getElementById('ws-prov-quote').checked = config.worksheetSettings.provideQuote;
@@ -811,6 +805,7 @@
             config.worksheetSettings = {
                 showTask1: document.getElementById('ws-task1').checked,
                 showTask2: document.getElementById('ws-task2').checked,
+                blankStyle: document.getElementById('ws-blank-style').value,
                 provideS1: document.getElementById('ws-prov-s1').checked,
                 provideS2: document.getElementById('ws-prov-s2').checked,
                 provideQuote: document.getElementById('ws-prov-quote').checked,
