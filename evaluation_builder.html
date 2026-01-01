@@ -134,7 +134,7 @@
         .del-btn { background: #ffdddd; border: 1px solid #ffaaaa; color: red; cursor: pointer; padding: 0 10px; border-radius: 4px; }
         .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #eef; padding: 10px; border-radius: 5px; }
 
-        /* --- PRINTABLE WORKSHEET (Print Mode) --- */
+        /* --- PRINTABLE WORKSHEET --- */
         #worksheet-area { display: none; }
 
         @media print {
@@ -147,7 +147,6 @@
             .ws-title { font-size: 24pt; font-weight: bold; margin-bottom: 10px; }
             .ws-gap-fill { line-height: 2.5; font-size: 14pt; margin-bottom: 30px; }
             
-            /* Table Styling for Print */
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             td { padding: 15px; vertical-align: middle; }
         }
@@ -204,7 +203,7 @@
     </script>
 
     <header>
-        <h1>Evaluation Architect</h1>
+        <h1 id="app-title-display">Evaluation Architect</h1>
         <div style="display:flex; gap:15px; align-items:center;">
             <div id="score-board">
                 <span id="level-badge" class="level-badge" style="background:var(--level-1)">LEVEL 1</span>
@@ -378,28 +377,74 @@
 
     <script>
         // --- STORAGE KEY ---
-        const STORE_KEY = 'eval_arch_v12';
+        // NEW KEY to prevent loading broken data from previous version
+        const STORE_KEY = 'eval_arch_v13';
         
         // --- STATE ---
-        let config = {};
+        // Initialize with default safe config
+        let config = {
+            "appTitle": "Evaluation Architect",
+            "adminPass": "teacher",
+            "settings": { "startLevel": 1, "maxLevel": 3, "streakThreshold": 3 },
+            "starters_evidence": ["The writer uses"],
+            "starters_evaluative": ["to suggest"],
+            "content_pairs": []
+        };
         let currentQuoteId = null;
         let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         let gameState = { currentLevel: 1, streak: 0 };
 
+        // --- SAFETY ADMIN FUNCTIONS (Global Scope) ---
+        function openAdmin() {
+            document.getElementById('admin-pass-input').value = "";
+            document.getElementById('admin-modal').style.display = 'flex';
+            document.getElementById('admin-lock').style.display = 'flex';
+            document.getElementById('admin-edit').style.display = 'none';
+        }
+        function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
+        
+        function unlockAdmin() {
+            // Fail-safe password if config is corrupted
+            const pass = (config && config.adminPass) ? config.adminPass : "teacher";
+            if (document.getElementById('admin-pass-input').value === pass) {
+                document.getElementById('admin-lock').style.display = 'none';
+                document.getElementById('admin-edit').style.display = 'block';
+                renderAdminUI();
+            } else alert("Incorrect");
+        }
+
         // --- INIT ---
         function init() {
             try {
+                // Try Local Storage first
                 const local = localStorage.getItem(STORE_KEY);
-                if(local) config = JSON.parse(local);
-                else config = JSON.parse(document.getElementById('app-config').textContent);
+                if(local) {
+                    config = JSON.parse(local);
+                } else {
+                    // Try Embedded JSON
+                    const embedded = document.getElementById('app-config').textContent;
+                    config = JSON.parse(embedded);
+                }
+                
+                // Validate Config Structure (Repair if broken)
+                if(!config.settings) config.settings = { startLevel: 1, maxLevel: 3, streakThreshold: 3 };
+                if(!config.content_pairs) config.content_pairs = [];
+                
+                // Apply Settings
+                document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
+                document.title = config.appTitle || "Evaluation Architect";
+                gameState.currentLevel = parseInt(config.settings.startLevel);
+                
+                updateScoreBoard();
+                renderStage0();
+                renderWorksheets();
+                
             } catch(e) {
                 console.error("Config Error", e);
-                config = JSON.parse(document.getElementById('app-config').textContent);
+                alert("Error loading settings. Admin menu is still accessible to fix content.");
+                // Config remains as default safe object defined at top
+                renderStage0();
             }
-            gameState.currentLevel = parseInt(config.settings.startLevel);
-            updateScoreBoard();
-            renderStage0();
-            renderWorksheets(); // Prep for printing
         }
 
         // --- GAME LOGIC ---
@@ -408,6 +453,10 @@
             showStage('stage-0', 0);
             const grid = document.getElementById('grid-quotes');
             grid.innerHTML = '';
+            if(config.content_pairs.length === 0) {
+                grid.innerHTML = "<p style='color:#777;'>No content loaded. Open Settings (Cog) to add quotes.</p>";
+                return;
+            }
             config.content_pairs.forEach(p => {
                 const btn = document.createElement('button');
                 btn.className = 'choice-btn btn-white';
@@ -426,7 +475,6 @@
         }
 
         function renderStage1() {
-            // Evidence Starters (Generic)
             showStage('stage-1', 20);
             const grid = document.getElementById('grid-s1');
             grid.innerHTML = '';
@@ -437,7 +485,6 @@
                 btn.onclick = () => { 
                     sentenceParts.s1 = txt; 
                     updateBuilder(); 
-                    
                     if(gameState.currentLevel === 1) finishGame();
                     else if(gameState.currentLevel === 2) renderStage3();
                     else renderStage2(); 
@@ -447,7 +494,6 @@
         }
 
         function renderStage2() {
-            // Method (Specific)
             showStage('stage-2', 40);
             const grid = document.getElementById('grid-s2');
             grid.innerHTML = '';
@@ -473,7 +519,6 @@
         }
 
         function renderStage3() {
-            // Evaluative Starters
             showStage('stage-3', 60);
             const grid = document.getElementById('grid-s3');
             grid.innerHTML = '';
@@ -487,13 +532,13 @@
         }
 
         function renderStage4() {
-            // Effect
             showStage('stage-4', 80);
             const grid = document.getElementById('grid-s4');
             grid.innerHTML = '';
             
             const pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            let opts = [{ txt: pair.effect, correct: true });
+            let opts = [];
+            opts.push({ txt: pair.effect, correct: true });
             if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
             
             opts.sort(() => Math.random() - 0.5);
@@ -574,14 +619,12 @@
 
         // --- WORKSHEET GENERATOR ---
         function renderWorksheets() {
-            // Task 1: Matching (Using Tables for Word Compatibility)
             const ws1 = document.getElementById('ws-task-1');
             ws1.innerHTML = '';
             let rightSide = [...config.content_pairs].sort(() => Math.random() - 0.5);
             
             // Build Table String
             let tableHTML = `<table style="width:100%; border:none; border-collapse:collapse;">`;
-            
             config.content_pairs.forEach((p, i) => {
                 tableHTML += `
                 <tr style="height: 50px;">
@@ -592,7 +635,6 @@
             tableHTML += `</table>`;
             ws1.innerHTML = tableHTML;
 
-            // Task 2: Builder
             const ws2 = document.getElementById('ws-task-2');
             ws2.innerHTML = '';
             config.content_pairs.forEach(p => {
@@ -615,7 +657,7 @@
             ".ws-header { text-align: center; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; }"+
             ".ws-title { font-size: 24pt; font-weight: bold; }"+
             ".ws-gap-fill { line-height: 2.5; font-size: 14pt; margin-bottom: 20px; }"+
-            /* Table Styling for Word */
+            /* Invisible Table Styling */
             "table { width: 100%; border-collapse: collapse; border: none; }"+
             "td { padding: 15px; vertical-align: middle; border: none; }"+
             "</style></head><body>";
@@ -633,23 +675,7 @@
             document.body.removeChild(link);
         }
 
-        // --- ADMIN ---
-        function openAdmin() {
-            document.getElementById('admin-pass-input').value = "";
-            document.getElementById('admin-modal').style.display = 'flex';
-            document.getElementById('admin-lock').style.display = 'flex';
-            document.getElementById('admin-edit').style.display = 'none';
-        }
-        function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
-        
-        function unlockAdmin() {
-            if(document.getElementById('admin-pass-input').value === config.adminPass) {
-                document.getElementById('admin-lock').style.display = 'none';
-                document.getElementById('admin-edit').style.display = 'block';
-                renderAdminUI();
-            } else alert("Incorrect");
-        }
-
+        // --- ADMIN EDITOR ---
         function renderAdminUI() {
             document.getElementById('edit-start-lvl').value = config.settings.startLevel;
             document.getElementById('edit-max-lvl').value = config.settings.maxLevel;
@@ -721,11 +747,10 @@
 
         function saveLocal(notify=false) {
             localStorage.setItem(STORE_KEY, JSON.stringify(config));
-            // Apply immediate changes
             gameState.currentLevel = config.settings.startLevel;
             updateScoreBoard();
             renderStage0();
-            renderWorksheets(); // Re-render worksheet logic on save
+            renderWorksheets();
             if(notify) alert("Settings Saved!");
         }
 
