@@ -46,7 +46,14 @@
 
         .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; }
         .admin-btn:hover { color: var(--app-color); }
-        .reset-link { font-size: 0.8rem; color: red; text-decoration: underline; cursor: pointer; margin-right: 15px; background:none; border:none; }
+        
+        /* NUCLEAR RESET LINK */
+        .reset-link { 
+            font-size: 0.8rem; color: white; background: red; text-decoration: none; 
+            cursor: pointer; margin-right: 15px; padding: 5px 10px; border-radius: 4px; font-weight: bold;
+            border: 2px solid darkred;
+        }
+        .reset-link:hover { background: darkred; }
 
         .container {
             flex-grow: 1;
@@ -149,6 +156,9 @@
     </style>
     
     <script>
+        // Global variables to prevent scope issues
+        let config = {}; 
+        
         function openAdmin() {
             document.getElementById('admin-pass-input').value = "";
             document.getElementById('admin-modal').style.display = 'flex';
@@ -158,9 +168,28 @@
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
         
         function hardReset() {
-            if(confirm("Factory Reset? This will delete all saved data and reload.")) {
-                localStorage.removeItem('eval_arch_v27'); 
+            if(confirm("FULL FACTORY RESET: This will wipe all saved data and reload the app.")) {
+                localStorage.clear(); // Nuke everything
                 location.reload();
+            }
+        }
+
+        function unlockAdmin() {
+            let input = document.getElementById('admin-pass-input').value;
+            // Trim whitespace (fixes copy-paste issues)
+            input = input.trim(); 
+            
+            // Get config pass if it exists, otherwise default
+            let configPass = (config && config.adminPass) ? config.adminPass : "teacher";
+            
+            // Allow: 1. Configured Pass, 2. "teacher", 3. "admin" (Backdoor)
+            if (input === configPass || input === "teacher" || input === "admin") {
+                document.getElementById('admin-lock').style.display = 'none';
+                document.getElementById('admin-edit').style.display = 'block';
+                // Trigger UI render if main script loaded
+                if(typeof renderAdminUI === 'function') renderAdminUI();
+            } else {
+                alert(`Password Incorrect.\nInput was: '${input}'\nExpected: '${configPass}' or 'teacher'`);
             }
         }
     </script>
@@ -307,9 +336,6 @@
                 <p>Password:</p>
                 <input type="password" id="admin-pass-input" style="padding:10px; font-size:1.2rem;">
                 <button onclick="unlockAdmin()" style="margin-top:10px; padding:10px 20px; background:var(--app-color); color:white; border:none; border-radius:4px; cursor:pointer;">Unlock</button>
-                <button onclick="hardReset()" style="margin-top:40px; font-size:0.8rem; color:#999; background:none; border:none; text-decoration:underline; cursor:pointer;">
-                    Forgot Password? Factory Reset App
-                </button>
             </div>
 
             <div id="admin-edit" class="panel-body" style="display:none;">
@@ -461,58 +487,24 @@
     </div>
 
     <script>
-        // --- STORAGE KEY ---
-        // V27: Updated to clear cache
-        const STORE_KEY = 'eval_arch_v27';
-        
-        // --- STATE ---
-        let config = {
-            "appTitle": "Evaluation Architect",
-            "adminPass": "teacher",
-            "settings": { "startLevel": 1, "maxLevel": 3, "streakThreshold": 3 },
-            "worksheetSettings": {
-                "showTask1": true, "showTask2": true,
-                "s1_mode": "text", "s2_mode": "line", "quote_mode": "text", "s3_mode": "line", "s4_mode": "line"
-            },
-            "starters_evidence": ["The writer uses"],
-            "starters_evaluative": ["to suggest"],
-            "content_pairs": []
-        };
+        const STORE_KEY = 'eval_arch_v28'; 
         let currentQuoteId = null;
         let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         let gameState = { currentLevel: 1, streak: 0 };
 
-        // --- UNLOCK FUNCTION (Master Key Included) ---
-        function unlockAdmin() {
-            const input = document.getElementById('admin-pass-input').value.trim();
-            const pass = (config && config.adminPass) ? config.adminPass : "teacher";
-            
-            // Allow Config Pass OR "teacher" OR "admin" (Master Keys)
-            if (input === pass || input === "teacher" || input === "admin") {
-                document.getElementById('admin-lock').style.display = 'none';
-                document.getElementById('admin-edit').style.display = 'block';
-                renderAdminUI();
-            } else alert("Incorrect Password");
-        }
-
-        // --- INIT ---
         function init() {
             try {
+                // Try Local Storage
                 const local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     const loadedConfig = JSON.parse(local);
-                    config = { ...config, ...loadedConfig };
-                    if(!config.worksheetSettings || !config.worksheetSettings.s1_mode) {
-                        config.worksheetSettings = { 
-                            showTask1: true, showTask2: true, 
-                            s1_mode: "text", s2_mode: "line", quote_mode: "text", s3_mode: "line", s4_mode: "line" 
-                        };
-                    }
+                    config = { ...JSON.parse(document.getElementById('app-config').textContent), ...loadedConfig };
                 } else {
-                    const embedded = document.getElementById('app-config').textContent;
-                    const loadedConfig = JSON.parse(embedded);
-                    config = { ...config, ...loadedConfig };
+                    config = JSON.parse(document.getElementById('app-config').textContent);
                 }
+                
+                // Ensure robustness
+                if(!config.worksheetSettings) config.worksheetSettings = {};
                 
                 document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
                 document.title = config.appTitle || "Evaluation Architect";
@@ -524,6 +516,8 @@
                 
             } catch(e) {
                 console.error("Config Error", e);
+                // Fail safe - ensure config exists
+                config = JSON.parse(document.getElementById('app-config').textContent);
                 renderStage0();
             }
         }
