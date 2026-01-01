@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evaluation Architect: Progression</title>
+    <title>Evaluation Architect</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
@@ -133,6 +133,23 @@
         .admin-input { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
         .del-btn { background: #ffdddd; border: 1px solid #ffaaaa; color: red; cursor: pointer; padding: 0 10px; border-radius: 4px; }
         .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #eef; padding: 10px; border-radius: 5px; }
+
+        /* --- PRINTABLE WORKSHEET --- */
+        #worksheet-area { display: none; }
+
+        @media print {
+            body { background: white; padding: 0; height: auto; overflow: visible; display: block; }
+            header, .container, #admin-modal, #overlay, #levelup-overlay { display: none !important; }
+            #worksheet-area { display: block; font-family: 'Times New Roman', serif; color: black; }
+            
+            .ws-page { page-break-after: always; padding: 20px; }
+            .ws-header { text-align: center; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; }
+            .ws-title { font-size: 24pt; font-weight: bold; }
+            .ws-task-box { border: 1px solid #000; padding: 15px; margin-bottom: 20px; }
+            .ws-match-row { display: flex; justify-content: space-between; margin-bottom: 15px; border-bottom: 1px dotted #999; padding-bottom: 5px; }
+            .ws-gap-fill { line-height: 2.5; font-size: 14pt; margin-bottom: 20px; }
+            .ws-blank { border-bottom: 1px solid black; display: inline-block; width: 150px; }
+        }
 
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
@@ -301,13 +318,13 @@
                 <hr style="margin:20px 0; border-top:1px solid #eee;">
 
                 <div class="section-box" style="border-left: 5px solid var(--col-1-pink);">
-                    <span class="section-title">Panel 1: Evidence Starters (Generic)</span>
+                    <span class="section-title">Panel 1: Evidence Starters</span>
                     <div id="list-s1"></div>
                     <button onclick="addItem('s1')" style="margin-top:5px;">+ Add Starter</button>
                 </div>
 
                 <div class="section-box" style="border-left: 5px solid var(--col-3-blue);">
-                    <span class="section-title">Panel 3: Evaluative Starters (Generic)</span>
+                    <span class="section-title">Panel 3: Evaluative Starters</span>
                     <div id="list-s3"></div>
                     <button onclick="addItem('s3')" style="margin-top:5px;">+ Add Starter</button>
                 </div>
@@ -318,19 +335,44 @@
                     <button onclick="addContent()" style="margin-top:10px; padding:10px; width:100%;">+ Add New Quote Logic</button>
                 </div>
 
-                <div style="text-align:center; padding-top:20px; border-top:1px solid #eee;">
-                    <button onclick="exportApp()" style="background:#27ae60; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:1rem;">
-                        <i class="fas fa-download"></i> Save & Download App
+                <div style="display:flex; justify-content: space-between; padding-top:20px; border-top:1px solid #eee;">
+                    <button onclick="window.print()" style="background:#f39c12; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">
+                        <i class="fas fa-print"></i> Print Worksheets
                     </button>
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="saveLocal(true)" style="background:#3498db; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">
+                            <i class="fas fa-save"></i> Save Settings
+                        </button>
+                        <button onclick="exportApp()" style="background:#27ae60; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">
+                            <i class="fas fa-download"></i> Download App
+                        </button>
+                    </div>
                 </div>
 
             </div>
         </div>
     </div>
 
+    <div id="worksheet-area">
+        <div class="ws-page">
+            <div class="ws-header">
+                <div class="ws-title">Task 1: Matching Analysis</div>
+                <p>Draw a line connecting the <strong>Quote</strong> to the correct <strong>Analysis</strong>.</p>
+            </div>
+            <div id="ws-task-1"></div>
+        </div>
+        <div class="ws-page">
+            <div class="ws-header">
+                <div class="ws-title">Task 2: Sentence Builder</div>
+                <p>Use the sentence structure to complete the analysis.</p>
+            </div>
+            <div id="ws-task-2"></div>
+        </div>
+    </div>
+
     <script>
         // --- STORAGE KEY ---
-        const STORE_KEY = 'eval_arch_v9';
+        const STORE_KEY = 'eval_arch_v10';
         
         // --- STATE ---
         let config = {};
@@ -351,6 +393,7 @@
             gameState.currentLevel = parseInt(config.settings.startLevel);
             updateScoreBoard();
             renderStage0();
+            renderWorksheets(); // Prep for printing
         }
 
         // --- GAME LOGIC ---
@@ -377,7 +420,7 @@
         }
 
         function renderStage1() {
-            // Evidence Starters (Generic) - ALL LEVELS
+            // Evidence Starters (Generic)
             showStage('stage-1', 20);
             const grid = document.getElementById('grid-s1');
             grid.innerHTML = '';
@@ -389,30 +432,21 @@
                     sentenceParts.s1 = txt; 
                     updateBuilder(); 
                     
-                    // --- PROGRESSION LOGIC ---
-                    if(gameState.currentLevel === 1) {
-                        // Level 1: Done
-                        finishGame();
-                    } else if(gameState.currentLevel === 2) {
-                        // Level 2: Skip Method, go to Evaluative
-                        renderStage3();
-                    } else {
-                        // Level 3: Go to Method
-                        renderStage2(); 
-                    }
+                    if(gameState.currentLevel === 1) finishGame();
+                    else if(gameState.currentLevel === 2) renderStage3();
+                    else renderStage2(); 
                 };
                 grid.appendChild(btn);
             });
         }
 
         function renderStage2() {
-            // Method (Specific) - LEVEL 3 ONLY
+            // Method (Specific)
             showStage('stage-2', 40);
             const grid = document.getElementById('grid-s2');
             grid.innerHTML = '';
             
             const pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            
             let opts = [{ txt: pair.method, correct: true }];
             const others = config.content_pairs.filter(p => p.id !== currentQuoteId);
             if(others.length > 0) opts.push({ txt: others[0].method, correct: false });
@@ -425,18 +459,15 @@
                 btn.className = 'choice-btn btn-s2';
                 btn.innerText = o.txt;
                 btn.onclick = () => {
-                    if(o.correct) { 
-                        sentenceParts.s2 = o.txt; 
-                        updateBuilder(); 
-                        renderStage3(); 
-                    } else showError();
+                    if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); renderStage3(); }
+                    else showError();
                 };
                 grid.appendChild(btn);
             });
         }
 
         function renderStage3() {
-            // Evaluative Starters (Generic) - LEVEL 2+3
+            // Evaluative Starters
             showStage('stage-3', 60);
             const grid = document.getElementById('grid-s3');
             grid.innerHTML = '';
@@ -450,13 +481,12 @@
         }
 
         function renderStage4() {
-            // Effect (Specific) - LEVEL 2+3
+            // Effect
             showStage('stage-4', 80);
             const grid = document.getElementById('grid-s4');
             grid.innerHTML = '';
             
             const pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            
             let opts = [];
             opts.push({ txt: pair.effect, correct: true });
             if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
@@ -477,15 +507,10 @@
 
         function finishGame() {
             showStage('stage-final', 100);
-            
-            // Check Progression
             gameState.streak++;
             updateScoreBoard();
-            
-            if(gameState.streak >= config.settings.streakThreshold) {
-                if(gameState.currentLevel < config.settings.maxLevel) {
-                    setTimeout(triggerLevelUp, 500);
-                }
+            if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) {
+                setTimeout(triggerLevelUp, 500);
             }
         }
 
@@ -501,18 +526,12 @@
                 b.innerHTML = '<span style="color:#ccc; font-style:italic;">Your sentence will appear here...</span>';
                 return;
             }
-            
             let html = "";
             if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `;
-            // Only show Method if it exists (Level 3)
             if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `;
-            
             if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `;
-            
-            // Only show Evaluation if they exist (Level 2/3)
             if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `;
             if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`;
-            
             b.innerHTML = html;
         }
 
@@ -525,7 +544,7 @@
         function showError() {
             document.getElementById('overlay').style.display = 'flex';
             document.getElementById('overlay').querySelector('.shake').classList.add('shake');
-            gameState.streak = 0; // Reset streak on fail
+            gameState.streak = 0; 
             updateScoreBoard();
         }
         function closeOverlay() { document.getElementById('overlay').style.display = 'none'; }
@@ -546,6 +565,33 @@
             const l = gameState.currentLevel;
             badge.innerText = "LEVEL " + l;
             badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
+        }
+
+        // --- WORKSHEET GENERATOR ---
+        function renderWorksheets() {
+            // Task 1: Matching
+            const ws1 = document.getElementById('ws-task-1');
+            ws1.innerHTML = '';
+            let rightSide = [...config.content_pairs].sort(() => Math.random() - 0.5);
+            
+            config.content_pairs.forEach((p, i) => {
+                ws1.innerHTML += `
+                <div class="ws-match-row">
+                    <div style="width:40%"><strong>"${p.quote}"</strong></div>
+                    <div style="width:40%">${rightSide[i].effect}</div>
+                </div>`;
+            });
+
+            // Task 2: Builder
+            const ws2 = document.getElementById('ws-task-2');
+            ws2.innerHTML = '';
+            config.content_pairs.forEach(p => {
+                ws2.innerHTML += `
+                <div class="ws-gap-fill">
+                    [Starter] _______________ <strong>"${p.quote}"</strong>
+                    [Link] _______________ [Effect] _________________________.
+                </div>`;
+            });
         }
 
         // --- ADMIN ---
@@ -611,35 +657,37 @@
             config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
             config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
             config.settings.streakThreshold = parseInt(document.getElementById('edit-streak').value);
-            save();
+            saveLocal();
         }
 
-        function updateList(key, idx, val) { config[key][idx] = val; save(); }
-        function delList(key, idx) { config[key].splice(idx, 1); save(); renderAdminUI(); }
+        function updateList(key, idx, val) { config[key][idx] = val; saveLocal(); }
+        function delList(key, idx) { config[key].splice(idx, 1); saveLocal(); renderAdminUI(); }
         function addItem(type) { 
             if(type==='s1') config.starters_evidence.push("New Starter");
             if(type==='s3') config.starters_evaluative.push("New Link");
-            save(); renderAdminUI();
+            saveLocal(); renderAdminUI();
         }
 
-        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; save(); }
+        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(); }
         function delContent(idx) { 
             if(confirm("Delete this quote set?")) {
                 config.content_pairs.splice(idx, 1);
-                save(); renderAdminUI();
+                saveLocal(); renderAdminUI();
             }
         }
         function addContent() {
             config.content_pairs.push({ id: "c"+Date.now(), quote:"Quote", method:"method", effect:"effect", distractor:"wrong" });
-            save(); renderAdminUI();
+            saveLocal(); renderAdminUI();
         }
 
-        function save() {
+        function saveLocal(notify=false) {
             localStorage.setItem(STORE_KEY, JSON.stringify(config));
             // Apply immediate changes
             gameState.currentLevel = config.settings.startLevel;
             updateScoreBoard();
-            resetGame();
+            renderStage0();
+            renderWorksheets(); // Re-render worksheet logic on save
+            if(notify) alert("Settings Saved!");
         }
 
         function exportApp() {
