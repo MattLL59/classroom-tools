@@ -46,14 +46,7 @@
 
         .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; }
         .admin-btn:hover { color: var(--app-color); }
-        
-        /* NUCLEAR RESET LINK */
-        .reset-link { 
-            font-size: 0.8rem; color: white; background: red; text-decoration: none; 
-            cursor: pointer; margin-right: 15px; padding: 5px 10px; border-radius: 4px; font-weight: bold;
-            border: 2px solid darkred;
-        }
-        .reset-link:hover { background: darkred; }
+        .reset-link { font-size: 0.8rem; color: red; text-decoration: underline; cursor: pointer; margin-right: 15px; background:none; border:none; }
 
         .container {
             flex-grow: 1;
@@ -156,7 +149,6 @@
     </style>
     
     <script>
-        // Global variables to prevent scope issues
         let config = {}; 
         
         function openAdmin() {
@@ -169,27 +161,21 @@
         
         function hardReset() {
             if(confirm("FULL FACTORY RESET: This will wipe all saved data and reload the app.")) {
-                localStorage.clear(); // Nuke everything
+                localStorage.clear(); 
                 location.reload();
             }
         }
 
         function unlockAdmin() {
-            let input = document.getElementById('admin-pass-input').value;
-            // Trim whitespace (fixes copy-paste issues)
-            input = input.trim(); 
-            
-            // Get config pass if it exists, otherwise default
+            let input = document.getElementById('admin-pass-input').value.trim();
             let configPass = (config && config.adminPass) ? config.adminPass : "teacher";
             
-            // Allow: 1. Configured Pass, 2. "teacher", 3. "admin" (Backdoor)
             if (input === configPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
-                // Trigger UI render if main script loaded
                 if(typeof renderAdminUI === 'function') renderAdminUI();
             } else {
-                alert(`Password Incorrect.\nInput was: '${input}'\nExpected: '${configPass}' or 'teacher'`);
+                alert("Incorrect Password");
             }
         }
     </script>
@@ -487,24 +473,29 @@
     </div>
 
     <script>
-        const STORE_KEY = 'eval_arch_v28'; 
+        // --- STORAGE KEY ---
+        const STORE_KEY = 'eval_arch_v29'; 
+        
         let currentQuoteId = null;
         let sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         let gameState = { currentLevel: 1, streak: 0 };
 
         function init() {
             try {
-                // Try Local Storage
                 const local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     const loadedConfig = JSON.parse(local);
-                    config = { ...JSON.parse(document.getElementById('app-config').textContent), ...loadedConfig };
+                    config = { ...config, ...loadedConfig };
+                    if(!config.worksheetSettings || !config.worksheetSettings.s1_mode) {
+                        config.worksheetSettings = { 
+                            showTask1: true, showTask2: true, 
+                            s1_mode: "text", s2_mode: "line", quote_mode: "text", s3_mode: "line", s4_mode: "line" 
+                        };
+                    }
                 } else {
-                    config = JSON.parse(document.getElementById('app-config').textContent);
+                    const embedded = document.getElementById('app-config').textContent;
+                    config = JSON.parse(embedded);
                 }
-                
-                // Ensure robustness
-                if(!config.worksheetSettings) config.worksheetSettings = {};
                 
                 document.getElementById('app-title-display').innerText = config.appTitle || "Evaluation Architect";
                 document.title = config.appTitle || "Evaluation Architect";
@@ -516,8 +507,6 @@
                 
             } catch(e) {
                 console.error("Config Error", e);
-                // Fail safe - ensure config exists
-                config = JSON.parse(document.getElementById('app-config').textContent);
                 renderStage0();
             }
         }
@@ -824,7 +813,7 @@
             config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
             config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
             config.settings.streakThreshold = parseInt(document.getElementById('edit-streak').value);
-            saveLocal();
+            saveLocal(false);
         }
 
         function updateWS() {
@@ -837,38 +826,43 @@
                 s3_mode: document.getElementById('s3-mode').value,
                 s4_mode: document.getElementById('s4-mode').value
             };
-            saveLocal();
+            saveLocal(false);
         }
 
-        function updateList(key, idx, val) { config[key][idx] = val; saveLocal(); }
-        function delList(key, idx) { config[key].splice(idx, 1); saveLocal(); renderAdminUI(); }
+        function updateList(key, idx, val) { config[key][idx] = val; saveLocal(false); }
+        function delList(key, idx) { config[key].splice(idx, 1); saveLocal(true); } // Requires render
         function addItem(type) { 
             if(type==='s1') config.starters_evidence.push("New Starter");
             if(type==='s3') config.starters_evaluative.push("New Link");
-            saveLocal(); renderAdminUI();
+            saveLocal(true); 
         }
 
-        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(); }
+        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(false); }
         function delContent(idx) { 
             if(confirm("Delete this quote set?")) {
                 config.content_pairs.splice(idx, 1);
-                saveLocal(); renderAdminUI();
+                saveLocal(true); 
             }
         }
         function addContent() {
             config.content_pairs.push({ id: "c"+Date.now(), quote:"Quote", method:"method", effect:"effect", distractor:"wrong" });
-            saveLocal(); renderAdminUI();
+            saveLocal(true); 
         }
 
-        function saveLocal(notify=false) {
+        // UPDATED SAVE LOGIC: Prevents "unresponsive" typing feel
+        function saveLocal(render = true) {
             config.appTitle = document.getElementById('edit-app-title').value;
             config.adminPass = document.getElementById('edit-admin-pass').value;
             localStorage.setItem(STORE_KEY, JSON.stringify(config));
+            
             gameState.currentLevel = config.settings.startLevel;
             updateScoreBoard();
-            renderStage0();
-            renderWorksheets();
-            if(notify) alert("Settings Saved!");
+            
+            if(render) {
+                renderStage0();
+                renderWorksheets();
+                renderAdminUI();
+            }
         }
 
         function exportApp() {
