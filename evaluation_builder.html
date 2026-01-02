@@ -34,7 +34,6 @@
             if (input === storedPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
-                // Delay render to ensure DOM is visible
                 setTimeout(renderAdminUI, 100);
             } else {
                 alert("Incorrect Password");
@@ -77,12 +76,10 @@
         
         .btn-s1 { background: var(--col-1-pink); } .btn-s2 { background: var(--col-2-yellow); } .btn-s3 { background: var(--col-3-blue); } .btn-s4 { background: var(--col-4-green); } .btn-white { background: white; border-color: #ddd; }
         
-        /* TYPING INTERFACE */
         #typing-interface { display: none; flex-direction: column; align-items: center; width: 100%; }
         #typing-input { width: 80%; padding: 15px; font-size: 1.1rem; border: 2px solid #ccc; border-radius: 8px; margin-bottom: 15px; font-family: inherit; resize: vertical; min-height: 80px; }
         #typing-submit { padding: 12px 30px; font-size: 1.1rem; background: var(--app-color); color: white; border: none; border-radius: 6px; cursor: pointer; }
-        #typing-submit:hover { background: #34495e; }
-
+        
         #sentence-builder { margin-top: 20px; padding: 15px; background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-wrap: wrap; gap: 5px; }
         .fragment { padding: 2px 5px; border-radius: 4px; }
         
@@ -90,7 +87,6 @@
         #overlay { background: rgba(231, 76, 60, 0.95); } #levelup-overlay { background: rgba(46, 204, 113, 0.95); }
         .shake { animation: shake 0.4s; }
         
-        /* ADMIN PANEL */
         #admin-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 200; justify-content: center; align-items: center; }
         .admin-panel { background: white; width: 90%; max-width: 900px; height: 95%; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
         .panel-header { padding: 15px; background: #eee; display: flex; justify-content: space-between; font-weight: bold; }
@@ -120,7 +116,6 @@
         .scaffold-label { font-weight: bold; font-size: 0.9rem; color:#444; }
         .scaffold-select { padding: 5px; width: 100%; border: 1px solid #999; border-radius: 4px; background: white; }
         
-        /* DATA EXPORT AREA */
         #config-io-area { width: 100%; height: 100px; font-family: monospace; font-size: 0.8rem; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; color: #555; display:block; margin-bottom:10px; }
 
         #worksheet-area { display: none; }
@@ -161,7 +156,6 @@
 
     <div class="container" id="game-container">
         <div id="topic-display">Question: How is the text presented?</div>
-
         <div class="progress-track"><div class="progress-fill" id="progress-bar"></div></div>
         
         <div id="stage-0" class="stage-area active">
@@ -281,7 +275,7 @@
     </div>
 
     <script>
-        var STORE_KEY = 'eval_arch_v51';
+        var STORE_KEY = 'eval_arch_v52';
         
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -377,224 +371,27 @@
             } catch(e) { console.error(e); }
         }
 
-        // --- GAME LOGIC ---
-        function hideAllStages() {
-            document.querySelectorAll('.stage-area').forEach(function(el) { el.classList.remove('active'); });
-            document.getElementById('typing-interface').style.display = 'none';
-        }
-
-        function showTypingMode(title, key) {
-            hideAllStages();
-            document.getElementById('typing-interface').style.display = 'flex';
-            document.getElementById('typing-title').innerText = title;
-            document.getElementById('typing-input').value = "";
-            document.getElementById('typing-input').focus();
-            currentTypingStage = key;
-        }
-
-        function submitTyping() {
-            var val = document.getElementById('typing-input').value;
-            if(val.trim() === "") { alert("Please type an answer."); return; }
-            
-            if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); }
-            else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); }
-            else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); }
-            else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); }
-            else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); }
-        }
-
-        function renderStage0() {
-            hideAllStages();
-            document.getElementById('stage-0').classList.add('active');
-            var grid = document.getElementById('grid-quotes');
-            grid.innerHTML = '';
-            if(!config.content_pairs || config.content_pairs.length === 0) {
-                grid.innerHTML = "<p style='color:#777;'>No content loaded.</p>";
-                return;
-            }
-            config.content_pairs.forEach(function(p) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-white';
-                var displayQuote = p.quote.length > 50 ? p.quote.substring(0,47) + "..." : p.quote;
-                btn.innerHTML = `"${displayQuote}"`;
-                btn.onclick = function() { startBuild(p.id, p.quote); };
-                grid.appendChild(btn);
-            });
-            updateBuilder();
-        }
-
-        function startBuild(id, quoteText) {
-            currentQuoteId = id;
-            sentenceParts = { s1: "", s2: "", quote: `"${quoteText}"`, s3: "", s4: "" };
-            updateBuilder();
-            if(config.worksheetSettings.s1_mode === "line") { showTypingMode("1. Evidence Starter", "s1"); }
-            else if(config.worksheetSettings.s1_mode === "none") { checkNextStageAfter1(); }
-            else { renderStage1(); }
-        }
-
-        function renderStage1() {
-            hideAllStages();
-            document.getElementById('stage-1').classList.add('active');
-            document.getElementById('progress-bar').style.width = '20%';
-            var grid = document.getElementById('grid-s1');
-            grid.innerHTML = '';
-            
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var options;
-            
-            if(pair && pair.specific_s1 && pair.specific_s1.trim() !== "") {
-                options = [pair.specific_s1];
-            } else {
-                options = config.starters_evidence;
-            }
-
-            options.forEach(function(txt) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s1';
-                btn.innerText = txt;
-                btn.onclick = function() { 
-                    sentenceParts.s1 = txt; updateBuilder(); 
-                    checkNextStageAfter1();
-                };
-                grid.appendChild(btn);
-            });
-        }
-
-        function checkNextStageAfter1() {
-            if(gameState.currentLevel === 1) { finishGame(); return; }
-            if(gameState.currentLevel === 2) { 
-                if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); }
-                else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); }
-                else { renderStage3(); }
-                return;
-            }
-            if(config.worksheetSettings.s2_mode === "line") { showTypingMode("2. The Method", "s2"); }
-            else if(config.worksheetSettings.s2_mode === "none") { 
-                if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); }
-                else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); }
-                else { renderStage3(); }
-            }
-            else { renderStage2(); }
-        }
-
-        function renderStage2() {
-            hideAllStages();
-            document.getElementById('stage-2').classList.add('active');
-            document.getElementById('progress-bar').style.width = '40%';
-            var grid = document.getElementById('grid-s2');
-            grid.innerHTML = '';
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var opts = [{ txt: pair.method, correct: true }];
-            var others = config.content_pairs.filter(function(p) { return p.id !== currentQuoteId; });
-            if(others.length > 0) opts.push({ txt: others[0].method, correct: false });
-            if(others.length > 1) opts.push({ txt: others[1].method, correct: false });
-            opts.sort(function() { return Math.random() - 0.5; });
-            opts.forEach(function(o) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s2';
-                btn.innerText = o.txt;
-                btn.onclick = function() { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); checkNextStageAfter2(); } else showError(); };
-                grid.appendChild(btn);
-            });
-        }
-
-        function checkNextStageAfter2() {
-            if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); }
-            else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); }
-            else { renderStage3(); }
-        }
-
-        function renderStage3() {
-            hideAllStages();
-            document.getElementById('stage-3').classList.add('active');
-            document.getElementById('progress-bar').style.width = '60%';
-            var grid = document.getElementById('grid-s3');
-            grid.innerHTML = '';
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var options;
-            if(pair && pair.specific_s3 && pair.specific_s3.trim() !== "") {
-                options = [pair.specific_s3];
-            } else {
-                options = config.starters_evaluative;
-            }
-            options.forEach(function(txt) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s3';
-                btn.innerText = txt;
-                btn.onclick = function() { sentenceParts.s3 = txt; updateBuilder(); checkNextStageAfter3(); };
-                grid.appendChild(btn);
-            });
-        }
-
-        function checkNextStageAfter3() {
-            if(config.worksheetSettings.s4_mode === "line") { showTypingMode("4. Inference & Effect", "s4"); }
-            else if(config.worksheetSettings.s4_mode === "none") { finishGame(); }
-            else { renderStage4(); }
-        }
-
-        function renderStage4() {
-            hideAllStages();
-            document.getElementById('stage-4').classList.add('active');
-            document.getElementById('progress-bar').style.width = '80%';
-            var grid = document.getElementById('grid-s4');
-            grid.innerHTML = '';
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var opts = [];
-            opts.push({ txt: pair.effect, correct: true });
-            if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
-            opts.sort(function() { return Math.random() - 0.5; });
-            opts.forEach(function(o) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s4';
-                btn.innerText = o.txt;
-                btn.onclick = function() { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); };
-                grid.appendChild(btn);
-            });
-        }
-
-        function finishGame() {
-            hideAllStages();
-            document.getElementById('stage-final').classList.add('active');
-            document.getElementById('progress-bar').style.width = '100%';
-            gameState.streak++;
-            updateScoreBoard();
-            if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) {
-                setTimeout(triggerLevelUp, 500);
-            }
-        }
-
-        function resetGame() {
-            sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
-            updateBuilder();
-            renderStage0();
-        }
-
-        function updateBuilder() {
-            var b = document.getElementById('sentence-builder');
-            if(!sentenceParts.s1 && !sentenceParts.quote) {
-                b.innerHTML = '<span style="color:#ccc; font-style:italic;">Your sentence will appear here...</span>';
-                return;
-            }
-            var html = "";
-            if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `;
-            if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `;
-            if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `;
-            if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `;
-            if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`;
-            b.innerHTML = html;
-        }
-
-        function showError() {
-            document.getElementById('overlay').style.display = 'flex';
-            document.getElementById('overlay').querySelector('.shake').classList.add('shake');
-            gameState.streak = 0; updateScoreBoard();
-        }
+        function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
+        function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
+        function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
+        function renderStage0() { hideAllStages(); document.getElementById('stage-0').classList.add('active'); var grid = document.getElementById('grid-quotes'); grid.innerHTML = ''; config.content_pairs.forEach(p => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-white'; var displayQuote = p.quote.length > 50 ? p.quote.substring(0,47) + "..." : p.quote; btn.innerHTML = `"${displayQuote}"`; btn.onclick = function() { startBuild(p.id, p.quote); }; grid.appendChild(btn); }); updateBuilder(); }
+        function startBuild(id, quoteText) { currentQuoteId = id; sentenceParts = { s1: "", s2: "", quote: `"${quoteText}"`, s3: "", s4: "" }; updateBuilder(); if(config.worksheetSettings.s1_mode === "line") { showTypingMode("1. Evidence Starter", "s1"); } else if(config.worksheetSettings.s1_mode === "none") { checkNextStageAfter1(); } else { renderStage1(); } }
+        function renderStage1() { hideAllStages(); document.getElementById('stage-1').classList.add('active'); document.getElementById('progress-bar').style.width = '20%'; var grid = document.getElementById('grid-s1'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s1 && pair.specific_s1.trim() !== "") ? [pair.specific_s1] : config.starters_evidence; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s1'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s1 = txt; updateBuilder(); checkNextStageAfter1(); }; grid.appendChild(btn); }); }
+        function checkNextStageAfter1() { if(gameState.currentLevel === 1) { finishGame(); return; } if(gameState.currentLevel === 2) { if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); } else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); } else { renderStage3(); } return; } if(config.worksheetSettings.s2_mode === "line") { showTypingMode("2. The Method", "s2"); } else if(config.worksheetSettings.s2_mode === "none") { if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); } else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); } else { renderStage3(); } } else { renderStage2(); } }
+        function renderStage2() { hideAllStages(); document.getElementById('stage-2').classList.add('active'); document.getElementById('progress-bar').style.width = '40%'; var grid = document.getElementById('grid-s2'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var opts = [{ txt: pair.method, correct: true }]; var others = config.content_pairs.filter(p => p.id !== currentQuoteId); if(others.length > 0) opts.push({ txt: others[0].method, correct: false }); if(others.length > 1) opts.push({ txt: others[1].method, correct: false }); opts.sort(() => Math.random() - 0.5); opts.forEach(o => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s2'; btn.innerText = o.txt; btn.onclick = function() { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); checkNextStageAfter2(); } else showError(); }; grid.appendChild(btn); }); }
+        function checkNextStageAfter2() { if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); } else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); } else { renderStage3(); } }
+        function renderStage3() { hideAllStages(); document.getElementById('stage-3').classList.add('active'); document.getElementById('progress-bar').style.width = '60%'; var grid = document.getElementById('grid-s3'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s3 && pair.specific_s3.trim() !== "") ? [pair.specific_s3] : config.starters_evaluative; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s3'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s3 = txt; updateBuilder(); checkNextStageAfter3(); }; grid.appendChild(btn); }); }
+        function checkNextStageAfter3() { if(config.worksheetSettings.s4_mode === "line") { showTypingMode("4. Inference & Effect", "s4"); } else if(config.worksheetSettings.s4_mode === "none") { finishGame(); } else { renderStage4(); } }
+        function renderStage4() { hideAllStages(); document.getElementById('stage-4').classList.add('active'); document.getElementById('progress-bar').style.width = '80%'; var grid = document.getElementById('grid-s4'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var opts = []; opts.push({ txt: pair.effect, correct: true }); if(pair.distractor) opts.push({ txt: pair.distractor, correct: false }); opts.sort(() => Math.random() - 0.5); opts.forEach(o => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s4'; btn.innerText = o.txt; btn.onclick = function() { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); }; grid.appendChild(btn); }); }
+        function finishGame() { hideAllStages(); document.getElementById('stage-final').classList.add('active'); document.getElementById('progress-bar').style.width = '100%'; gameState.streak++; updateScoreBoard(); if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) { setTimeout(triggerLevelUp, 500); } }
+        function resetGame() { sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" }; updateBuilder(); renderStage0(); }
+        function updateBuilder() { var b = document.getElementById('sentence-builder'); if(!sentenceParts.s1 && !sentenceParts.quote) { b.innerHTML = '<span style="color:#ccc; font-style:italic;">Your sentence will appear here...</span>'; return; } var html = ""; if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `; if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `; if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `; if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `; if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`; b.innerHTML = html; }
+        function showError() { document.getElementById('overlay').style.display = 'flex'; document.getElementById('overlay').querySelector('.shake').classList.add('shake'); gameState.streak = 0; updateScoreBoard(); }
         function closeOverlay() { document.getElementById('overlay').style.display = 'none'; }
         function triggerLevelUp() { gameState.currentLevel++; gameState.streak = 0; document.getElementById('levelup-msg').innerText = "You have reached Level " + gameState.currentLevel; document.getElementById('levelup-overlay').style.display = 'flex'; updateScoreBoard(); }
         function closeLevelUp() { document.getElementById('levelup-overlay').style.display = 'none'; }
         function updateScoreBoard() { document.getElementById('streak-val').innerText = gameState.streak; document.getElementById('target-val').innerText = config.settings.streakThreshold; var badge = document.getElementById('level-badge'); var l = gameState.currentLevel; badge.innerText = "LEVEL " + l; badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)"; }
 
-        // --- CONTENT MANAGEMENT ---
         function updateList(key, idx, val) { config[key][idx] = val; }
         function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); } 
         function addItem(type) { try { if (!config.starters_evidence) config.starters_evidence = []; if (!config.starters_evaluative) config.starters_evaluative = []; var text = prompt("Enter text for new starter:"); if(text) { if(type==='s1') config.starters_evidence.push(text); if(type==='s3') config.starters_evaluative.push(text); renderAdminUI(); } } catch(e) { alert("Error adding item: " + e.message); } }
@@ -679,23 +476,17 @@
             }
         }
 
-        // --- EXPORT FUNCTIONS (NEW POPUP LOGIC) ---
+        // --- NEW PRINT FUNCTION (POPUP) ---
         function printWorksheet() {
-            // Force refresh of content before printing
             renderWorksheets();
-            
             var content = "<html><head><title>Worksheet</title>";
-            content += "<style>body { font-family: 'Aptos', sans-serif; padding: 20px; } table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } td { padding: 15px; vertical-align: top; border-bottom: 1px solid #ccc; }</style>";
+            content += "<style>body { font-family: 'Arial', sans-serif; padding: 20px; } table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } td { padding: 15px; vertical-align: top; border-bottom: 1px solid #ccc; }</style>";
             content += "</head><body>";
-            
             if(config.worksheetSettings.showTask1) {
-                content += "<h2>Task 1: Matching Analysis</h2>";
-                content += document.getElementById("ws-task-1").innerHTML;
-                content += "<br><br>";
+                content += "<h2>Task 1: Matching Analysis</h2>" + document.getElementById("ws-task-1").innerHTML + "<br><br>";
             }
             if(config.worksheetSettings.showTask2) {
-                content += "<h2>Task 2: Sentence Builder</h2>";
-                content += document.getElementById("ws-task-2").innerHTML;
+                content += "<h2>Task 2: Sentence Builder</h2>" + document.getElementById("ws-task-2").innerHTML;
             }
             content += "</body></html>";
 
@@ -705,23 +496,19 @@
             win.print();
         }
 
+        // --- EXPORT FUNCTION ---
         function downloadWordDoc() {
-            // Force refresh of content before download
             renderWorksheets();
-
             var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Arial', sans-serif; } table { width: 100%; border-collapse: collapse; } td { padding: 10px; border: 1px solid #ddd; }</style></head><body>";
             var footer = "</body></html>";
             var contentHTML = "";
-            
             if(config.worksheetSettings.showTask1) {
                 contentHTML += "<h2>Task 1: Matching</h2>" + document.getElementById("ws-task-1").innerHTML + "<br><br>";
             }
             if(config.worksheetSettings.showTask2) {
                 contentHTML += "<h2>Task 2: Sentence Builder</h2>" + document.getElementById("ws-task-2").innerHTML;
             }
-
             var sourceHTML = header + contentHTML + footer;
-            
             var blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
             var url = URL.createObjectURL(blob);
             var link = document.createElement("a");
