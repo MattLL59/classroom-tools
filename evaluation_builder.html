@@ -120,18 +120,22 @@
         .scaffold-label { font-weight: bold; font-size: 0.9rem; color:#444; }
         .scaffold-select { padding: 5px; width: 100%; border: 1px solid #999; border-radius: 4px; background: white; }
         
+        /* HIDDEN WORKSHEET AREA (Visible only in print) */
         #worksheet-area { display: none; }
+
         @media print {
-            body { background: white; padding: 0; height: auto; overflow: visible; display: block; }
+            body { background: white; padding: 0; margin: 0; height: auto; overflow: visible; display: block; }
             header, .container, #admin-modal, #overlay, #levelup-overlay { display: none !important; }
-            #worksheet-area { display: block; font-family: 'Aptos', sans-serif; color: black; }
-            .ws-page { page-break-after: always; padding: 40px; }
+            #worksheet-area { display: block !important; font-family: 'Aptos', sans-serif; color: black; padding: 20px; }
+            
+            .ws-page { page-break-after: always; padding: 20px; }
             .ws-header { text-align: left; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; }
-            .ws-title { font-size: 14pt; font-weight: bold; margin-bottom: 5px; font-family: 'Aptos', sans-serif; }
-            .ws-instruction { font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; }
-            .ws-gap-fill { line-height: 2.5; font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            td { padding: 15px; vertical-align: middle; }
+            .ws-title { font-size: 16pt; font-weight: bold; margin-bottom: 5px; }
+            .ws-instruction { font-size: 12pt; margin-bottom: 20px; font-style: italic; }
+            .ws-gap-fill { line-height: 2.5; font-size: 12pt; margin-bottom: 30px; }
+            
+            table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            td { padding: 15px; vertical-align: top; border-bottom: 1px solid #ccc; }
         }
     </style>
 </head>
@@ -252,8 +256,8 @@
 
                 <div style="display:flex; justify-content: space-between; padding-top:20px; border-top:1px solid #eee;">
                     <div style="display:flex; gap:10px;">
-                        <button onclick="window.print()" style="background:#f39c12; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Print / Save PDF</button>
-                        <button onclick="downloadWordDoc()" style="background:#2980b9; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Download Word Doc</button>
+                        <button onclick="renderWorksheets(); window.print()" style="background:#f39c12; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Print / Save PDF</button>
+                        <button onclick="renderWorksheets(); downloadWordDoc()" style="background:#2980b9; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Download Word Doc</button>
                     </div>
                     <div style="display:flex; gap:10px;">
                         <button id="save-btn" onclick="triggerSave()" style="background:#3498db; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; font-weight:bold; width:150px;">Save Settings</button>
@@ -265,45 +269,23 @@
     </div>
 
     <div id="worksheet-area">
-        <div id="ws-task-container-1">
-            <div class="ws-page">
-                <div class="ws-header"><div class="ws-title">Task 1: Matching Analysis</div><p class="ws-instruction">Draw a line connecting the evidence to the point.</p></div>
-                <div id="ws-task-1"></div>
-            </div>
-        </div>
-        <div id="ws-task-container-2">
-            <div class="ws-page">
-                <div class="ws-header"><div class="ws-title">Task 2: Sentence Builder</div><p class="ws-instruction">Use the sentence structure to complete the analysis.</p></div>
-                <div id="ws-task-2"></div>
-            </div>
-        </div>
+        <div id="ws-task-container-1"></div>
+        <div style="height:40px;"></div> <div id="ws-task-container-2"></div>
     </div>
 
     <script>
-        var STORE_KEY = 'eval_arch_v46'; // Increment to clear cache
+        var STORE_KEY = 'eval_arch_v47';
         
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         var gameState = { currentLevel: 1, streak: 0 };
         var currentTypingStage = "";
 
-        // --- SAFE DOM HELPERS (THE FIX) ---
-        function getSafeVal(id) {
-            var el = document.getElementById(id);
-            return el ? el.value : "";
-        }
-        function getSafeCheck(id) {
-            var el = document.getElementById(id);
-            return el ? el.checked : false;
-        }
-        function safeSetVal(id, val) {
-            var el = document.getElementById(id);
-            if(el) el.value = val;
-        }
-        function safeSetCheck(id, val) {
-            var el = document.getElementById(id);
-            if(el) el.checked = val;
-        }
+        // --- SAFE DOM HELPERS ---
+        function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
+        function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
+        function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
 
         // --- SAVE FUNCTION ---
         function saveLocal(render) {
@@ -313,7 +295,6 @@
                 config.adminPass = getSafeVal('edit-admin-pass');
                 config.topic = getSafeVal('edit-topic');
                 
-                // Explicitly update settings to capture state before save
                 updateSettings();
                 updateWS();
 
@@ -384,311 +365,42 @@
                 
                 updateScoreBoard();
                 renderStage0();
-                renderWorksheets();
+                renderWorksheets(); // IMPORTANT: Render immediately
                 
             } catch(e) { console.error(e); }
         }
 
-        // --- GAME LOGIC ---
-        function hideAllStages() {
-            document.querySelectorAll('.stage-area').forEach(function(el) { el.classList.remove('active'); });
-            document.getElementById('typing-interface').style.display = 'none';
-        }
-
-        function showTypingMode(title, key) {
-            hideAllStages();
-            document.getElementById('typing-interface').style.display = 'flex';
-            document.getElementById('typing-title').innerText = title;
-            document.getElementById('typing-input').value = "";
-            document.getElementById('typing-input').focus();
-            currentTypingStage = key;
-        }
-
-        function submitTyping() {
-            var val = document.getElementById('typing-input').value;
-            if(val.trim() === "") { alert("Please type an answer."); return; }
-            
-            if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); }
-            else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); }
-            else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); }
-            else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); }
-            else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); }
-        }
-
-        function renderStage0() {
-            hideAllStages();
-            document.getElementById('stage-0').classList.add('active');
-            var grid = document.getElementById('grid-quotes');
-            grid.innerHTML = '';
-            if(!config.content_pairs || config.content_pairs.length === 0) {
-                grid.innerHTML = "<p style='color:#777;'>No content loaded.</p>";
-                return;
-            }
-            config.content_pairs.forEach(function(p) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-white';
-                var displayQuote = p.quote.length > 50 ? p.quote.substring(0,47) + "..." : p.quote;
-                btn.innerHTML = `"${displayQuote}"`;
-                btn.onclick = function() { startBuild(p.id, p.quote); };
-                grid.appendChild(btn);
-            });
-            updateBuilder();
-        }
-
-        function startBuild(id, quoteText) {
-            currentQuoteId = id;
-            sentenceParts = { s1: "", s2: "", quote: `"${quoteText}"`, s3: "", s4: "" };
-            updateBuilder();
-            // Start Stage 1 logic
-            if(config.worksheetSettings.s1_mode === "line") { showTypingMode("1. Evidence Starter", "s1"); }
-            else if(config.worksheetSettings.s1_mode === "none") { checkNextStageAfter1(); }
-            else { renderStage1(); }
-        }
-
-        function renderStage1() {
-            hideAllStages();
-            document.getElementById('stage-1').classList.add('active');
-            document.getElementById('progress-bar').style.width = '20%';
-            var grid = document.getElementById('grid-s1');
-            grid.innerHTML = '';
-            
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var options;
-            
-            if(pair && pair.specific_s1 && pair.specific_s1.trim() !== "") {
-                options = [pair.specific_s1];
-            } else {
-                options = config.starters_evidence;
-            }
-
-            options.forEach(function(txt) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s1';
-                btn.innerText = txt;
-                btn.onclick = function() { 
-                    sentenceParts.s1 = txt; updateBuilder(); 
-                    checkNextStageAfter1();
-                };
-                grid.appendChild(btn);
-            });
-        }
-
-        function checkNextStageAfter1() {
-            if(gameState.currentLevel === 1) { finishGame(); return; }
-            
-            if(gameState.currentLevel === 2) { 
-                if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); }
-                else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); }
-                else { renderStage3(); }
-                return;
-            }
-
-            if(config.worksheetSettings.s2_mode === "line") { showTypingMode("2. The Method", "s2"); }
-            else if(config.worksheetSettings.s2_mode === "none") { 
-                if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); }
-                else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); }
-                else { renderStage3(); }
-            }
-            else { renderStage2(); }
-        }
-
-        function renderStage2() {
-            hideAllStages();
-            document.getElementById('stage-2').classList.add('active');
-            document.getElementById('progress-bar').style.width = '40%';
-            var grid = document.getElementById('grid-s2');
-            grid.innerHTML = '';
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var opts = [{ txt: pair.method, correct: true }];
-            var others = config.content_pairs.filter(function(p) { return p.id !== currentQuoteId; });
-            if(others.length > 0) opts.push({ txt: others[0].method, correct: false });
-            if(others.length > 1) opts.push({ txt: others[1].method, correct: false });
-            opts.sort(function() { return Math.random() - 0.5; });
-            opts.forEach(function(o) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s2';
-                btn.innerText = o.txt;
-                btn.onclick = function() { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); checkNextStageAfter2(); } else showError(); };
-                grid.appendChild(btn);
-            });
-        }
-
-        function checkNextStageAfter2() {
-            if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); }
-            else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); }
-            else { renderStage3(); }
-        }
-
-        function renderStage3() {
-            hideAllStages();
-            document.getElementById('stage-3').classList.add('active');
-            document.getElementById('progress-bar').style.width = '60%';
-            var grid = document.getElementById('grid-s3');
-            grid.innerHTML = '';
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var options;
-            
-            if(pair && pair.specific_s3 && pair.specific_s3.trim() !== "") {
-                options = [pair.specific_s3];
-            } else {
-                options = config.starters_evaluative;
-            }
-
-            options.forEach(function(txt) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s3';
-                btn.innerText = txt;
-                btn.onclick = function() { sentenceParts.s3 = txt; updateBuilder(); checkNextStageAfter3(); };
-                grid.appendChild(btn);
-            });
-        }
-
-        function checkNextStageAfter3() {
-            if(config.worksheetSettings.s4_mode === "line") { showTypingMode("4. Inference & Effect", "s4"); }
-            else if(config.worksheetSettings.s4_mode === "none") { finishGame(); }
-            else { renderStage4(); }
-        }
-
-        function renderStage4() {
-            hideAllStages();
-            document.getElementById('stage-4').classList.add('active');
-            document.getElementById('progress-bar').style.width = '80%';
-            var grid = document.getElementById('grid-s4');
-            grid.innerHTML = '';
-            var pair = config.content_pairs.find(function(p) { return p.id === currentQuoteId; });
-            var opts = [];
-            opts.push({ txt: pair.effect, correct: true });
-            if(pair.distractor) opts.push({ txt: pair.distractor, correct: false });
-            opts.sort(function() { return Math.random() - 0.5; });
-            opts.forEach(function(o) {
-                var btn = document.createElement('button');
-                btn.className = 'choice-btn btn-s4';
-                btn.innerText = o.txt;
-                btn.onclick = function() { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); };
-                grid.appendChild(btn);
-            });
-        }
-
-        function finishGame() {
-            hideAllStages();
-            document.getElementById('stage-final').classList.add('active');
-            document.getElementById('progress-bar').style.width = '100%';
-            gameState.streak++;
-            updateScoreBoard();
-            if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) {
-                setTimeout(triggerLevelUp, 500);
-            }
-        }
-
-        function resetGame() {
-            sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
-            updateBuilder();
-            renderStage0();
-        }
-
-        function updateBuilder() {
-            var b = document.getElementById('sentence-builder');
-            if(!sentenceParts.s1 && !sentenceParts.quote) {
-                b.innerHTML = '<span style="color:#ccc; font-style:italic;">Your sentence will appear here...</span>';
-                return;
-            }
-            var html = "";
-            if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `;
-            if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `;
-            if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `;
-            if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `;
-            if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`;
-            b.innerHTML = html;
-        }
-
-        function showError() {
-            document.getElementById('overlay').style.display = 'flex';
-            document.getElementById('overlay').querySelector('.shake').classList.add('shake');
-            gameState.streak = 0; updateScoreBoard();
-        }
+        // --- GAME LOGIC (Brief for Space) ---
+        function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
+        function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
+        function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
+        function renderStage0() { hideAllStages(); document.getElementById('stage-0').classList.add('active'); var grid = document.getElementById('grid-quotes'); grid.innerHTML = ''; config.content_pairs.forEach(p => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-white'; var displayQuote = p.quote.length > 50 ? p.quote.substring(0,47) + "..." : p.quote; btn.innerHTML = `"${displayQuote}"`; btn.onclick = function() { startBuild(p.id, p.quote); }; grid.appendChild(btn); }); updateBuilder(); }
+        function startBuild(id, quoteText) { currentQuoteId = id; sentenceParts = { s1: "", s2: "", quote: `"${quoteText}"`, s3: "", s4: "" }; updateBuilder(); if(config.worksheetSettings.s1_mode === "line") { showTypingMode("1. Evidence Starter", "s1"); } else if(config.worksheetSettings.s1_mode === "none") { checkNextStageAfter1(); } else { renderStage1(); } }
+        function renderStage1() { hideAllStages(); document.getElementById('stage-1').classList.add('active'); document.getElementById('progress-bar').style.width = '20%'; var grid = document.getElementById('grid-s1'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s1 && pair.specific_s1.trim() !== "") ? [pair.specific_s1] : config.starters_evidence; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s1'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s1 = txt; updateBuilder(); checkNextStageAfter1(); }; grid.appendChild(btn); }); }
+        function checkNextStageAfter1() { if(gameState.currentLevel === 1) { finishGame(); return; } if(gameState.currentLevel === 2) { if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); } else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); } else { renderStage3(); } return; } if(config.worksheetSettings.s2_mode === "line") { showTypingMode("2. The Method", "s2"); } else if(config.worksheetSettings.s2_mode === "none") { if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); } else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); } else { renderStage3(); } } else { renderStage2(); } }
+        function renderStage2() { hideAllStages(); document.getElementById('stage-2').classList.add('active'); document.getElementById('progress-bar').style.width = '40%'; var grid = document.getElementById('grid-s2'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var opts = [{ txt: pair.method, correct: true }]; var others = config.content_pairs.filter(p => p.id !== currentQuoteId); if(others.length > 0) opts.push({ txt: others[0].method, correct: false }); if(others.length > 1) opts.push({ txt: others[1].method, correct: false }); opts.sort(() => Math.random() - 0.5); opts.forEach(o => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s2'; btn.innerText = o.txt; btn.onclick = function() { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); checkNextStageAfter2(); } else showError(); }; grid.appendChild(btn); }); }
+        function checkNextStageAfter2() { if(config.worksheetSettings.s3_mode === "line") { showTypingMode("3. Evaluative Link", "s3"); } else if(config.worksheetSettings.s3_mode === "none") { checkNextStageAfter3(); } else { renderStage3(); } }
+        function renderStage3() { hideAllStages(); document.getElementById('stage-3').classList.add('active'); document.getElementById('progress-bar').style.width = '60%'; var grid = document.getElementById('grid-s3'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s3 && pair.specific_s3.trim() !== "") ? [pair.specific_s3] : config.starters_evaluative; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s3'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s3 = txt; updateBuilder(); checkNextStageAfter3(); }; grid.appendChild(btn); }); }
+        function checkNextStageAfter3() { if(config.worksheetSettings.s4_mode === "line") { showTypingMode("4. Inference & Effect", "s4"); } else if(config.worksheetSettings.s4_mode === "none") { finishGame(); } else { renderStage4(); } }
+        function renderStage4() { hideAllStages(); document.getElementById('stage-4').classList.add('active'); document.getElementById('progress-bar').style.width = '80%'; var grid = document.getElementById('grid-s4'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var opts = []; opts.push({ txt: pair.effect, correct: true }); if(pair.distractor) opts.push({ txt: pair.distractor, correct: false }); opts.sort(() => Math.random() - 0.5); opts.forEach(o => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s4'; btn.innerText = o.txt; btn.onclick = function() { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); }; grid.appendChild(btn); }); }
+        function finishGame() { hideAllStages(); document.getElementById('stage-final').classList.add('active'); document.getElementById('progress-bar').style.width = '100%'; gameState.streak++; updateScoreBoard(); if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) { setTimeout(triggerLevelUp, 500); } }
+        function resetGame() { sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" }; updateBuilder(); renderStage0(); }
+        function updateBuilder() { var b = document.getElementById('sentence-builder'); if(!sentenceParts.s1 && !sentenceParts.quote) { b.innerHTML = '<span style="color:#ccc; font-style:italic;">Your sentence will appear here...</span>'; return; } var html = ""; if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `; if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `; if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `; if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `; if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`; b.innerHTML = html; }
+        function showError() { document.getElementById('overlay').style.display = 'flex'; document.getElementById('overlay').querySelector('.shake').classList.add('shake'); gameState.streak = 0; updateScoreBoard(); }
         function closeOverlay() { document.getElementById('overlay').style.display = 'none'; }
-
-        function triggerLevelUp() {
-            gameState.currentLevel++;
-            gameState.streak = 0;
-            document.getElementById('levelup-msg').innerText = "You have reached Level " + gameState.currentLevel;
-            document.getElementById('levelup-overlay').style.display = 'flex';
-            updateScoreBoard();
-        }
+        function triggerLevelUp() { gameState.currentLevel++; gameState.streak = 0; document.getElementById('levelup-msg').innerText = "You have reached Level " + gameState.currentLevel; document.getElementById('levelup-overlay').style.display = 'flex'; updateScoreBoard(); }
         function closeLevelUp() { document.getElementById('levelup-overlay').style.display = 'none'; }
-
-        function updateScoreBoard() {
-            document.getElementById('streak-val').innerText = gameState.streak;
-            document.getElementById('target-val').innerText = config.settings.streakThreshold;
-            var badge = document.getElementById('level-badge');
-            var l = gameState.currentLevel;
-            badge.innerText = "LEVEL " + l;
-            badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
-        }
+        function updateScoreBoard() { document.getElementById('streak-val').innerText = gameState.streak; document.getElementById('target-val').innerText = config.settings.streakThreshold; var badge = document.getElementById('level-badge'); var l = gameState.currentLevel; badge.innerText = "LEVEL " + l; badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)"; }
 
         // --- CONTENT MANAGEMENT ---
         function updateList(key, idx, val) { config[key][idx] = val; }
         function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); } 
-        
-        function addItem(type) { 
-            try {
-                if (!config.starters_evidence) config.starters_evidence = [];
-                if (!config.starters_evaluative) config.starters_evaluative = [];
-
-                var text = prompt("Enter text for new starter:");
-                if(text) {
-                    if(type==='s1') config.starters_evidence.push(text);
-                    if(type==='s3') config.starters_evaluative.push(text);
-                    renderAdminUI(); 
-                }
-            } catch(e) {
-                alert("Error adding item: " + e.message);
-            }
-        }
-
+        function addItem(type) { try { if (!config.starters_evidence) config.starters_evidence = []; if (!config.starters_evaluative) config.starters_evaluative = []; var text = prompt("Enter text for new starter:"); if(text) { if(type==='s1') config.starters_evidence.push(text); if(type==='s3') config.starters_evaluative.push(text); renderAdminUI(); } } catch(e) { alert("Error adding item: " + e.message); } }
         function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; }
-        function delContent(idx) { 
-            if(confirm("Delete this quote set?")) {
-                config.content_pairs.splice(idx, 1);
-                renderAdminUI();
-            }
-        }
-        function addContent() {
-            try {
-                if (!config.content_pairs) config.content_pairs = [];
-                config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" });
-                renderAdminUI();
-                setTimeout(function() {
-                    var list = document.getElementById('list-content');
-                    if(list && list.lastElementChild) list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
-                }, 200);
-            } catch(e) {
-                alert("Error adding content: " + e.message);
-            }
-        }
+        function delContent(idx) { if(confirm("Delete this quote set?")) { config.content_pairs.splice(idx, 1); renderAdminUI(); } }
+        function addContent() { try { if (!config.content_pairs) config.content_pairs = []; config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" }); renderAdminUI(); setTimeout(function() { var list = document.getElementById('list-content'); if(list && list.lastElementChild) list.lastElementChild.scrollIntoView({ behavior: 'smooth' }); }, 200); } catch(e) { alert("Error adding content: " + e.message); } }
+        function triggerSave() { try { updateSettings(); updateWS(); saveLocal(true); var btn = document.getElementById('save-btn'); var originalText = btn.innerText; var originalColor = btn.style.background; btn.innerText = "Saved!"; btn.style.background = "#27ae60"; setTimeout(function() { btn.innerText = originalText; btn.style.background = originalColor; }, 1000); } catch(e) { alert("Save Failed! " + e.message); } }
 
-        // --- TRIGGER SAVE WITH FEEDBACK ---
-        function triggerSave() {
-            try {
-                updateSettings();
-                updateWS();
-                saveLocal(true);
-                
-                var btn = document.getElementById('save-btn');
-                var originalText = btn.innerText;
-                var originalColor = btn.style.background;
-                btn.innerText = "Saved!";
-                btn.style.background = "#27ae60"; 
-                setTimeout(function() {
-                    btn.innerText = originalText;
-                    btn.style.background = originalColor;
-                }, 1000);
-            } catch(e) {
-                alert("Save Failed! " + e.message);
-            }
-        }
-
-        // --- RENDERERS ---
         function renderAdminUI() {
             safeSetVal('edit-topic', config.topic || "");
             safeSetVal('edit-start-lvl', config.settings.startLevel);
@@ -696,54 +408,21 @@
             safeSetVal('edit-streak', config.settings.streakThreshold);
             safeSetVal('edit-app-title', config.appTitle);
             safeSetVal('edit-admin-pass', config.adminPass);
-            
             safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
             safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
-            
             safeSetVal('s1-mode', config.worksheetSettings.s1_mode || 'text');
             safeSetVal('s2-mode', config.worksheetSettings.s2_mode || 'line');
             safeSetVal('quote-mode', config.worksheetSettings.quote_mode || 'text');
             safeSetVal('s3-mode', config.worksheetSettings.s3_mode || 'line');
             safeSetVal('s4-mode', config.worksheetSettings.s4_mode || 'line');
-
             renderList('list-s1', config.starters_evidence, 'starters_evidence');
             renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
-            
             var cList = document.getElementById('list-content');
             cList.innerHTML = '';
             config.content_pairs.forEach(function(p, i) {
                 var div = document.createElement('div');
                 div.className = "content-card";
-                div.innerHTML = `
-                    <div class="content-card-header">
-                        <span>Answer Set #${i+1}</span>
-                        <button class="del-btn" onclick="delContent(${i})">Delete</button>
-                    </div>
-                    <div class="step-1">
-                        <span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span>
-                        <input class="admin-input" style="width:95%" value="${(p.specific_s1 || '')}" onchange="updateContent(${i}, 'specific_s1', this.value)">
-                    </div>
-                    <div class="step-2">
-                        <span class="step-label">2. Method / Terminology</span>
-                        <input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${(p.method || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)">
-                    </div>
-                    <div class="step-3">
-                        <span class="step-label">3. Evidence / Quote</span>
-                        <textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${(p.quote || '')}</textarea>
-                    </div>
-                    <div class="step-4">
-                        <span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span>
-                        <input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${(p.specific_s3 || '')}" onchange="updateContent(${i}, 'specific_s3', this.value)">
-                    </div>
-                    <div class="step-5">
-                        <span class="step-label">5. Effect / Analysis</span>
-                        <textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${(p.effect || '')}</textarea>
-                    </div>
-                    <div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;">
-                        <span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span>
-                        <input class="admin-input" style="width:95%; border-color:red;" value="${(p.distractor || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'distractor', this.value)">
-                    </div>
-                `;
+                div.innerHTML = `<div class="content-card-header"><span>Answer Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div><div class="step-1"><span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%" value="${(p.specific_s1 || '')}" onchange="updateContent(${i}, 'specific_s1', this.value)"></div><div class="step-2"><span class="step-label">2. Method / Terminology</span><input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${(p.method || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)"></div><div class="step-3"><span class="step-label">3. Evidence / Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${(p.quote || '')}</textarea></div><div class="step-4"><span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${(p.specific_s3 || '')}" onchange="updateContent(${i}, 'specific_s3', this.value)"></div><div class="step-5"><span class="step-label">5. Effect / Analysis</span><textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${(p.effect || '')}</textarea></div><div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;"><span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span><input class="admin-input" style="width:95%; border-color:red;" value="${(p.distractor || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'distractor', this.value)"></div>`;
                 cList.appendChild(div);
             });
         }
@@ -755,43 +434,41 @@
             arr.forEach(function(txt, i) {
                 var row = document.createElement('div');
                 row.className = 'input-row';
-                row.innerHTML = `
-                    <input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)">
-                    <button class="del-btn" onclick="delList('${key}', ${i})">X</button>
-                `;
+                row.innerHTML = `<input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)"><button class="del-btn" onclick="delList('${key}', ${i})">X</button>`;
                 el.appendChild(row);
             });
         }
 
+        // --- WORKSHEET RENDERER (Safe for Print) ---
         function renderWorksheets() {
-            var task1Container = document.getElementById('ws-task-container-1');
-            if(!config.worksheetSettings.showTask1) {
-                task1Container.style.display = 'none';
-            } else {
-                task1Container.style.display = 'block';
-                var ws1 = document.getElementById('ws-task-1');
+            var ws1 = document.getElementById('ws-task-1');
+            var ws2 = document.getElementById('ws-task-2');
+            
+            // Check visibility based on settings
+            document.getElementById('ws-task-container-1').style.display = config.worksheetSettings.showTask1 ? 'block' : 'none';
+            document.getElementById('ws-task-container-2').style.display = config.worksheetSettings.showTask2 ? 'block' : 'none';
+
+            // Render Task 1 (Matching)
+            if (config.worksheetSettings.showTask1) {
                 ws1.innerHTML = '';
+                // Randomize right side
                 var rightSide = [].concat(config.content_pairs).sort(function() { return Math.random() - 0.5; });
                 var tableHTML = `<table style="width:100%; border:none; border-collapse:collapse;">`;
                 config.content_pairs.forEach(function(p, i) {
-                    tableHTML += `<tr style="height: 50px;"><td style="width:40%; border:none; padding:15px; vertical-align:middle;"><strong>"${p.quote}"</strong></td><td style="width:20%; border:none;"></td><td style="width:40%; border:none; padding:15px; vertical-align:middle;">${rightSide[i].effect}</td></tr>`;
+                    tableHTML += `<tr style="height: 50px; border-bottom:1px solid #ddd;"><td style="width:40%; padding:15px;"><strong>"${p.quote}"</strong></td><td style="width:20%;"></td><td style="width:40%; padding:15px;">${rightSide[i].effect}</td></tr>`;
                 });
                 tableHTML += `</table>`;
                 ws1.innerHTML = tableHTML;
             }
 
-            var task2Container = document.getElementById('ws-task-container-2');
-            if(!config.worksheetSettings.showTask2) {
-                task2Container.style.display = 'none';
-            } else {
-                task2Container.style.display = 'block';
-                var ws2 = document.getElementById('ws-task-2');
+            // Render Task 2 (Scaffolded Sentences)
+            if (config.worksheetSettings.showTask2) {
                 ws2.innerHTML = '';
                 var s = config.worksheetSettings;
-                
                 var blank = "__________________";
 
                 config.content_pairs.forEach(function(p) {
+                    // Logic: If 'text', use specific if available, else random generic.
                     var randS1 = config.starters_evidence[Math.floor(Math.random() * config.starters_evidence.length)] || "The writer uses";
                     var randS3 = config.starters_evaluative[Math.floor(Math.random() * config.starters_evaluative.length)] || "to suggest";
 
@@ -800,19 +477,46 @@
                     var t_q = s.quote_mode === 'text' ? `<strong>"${p.quote}"</strong>` : (s.quote_mode === 'line' ? `<strong>"${blank}"</strong>` : "");
                     var t_s3 = s.s3_mode === 'text' ? (p.specific_s3 || randS3) : (s.s3_mode === 'line' ? blank : "");
                     var t_s4 = s.s4_mode === 'text' ? p.effect : (s.s4_mode === 'line' ? "__________________________________" : "");
-                    var parts = [t_s1, t_s2, t_q, t_s3, t_s4].filter(function(p) { return p !== ""; });
-                    ws2.innerHTML += `<div class="ws-gap-fill">(Sentence starter) ${parts.join(" ")}.</div>`;
+
+                    // Filter out "none" selections (empty strings)
+                    var parts = [t_s1, t_s2, t_q, t_s3, t_s4].filter(function(part) { return part !== ""; });
+                    
+                    ws2.innerHTML += `<div class="ws-gap-fill" style="margin-bottom:25px; line-height:2.0;">${parts.join(" ")}.</div>`;
                 });
             }
         }
 
+        // --- EXPORT FUNCTIONS ---
         function downloadWordDoc() {
-            var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Aptos', sans-serif; } .ws-page { page-break-after: always; padding: 40px; } .ws-header { text-align: left; border-bottom: 2px solid black; margin-bottom: 30px; padding-bottom: 10px; } .ws-title { font-size: 14pt; font-weight: bold; margin-bottom: 5px; font-family: 'Aptos', sans-serif; } .ws-instruction { font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; } .ws-gap-fill { line-height: 2.5; font-size: 11pt; margin-bottom: 20px; font-family: 'Aptos', sans-serif; } table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } td { padding: 15px; vertical-align: middle; border: none; font-family: 'Aptos', sans-serif; }</style></head><body>";
+            // Remove style=display:none to ensure content is captured
+            var c1 = document.getElementById("ws-task-container-1");
+            var c2 = document.getElementById("ws-task-container-2");
+            
+            // Backup display states
+            var d1 = c1.style.display;
+            var d2 = c2.style.display;
+            
+            // Force show for capture
+            if(config.worksheetSettings.showTask1) c1.style.display = 'block';
+            if(config.worksheetSettings.showTask2) c2.style.display = 'block';
+
+            var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Arial', sans-serif; } table { width: 100%; border-collapse: collapse; } td { padding: 10px; border: 1px solid #ddd; }</style></head><body>";
             var footer = "</body></html>";
             var contentHTML = "";
-            if(config.worksheetSettings.showTask1) contentHTML += document.getElementById("ws-task-container-1").innerHTML;
-            if(config.worksheetSettings.showTask2) contentHTML += document.getElementById("ws-task-container-2").innerHTML;
+            
+            if(config.worksheetSettings.showTask1) {
+                contentHTML += "<h2>Task 1: Matching</h2>" + document.getElementById("ws-task-1").innerHTML + "<br><br>";
+            }
+            if(config.worksheetSettings.showTask2) {
+                contentHTML += "<h2>Task 2: Sentence Builder</h2>" + document.getElementById("ws-task-2").innerHTML;
+            }
+
             var sourceHTML = header + contentHTML + footer;
+            
+            // Restore display states
+            c1.style.display = d1;
+            c2.style.display = d2;
+
             var blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
             var url = URL.createObjectURL(blob);
             var link = document.createElement("a");
