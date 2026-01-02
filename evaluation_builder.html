@@ -34,7 +34,7 @@
             if (input === storedPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
-                setTimeout(renderAdminUI, 50);
+                if(typeof renderAdminUI === 'function') { renderAdminUI(); }
             } else {
                 alert("Incorrect Password");
             }
@@ -80,7 +80,8 @@
         #typing-interface { display: none; flex-direction: column; align-items: center; width: 100%; }
         #typing-input { width: 80%; padding: 15px; font-size: 1.1rem; border: 2px solid #ccc; border-radius: 8px; margin-bottom: 15px; font-family: inherit; resize: vertical; min-height: 80px; }
         #typing-submit { padding: 12px 30px; font-size: 1.1rem; background: var(--app-color); color: white; border: none; border-radius: 6px; cursor: pointer; }
-        
+        #typing-submit:hover { background: #34495e; }
+
         #sentence-builder { margin-top: 20px; padding: 15px; background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-wrap: wrap; gap: 5px; }
         .fragment { padding: 2px 5px; border-radius: 4px; }
         
@@ -94,7 +95,7 @@
         .panel-header { padding: 15px; background: #eee; display: flex; justify-content: space-between; font-weight: bold; }
         .panel-body { padding: 20px; overflow-y: auto; flex-grow: 1; }
         .section-box { border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .section-title { font-weight: bold; margin-bottom: 10px; display: block; color: var(--app-color); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; }
+        .section-title { font-weight: bold; margin-bottom: 10px; display: block; color: var(--app-color); text-transform: uppercase; font-size: 0.9rem; letter-spacing: 1px; }
         
         .input-row { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
         .admin-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
@@ -218,7 +219,7 @@
 
                 <div class="section-box" style="border-left: 5px solid var(--col-2-yellow);">
                     <span class="section-title">1. Content Manager (The Answers)</span>
-                    <p style="font-size:0.9rem; color:#666; margin-bottom:10px;">Build the ideal sentences here. If you leave a starter/link empty, the system will pick a random one from the generic lists below.</p>
+                    <p style="font-size:0.9rem; color:#666; margin-bottom:10px;">Build the ideal sentences here. Leave the first and fourth boxes blank to use the generic lists.</p>
                     <div id="list-content"></div>
                     <button onclick="addContent()" style="margin-top:10px; padding:12px; width:100%; background:#f1c40f; border:none; font-weight:bold; cursor:pointer;">+ Add New Answer Set</button>
                 </div>
@@ -278,13 +279,38 @@
     </div>
 
     <script>
-        var STORE_KEY = 'eval_arch_v44';
+        var STORE_KEY = 'eval_arch_v45'; // Increment version to clear cache
         
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         var gameState = { currentLevel: 1, streak: 0 };
         var currentTypingStage = "";
 
+        // --- CRITICAL: SAVE FUNCTION MUST BE DEFINED FIRST ---
+        function saveLocal(render) {
+            if(render === undefined) render = true;
+            try {
+                config.appTitle = document.getElementById('edit-app-title').value;
+                config.adminPass = document.getElementById('edit-admin-pass').value;
+                config.topic = document.getElementById('edit-topic').value;
+                localStorage.setItem(STORE_KEY, JSON.stringify(config));
+                
+                gameState.currentLevel = config.settings.startLevel;
+                updateScoreBoard();
+                document.getElementById('topic-display').innerText = "Question: " + (config.topic || "Analysis");
+                
+                if(render) {
+                    renderStage0();
+                    renderWorksheets();
+                    renderAdminUI();
+                }
+            } catch(e) {
+                console.error("Save Error:", e);
+                alert("Error saving: " + e.message);
+            }
+        }
+
+        // --- INIT ---
         window.onload = function() { init(); };
 
         function init() {
@@ -328,6 +354,164 @@
         function safeSetCheck(id, val) {
             var el = document.getElementById(id);
             if(el) el.checked = val;
+        }
+
+        // --- UPDATE HANDLERS ---
+        function updateSettings() {
+            config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
+            config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
+            config.settings.streakThreshold = parseInt(document.getElementById('edit-streak').value);
+            saveLocal(false);
+        }
+
+        function updateWS() {
+            config.worksheetSettings = {
+                showTask1: document.getElementById('ws-task1').checked,
+                showTask2: document.getElementById('ws-task2').checked,
+                s1_mode: document.getElementById('s1-mode').value,
+                s2_mode: document.getElementById('s2-mode').value,
+                quote_mode: document.getElementById('quote-mode').value,
+                s3_mode: document.getElementById('s3-mode').value,
+                s4_mode: document.getElementById('s4-mode').value
+            };
+            saveLocal(false);
+        }
+
+        function updateList(key, idx, val) { config[key][idx] = val; saveLocal(false); }
+        function delList(key, idx) { config[key].splice(idx, 1); saveLocal(true); } 
+        
+        function addItem(type) { 
+            try {
+                if (!config.starters_evidence) config.starters_evidence = [];
+                if (!config.starters_evaluative) config.starters_evaluative = [];
+
+                var text = prompt("Enter text for new starter:");
+                if(text) {
+                    if(type==='s1') config.starters_evidence.push(text);
+                    if(type==='s3') config.starters_evaluative.push(text);
+                    saveLocal(true); 
+                }
+            } catch(e) {
+                alert("Error adding item: " + e.message);
+            }
+        }
+
+        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(false); }
+        function delContent(idx) { 
+            if(confirm("Delete this quote set?")) {
+                config.content_pairs.splice(idx, 1);
+                saveLocal(true); 
+            }
+        }
+        function addContent() {
+            try {
+                if (!config.content_pairs) config.content_pairs = [];
+                
+                config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" });
+                saveLocal(true);
+                
+                setTimeout(function() {
+                    var list = document.getElementById('list-content');
+                    if(list && list.lastElementChild) list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+                }, 200);
+            } catch(e) {
+                alert("Error adding content: " + e.message);
+            }
+        }
+
+        function triggerSave() {
+            try {
+                updateSettings();
+                updateWS();
+                saveLocal(true);
+                
+                var btn = document.getElementById('save-btn');
+                var originalText = btn.innerText;
+                var originalColor = btn.style.background;
+                btn.innerText = "Saved!";
+                btn.style.background = "#27ae60"; 
+                setTimeout(function() {
+                    btn.innerText = originalText;
+                    btn.style.background = originalColor;
+                }, 1000);
+            } catch(e) {
+                alert("Save Failed! " + e.message);
+            }
+        }
+
+        // --- RENDERERS ---
+        function renderAdminUI() {
+            safeSetVal('edit-topic', config.topic || "");
+            safeSetVal('edit-start-lvl', config.settings.startLevel);
+            safeSetVal('edit-max-lvl', config.settings.maxLevel);
+            safeSetVal('edit-streak', config.settings.streakThreshold);
+            safeSetVal('edit-app-title', config.appTitle);
+            safeSetVal('edit-admin-pass', config.adminPass);
+            
+            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
+            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
+            
+            safeSetVal('s1-mode', config.worksheetSettings.s1_mode || 'text');
+            safeSetVal('s2-mode', config.worksheetSettings.s2_mode || 'line');
+            safeSetVal('quote-mode', config.worksheetSettings.quote_mode || 'text');
+            safeSetVal('s3-mode', config.worksheetSettings.s3_mode || 'line');
+            safeSetVal('s4-mode', config.worksheetSettings.s4_mode || 'line');
+
+            renderList('list-s1', config.starters_evidence, 'starters_evidence');
+            renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
+            
+            var cList = document.getElementById('list-content');
+            cList.innerHTML = '';
+            config.content_pairs.forEach(function(p, i) {
+                var div = document.createElement('div');
+                div.className = "content-card";
+                div.innerHTML = `
+                    <div class="content-card-header">
+                        <span>Answer Set #${i+1}</span>
+                        <button class="del-btn" onclick="delContent(${i})">Delete</button>
+                    </div>
+                    <div class="step-1">
+                        <span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span>
+                        <input class="admin-input" style="width:95%" value="${(p.specific_s1 || '')}" onchange="updateContent(${i}, 'specific_s1', this.value)">
+                    </div>
+                    <div class="step-2">
+                        <span class="step-label">2. Method / Terminology</span>
+                        <input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${(p.method || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)">
+                    </div>
+                    <div class="step-3">
+                        <span class="step-label">3. Evidence / Quote</span>
+                        <textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${(p.quote || '')}</textarea>
+                    </div>
+                    <div class="step-4">
+                        <span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span>
+                        <input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${(p.specific_s3 || '')}" onchange="updateContent(${i}, 'specific_s3', this.value)">
+                    </div>
+                    <div class="step-5">
+                        <span class="step-label">5. Effect / Analysis</span>
+                        <textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${(p.effect || '')}</textarea>
+                    </div>
+                    <div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;">
+                        <span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span>
+                        <input class="admin-input" style="width:95%; border-color:red;" value="${(p.distractor || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'distractor', this.value)">
+                    </div>
+                `;
+                cList.appendChild(div);
+            });
+        }
+
+        function renderList(elId, arr, key) {
+            var el = document.getElementById(elId);
+            el.innerHTML = '';
+            if (!arr) arr = [];
+            arr.forEach(function(txt, i) {
+                var row = document.createElement('div');
+                row.className = 'input-row';
+                row.innerHTML = `
+                    <input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)">
+                    <button class="del-btn" onclick="delList('${key}', ${i})">X</button>
+                `;
+                el.appendChild(row);
+            });
         }
 
         // --- GAME LOGIC ---
@@ -565,184 +749,6 @@
             var l = gameState.currentLevel;
             badge.innerText = "LEVEL " + l;
             badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
-        }
-
-        // --- ADMIN UI RENDERERS ---
-        function renderAdminUI() {
-            safeSetVal('edit-topic', config.topic || "");
-            safeSetVal('edit-start-lvl', config.settings.startLevel);
-            safeSetVal('edit-max-lvl', config.settings.maxLevel);
-            safeSetVal('edit-streak', config.settings.streakThreshold);
-            safeSetVal('edit-app-title', config.appTitle);
-            safeSetVal('edit-admin-pass', config.adminPass);
-            
-            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
-            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
-            
-            safeSetVal('s1-mode', config.worksheetSettings.s1_mode || 'text');
-            safeSetVal('s2-mode', config.worksheetSettings.s2_mode || 'line');
-            safeSetVal('quote-mode', config.worksheetSettings.quote_mode || 'text');
-            safeSetVal('s3-mode', config.worksheetSettings.s3_mode || 'line');
-            safeSetVal('s4-mode', config.worksheetSettings.s4_mode || 'line');
-
-            renderList('list-s1', config.starters_evidence, 'starters_evidence');
-            renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
-            
-            var cList = document.getElementById('list-content');
-            cList.innerHTML = '';
-            config.content_pairs.forEach(function(p, i) {
-                var div = document.createElement('div');
-                div.className = "content-card";
-                div.innerHTML = `
-                    <div class="content-card-header">
-                        <span>Answer Set #${i+1}</span>
-                        <button class="del-btn" onclick="delContent(${i})">Delete</button>
-                    </div>
-                    <div class="step-1">
-                        <span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span>
-                        <input class="admin-input" style="width:95%" value="${(p.specific_s1 || '')}" onchange="updateContent(${i}, 'specific_s1', this.value)">
-                    </div>
-                    <div class="step-2">
-                        <span class="step-label">2. Method / Terminology</span>
-                        <input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${(p.method || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)">
-                    </div>
-                    <div class="step-3">
-                        <span class="step-label">3. Evidence / Quote</span>
-                        <textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${(p.quote || '')}</textarea>
-                    </div>
-                    <div class="step-4">
-                        <span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span>
-                        <input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${(p.specific_s3 || '')}" onchange="updateContent(${i}, 'specific_s3', this.value)">
-                    </div>
-                    <div class="step-5">
-                        <span class="step-label">5. Effect / Analysis</span>
-                        <textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${(p.effect || '')}</textarea>
-                    </div>
-                    <div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;">
-                        <span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span>
-                        <input class="admin-input" style="width:95%; border-color:red;" value="${(p.distractor || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'distractor', this.value)">
-                    </div>
-                `;
-                cList.appendChild(div);
-            });
-        }
-
-        function renderList(elId, arr, key) {
-            var el = document.getElementById(elId);
-            el.innerHTML = '';
-            // Ensure array exists
-            if (!arr) arr = [];
-            arr.forEach(function(txt, i) {
-                var row = document.createElement('div');
-                row.className = 'input-row';
-                row.innerHTML = `
-                    <input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)">
-                    <button class="del-btn" onclick="delList('${key}', ${i})">X</button>
-                `;
-                el.appendChild(row);
-            });
-        }
-
-        // --- UPDATE HANDLERS ---
-        function updateSettings() {
-            config.settings.startLevel = parseInt(document.getElementById('edit-start-lvl').value);
-            config.settings.maxLevel = parseInt(document.getElementById('edit-max-lvl').value);
-            config.settings.streakThreshold = parseInt(document.getElementById('edit-streak').value);
-            saveLocal(false);
-        }
-
-        function updateWS() {
-            config.worksheetSettings = {
-                showTask1: document.getElementById('ws-task1').checked,
-                showTask2: document.getElementById('ws-task2').checked,
-                s1_mode: document.getElementById('s1-mode').value,
-                s2_mode: document.getElementById('s2-mode').value,
-                quote_mode: document.getElementById('quote-mode').value,
-                s3_mode: document.getElementById('s3-mode').value,
-                s4_mode: document.getElementById('s4-mode').value
-            };
-            saveLocal(false);
-        }
-
-        function updateList(key, idx, val) { config[key][idx] = val; saveLocal(false); }
-        function delList(key, idx) { config[key].splice(idx, 1); saveLocal(true); } 
-        
-        function addItem(type) { 
-            try {
-                // Initialize if missing
-                if (!config.starters_evidence) config.starters_evidence = [];
-                if (!config.starters_evaluative) config.starters_evaluative = [];
-
-                var text = prompt("Enter text for new starter:");
-                if(text) {
-                    if(type==='s1') config.starters_evidence.push(text);
-                    if(type==='s3') config.starters_evaluative.push(text);
-                    saveLocal(true); 
-                }
-            } catch(e) {
-                alert("Error adding item: " + e.message);
-            }
-        }
-
-        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; saveLocal(false); }
-        function delContent(idx) { 
-            if(confirm("Delete this quote set?")) {
-                config.content_pairs.splice(idx, 1);
-                saveLocal(true); 
-            }
-        }
-        function addContent() {
-            try {
-                if (!config.content_pairs) config.content_pairs = [];
-                
-                config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" });
-                saveLocal(true);
-                
-                setTimeout(function() {
-                    var list = document.getElementById('list-content');
-                    if(list && list.lastElementChild) list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
-                }, 200);
-            } catch(e) {
-                alert("Error adding content: " + e.message);
-            }
-        }
-
-        // --- TRIGGER SAVE WITH FEEDBACK ---
-        function triggerSave() {
-            try {
-                config.appTitle = document.getElementById('edit-app-title').value;
-                config.adminPass = document.getElementById('edit-admin-pass').value;
-                config.topic = document.getElementById('edit-topic').value;
-                
-                // Explicitly call update settings to capture dropdowns
-                updateSettings();
-                updateWS();
-
-                localStorage.setItem(STORE_KEY, JSON.stringify(config));
-                
-                // VISUAL FEEDBACK
-                var btn = document.getElementById('save-btn');
-                var originalText = btn.innerText;
-                var originalColor = btn.style.background;
-                
-                btn.innerText = "Saved!";
-                btn.style.background = "#27ae60"; // Green
-                
-                setTimeout(function() {
-                    btn.innerText = originalText;
-                    btn.style.background = originalColor;
-                }, 1000);
-
-                // Re-render Game
-                gameState.currentLevel = config.settings.startLevel;
-                updateScoreBoard();
-                document.getElementById('topic-display').innerText = "Question: " + (config.topic || "Analysis");
-                renderStage0();
-                renderWorksheets();
-
-            } catch(e) {
-                alert("Save Failed! Storage might be full.\n" + e.message);
-            }
         }
 
         function renderWorksheets() {
