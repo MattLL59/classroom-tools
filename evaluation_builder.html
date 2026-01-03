@@ -7,7 +7,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
     <script>
-        // --- 1. DEFAULT DATA (The Safety Net) ---
+        // --- 1. ROBUST DEFAULT DATA ---
         var defaultData = {
             appTitle: "Evaluation Architect",
             topic: "How is the character presented?",
@@ -15,7 +15,7 @@
             settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3 },
             worksheetSettings: {
                 showTask1: true, showTask2: true,
-                s1_mode: "text", s2_mode: "line", quote_mode: "text", s3_mode: "line", s4_mode: "line"
+                s1_mode: "text", s2_mode: "text", quote_mode: "text", s3_mode: "text", s4_mode: "text"
             },
             starters_evidence: [ "The writer uses", "The author explicitly chooses", "The text presents" ],
             starters_evaluative: [ "to effectively suggest", "in order to imply", "which creates the impression" ],
@@ -25,16 +25,14 @@
             ]
         };
 
-        // --- 2. CONFIGURATION ---
-        // Changed Key to force fresh start
-        var STORE_KEY = 'eval_arch_v63_clean'; 
+        var STORE_KEY = 'eval_arch_v64'; // Version bump
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         var gameState = { currentLevel: 1, streak: 0 };
         var currentTypingStage = "";
 
-        // --- 3. INITIALIZATION ---
+        // --- 2. INIT ---
         function init() {
             try {
                 var local = localStorage.getItem(STORE_KEY);
@@ -44,21 +42,20 @@
                     config = Object.assign({}, defaultData, saved);
                     if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
                     if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
+                    
+                    // Critical: If content array is empty/broken, restore default
+                    if(!config.content_pairs || config.content_pairs.length === 0) {
+                        config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+                    }
                 }
             } catch(e) {
-                console.log("Load error, resetting to defaults.");
+                console.log("Load error, using defaults.");
                 config = JSON.parse(JSON.stringify(defaultData));
             }
-
-            // SAFETY CHECK: If content became empty, restore defaults
-            if (!config.content_pairs || config.content_pairs.length === 0) {
-                config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
-            }
-            if (!config.starters_evidence || config.starters_evidence.length === 0) {
-                config.starters_evidence = JSON.parse(JSON.stringify(defaultData.starters_evidence));
-            }
-
+            
+            // Render everything immediately
             updateDOM();
+            renderAdminUI(); // Pre-populate Admin panel
         }
 
         function updateDOM() {
@@ -68,6 +65,17 @@
             gameState.currentLevel = parseInt(config.settings.startLevel);
             updateScoreBoard();
             renderStage0();
+        }
+
+        // --- 3. DOM HELPERS ---
+        function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
+        function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
+        function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
+        // Safe string escaper for inputs
+        function esc(str) {
+            if (str === undefined || str === null) return "";
+            return str.toString().replace(/"/g, '&quot;');
         }
 
         // --- 4. CORE FUNCTIONS ---
@@ -81,7 +89,7 @@
         function saveLocal(render) {
             if(render === undefined) render = true;
             try {
-                // Only capture from UI if UI is actually open
+                // If Admin UI is open, grab values
                 if(document.getElementById('admin-modal').style.display === 'flex') {
                     updateSettingsFromUI();
                 }
@@ -97,10 +105,10 @@
 
                 if(render) {
                     renderAdminUI();
-                    if(currentQuoteId) updateBuilder();
-                    else renderStage0();
+                    if(!currentQuoteId) renderStage0(); // Only refresh game if not in middle of play
                 }
             } catch(e) {
+                console.error("Save error:", e);
                 alert("Error saving: " + e.message);
             }
         }
@@ -124,12 +132,6 @@
             if(el = document.getElementById('s3-mode')) config.worksheetSettings.s3_mode = el.value;
             if(el = document.getElementById('s4-mode')) config.worksheetSettings.s4_mode = el.value;
         }
-
-        // --- DOM HELPERS ---
-        function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
-        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
-        function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
-        function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
 
         window.onload = init;
     </script>
@@ -320,6 +322,7 @@
             if (input === config.adminPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
+                // Trigger Render explicitly
                 renderAdminUI();
             } else {
                 alert("Incorrect Password");
@@ -396,7 +399,7 @@
             arr.forEach(function(txt, i) {
                 var row = document.createElement('div');
                 row.className = 'input-row';
-                row.innerHTML = `<input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)"><button class="del-btn" onclick="delList('${key}', ${i})">X</button>`;
+                row.innerHTML = `<input class="admin-input" value="${esc(txt)}" onchange="updateList('${key}', ${i}, this.value)"><button class="del-btn" onclick="delList('${key}', ${i})">X</button>`;
                 el.appendChild(row);
             });
         }
@@ -498,6 +501,37 @@
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+        }
+
+        function renderAdminUI() {
+            safeSetVal('edit-topic', config.topic);
+            safeSetVal('edit-start-lvl', config.settings.startLevel);
+            safeSetVal('edit-max-lvl', config.settings.maxLevel);
+            safeSetVal('edit-streak', config.settings.streakThreshold);
+            safeSetVal('edit-app-title', config.appTitle);
+            safeSetVal('edit-admin-pass', config.adminPass);
+            
+            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
+            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
+            
+            safeSetVal('s1-mode', config.worksheetSettings.s1_mode);
+            safeSetVal('s2-mode', config.worksheetSettings.s2_mode);
+            safeSetVal('quote-mode', config.worksheetSettings.quote_mode);
+            safeSetVal('s3-mode', config.worksheetSettings.s3_mode);
+            safeSetVal('s4-mode', config.worksheetSettings.s4_mode);
+
+            renderList('list-s1', config.starters_evidence, 'starters_evidence');
+            renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
+            
+            var cList = document.getElementById('list-content');
+            cList.innerHTML = '';
+            config.content_pairs.forEach(function(p, i) {
+                var div = document.createElement('div');
+                div.className = "content-card";
+                div.innerHTML = `<div class="content-card-header"><span>Answer Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div><div class="step-1"><span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i}, 'specific_s1', this.value)"></div><div class="step-2"><span class="step-label">2. Method / Terminology</span><input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${esc(p.method)}" onchange="updateContent(${i}, 'method', this.value)"></div><div class="step-3"><span class="step-label">3. Evidence / Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${esc(p.quote)}</textarea></div><div class="step-4"><span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${esc(p.specific_s3)}" onchange="updateContent(${i}, 'specific_s3', this.value)"></div><div class="step-5"><span class="step-label">5. Effect / Analysis</span><textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${esc(p.effect)}</textarea></div><div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;"><span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span><input class="admin-input" style="width:95%; border-color:red;" value="${esc(p.distractor)}" onchange="updateContent(${i}, 'distractor', this.value)"></div>`;
+                cList.appendChild(div);
+            });
+            if(document.getElementById('config-io-area')) document.getElementById('config-io-area').value = JSON.stringify(config);
         }
     </script>
 </body>
