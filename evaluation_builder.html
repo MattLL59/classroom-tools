@@ -34,8 +34,8 @@
             if (input === storedPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
-                // Trigger UI Refresh
-                setTimeout(renderAdminUI, 50);
+                // Trigger Render
+                setTimeout(renderAdminUI, 100);
             } else {
                 alert("Incorrect Password");
             }
@@ -285,7 +285,8 @@
 
         // --- SAFE DOM HELPERS ---
         function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
-        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
+        // FIX: Return NULL if element missing, so we can detect it
+        function getSafeCheckElement(id) { return document.getElementById(id); }
         function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
         function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
 
@@ -320,8 +321,6 @@
         }
 
         // --- UPDATE HANDLERS ---
-        // GUARDIAN FIX: Do not update config to 'false' if element is missing.
-        // Instead, only update if the element actually exists in DOM.
         function updateSettings() {
             var elStart = document.getElementById('edit-start-lvl');
             if(elStart) config.settings.startLevel = parseInt(elStart.value);
@@ -334,7 +333,7 @@
         }
 
         function updateWS() {
-            // GUARDIAN FIX: Ensure config object exists
+            // FIX: If element is missing (Admin closed), DO NOT overwrite config with False
             if(!config.worksheetSettings) config.worksheetSettings = {};
 
             var t1 = document.getElementById('ws-task1');
@@ -343,20 +342,12 @@
             var t2 = document.getElementById('ws-task2');
             if(t2) config.worksheetSettings.showTask2 = t2.checked;
 
-            var s1 = document.getElementById('s1-mode');
-            if(s1) config.worksheetSettings.s1_mode = s1.value;
-
-            var s2 = document.getElementById('s2-mode');
-            if(s2) config.worksheetSettings.s2_mode = s2.value;
-
-            var q = document.getElementById('quote-mode');
-            if(q) config.worksheetSettings.quote_mode = q.value;
-
-            var s3 = document.getElementById('s3-mode');
-            if(s3) config.worksheetSettings.s3_mode = s3.value;
-
-            var s4 = document.getElementById('s4-mode');
-            if(s4) config.worksheetSettings.s4_mode = s4.value;
+            // Dropdowns
+            var s1 = document.getElementById('s1-mode'); if(s1) config.worksheetSettings.s1_mode = s1.value;
+            var s2 = document.getElementById('s2-mode'); if(s2) config.worksheetSettings.s2_mode = s2.value;
+            var q = document.getElementById('quote-mode'); if(q) config.worksheetSettings.quote_mode = q.value;
+            var s3 = document.getElementById('s3-mode'); if(s3) config.worksheetSettings.s3_mode = s3.value;
+            var s4 = document.getElementById('s4-mode'); if(s4) config.worksheetSettings.s4_mode = s4.value;
         }
 
         window.onload = function() { init(); };
@@ -382,7 +373,7 @@
                     config = defaultConfig;
                 }
                 
-                // FORCE DEFAULTS IF MISSING
+                // FORCE DEFAULTS ON LOAD IF MISSING
                 if(config.worksheetSettings.showTask1 === undefined) config.worksheetSettings.showTask1 = true;
                 if(config.worksheetSettings.showTask2 === undefined) config.worksheetSettings.showTask2 = true;
 
@@ -391,7 +382,7 @@
                 document.title = config.appTitle || "Evaluation Architect";
                 gameState.currentLevel = parseInt(config.settings.startLevel);
                 
-                // CRITICAL: RENDER ADMIN UI INVISIBLY ON START TO CREATE DOM ELEMENTS
+                // Init UI invisible to prep elements
                 renderAdminUI();
 
                 updateScoreBoard();
@@ -401,19 +392,18 @@
             } catch(e) { console.error(e); }
         }
 
-        // --- EXPORT STRING BUILDER (DIRECT DATA + BORDERS) ---
+        // --- EXPORT STRING BUILDER ---
         function getExportHTML() {
-            // Force config refresh (safe due to Guardian Fix)
-            updateWS(); 
+            // DO NOT CALL UPDATEWS HERE. IT MIGHT BREAK IF UI CLOSED.
+            // USE STORED CONFIG ONLY.
 
             var html = "<h1>Worksheet: " + (config.topic || "Analysis") + "</h1>";
             var blank = "__________________";
             
-            // Check flags - default to TRUE if undefined
+            // Explicit check against boolean false
             var doTask1 = (config.worksheetSettings.showTask1 !== false);
             var doTask2 = (config.worksheetSettings.showTask2 !== false);
 
-            // Task 1
             if(doTask1) {
                 html += "<h2>Task 1: Matching Analysis</h2>";
                 html += "<table border='1' cellpadding='10' cellspacing='0' style='width:100%; border-collapse:collapse; margin-bottom:30px;'>";
@@ -428,7 +418,6 @@
                 html += "</table>";
             }
 
-            // Task 2
             if(doTask2) {
                 html += "<h2>Task 2: Sentence Builder</h2>";
                 var s = config.worksheetSettings;
@@ -447,11 +436,16 @@
                 });
             }
             
+            if(!doTask1 && !doTask2) {
+                html += "<p><em>No tasks selected in settings. Please check 'Include Matching Task' or 'Include Sentence Task' in the Admin Panel.</em></p>";
+            }
+
             return html;
         }
 
-        // --- NEW EXPORT FUNCTIONS ---
+        // --- EXPORT FUNCTIONS ---
         function printWorksheet() {
+            // Note: Removed syncAllData to avoid accidental overwrite
             var content = "<html><head><title>Worksheet</title>";
             content += "<style>body { font-family: 'Arial', sans-serif; padding: 40px; } h2 { border-bottom: 2px solid black; padding-bottom: 10px; }</style>";
             content += "</head><body>";
@@ -465,6 +459,7 @@
         }
 
         function downloadWordDoc() {
+            // Note: Removed syncAllData to avoid accidental overwrite
             var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Arial', sans-serif; } table { width: 100%; border-collapse: collapse; } td { border: 1px solid black; padding: 10px; }</style></head><body>";
             var footer = "</body></html>";
             var content = getExportHTML();
@@ -497,7 +492,7 @@
             document.body.removeChild(a);
         }
 
-        // --- GAME LOGIC (Brief) ---
+        // --- GAME LOGIC ---
         function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
         function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
         function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
