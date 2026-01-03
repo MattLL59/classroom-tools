@@ -265,7 +265,7 @@
     </div>
 
     <script>
-        var STORE_KEY = 'eval_arch_v53';
+        var STORE_KEY = 'eval_arch_v55'; // Increment to clear cache
         
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -285,13 +285,18 @@
                 config.appTitle = getSafeVal('edit-app-title');
                 config.adminPass = getSafeVal('edit-admin-pass');
                 config.topic = getSafeVal('edit-topic');
+                
                 updateSettings();
                 updateWS();
+
                 localStorage.setItem(STORE_KEY, JSON.stringify(config));
+                
                 gameState.currentLevel = config.settings.startLevel;
                 updateScoreBoard();
                 document.getElementById('topic-display').innerText = "Question: " + (config.topic || "Analysis");
+                
                 updateConfigDisplay();
+
                 if(render) {
                     renderStage0();
                     renderAdminUI();
@@ -302,7 +307,6 @@
             }
         }
 
-        // --- UPDATE HANDLERS ---
         function updateSettings() {
             config.settings.startLevel = parseInt(getSafeVal('edit-start-lvl')) || 1;
             config.settings.maxLevel = parseInt(getSafeVal('edit-max-lvl')) || 3;
@@ -350,24 +354,28 @@
             } catch(e) { console.error(e); }
         }
 
-        // --- EXPORT STRING BUILDER (DIRECT DATA) ---
+        // --- EXPORT STRING BUILDER (DIRECT DATA + BORDERS) ---
         function getExportHTML() {
             var html = "<h1>Worksheet: " + (config.topic || "Analysis") + "</h1>";
             var blank = "__________________";
             
-            // Build Task 1
+            // Task 1
             if(config.worksheetSettings.showTask1) {
                 html += "<h2>Task 1: Matching Analysis</h2>";
-                html += "<table style='width:100%; border-collapse:collapse; margin-bottom:30px;'>";
-                // Randomize right side
+                // EXPLICIT BORDERS FOR WORD
+                html += "<table border='1' cellpadding='10' cellspacing='0' style='width:100%; border-collapse:collapse; margin-bottom:30px;'>";
                 var rightSide = [].concat(config.content_pairs).sort(function() { return Math.random() - 0.5; });
                 config.content_pairs.forEach(function(p, i) {
-                    html += `<tr><td style='padding:15px; border:1px solid #ccc; width:40%;'><strong>"${p.quote}"</strong></td><td style='width:20%; text-align:center;'>&rarr;</td><td style='padding:15px; border:1px solid #ccc; width:40%;'>${rightSide[i].effect}</td></tr>`;
+                    html += `<tr>
+                        <td style='width:40%; border:1px solid #000; padding:10px;'><strong>"${p.quote}"</strong></td>
+                        <td style='width:20%; border:1px solid #000; text-align:center; padding:10px;'>&rarr;</td>
+                        <td style='width:40%; border:1px solid #000; padding:10px;'>${rightSide[i].effect}</td>
+                    </tr>`;
                 });
                 html += "</table>";
             }
 
-            // Build Task 2
+            // Task 2
             if(config.worksheetSettings.showTask2) {
                 html += "<h2>Task 2: Sentence Builder</h2>";
                 var s = config.worksheetSettings;
@@ -390,8 +398,12 @@
 
         // --- NEW EXPORT FUNCTIONS ---
         function printWorksheet() {
+            // Force Update Config from UI before printing
+            updateSettings();
+            updateWS();
+            
             var content = "<html><head><title>Worksheet</title>";
-            content += "<style>body { font-family: 'Arial', sans-serif; padding: 40px; } h2 { border-bottom: 2px solid black; padding-bottom: 10px; }</style>";
+            content += "<style>body { font-family: 'Arial', sans-serif; padding: 40px; } table { width: 100%; border-collapse: collapse; } td { padding: 10px; border: 1px solid black; }</style>";
             content += "</head><body>";
             content += getExportHTML();
             content += "</body></html>";
@@ -403,7 +415,11 @@
         }
 
         function downloadWordDoc() {
-            var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Arial', sans-serif; }</style></head><body>";
+            // Force Update Config from UI
+            updateSettings();
+            updateWS();
+
+            var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Arial', sans-serif; } table { width: 100%; border-collapse: collapse; } td { border: 1px solid black; padding: 10px; }</style></head><body>";
             var footer = "</body></html>";
             var content = getExportHTML();
             var sourceHTML = header + content + footer;
@@ -418,6 +434,7 @@
             document.body.removeChild(link);
         }
 
+        // --- APP EXPORT ---
         function exportApp() {
             var json = JSON.stringify(config, null, 4);
             document.getElementById('app-config').textContent = json;
@@ -435,7 +452,7 @@
             document.body.removeChild(a);
         }
 
-        // --- GAME LOGIC (Brief) ---
+        // --- GAME LOGIC ---
         function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
         function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
         function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
