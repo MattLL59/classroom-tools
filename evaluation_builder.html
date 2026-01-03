@@ -25,7 +25,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v65'; // Version bump
+        var STORE_KEY = 'eval_arch_v66_fixed'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -41,18 +41,27 @@
                     config = Object.assign({}, defaultData, saved);
                     if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
                     if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
-                    
-                    if(!config.content_pairs || config.content_pairs.length === 0) {
-                        config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
-                    }
                 }
             } catch(e) {
                 console.log("Load error, using defaults.");
                 config = JSON.parse(JSON.stringify(defaultData));
             }
+
+            // --- AGGRESSIVE DATA RESTORATION ---
+            // If data is empty (user accidentally deleted all, or save corrupted), RESTORE DEFAULTS
+            if(!config.content_pairs || config.content_pairs.length === 0) {
+                console.log("Empty content detected. Restoring defaults.");
+                config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+            }
+            if(!config.starters_evidence || config.starters_evidence.length === 0) {
+                config.starters_evidence = JSON.parse(JSON.stringify(defaultData.starters_evidence));
+            }
+            if(!config.starters_evaluative || config.starters_evaluative.length === 0) {
+                config.starters_evaluative = JSON.parse(JSON.stringify(defaultData.starters_evaluative));
+            }
             
             updateDOM();
-            renderAdminUI(); 
+            renderAdminUI(); // Render immediately in background
         }
 
         function updateDOM() {
@@ -69,7 +78,10 @@
         function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
         function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
         function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
-        function esc(str) { return str ? str.toString().replace(/"/g, '&quot;') : ""; }
+        function esc(str) { 
+            if(str === null || str === undefined) return "";
+            return str.toString().replace(/"/g, '&quot;'); 
+        }
 
         // --- 4. CORE FUNCTIONS ---
         function forceReset() {
@@ -442,7 +454,7 @@
 
                     var getPart = function(mode, text) {
                         if(mode === 'text') return text;
-                        if(mode === 'scaffold') return blank; // Buttons game, Blank PDF
+                        if(mode === 'scaffold') return blank; 
                         if(mode === 'line') return blank;
                         return "";
                     };
@@ -497,6 +509,37 @@
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+        }
+
+        function renderAdminUI() {
+            safeSetVal('edit-topic', config.topic);
+            safeSetVal('edit-start-lvl', config.settings.startLevel);
+            safeSetVal('edit-max-lvl', config.settings.maxLevel);
+            safeSetVal('edit-streak', config.settings.streakThreshold);
+            safeSetVal('edit-app-title', config.appTitle);
+            safeSetVal('edit-admin-pass', config.adminPass);
+            
+            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
+            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
+            
+            safeSetVal('s1-mode', config.worksheetSettings.s1_mode);
+            safeSetVal('s2-mode', config.worksheetSettings.s2_mode);
+            safeSetVal('quote-mode', config.worksheetSettings.quote_mode);
+            safeSetVal('s3-mode', config.worksheetSettings.s3_mode);
+            safeSetVal('s4-mode', config.worksheetSettings.s4_mode);
+
+            renderList('list-s1', config.starters_evidence, 'starters_evidence');
+            renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
+            
+            var cList = document.getElementById('list-content');
+            cList.innerHTML = '';
+            config.content_pairs.forEach(function(p, i) {
+                var div = document.createElement('div');
+                div.className = "content-card";
+                div.innerHTML = `<div class="content-card-header"><span>Answer Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div><div class="step-1"><span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i}, 'specific_s1', this.value)"></div><div class="step-2"><span class="step-label">2. Method / Terminology</span><input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${esc(p.method)}" onchange="updateContent(${i}, 'method', this.value)"></div><div class="step-3"><span class="step-label">3. Evidence / Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${esc(p.quote)}</textarea></div><div class="step-4"><span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${esc(p.specific_s3)}" onchange="updateContent(${i}, 'specific_s3', this.value)"></div><div class="step-5"><span class="step-label">5. Effect / Analysis</span><textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${esc(p.effect)}</textarea></div><div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;"><span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span><input class="admin-input" style="width:95%; border-color:red;" value="${esc(p.distractor)}" onchange="updateContent(${i}, 'distractor', this.value)"></div>`;
+                cList.appendChild(div);
+            });
+            if(document.getElementById('config-io-area')) document.getElementById('config-io-area').value = JSON.stringify(config);
         }
     </script>
 </body>
