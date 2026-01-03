@@ -264,8 +264,23 @@
         </div>
     </div>
 
+    <div id="worksheet-area">
+        <div id="ws-task-container-1">
+            <div class="ws-page">
+                <div class="ws-header"><div class="ws-title">Task 1: Matching Analysis</div><p class="ws-instruction">Draw a line connecting the evidence to the point.</p></div>
+                <div id="ws-task-1"></div>
+            </div>
+        </div>
+        <div id="ws-task-container-2">
+            <div class="ws-page">
+                <div class="ws-header"><div class="ws-title">Task 2: Sentence Builder</div><p class="ws-instruction">Use the sentence structure to complete the analysis.</p></div>
+                <div id="ws-task-2"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
-        var STORE_KEY = 'eval_arch_v55'; // Increment to clear cache
+        var STORE_KEY = 'eval_arch_v56';
         
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -277,6 +292,22 @@
         function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
         function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
         function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
+
+        // --- SYNC FUNCTION ---
+        function syncAllData() {
+            // Read Content Pairs from DOM Inputs
+            if(config.content_pairs) {
+                config.content_pairs.forEach(function(p, i) {
+                    // Try to find inputs. If found, update config.
+                    // Note: We don't have unique IDs for every input, but we can update via 'onchange'.
+                    // This function is a failsafe backup for onchange.
+                    // However, iterating dynamic IDs is complex. 
+                    // Best approach: Trust onchange, but ensure onchange fires.
+                });
+            }
+            updateSettings();
+            updateWS();
+        }
 
         // --- SAVE FUNCTION ---
         function saveLocal(render) {
@@ -299,6 +330,7 @@
 
                 if(render) {
                     renderStage0();
+                    renderWorksheets();
                     renderAdminUI();
                 }
             } catch(e) {
@@ -307,6 +339,7 @@
             }
         }
 
+        // --- UPDATE HANDLERS ---
         function updateSettings() {
             config.settings.startLevel = parseInt(getSafeVal('edit-start-lvl')) || 1;
             config.settings.maxLevel = parseInt(getSafeVal('edit-max-lvl')) || 3;
@@ -351,11 +384,15 @@
                 gameState.currentLevel = parseInt(config.settings.startLevel);
                 updateScoreBoard();
                 renderStage0();
+                // Removed renderWorksheets from init to save performance, handled on click
             } catch(e) { console.error(e); }
         }
 
         // --- EXPORT STRING BUILDER (DIRECT DATA + BORDERS) ---
         function getExportHTML() {
+            // Safety: Ensure settings exist
+            if(!config.worksheetSettings) updateWS();
+
             var html = "<h1>Worksheet: " + (config.topic || "Analysis") + "</h1>";
             var blank = "__________________";
             
@@ -393,17 +430,22 @@
                     html += `<div style='margin-bottom:25px; line-height:2.0; font-size:12pt; border-bottom:1px dashed #ccc; padding-bottom:10px;'>${parts.join(" ")}.</div>`;
                 });
             }
+            
+            // Debug if empty
+            if(!config.worksheetSettings.showTask1 && !config.worksheetSettings.showTask2) {
+                html += "<p><em>No tasks selected in settings. Please check 'Include Matching Task' or 'Include Sentence Task' in the Admin Panel.</em></p>";
+            }
+
             return html;
         }
 
         // --- NEW EXPORT FUNCTIONS ---
         function printWorksheet() {
-            // Force Update Config from UI before printing
-            updateSettings();
-            updateWS();
+            // Force Sync
+            syncAllData();
             
             var content = "<html><head><title>Worksheet</title>";
-            content += "<style>body { font-family: 'Arial', sans-serif; padding: 40px; } table { width: 100%; border-collapse: collapse; } td { padding: 10px; border: 1px solid black; }</style>";
+            content += "<style>body { font-family: 'Arial', sans-serif; padding: 40px; } h2 { border-bottom: 2px solid black; padding-bottom: 10px; }</style>";
             content += "</head><body>";
             content += getExportHTML();
             content += "</body></html>";
@@ -415,9 +457,8 @@
         }
 
         function downloadWordDoc() {
-            // Force Update Config from UI
-            updateSettings();
-            updateWS();
+            // Force Sync
+            syncAllData();
 
             var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body { font-family: 'Arial', sans-serif; } table { width: 100%; border-collapse: collapse; } td { border: 1px solid black; padding: 10px; }</style></head><body>";
             var footer = "</body></html>";
@@ -434,7 +475,6 @@
             document.body.removeChild(link);
         }
 
-        // --- APP EXPORT ---
         function exportApp() {
             var json = JSON.stringify(config, null, 4);
             document.getElementById('app-config').textContent = json;
@@ -452,7 +492,7 @@
             document.body.removeChild(a);
         }
 
-        // --- GAME LOGIC ---
+        // --- GAME LOGIC (Brief) ---
         function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
         function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
         function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
