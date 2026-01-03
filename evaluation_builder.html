@@ -311,4 +311,568 @@
             starters_evidence: [ "The writer uses", "The author explicitly chooses", "The text presents" ],
             starters_evaluative: [ "to effectively suggest", "in order to imply", "which creates the impression" ],
             ao4_starters: [ "I completely agree that", "The writer successfully conveys that", "It is clear that" ],
-            ao4_markers: [ "Furthermore,", "However,", "Above
+            ao4_markers: [ "Furthermore,", "However,", "Above all,", "Consequently,", "Similarly,", "In contrast," ],
+            ao4_links: [ "which is evident when", "as seen in the line", "demonstrated by the phrase" ],
+            content_pairs: [
+                { 
+                    id: "c1", 
+                    specific_s1: "", quote: "neighbour from hell", method: "the aggressive metaphor", specific_s3: "", effect: "that the BBC is impossible to live alongside.", distractor: "that the BBC lives in a hot place.",
+                    structure: ['s1', 's2', 'quote', 's3', 's4'] 
+                },
+                { 
+                    id: "c2", 
+                    specific_s1: "", quote: "taken an axe", method: "the violent imagery", specific_s3: "", effect: "that they are destroying local news deliberately.", distractor: "that they are doing some gardening.",
+                    structure: ['s1', 's2', 'quote', 's3', 's4'] 
+                }
+            ]
+        };
+
+        var STORE_KEY = 'eval_arch_v74_fix'; 
+        var config = JSON.parse(JSON.stringify(defaultData));
+        var currentQuoteId = null;
+        var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
+        var gameState = { currentLevel: 1, streak: 0, score: 0 };
+        var currentStageIndex = 0;
+        var currentGameStructure = [];
+
+        // --- 2. INIT ---
+        window.onload = function() {
+            try {
+                // Force UI Clean on Start
+                document.getElementById('admin-modal').style.display = 'none';
+                document.getElementById('levelup-overlay').style.display = 'none';
+                document.getElementById('win-overlay').style.display = 'none';
+                document.getElementById('overlay').style.display = 'none';
+
+                var local = localStorage.getItem(STORE_KEY);
+                if(local) {
+                    var saved = JSON.parse(local);
+                    config = Object.assign({}, defaultData, saved);
+                    if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
+                    if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
+                }
+            } catch(e) {
+                console.log("Load error, using defaults.");
+                config = JSON.parse(JSON.stringify(defaultData));
+            }
+
+            // Safety Defaults
+            if(!config.content_pairs || config.content_pairs.length === 0) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+            config.content_pairs.forEach(p => {
+                if(!p.structure || p.structure.length !== 5) p.structure = ['s1', 's2', 'quote', 's3', 's4'];
+            });
+            if(!config.default_structure) config.default_structure = ['s1', 's2', 'quote', 's3', 's4'];
+
+            updateDOM();
+            renderAdminUI();
+        };
+
+        function updateDOM() {
+            document.getElementById('app-title-display').innerText = config.appTitle;
+            document.getElementById('topic-display').innerText = "Question: " + config.topic;
+            document.title = config.appTitle;
+            gameState.currentLevel = parseInt(config.settings.startLevel);
+            updateScoreBoard();
+            resetGame();
+        }
+
+        // --- 3. CORE ENGINE ---
+        function getStageLabel(key) {
+            var isAO4 = (config.gameMode === "AO4");
+            if(key === 's1') return isAO4 ? "The Judgement" : "Evidence Starter";
+            if(key === 's2') return isAO4 ? "Discourse Marker" : "The Method";
+            if(key === 'quote') return "Evidence / Quote";
+            if(key === 's3') return isAO4 ? "Evidence Link" : "Evaluative Link";
+            if(key === 's4') return isAO4 ? "Critical Comment" : "Inference & Effect";
+            return "Unknown Stage";
+        }
+
+        function getStageSubtitle(key) {
+            var isAO4 = (config.gameMode === "AO4");
+            if(key === 's1') return isAO4 ? "State your opinion." : "How will you introduce the quote?";
+            if(key === 's2') return isAO4 ? "Choose a signpost." : "What terminology applies?";
+            if(key === 'quote') return "Select the evidence.";
+            if(key === 's3') return "Connect to the meaning.";
+            if(key === 's4') return "What is the deeper meaning/effect?";
+            return "Select the correct option.";
+        }
+
+        function resetGame() {
+            sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
+            currentStageIndex = 0; 
+            currentQuoteId = null; 
+            currentGameStructure = []; 
+            updateBuilder();
+            renderGameGrid('quote_select_mode'); 
+        }
+
+        function loadStage() {
+            if(currentStageIndex >= currentGameStructure.length) {
+                finishGame();
+                return;
+            }
+
+            var stageKey = currentGameStructure[currentStageIndex];
+
+            // LEVEL 1
+            if(gameState.currentLevel === 1) {
+               if(stageKey === 's4') {
+                    autoFillIntermediates(); 
+                    renderGameGrid('s4');
+                    return;
+                } else if(stageKey === 'quote') {
+                    currentStageIndex++;
+                    loadStage();
+                    return;
+                } else {
+                    currentStageIndex++;
+                    loadStage();
+                    return;
+                }
+            }
+
+            // LEVEL 2 & 3
+            var mode = config.worksheetSettings[stageKey + "_mode"] || "text";
+            if(stageKey === 'quote') mode = config.worksheetSettings.quote_mode;
+
+            if(mode === 'none') {
+                currentStageIndex++;
+                loadStage(); 
+            } else if(mode === 'line') {
+                showTypingMode(getStageLabel(stageKey), stageKey);
+            } else {
+                renderGameGrid(stageKey);
+            }
+        }
+
+        function autoFillIntermediates() {
+            var isAO4 = (config.gameMode === "AO4");
+            var s1List = isAO4 ? config.ao4_starters : config.starters_evidence;
+            var s3List = isAO4 ? config.ao4_links : config.starters_evaluative;
+            
+            if(!sentenceParts.s1) sentenceParts.s1 = s1List[Math.floor(Math.random() * s1List.length)];
+            
+            var pair = config.content_pairs.find(p => p.id === currentQuoteId);
+            if(!sentenceParts.s2) {
+                if(isAO4) sentenceParts.s2 = config.ao4_markers[Math.floor(Math.random() * config.ao4_markers.length)];
+                else sentenceParts.s2 = pair ? pair.method : "the method";
+            }
+            if(!sentenceParts.s3) sentenceParts.s3 = s3List[Math.floor(Math.random() * s3List.length)];
+            updateBuilder();
+        }
+
+        function renderGameGrid(key) {
+            hideAllStages();
+            document.getElementById('stage-area').style.display = 'block';
+            
+            var grid = document.getElementById('game-grid');
+            grid.innerHTML = '';
+
+            // INITIAL QUOTE SELECTION
+            if(key === 'quote_select_mode') {
+                document.getElementById('stage-title').innerText = "Select Evidence";
+                document.getElementById('stage-subtitle').innerText = "Which quote best answers the question?";
+                
+                config.content_pairs.forEach(p => {
+                    var btn = createBtn(p.quote, () => {
+                        currentQuoteId = p.id;
+                        currentGameStructure = p.structure || config.default_structure; 
+                        sentenceParts.quote = `"${p.quote}"`;
+                        currentStageIndex = 0;
+                        updateBuilder();
+                        loadStage();
+                    });
+                    btn.classList.add('btn-white');
+                    grid.appendChild(btn);
+                });
+                return;
+            }
+
+            document.getElementById('stage-title').innerText = (currentStageIndex + 1) + ". " + getStageLabel(key);
+            document.getElementById('stage-subtitle').innerText = getStageSubtitle(key);
+
+            if(key === 'quote') {
+                currentStageIndex++;
+                loadStage();
+                return;
+            }
+
+            var pair = config.content_pairs.find(p => p.id === currentQuoteId);
+            var options = [];
+            var isAO4 = (config.gameMode === "AO4");
+
+            if(key === 's1') {
+                var list = isAO4 ? config.ao4_starters : config.starters_evidence;
+                if(pair && pair.specific_s1) list = [pair.specific_s1];
+                list.forEach(t => options.push({ txt: t, correct: true }));
+            }
+            else if(key === 's2') {
+                if(isAO4) {
+                    config.ao4_markers.forEach(t => options.push({ txt: t, correct: true }));
+                } else {
+                    options.push({ txt: pair.method, correct: true });
+                    var others = config.content_pairs.filter(p => p.id !== currentQuoteId);
+                    if(others[0]) options.push({ txt: others[0].method, correct: false });
+                    if(others[1]) options.push({ txt: others[1].method, correct: false });
+                }
+            }
+            else if(key === 's3') {
+                var list = isAO4 ? config.ao4_links : config.starters_evaluative;
+                if(pair && pair.specific_s3) list = [pair.specific_s3];
+                list.forEach(t => options.push({ txt: t, correct: true }));
+            }
+            else if(key === 's4') {
+                options.push({ txt: pair.effect, correct: true });
+                if(pair.distractor) options.push({ txt: pair.distractor, correct: false });
+            }
+
+            options.sort(() => Math.random() - 0.5);
+            
+            options.forEach(opt => {
+                var colorClass = key === 's1' ? 'btn-s1' : key === 's2' ? 'btn-s2' : key === 's3' ? 'btn-s3' : 'btn-s4';
+                var btn = createBtn(opt.txt, () => {
+                    if(opt.correct) {
+                        sentenceParts[key] = opt.txt;
+                        advanceStage();
+                    } else {
+                        showError();
+                    }
+                });
+                btn.classList.add(colorClass);
+                grid.appendChild(btn);
+            });
+        }
+
+        function createBtn(text, onclick) {
+            var btn = document.createElement('button');
+            btn.className = 'choice-btn';
+            btn.innerHTML = text;
+            btn.onclick = onclick;
+            return btn;
+        }
+
+        function advanceStage() {
+            updateBuilder();
+            currentStageIndex++;
+            loadStage();
+        }
+
+        function submitTyping() {
+            var val = document.getElementById('typing-input').value.trim();
+            if(!val) return alert("Please type something.");
+            var key = currentGameStructure[currentStageIndex];
+            sentenceParts[key] = val;
+            advanceStage();
+        }
+
+        function finishGame() {
+            var points = 2 * Math.pow(2, gameState.currentLevel - 1);
+            gameState.score += points;
+            gameState.streak++;
+            updateScoreBoard();
+
+            if(gameState.streak >= config.settings.streakThreshold) {
+                if(gameState.currentLevel < config.settings.maxLevel) {
+                    showLevelUp(points);
+                } else {
+                    showWin();
+                }
+            } else {
+                hideAllStages();
+                document.getElementById('stage-final').style.display = 'block';
+            }
+        }
+
+        // --- OVERLAYS & UI ---
+        function showLevelUp(pts) {
+            document.getElementById('levelup-overlay').style.display = 'flex';
+            document.getElementById('levelup-msg').innerText = `Level Complete! +${pts} Points`;
+        }
+        function showWin() {
+            document.getElementById('win-overlay').style.display = 'flex';
+            document.getElementById('final-score').innerText = gameState.score;
+        }
+        function closeLevelUp() {
+            gameState.currentLevel++;
+            gameState.streak = 0;
+            document.getElementById('levelup-overlay').style.display = 'none';
+            updateScoreBoard();
+            resetGame();
+        }
+        function showError() {
+            var ov = document.getElementById('overlay');
+            ov.style.display = 'flex';
+            gameState.streak = 0;
+            updateScoreBoard();
+        }
+        function closeOverlay() { document.getElementById('overlay').style.display = 'none'; }
+        
+        function hideAllStages() {
+            document.getElementById('stage-area').style.display = 'none';
+            document.getElementById('typing-interface').style.display = 'none';
+            document.getElementById('stage-final').style.display = 'none';
+        }
+        function showTypingMode(title, key) {
+            hideAllStages();
+            document.getElementById('typing-interface').style.display = 'flex';
+            document.getElementById('typing-title').innerText = title;
+            document.getElementById('typing-input').value = "";
+            document.getElementById('typing-input').focus();
+        }
+
+        function updateBuilder() {
+            var html = "";
+            var struct = currentGameStructure.length > 0 ? currentGameStructure : config.default_structure;
+            
+            struct.forEach(key => {
+                var txt = sentenceParts[key];
+                if(txt) {
+                    var col = key==='s1'?'var(--col-1-pink)': key==='s2'?'var(--col-2-yellow)': key==='quote'?'white': key==='s3'?'var(--col-3-blue)':'var(--col-4-green)';
+                    var border = key==='quote' ? 'border:1px solid #ccc;' : '';
+                    html += `<span class="fragment" style="background:${col}; ${border}">${txt}</span> `;
+                }
+            });
+            document.getElementById('sentence-builder').innerHTML = html || "<span style='color:#ccc'>Sentence building...</span>";
+        }
+
+        function updateScoreBoard() {
+            document.getElementById('streak-val').innerText = gameState.streak + "/" + config.settings.streakThreshold;
+            document.getElementById('score-val').innerText = gameState.score;
+            var l = gameState.currentLevel;
+            var badge = document.getElementById('level-badge');
+            badge.innerText = "LEVEL " + l;
+            badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)";
+        }
+
+        // --- ADMIN FUNCTIONS ---
+        function openAdmin() { document.getElementById('admin-modal').style.display = 'flex'; }
+        function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
+        function unlockAdmin() {
+            var val = document.getElementById('admin-pass-input').value;
+            if(val === config.adminPass || val === "teacher") {
+                document.getElementById('admin-lock').style.display = 'none';
+                document.getElementById('admin-edit').style.display = 'block';
+                renderAdminUI();
+            } else { alert("Incorrect"); }
+        }
+
+        function renderAdminUI() {
+            safeSetVal('edit-topic', config.topic);
+            safeSetVal('edit-start-lvl', config.settings.startLevel);
+            safeSetVal('edit-max-lvl', config.settings.maxLevel);
+            safeSetVal('edit-streak', config.settings.streakThreshold);
+            safeSetVal('edit-app-title', config.appTitle);
+            safeSetVal('edit-admin-pass', config.adminPass);
+            safeSetVal('edit-gamemode', config.gameMode);
+            
+            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
+            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
+            
+            ['s1', 's2', 'quote', 's3', 's4'].forEach(k => {
+                if(document.getElementById(k+'-mode')) document.getElementById(k+'-mode').value = config.worksheetSettings[k+'_mode'];
+            });
+
+            for(var i=0; i<5; i++) {
+                if(document.getElementById('def-struct-'+i)) document.getElementById('def-struct-'+i).value = config.default_structure[i];
+            }
+
+            if(config.gameMode === "AO4") {
+                document.getElementById('box-s2-markers').style.display = 'block';
+                renderList('list-s1', config.ao4_starters, 'ao4_starters');
+                renderList('list-s2', config.ao4_markers, 'ao4_markers');
+                renderList('list-s3', config.ao4_links, 'ao4_links');
+            } else {
+                document.getElementById('box-s2-markers').style.display = 'none';
+                renderList('list-s1', config.starters_evidence, 'starters_evidence');
+                renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
+            }
+
+            var cList = document.getElementById('list-content');
+            cList.innerHTML = '';
+            config.content_pairs.forEach((p, i) => {
+                var div = document.createElement('div');
+                div.className = "content-card";
+                
+                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
+                    <small><strong>Sentence Order:</strong></small><br>
+                    <div style="display:flex; gap:3px;">`;
+                p.structure.forEach((sVal, sIdx) => {
+                    structHTML += `<select class="admin-input" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
+                        <option value="s1" ${sVal=='s1'?'selected':''}>Starter</option>
+                        <option value="s2" ${sVal=='s2'?'selected':''}>Method</option>
+                        <option value="quote" ${sVal=='quote'?'selected':''}>Quote</option>
+                        <option value="s3" ${sVal=='s3'?'selected':''}>Link</option>
+                        <option value="s4" ${sVal=='s4'?'selected':''}>Effect</option>
+                    </select>`;
+                });
+                structHTML += `</div></div>`;
+
+                div.innerHTML = `<div class="content-card-header"><span>Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div>
+                ${structHTML}
+                <div class="step-1"><span class="step-label">Specific Starter</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
+                <div class="step-2"><span class="step-label">Method</span><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
+                <div class="step-3"><span class="step-label">Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
+                <div class="step-4"><span class="step-label">Link</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
+                <div class="step-5"><span class="step-label">Effect</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>
+                <div style="margin-top:5px; border-top:1px dashed #ccc;"><span class="step-label" style="color:red">Distractor</span><input class="admin-input" style="width:95%" value="${esc(p.distractor)}" onchange="updateContent(${i},'distractor',this.value)"></div>`;
+                cList.appendChild(div);
+            });
+            
+            document.getElementById('config-io-area').value = JSON.stringify(config);
+        }
+
+        // --- DATA UPDATERS ---
+        function updateSettingsFromUI() {
+            config.appTitle = getSafeVal('edit-app-title');
+            config.adminPass = getSafeVal('edit-admin-pass');
+            config.topic = getSafeVal('edit-topic');
+            config.gameMode = getSafeVal('edit-gamemode');
+            
+            config.settings.startLevel = parseInt(getSafeVal('edit-start-lvl'));
+            config.settings.maxLevel = parseInt(getSafeVal('edit-max-lvl'));
+            config.settings.streakThreshold = parseInt(getSafeVal('edit-streak'));
+
+            config.worksheetSettings.showTask1 = document.getElementById('ws-task1').checked;
+            config.worksheetSettings.showTask2 = document.getElementById('ws-task2').checked;
+            
+            ['s1', 's2', 'quote', 's3', 's4'].forEach(k => {
+                config.worksheetSettings[k+'_mode'] = getSafeVal(k+'-mode');
+            });
+
+            var newDef = [];
+            for(var i=0; i<5; i++) {
+                if(document.getElementById('def-struct-'+i)) newDef.push(document.getElementById('def-struct-'+i).value);
+            }
+            if(newDef.length === 5) config.default_structure = newDef;
+        }
+
+        function renderList(elId, arr, key) {
+            var el = document.getElementById(elId);
+            el.innerHTML = '';
+            arr.forEach((txt, i) => {
+                var div = document.createElement('div');
+                div.className = 'input-row';
+                div.innerHTML = `<input class="admin-input" value="${esc(txt)}" onchange="updateList('${key}',${i},this.value)"><button class="del-btn" onclick="delList('${key}',${i})">X</button>`;
+                el.appendChild(div);
+            });
+        }
+        function updateList(key, idx, val) { config[key][idx] = val; }
+        function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); }
+        function addItem(type) {
+            var val = prompt("Enter text:");
+            if(!val) return;
+            if(type === 's2') config.ao4_markers.push(val);
+            else if(type === 's1') (config.gameMode==='AO4' ? config.ao4_starters : config.starters_evidence).push(val);
+            else (config.gameMode==='AO4' ? config.ao4_links : config.starters_evaluative).push(val);
+            renderAdminUI();
+        }
+        function updateContent(idx, f, v) { config.content_pairs[idx][f] = v; }
+        function updateCardStruct(idx, pos, val) { config.content_pairs[idx].structure[pos] = val; }
+        function delContent(idx) { if(confirm("Delete?")) { config.content_pairs.splice(idx, 1); renderAdminUI(); } }
+        function addContent() { 
+            var newStruct = JSON.parse(JSON.stringify(config.default_structure));
+            config.content_pairs.push({ id:"c"+Date.now(), specific_s1:"", quote:"New Quote", method:"", specific_s3:"", effect:"", distractor:"", structure: newStruct }); 
+            renderAdminUI(); 
+            setTimeout(() => document.getElementById('list-content').lastElementChild.scrollIntoView({behavior:'smooth'}), 100); 
+        }
+        
+        // NEW: Apply Default Structure to All
+        function applyDefaultStructureToAll() {
+            if(confirm("Overwrite the sentence order for ALL existing questions with the Default Order?")) {
+                var newS = JSON.parse(JSON.stringify(config.default_structure));
+                config.content_pairs.forEach(p => { p.structure = JSON.parse(JSON.stringify(newS)); });
+                renderAdminUI();
+                alert("Updated all questions!");
+            }
+        }
+
+        function copyToClipboard() { document.getElementById('config-io-area').select(); document.execCommand("copy"); alert("Copied"); }
+        function loadConfigFromText() { try { config = JSON.parse(document.getElementById('config-io-area').value); saveLocal(true); alert("Loaded"); } catch(e) { alert("Error"); } }
+
+        // --- EXPORT ---
+        function getExportHTML(isWordDoc) {
+            if(document.getElementById('admin-modal').style.display === 'flex') updateSettingsFromUI();
+            var html = "<h1>Worksheet: " + config.topic + "</h1>";
+            
+            if(config.worksheetSettings.showTask1) {
+                html += "<h2>Task 1: Matching</h2>";
+                var b = isWordDoc ? '0' : '1';
+                var s = isWordDoc ? 'border:none;' : 'border:1px solid #000;';
+                html += `<table border="${b}" style="width:100%; border-collapse:collapse; ${s}">`;
+                var shuffled = [].concat(config.content_pairs).sort(() => Math.random() - 0.5);
+                config.content_pairs.forEach((p, i) => {
+                    html += `<tr><td style="padding:10px; width:40%; ${s}">"${p.quote}"</td><td style="padding:10px; width:20%; text-align:center; ${s}">&rarr;</td><td style="padding:10px; width:40%; ${s}">${shuffled[i].effect}</td></tr>`;
+                });
+                html += "</table><br>";
+            }
+
+            if(config.worksheetSettings.showTask2) {
+                html += "<h2>Task 2: Sentence Builder</h2>";
+                var blank = "__________________";
+                config.content_pairs.forEach(p => {
+                    var s1L = config.gameMode==='AO4' ? config.ao4_starters : config.starters_evidence;
+                    var s3L = config.gameMode==='AO4' ? config.ao4_links : config.starters_evaluative;
+                    
+                    var parts = p.structure.map(key => {
+                        var mode = config.worksheetSettings[key === 'quote' ? 'quote_mode' : key+'_mode'];
+                        if(mode === 'none') return null;
+                        if(mode === 'scaffold' || mode === 'line') return blank;
+                        
+                        if(key === 's1') return p.specific_s1 || s1L[0];
+                        if(key === 's2') return p.method || "method";
+                        if(key === 'quote') return `<strong>"${p.quote}"</strong>`;
+                        if(key === 's3') return p.specific_s3 || s3L[0];
+                        if(key === 's4') return p.effect;
+                    }).filter(x => x !== null);
+
+                    var lineStyle = isWordDoc ? "margin-bottom:20px; line-height:2;" : "margin-bottom:20px; line-height:2; border-bottom:1px dashed #ccc;";
+                    html += `<div style="${lineStyle}">${parts.join(" ")}.</div>`;
+                });
+            }
+            return html;
+        }
+
+        function downloadWordDoc() {
+            var h = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:'Aptos', sans-serif; font-size:12pt;}</style></head><body>" + getExportHTML(true) + "</body></html>";
+            var blob = new Blob(['\ufeff', h], { type: 'application/msword' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            document.body.appendChild(a);
+            a.href = url;
+            a.download = 'evaluation_worksheet.doc';
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function printWorksheet() {
+            var h = "<html><head><title>Worksheet</title><style>body{font-family:Arial; padding:40px;}</style></head><body>" + getExportHTML(false) + "</body></html>";
+            var w = window.open('','','height=700,width=900');
+            w.document.write(h);
+            w.document.close();
+            w.print();
+        }
+
+        function exportApp() {
+            var json = JSON.stringify(config, null, 4);
+            var html = document.documentElement.outerHTML;
+            var bakedHtml = html.replace(/var defaultData = \{.*?\};/s, "var defaultData = " + json + ";");
+            var blob = new Blob([bakedHtml], {type:'text/html'});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = 'evaluation_architect.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // --- DOM SAFE HELPERS ---
+        function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
+        function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
+        function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
+        function esc(str) { return str ? str.toString().replace(/"/g, '&quot;') : ""; }
+
+    </script>
+</body>
+</html>
