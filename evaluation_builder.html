@@ -38,7 +38,8 @@
         #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
         
-        .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; z-index: 100; }
+        /* ADMIN BTN Z-INDEX BOOSTED TO 10000 */
+        .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; z-index: 10000; position: relative; }
         .admin-btn:hover { color: var(--app-color); }
         .reset-btn { background: #c0392b; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
 
@@ -81,7 +82,7 @@
         #sentence-builder { margin-top: 20px; padding: 15px; background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
         .fragment { padding: 2px 5px; border-radius: 4px; }
         
-        /* OVERLAYS - Explicitly Hidden by Default */
+        /* OVERLAYS */
         #overlay, #levelup-overlay, #win-overlay, #admin-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; justify-content: center; align-items: center; text-align: center; color: white; }
         #overlay { background: rgba(231, 76, 60, 0.95); } 
         #levelup-overlay { background: rgba(46, 204, 113, 0.98); }
@@ -138,7 +139,7 @@
                 <span style="border-left:1px solid #ccc; padding-left:15px;">Score: <span id="score-val" style="font-size:1.2rem; color:#f1c40f;">0</span></span>
             </div>
             <button onclick="forceReset()" class="reset-btn">⚠ RESET</button>
-            <button class="admin-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
+            <button class="admin-btn" id="cog-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
         </div>
     </header>
 
@@ -327,7 +328,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v74_fix'; 
+        var STORE_KEY = 'eval_arch_v75_final'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -338,7 +339,7 @@
         // --- 2. INIT ---
         window.onload = function() {
             try {
-                // Force UI Clean on Start
+                // Force Clean UI
                 document.getElementById('admin-modal').style.display = 'none';
                 document.getElementById('levelup-overlay').style.display = 'none';
                 document.getElementById('win-overlay').style.display = 'none';
@@ -356,16 +357,25 @@
                 config = JSON.parse(JSON.stringify(defaultData));
             }
 
-            // Safety Defaults
-            if(!config.content_pairs || config.content_pairs.length === 0) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
-            config.content_pairs.forEach(p => {
-                if(!p.structure || p.structure.length !== 5) p.structure = ['s1', 's2', 'quote', 's3', 's4'];
-            });
-            if(!config.default_structure) config.default_structure = ['s1', 's2', 'quote', 's3', 's4'];
+            // SAFETY: Self-Repair Corrupt Data
+            sanitizeData();
 
             updateDOM();
-            renderAdminUI();
+            // We delay renderAdminUI slightly to ensure DOM is ready, though onload handles it.
+            setTimeout(renderAdminUI, 10);
         };
+
+        function sanitizeData() {
+            if(!config.content_pairs || !Array.isArray(config.content_pairs)) {
+                config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+            }
+            config.content_pairs.forEach(p => {
+                if(!p.structure || !Array.isArray(p.structure) || p.structure.length !== 5) {
+                    p.structure = JSON.parse(JSON.stringify(config.default_structure));
+                }
+            });
+            if(!config.default_structure) config.default_structure = ['s1', 's2', 'quote', 's3', 's4'];
+        }
 
         function updateDOM() {
             document.getElementById('app-title-display').innerText = config.appTitle;
@@ -414,7 +424,7 @@
 
             var stageKey = currentGameStructure[currentStageIndex];
 
-            // LEVEL 1
+            // LEVEL 1 LOGIC
             if(gameState.currentLevel === 1) {
                if(stageKey === 's4') {
                     autoFillIntermediates(); 
@@ -476,7 +486,8 @@
                 config.content_pairs.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        currentGameStructure = p.structure || config.default_structure; 
+                        // Use the quote's specific structure, or default if missing
+                        currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure; 
                         sentenceParts.quote = `"${p.quote}"`;
                         currentStageIndex = 0;
                         updateBuilder();
@@ -622,7 +633,7 @@
 
         function updateBuilder() {
             var html = "";
-            var struct = currentGameStructure.length > 0 ? currentGameStructure : config.default_structure;
+            var struct = (currentGameStructure && currentGameStructure.length > 0) ? currentGameStructure : config.default_structure;
             
             struct.forEach(key => {
                 var txt = sentenceParts[key];
@@ -657,68 +668,70 @@
         }
 
         function renderAdminUI() {
-            safeSetVal('edit-topic', config.topic);
-            safeSetVal('edit-start-lvl', config.settings.startLevel);
-            safeSetVal('edit-max-lvl', config.settings.maxLevel);
-            safeSetVal('edit-streak', config.settings.streakThreshold);
-            safeSetVal('edit-app-title', config.appTitle);
-            safeSetVal('edit-admin-pass', config.adminPass);
-            safeSetVal('edit-gamemode', config.gameMode);
-            
-            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
-            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
-            
-            ['s1', 's2', 'quote', 's3', 's4'].forEach(k => {
-                if(document.getElementById(k+'-mode')) document.getElementById(k+'-mode').value = config.worksheetSettings[k+'_mode'];
-            });
-
-            for(var i=0; i<5; i++) {
-                if(document.getElementById('def-struct-'+i)) document.getElementById('def-struct-'+i).value = config.default_structure[i];
-            }
-
-            if(config.gameMode === "AO4") {
-                document.getElementById('box-s2-markers').style.display = 'block';
-                renderList('list-s1', config.ao4_starters, 'ao4_starters');
-                renderList('list-s2', config.ao4_markers, 'ao4_markers');
-                renderList('list-s3', config.ao4_links, 'ao4_links');
-            } else {
-                document.getElementById('box-s2-markers').style.display = 'none';
-                renderList('list-s1', config.starters_evidence, 'starters_evidence');
-                renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
-            }
-
-            var cList = document.getElementById('list-content');
-            cList.innerHTML = '';
-            config.content_pairs.forEach((p, i) => {
-                var div = document.createElement('div');
-                div.className = "content-card";
+            try {
+                safeSetVal('edit-topic', config.topic);
+                safeSetVal('edit-start-lvl', config.settings.startLevel);
+                safeSetVal('edit-max-lvl', config.settings.maxLevel);
+                safeSetVal('edit-streak', config.settings.streakThreshold);
+                safeSetVal('edit-app-title', config.appTitle);
+                safeSetVal('edit-admin-pass', config.adminPass);
+                safeSetVal('edit-gamemode', config.gameMode);
                 
-                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
-                    <small><strong>Sentence Order:</strong></small><br>
-                    <div style="display:flex; gap:3px;">`;
-                p.structure.forEach((sVal, sIdx) => {
-                    structHTML += `<select class="admin-input" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
-                        <option value="s1" ${sVal=='s1'?'selected':''}>Starter</option>
-                        <option value="s2" ${sVal=='s2'?'selected':''}>Method</option>
-                        <option value="quote" ${sVal=='quote'?'selected':''}>Quote</option>
-                        <option value="s3" ${sVal=='s3'?'selected':''}>Link</option>
-                        <option value="s4" ${sVal=='s4'?'selected':''}>Effect</option>
-                    </select>`;
+                safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
+                safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
+                
+                ['s1', 's2', 'quote', 's3', 's4'].forEach(k => {
+                    if(document.getElementById(k+'-mode')) document.getElementById(k+'-mode').value = config.worksheetSettings[k+'_mode'];
                 });
-                structHTML += `</div></div>`;
 
-                div.innerHTML = `<div class="content-card-header"><span>Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div>
-                ${structHTML}
-                <div class="step-1"><span class="step-label">Specific Starter</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
-                <div class="step-2"><span class="step-label">Method</span><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
-                <div class="step-3"><span class="step-label">Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
-                <div class="step-4"><span class="step-label">Link</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
-                <div class="step-5"><span class="step-label">Effect</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>
-                <div style="margin-top:5px; border-top:1px dashed #ccc;"><span class="step-label" style="color:red">Distractor</span><input class="admin-input" style="width:95%" value="${esc(p.distractor)}" onchange="updateContent(${i},'distractor',this.value)"></div>`;
-                cList.appendChild(div);
-            });
-            
-            document.getElementById('config-io-area').value = JSON.stringify(config);
+                for(var i=0; i<5; i++) {
+                    if(document.getElementById('def-struct-'+i)) document.getElementById('def-struct-'+i).value = config.default_structure[i];
+                }
+
+                if(config.gameMode === "AO4") {
+                    document.getElementById('box-s2-markers').style.display = 'block';
+                    renderList('list-s1', config.ao4_starters, 'ao4_starters');
+                    renderList('list-s2', config.ao4_markers, 'ao4_markers');
+                    renderList('list-s3', config.ao4_links, 'ao4_links');
+                } else {
+                    document.getElementById('box-s2-markers').style.display = 'none';
+                    renderList('list-s1', config.starters_evidence, 'starters_evidence');
+                    renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
+                }
+
+                var cList = document.getElementById('list-content');
+                cList.innerHTML = '';
+                config.content_pairs.forEach((p, i) => {
+                    var div = document.createElement('div');
+                    div.className = "content-card";
+                    
+                    var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
+                        <small><strong>Sentence Order:</strong></small><br>
+                        <div style="display:flex; gap:3px;">`;
+                    p.structure.forEach((sVal, sIdx) => {
+                        structHTML += `<select class="admin-input" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
+                            <option value="s1" ${sVal=='s1'?'selected':''}>Starter</option>
+                            <option value="s2" ${sVal=='s2'?'selected':''}>Method</option>
+                            <option value="quote" ${sVal=='quote'?'selected':''}>Quote</option>
+                            <option value="s3" ${sVal=='s3'?'selected':''}>Link</option>
+                            <option value="s4" ${sVal=='s4'?'selected':''}>Effect</option>
+                        </select>`;
+                    });
+                    structHTML += `</div></div>`;
+
+                    div.innerHTML = `<div class="content-card-header"><span>Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div>
+                    ${structHTML}
+                    <div class="step-1"><span class="step-label">Specific Starter</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
+                    <div class="step-2"><span class="step-label">Method</span><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
+                    <div class="step-3"><span class="step-label">Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
+                    <div class="step-4"><span class="step-label">Link</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
+                    <div class="step-5"><span class="step-label">Effect</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>
+                    <div style="margin-top:5px; border-top:1px dashed #ccc;"><span class="step-label" style="color:red">Distractor</span><input class="admin-input" style="width:95%" value="${esc(p.distractor)}" onchange="updateContent(${i},'distractor',this.value)"></div>`;
+                    cList.appendChild(div);
+                });
+                
+                document.getElementById('config-io-area').value = JSON.stringify(config);
+            } catch(e) { console.error("Render Admin Failed", e); }
         }
 
         // --- DATA UPDATERS ---
@@ -776,7 +789,6 @@
             setTimeout(() => document.getElementById('list-content').lastElementChild.scrollIntoView({behavior:'smooth'}), 100); 
         }
         
-        // NEW: Apply Default Structure to All
         function applyDefaultStructureToAll() {
             if(confirm("Overwrite the sentence order for ALL existing questions with the Default Order?")) {
                 var newS = JSON.parse(JSON.stringify(config.default_structure));
