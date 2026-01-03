@@ -6,8 +6,143 @@
     <title>Evaluation Architect</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
+    <script>
+        // --- 1. ROBUST DEFAULT DATA ---
+        var defaultData = {
+            appTitle: "Evaluation Architect",
+            topic: "How is the character presented?",
+            adminPass: "teacher",
+            settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3 },
+            worksheetSettings: {
+                showTask1: true, 
+                showTask2: true,
+                // These defaults match the dropdown values
+                s1_mode: "text", 
+                s2_mode: "text", 
+                quote_mode: "text", 
+                s3_mode: "text", 
+                s4_mode: "text"
+            },
+            starters_evidence: [ "The writer uses", "The author explicitly chooses", "The text presents" ],
+            starters_evaluative: [ "to effectively suggest", "in order to imply", "which creates the impression" ],
+            content_pairs: [
+                { id: "c1", specific_s1: "", quote: "neighbour from hell", method: "the aggressive metaphor", specific_s3: "", effect: "that the BBC is impossible to live alongside.", distractor: "that the BBC lives in a hot place." },
+                { id: "c2", specific_s1: "", quote: "taken an axe", method: "the violent imagery", specific_s3: "", effect: "that they are destroying local news deliberately.", distractor: "that they are doing some gardening." }
+            ]
+        };
+
+        var STORE_KEY = 'eval_arch_v62'; // Version bump
+        var config = JSON.parse(JSON.stringify(defaultData));
+        var currentQuoteId = null;
+        var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
+        var gameState = { currentLevel: 1, streak: 0 };
+        var currentTypingStage = "";
+
+        // --- 2. INIT ---
+        function init() {
+            try {
+                var local = localStorage.getItem(STORE_KEY);
+                if(local) {
+                    var saved = JSON.parse(local);
+                    // Merge saved data with defaults to ensure all keys exist
+                    config = Object.assign({}, defaultData, saved);
+                    if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
+                    if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
+                }
+            } catch(e) {
+                console.log("Load error, using defaults.");
+                config = JSON.parse(JSON.stringify(defaultData));
+            }
+            updateDOM();
+        }
+
+        function updateDOM() {
+            document.getElementById('app-title-display').innerText = config.appTitle;
+            document.getElementById('topic-display').innerText = "Question: " + config.topic;
+            document.title = config.appTitle;
+            gameState.currentLevel = parseInt(config.settings.startLevel);
+            updateScoreBoard();
+            renderStage0();
+        }
+
+        // --- 3. CORE FUNCTIONS ---
+        function forceReset() {
+            if(confirm("Factory Reset: This will wipe all saved data and reload.")) {
+                localStorage.removeItem(STORE_KEY);
+                window.location.reload();
+            }
+        }
+
+        function saveLocal(render) {
+            if(render === undefined) render = true;
+            try {
+                // If Admin UI is open, grab values
+                if(document.getElementById('admin-modal').style.display === 'flex') {
+                    updateSettingsFromUI();
+                }
+                
+                localStorage.setItem(STORE_KEY, JSON.stringify(config));
+                
+                // Update Game Title/Topic immediately
+                document.getElementById('app-title-display').innerText = config.appTitle;
+                document.getElementById('topic-display').innerText = "Question: " + config.topic;
+                
+                // Update Export Code Box
+                if(document.getElementById('config-io-area')) {
+                    document.getElementById('config-io-area').value = JSON.stringify(config);
+                }
+
+                if(render) {
+                    // Re-render admin to confirm save
+                    renderAdminUI();
+                    // Restart game stage to apply changes (e.g. buttons vs typing)
+                    if(currentQuoteId) {
+                        // If in middle of game, just refresh UI
+                        updateBuilder();
+                    } else {
+                        renderStage0(); 
+                    }
+                }
+            } catch(e) {
+                console.error("Save error:", e);
+                alert("Error saving: " + e.message);
+            }
+        }
+
+        function updateSettingsFromUI() {
+            // General
+            config.appTitle = getSafeVal('edit-app-title');
+            config.adminPass = getSafeVal('edit-admin-pass');
+            config.topic = getSafeVal('edit-topic');
+            
+            // Rules
+            var el;
+            if(el = document.getElementById('edit-start-lvl')) config.settings.startLevel = parseInt(el.value);
+            if(el = document.getElementById('edit-max-lvl')) config.settings.maxLevel = parseInt(el.value);
+            if(el = document.getElementById('edit-streak')) config.settings.streakThreshold = parseInt(el.value);
+
+            // Scaffolding
+            if(document.getElementById('ws-task1')) config.worksheetSettings.showTask1 = document.getElementById('ws-task1').checked;
+            if(document.getElementById('ws-task2')) config.worksheetSettings.showTask2 = document.getElementById('ws-task2').checked;
+            
+            // Dropdowns (The Hybrid Modes)
+            if(el = document.getElementById('s1-mode')) config.worksheetSettings.s1_mode = el.value;
+            if(el = document.getElementById('s2-mode')) config.worksheetSettings.s2_mode = el.value;
+            if(el = document.getElementById('quote-mode')) config.worksheetSettings.quote_mode = el.value;
+            if(el = document.getElementById('s3-mode')) config.worksheetSettings.s3_mode = el.value;
+            if(el = document.getElementById('s4-mode')) config.worksheetSettings.s4_mode = el.value;
+        }
+
+        // --- 4. DOM HELPERS ---
+        function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+        function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
+        function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
+
+        window.onload = init;
+    </script>
+
     <style>
-        /* --- CSS STYLES --- */
+        /* CSS STYLES */
         :root {
             --col-1-pink: #ff99cc; --col-2-yellow: #ffeb3b; --col-3-blue: #85c1e9; --col-4-green: #90ee90;
             --app-color: #2c3e50; --accent-color: #e74c3c;
@@ -129,7 +264,6 @@
 
                 <div class="section-box" style="border-left: 5px solid #2ecc71;">
                     <span class="section-title">2. Worksheet & Game Scaffolding</span>
-                    <p style="font-size:0.9rem; margin-bottom:15px;">Configure how each element appears in the Game versus the PDF.</p>
                     <div style="background:#f0f9f0; padding:10px; border-radius:5px;">
                         <div class="scaffold-row"><span class="scaffold-label">1. Evidence Starter</span><select id="s1-mode" class="scaffold-select" onchange="saveLocal(false)"><option value="text">Game: Buttons / PDF: Text</option><option value="scaffold">Game: Buttons / PDF: Blank</option><option value="line">Game: Typing / PDF: Blank</option><option value="none">Remove from Both</option></select></div>
                         <div class="scaffold-row"><span class="scaffold-label">2. Method</span><select id="s2-mode" class="scaffold-select" onchange="saveLocal(false)"><option value="text">Game: Buttons / PDF: Text</option><option value="scaffold">Game: Buttons / PDF: Blank</option><option value="line">Game: Typing / PDF: Blank</option><option value="none">Remove from Both</option></select></div>
@@ -171,71 +305,7 @@
         </div>
     </div>
 
-    <div id="worksheet-area">
-        <div id="ws-task-container-1"></div>
-        <div style="height:40px;"></div>
-        <div id="ws-task-container-2"></div>
-    </div>
-
     <script>
-        var STORE_KEY = 'eval_arch_v61';
-        
-        var defaultData = {
-            appTitle: "Evaluation Architect",
-            topic: "How is the character presented?",
-            adminPass: "teacher",
-            settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3 },
-            worksheetSettings: {
-                showTask1: true, showTask2: true,
-                s1_mode: "text", s2_mode: "line", quote_mode: "text", s3_mode: "line", s4_mode: "line"
-            },
-            starters_evidence: [ "The writer uses", "The author explicitly chooses", "The text presents" ],
-            starters_evaluative: [ "to effectively suggest", "in order to imply", "which creates the impression" ],
-            content_pairs: [
-                { id: "c1", specific_s1: "", quote: "neighbour from hell", method: "the aggressive metaphor", specific_s3: "", effect: "that the BBC is impossible to live alongside.", distractor: "that the BBC lives in a hot place." },
-                { id: "c2", specific_s1: "", quote: "taken an axe", method: "the violent imagery", specific_s3: "", effect: "that they are destroying local news deliberately.", distractor: "that they are doing some gardening." }
-            ]
-        };
-
-        var config = JSON.parse(JSON.stringify(defaultData));
-        var currentQuoteId = null;
-        var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
-        var gameState = { currentLevel: 1, streak: 0 };
-        var currentTypingStage = "";
-
-        // --- DOM HELPER ---
-        function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
-        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
-        function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
-        function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
-
-        // --- INIT ---
-        window.onload = function() {
-            try {
-                var local = localStorage.getItem(STORE_KEY);
-                if(local) {
-                    var saved = JSON.parse(local);
-                    config = Object.assign({}, defaultData, saved);
-                    if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
-                    if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
-                }
-            } catch(e) { console.log("Load error, using defaults."); }
-
-            if(config.worksheetSettings.showTask1 === undefined) config.worksheetSettings.showTask1 = true;
-            if(config.worksheetSettings.showTask2 === undefined) config.worksheetSettings.showTask2 = true;
-
-            updateDOM();
-        };
-
-        function updateDOM() {
-            document.getElementById('app-title-display').innerText = config.appTitle;
-            document.getElementById('topic-display').innerText = "Question: " + config.topic;
-            document.title = config.appTitle;
-            gameState.currentLevel = parseInt(config.settings.startLevel);
-            updateScoreBoard();
-            renderStage0();
-        }
-
         // --- ADMIN ACTIONS ---
         function openAdmin() { 
             document.getElementById('admin-pass-input').value = "";
@@ -254,201 +324,6 @@
             } else {
                 alert("Incorrect Password");
             }
-        }
-
-        function forceReset() {
-            if(confirm("Factory Reset: This will wipe all saved data and reload.")) {
-                localStorage.removeItem(STORE_KEY);
-                window.location.reload();
-            }
-        }
-
-        function saveLocal(render) {
-            if(render === undefined) render = true;
-            try {
-                if(document.getElementById('admin-modal').style.display === 'flex' && document.getElementById('admin-edit').style.display === 'block') {
-                    config.appTitle = getSafeVal('edit-app-title');
-                    config.adminPass = getSafeVal('edit-admin-pass');
-                    config.topic = getSafeVal('edit-topic');
-                    updateSettingsFromUI();
-                }
-                
-                localStorage.setItem(STORE_KEY, JSON.stringify(config));
-                gameState.currentLevel = config.settings.startLevel;
-                updateDOM();
-                if(render) renderAdminUI();
-            } catch(e) { console.error("Save error:", e); }
-        }
-
-        function updateSettingsFromUI() {
-            var el;
-            if(el = document.getElementById('edit-start-lvl')) config.settings.startLevel = parseInt(el.value);
-            if(el = document.getElementById('edit-max-lvl')) config.settings.maxLevel = parseInt(el.value);
-            if(el = document.getElementById('edit-streak')) config.settings.streakThreshold = parseInt(el.value);
-
-            if(document.getElementById('ws-task1')) config.worksheetSettings.showTask1 = document.getElementById('ws-task1').checked;
-            if(document.getElementById('ws-task2')) config.worksheetSettings.showTask2 = document.getElementById('ws-task2').checked;
-            
-            if(el = document.getElementById('s1-mode')) config.worksheetSettings.s1_mode = el.value;
-            if(el = document.getElementById('s2-mode')) config.worksheetSettings.s2_mode = el.value;
-            if(el = document.getElementById('quote-mode')) config.worksheetSettings.quote_mode = el.value;
-            if(el = document.getElementById('s3-mode')) config.worksheetSettings.s3_mode = el.value;
-            if(el = document.getElementById('s4-mode')) config.worksheetSettings.s4_mode = el.value;
-        }
-
-        function updateWS() {
-            updateSettingsFromUI();
-            saveLocal(false);
-        }
-        function updateSettings() {
-            updateSettingsFromUI();
-            saveLocal(false);
-        }
-
-        function renderAdminUI() {
-            safeSetVal('edit-topic', config.topic);
-            safeSetVal('edit-start-lvl', config.settings.startLevel);
-            safeSetVal('edit-max-lvl', config.settings.maxLevel);
-            safeSetVal('edit-streak', config.settings.streakThreshold);
-            safeSetVal('edit-app-title', config.appTitle);
-            safeSetVal('edit-admin-pass', config.adminPass);
-            
-            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
-            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
-            
-            safeSetVal('s1-mode', config.worksheetSettings.s1_mode);
-            safeSetVal('s2-mode', config.worksheetSettings.s2_mode);
-            safeSetVal('quote-mode', config.worksheetSettings.quote_mode);
-            safeSetVal('s3-mode', config.worksheetSettings.s3_mode);
-            safeSetVal('s4-mode', config.worksheetSettings.s4_mode);
-
-            renderList('list-s1', config.starters_evidence, 'starters_evidence');
-            renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
-            
-            var cList = document.getElementById('list-content');
-            cList.innerHTML = '';
-            config.content_pairs.forEach(function(p, i) {
-                var div = document.createElement('div');
-                div.className = "content-card";
-                div.innerHTML = `<div class="content-card-header"><span>Answer Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div><div class="step-1"><span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%" value="${(p.specific_s1 || '')}" onchange="updateContent(${i}, 'specific_s1', this.value)"></div><div class="step-2"><span class="step-label">2. Method / Terminology</span><input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${(p.method || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'method', this.value)"></div><div class="step-3"><span class="step-label">3. Evidence / Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${(p.quote || '')}</textarea></div><div class="step-4"><span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${(p.specific_s3 || '')}" onchange="updateContent(${i}, 'specific_s3', this.value)"></div><div class="step-5"><span class="step-label">5. Effect / Analysis</span><textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${(p.effect || '')}</textarea></div><div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;"><span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span><input class="admin-input" style="width:95%; border-color:red;" value="${(p.distractor || '').replace(/"/g, '&quot;')}" onchange="updateContent(${i}, 'distractor', this.value)"></div>`;
-                cList.appendChild(div);
-            });
-            if(document.getElementById('config-io-area')) document.getElementById('config-io-area').value = JSON.stringify(config);
-        }
-
-        // --- CONTENT HELPERS ---
-        function renderList(elId, arr, key) {
-            var el = document.getElementById(elId);
-            el.innerHTML = '';
-            if (!arr) arr = [];
-            arr.forEach(function(txt, i) {
-                var row = document.createElement('div');
-                row.className = 'input-row';
-                row.innerHTML = `<input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)"><button class="del-btn" onclick="delList('${key}', ${i})">X</button>`;
-                el.appendChild(row);
-            });
-        }
-        function updateList(key, idx, val) { config[key][idx] = val; }
-        function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); } 
-        function addItem(type) { var text = prompt("Enter text:"); if(text) { if(type==='s1') config.starters_evidence.push(text); else config.starters_evaluative.push(text); renderAdminUI(); }}
-        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; }
-        function delContent(idx) { if(confirm("Delete?")) { config.content_pairs.splice(idx, 1); renderAdminUI(); }}
-        function addContent() { config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" }); renderAdminUI(); setTimeout(() => document.getElementById('list-content').lastElementChild.scrollIntoView({ behavior: 'smooth' }), 200); }
-        function triggerSave() { saveLocal(true); var btn = document.getElementById('save-btn'); var old = btn.innerText; btn.innerText = "Saved!"; btn.style.background = "#27ae60"; setTimeout(() => { btn.innerText = old; btn.style.background = "#3498db"; }, 1000); }
-        function copyToClipboard() { document.getElementById('config-io-area').select(); document.execCommand("copy"); alert("Copied!"); }
-        function loadConfigFromText() { try { config = JSON.parse(document.getElementById('config-io-area').value); saveLocal(true); alert("Loaded!"); } catch(e) { alert("Error"); } }
-
-        // --- EXPORT LOGIC ---
-        function getExportHTML(isWordDoc) {
-            if(document.getElementById('admin-modal').style.display === 'flex') updateSettingsFromUI();
-
-            var html = "<h1>Worksheet: " + (config.topic || "Analysis") + "</h1>";
-            
-            var doTask1 = (config.worksheetSettings.showTask1 !== false);
-            var doTask2 = (config.worksheetSettings.showTask2 !== false);
-
-            if(doTask1) {
-                html += "<h2>Task 1: Matching Analysis</h2>";
-                var tableBorder = isWordDoc ? '0' : '1';
-                var tableStyle = isWordDoc ? "width:100%; border-collapse:collapse; border:none;" : "width:100%; border-collapse:collapse; border:1px solid #000;";
-                var cellStyle = isWordDoc ? "padding:10px; border:none;" : "padding:10px; border:1px solid #000;";
-                
-                html += `<table border="${tableBorder}" style="${tableStyle}">`;
-                var rightSide = [].concat(config.content_pairs).sort(() => Math.random() - 0.5);
-                config.content_pairs.forEach(function(p, i) {
-                    html += `<tr><td style="${cellStyle} width:40%;"><strong>"${p.quote}"</strong></td><td style="${cellStyle} width:20%; text-align:center;">&rarr;</td><td style="${cellStyle} width:40%;">${rightSide[i].effect}</td></tr>`;
-                });
-                html += "</table><br>";
-            }
-
-            if(doTask2) {
-                html += "<h2>Task 2: Sentence Builder</h2>";
-                var s = config.worksheetSettings;
-                var blank = "__________________";
-                config.content_pairs.forEach(function(p) {
-                    var randS1 = config.starters_evidence[Math.floor(Math.random() * config.starters_evidence.length)] || "The writer uses";
-                    var randS3 = config.starters_evaluative[Math.floor(Math.random() * config.starters_evaluative.length)] || "to suggest";
-
-                    // LOGIC: 'text' or 'scaffold' = Show Text. 'line' or 'none' = Blank/Skip.
-                    // BUT for PDF export, we respect the specific export request (e.g. scaffold = blank line on pdf)
-                    
-                    var getPart = function(mode, text) {
-                        if(mode === 'text') return text;
-                        if(mode === 'scaffold') return blank; // Buttons in game, Blank on PDF
-                        if(mode === 'line') return blank;
-                        return "";
-                    };
-
-                    var t_s1 = getPart(s.s1_mode, (p.specific_s1 || randS1));
-                    var t_s2 = getPart(s.s2_mode, p.method);
-                    var t_q = getPart(s.quote_mode, `"${p.quote}"`);
-                    if(s.quote_mode !== 'none' && s.quote_mode !== 'line') t_q = `<strong>${t_q}</strong>`;
-                    
-                    var t_s3 = getPart(s.s3_mode, (p.specific_s3 || randS3));
-                    var t_s4 = getPart(s.s4_mode, p.effect);
-                    
-                    var parts = [t_s1, t_s2, t_q, t_s3, t_s4].filter(function(pt) { return pt !== ""; });
-                    
-                    var lineStyle = isWordDoc ? "margin-bottom:25px; line-height:2.0; font-size:12pt;" : "margin-bottom:25px; line-height:2.0; border-bottom:1px dashed #ccc; padding-bottom:10px;";
-                    html += `<div style="${lineStyle}">${parts.join(" ")}.</div>`;
-                });
-            }
-            return html;
-        }
-
-        function printWorksheet() {
-            var content = "<html><head><title>Worksheet</title><style>body{font-family:Arial, sans-serif; padding:40px; color:#000;} h2{border-bottom:2px solid black; padding-bottom:10px;}</style></head><body>" + getExportHTML(false) + "</body></html>";
-            var win = window.open('', '', 'height=700,width=900');
-            win.document.write(content);
-            win.document.close();
-            win.print();
-        }
-
-        function downloadWordDoc() {
-            var content = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:'Aptos', sans-serif; font-size:12pt; color:#000;}</style></head><body>" + getExportHTML(true) + "</body></html>";
-            var blob = new Blob(['\ufeff', content], { type: 'application/msword' });
-            var url = URL.createObjectURL(blob);
-            var link = document.createElement("a");
-            document.body.appendChild(link);
-            link.href = url;
-            link.download = 'evaluation_worksheet.doc';
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        function exportApp() {
-            var json = JSON.stringify(config, null, 4);
-            document.getElementById('app-config').textContent = json;
-            closeAdmin();
-            var html = document.documentElement.outerHTML;
-            var blob = new Blob([html], {type:'text/html'});
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = 'evaluation_architect.html';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
         }
 
         // --- GAME LOGIC ---
@@ -512,6 +387,118 @@
         function triggerLevelUp() { gameState.currentLevel++; gameState.streak = 0; document.getElementById('levelup-msg').innerText = "You have reached Level " + gameState.currentLevel; document.getElementById('levelup-overlay').style.display = 'flex'; updateScoreBoard(); }
         function closeLevelUp() { document.getElementById('levelup-overlay').style.display = 'none'; }
         function updateScoreBoard() { document.getElementById('streak-val').innerText = gameState.streak; document.getElementById('target-val').innerText = config.settings.streakThreshold; var badge = document.getElementById('level-badge'); var l = gameState.currentLevel; badge.innerText = "LEVEL " + l; badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)"; }
+
+        // --- CONTENT HELPERS ---
+        function renderList(elId, arr, key) {
+            var el = document.getElementById(elId);
+            el.innerHTML = '';
+            if (!arr) arr = [];
+            arr.forEach(function(txt, i) {
+                var row = document.createElement('div');
+                row.className = 'input-row';
+                row.innerHTML = `<input class="admin-input" value="${txt.replace(/"/g, '&quot;')}" onchange="updateList('${key}', ${i}, this.value)"><button class="del-btn" onclick="delList('${key}', ${i})">X</button>`;
+                el.appendChild(row);
+            });
+        }
+        function updateList(key, idx, val) { config[key][idx] = val; }
+        function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); } 
+        function addItem(type) { var text = prompt("Enter text:"); if(text) { if(type==='s1') config.starters_evidence.push(text); else config.starters_evaluative.push(text); renderAdminUI(); }}
+        function updateContent(idx, field, val) { config.content_pairs[idx][field] = val; }
+        function delContent(idx) { if(confirm("Delete?")) { config.content_pairs.splice(idx, 1); renderAdminUI(); }}
+        function addContent() { config.content_pairs.push({ id: "c"+Date.now(), specific_s1:"", quote:"New Quote", method:"Method", specific_s3:"", effect:"Effect", distractor:"Wrong Answer" }); renderAdminUI(); setTimeout(() => document.getElementById('list-content').lastElementChild.scrollIntoView({ behavior: 'smooth' }), 200); }
+        function triggerSave() { saveLocal(true); var btn = document.getElementById('save-btn'); var old = btn.innerText; btn.innerText = "Saved!"; btn.style.background = "#27ae60"; setTimeout(() => { btn.innerText = old; btn.style.background = "#3498db"; }, 1000); }
+        function copyToClipboard() { document.getElementById('config-io-area').select(); document.execCommand("copy"); alert("Copied!"); }
+        function loadConfigFromText() { try { config = JSON.parse(document.getElementById('config-io-area').value); saveLocal(true); alert("Loaded!"); } catch(e) { alert("Error"); } }
+
+        // --- EXPORT LOGIC ---
+        function getExportHTML(isWordDoc) {
+            if(document.getElementById('admin-modal').style.display === 'flex') updateSettingsFromUI();
+
+            var html = "<h1>Worksheet: " + (config.topic || "Analysis") + "</h1>";
+            
+            var doTask1 = (config.worksheetSettings.showTask1 !== false);
+            var doTask2 = (config.worksheetSettings.showTask2 !== false);
+
+            if(doTask1) {
+                html += "<h2>Task 1: Matching Analysis</h2>";
+                var tableBorder = isWordDoc ? '0' : '1';
+                var tableStyle = isWordDoc ? "width:100%; border-collapse:collapse; border:none;" : "width:100%; border-collapse:collapse; border:1px solid #000;";
+                var cellStyle = isWordDoc ? "padding:10px; border:none;" : "padding:10px; border:1px solid #000;";
+                
+                html += `<table border="${tableBorder}" style="${tableStyle}">`;
+                var rightSide = [].concat(config.content_pairs).sort(() => Math.random() - 0.5);
+                config.content_pairs.forEach(function(p, i) {
+                    html += `<tr><td style="${cellStyle} width:40%;"><strong>"${p.quote}"</strong></td><td style="${cellStyle} width:20%; text-align:center;">&rarr;</td><td style="${cellStyle} width:40%;">${rightSide[i].effect}</td></tr>`;
+                });
+                html += "</table><br>";
+            }
+
+            if(doTask2) {
+                html += "<h2>Task 2: Sentence Builder</h2>";
+                var s = config.worksheetSettings;
+                var blank = "__________________";
+                config.content_pairs.forEach(function(p) {
+                    var randS1 = config.starters_evidence[Math.floor(Math.random() * config.starters_evidence.length)] || "The writer uses";
+                    var randS3 = config.starters_evaluative[Math.floor(Math.random() * config.starters_evaluative.length)] || "to suggest";
+
+                    var getPart = function(mode, text) {
+                        if(mode === 'text') return text;
+                        if(mode === 'scaffold') return blank; 
+                        if(mode === 'line') return blank;
+                        return "";
+                    };
+
+                    var t_s1 = getPart(s.s1_mode, (p.specific_s1 || randS1));
+                    var t_s2 = getPart(s.s2_mode, p.method);
+                    var t_q = getPart(s.quote_mode, `"${p.quote}"`);
+                    if(s.quote_mode !== 'none' && s.quote_mode !== 'line') t_q = `<strong>${t_q}</strong>`;
+                    
+                    var t_s3 = getPart(s.s3_mode, (p.specific_s3 || randS3));
+                    var t_s4 = getPart(s.s4_mode, p.effect);
+                    
+                    var parts = [t_s1, t_s2, t_q, t_s3, t_s4].filter(function(pt) { return pt !== ""; });
+                    
+                    var lineStyle = isWordDoc ? "margin-bottom:25px; line-height:2.0; font-size:12pt;" : "margin-bottom:25px; line-height:2.0; border-bottom:1px dashed #ccc; padding-bottom:10px;";
+                    html += `<div style="${lineStyle}">${parts.join(" ")}.</div>`;
+                });
+            }
+            return html;
+        }
+
+        function printWorksheet() {
+            var content = "<html><head><title>Worksheet</title><style>body{font-family:Arial, sans-serif; padding:40px; color:#000;} h2{border-bottom:2px solid black; padding-bottom:10px;}</style></head><body>" + getExportHTML(false) + "</body></html>";
+            var win = window.open('', '', 'height=700,width=900');
+            win.document.write(content);
+            win.document.close();
+            win.print();
+        }
+
+        function downloadWordDoc() {
+            var content = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:'Aptos', sans-serif; font-size:12pt; color:#000;}</style></head><body>" + getExportHTML(true) + "</body></html>";
+            var blob = new Blob(['\ufeff', content], { type: 'application/msword' });
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement("a");
+            document.body.appendChild(link);
+            link.href = url;
+            link.download = 'evaluation_worksheet.doc';
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportApp() {
+            var json = JSON.stringify(config, null, 4);
+            document.getElementById('app-config').textContent = json;
+            closeAdmin();
+            var html = document.documentElement.outerHTML;
+            var blob = new Blob([html], {type:'text/html'});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'evaluation_architect.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
     </script>
 </body>
 </html>
