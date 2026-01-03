@@ -25,11 +25,13 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v67_fixed'; 
+        var STORE_KEY = 'eval_arch_v68_game'; // Version bump
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
-        var gameState = { currentLevel: 1, streak: 0 };
+        
+        // GAME STATE INCLUDES SCORE NOW
+        var gameState = { currentLevel: 1, streak: 0, score: 0 };
         var currentTypingStage = "";
 
         // --- 2. INIT ---
@@ -60,7 +62,14 @@
             document.getElementById('app-title-display').innerText = config.appTitle;
             document.getElementById('topic-display').innerText = "Question: " + config.topic;
             document.title = config.appTitle;
+            
+            // On hard reload, reset level to start level, but keep settings
+            // If you want to persist progress, you'd save gameState to localStorage too.
+            // For now, we reset game progress on reload to avoid getting stuck.
             gameState.currentLevel = parseInt(config.settings.startLevel);
+            gameState.score = 0; 
+            gameState.streak = 0;
+
             updateScoreBoard();
             renderStage0();
         }
@@ -77,7 +86,7 @@
 
         // --- 4. CORE FUNCTIONS ---
         function forceReset() {
-            if(confirm("Factory Reset: This will wipe all saved data and reload.")) {
+            if(confirm("Factory Reset: This will wipe all saved data, scores, and reload.")) {
                 localStorage.removeItem(STORE_KEY);
                 window.location.reload();
             }
@@ -101,8 +110,7 @@
 
                 if(render) {
                     renderAdminUI();
-                    // FORCE RESET GAME TO SHOW NEW CONTENT IMMEDIATELY
-                    resetGame(); 
+                    resetGame(); // Force refresh game
                 }
             } catch(e) {
                 alert("Error saving: " + e.message);
@@ -142,7 +150,7 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f7; color: #333; margin: 0; padding: 20px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e0e0e0; }
         h1 { margin: 0; color: var(--app-color); font-size: 1.6rem; }
-        #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 10px; align-items: center; }
+        #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
         .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; }
         .admin-btn:hover { color: var(--app-color); }
@@ -164,8 +172,10 @@
         #typing-submit { padding: 12px 30px; font-size: 1.1rem; background: var(--app-color); color: white; border: none; border-radius: 6px; cursor: pointer; }
         #sentence-builder { margin-top: 20px; padding: 15px; background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-wrap: wrap; gap: 5px; }
         .fragment { padding: 2px 5px; border-radius: 4px; }
-        #overlay, #levelup-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; justify-content: center; align-items: center; text-align: center; color: white; }
-        #overlay { background: rgba(231, 76, 60, 0.95); } #levelup-overlay { background: rgba(46, 204, 113, 0.95); }
+        #overlay, #levelup-overlay, #win-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; justify-content: center; align-items: center; text-align: center; color: white; }
+        #overlay { background: rgba(231, 76, 60, 0.95); } 
+        #levelup-overlay { background: rgba(46, 204, 113, 0.95); }
+        #win-overlay { background: rgba(241, 196, 15, 0.98); color: #333; }
         .shake { animation: shake 0.4s; }
         #admin-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 200; justify-content: center; align-items: center; }
         .admin-panel { background: white; width: 90%; max-width: 900px; height: 95%; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
@@ -199,6 +209,7 @@
             <div id="score-board">
                 <span id="level-badge" class="level-badge" style="background:var(--level-1)">LEVEL 1</span>
                 <span>Streak: <span id="streak-val">0</span>/<span id="target-val">3</span></span>
+                <span style="border-left:1px solid rgba(255,255,255,0.3); padding-left:15px;">Score: <span id="score-val" style="font-size:1.2rem; color:#f1c40f;">0</span></span>
             </div>
             <button onclick="forceReset()" class="reset-btn">⚠ RESET</button>
             <button class="admin-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
@@ -221,7 +232,25 @@
     </div>
 
     <div id="overlay" onclick="closeOverlay()"><div id="overlay-msg"><i class="fas fa-times-circle" style="font-size:3rem; color:#e74c3c; margin-bottom:15px;"></i><h2>Incorrect</h2><p>Try again.</p></div></div>
-    <div id="levelup-overlay" onclick="closeLevelUp()"><div class="overlay-content"><i class="fas fa-arrow-up" style="font-size:4rem; color:#f1c40f; margin-bottom:20px;"></i><h2>LEVEL UP!</h2><p id="levelup-msg"></p><button class="choice-btn btn-white">Continue</button></div></div>
+    
+    <div id="levelup-overlay" onclick="closeLevelUp()">
+        <div class="overlay-content">
+            <img src="https://media.giphy.com/media/26tOZ42Mg6pbTUPvO/giphy.gif" style="width:200px; border-radius:10px; margin-bottom:10px;">
+            <h2 style="font-size:2.5rem;">LEVEL UP!</h2>
+            <p id="levelup-msg" style="font-size:1.2rem;"></p>
+            <button class="choice-btn btn-white">Continue</button>
+        </div>
+    </div>
+
+    <div id="win-overlay">
+        <div class="overlay-content">
+            <img src="https://media.giphy.com/media/l2Je4zlfxF6z0IWZi/giphy.gif" style="width:250px; border-radius:10px; margin-bottom:20px;">
+            <h1 style="font-size:3rem; color:#d35400;">CONGRATULATIONS!</h1>
+            <p style="font-size:1.5rem;">You have completed the Architect Training.</p>
+            <p style="font-size:2rem; font-weight:bold; margin:20px;">FINAL SCORE: <span id="final-score">0</span></p>
+            <button class="choice-btn" style="background:#2c3e50; color:white;" onclick="forceReset()">Play Again</button>
+        </div>
+    </div>
 
     <div id="admin-modal">
         <div class="admin-panel">
@@ -327,17 +356,28 @@
         // --- GAME LOGIC ---
         function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
         function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
-        function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
+        
+        function submitTyping() { 
+            var val = document.getElementById('typing-input').value; 
+            if(val.trim() === "") { alert("Please type an answer."); return; } 
+            
+            if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } 
+            else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } 
+            else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } 
+            else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } 
+            else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } 
+        }
+
         function renderStage0() { hideAllStages(); document.getElementById('stage-0').classList.add('active'); var grid = document.getElementById('grid-quotes'); grid.innerHTML = ''; config.content_pairs.forEach(p => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-white'; var displayQuote = p.quote.length > 50 ? p.quote.substring(0,47) + "..." : p.quote; btn.innerHTML = `"${displayQuote}"`; btn.onclick = function() { startBuild(p.id, p.quote); }; grid.appendChild(btn); }); updateBuilder(); }
         
         function startBuild(id, quoteText) { 
             currentQuoteId = id; 
             sentenceParts = { s1: "", s2: "", quote: `"${quoteText}"`, s3: "", s4: "" }; 
             updateBuilder(); 
-            // Treat 'scaffold' same as 'text' for GAME (Buttons)
-            if(config.worksheetSettings.s1_mode === "line") { showTypingMode("1. Evidence Starter", "s1"); }
-            else if(config.worksheetSettings.s1_mode === "none") { checkNextStageAfter1(); } 
-            else { renderStage1(); } // 'text' or 'scaffold'
+            var mode = config.worksheetSettings.s1_mode;
+            if(mode === 'line') showTypingMode("1. Evidence Starter", "s1");
+            else if(mode === 'none') checkNextStageAfter1();
+            else renderStage1();
         }
 
         function renderStage1() { hideAllStages(); document.getElementById('stage-1').classList.add('active'); document.getElementById('progress-bar').style.width = '20%'; var grid = document.getElementById('grid-s1'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s1 && pair.specific_s1.trim() !== "") ? [pair.specific_s1] : config.starters_evidence; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s1'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s1 = txt; updateBuilder(); checkNextStageAfter1(); }; grid.appendChild(btn); }); }
@@ -371,14 +411,61 @@
 
         function renderStage4() { hideAllStages(); document.getElementById('stage-4').classList.add('active'); document.getElementById('progress-bar').style.width = '80%'; var grid = document.getElementById('grid-s4'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var opts = []; opts.push({ txt: pair.effect, correct: true }); if(pair.distractor) opts.push({ txt: pair.distractor, correct: false }); opts.sort(() => Math.random() - 0.5); opts.forEach(o => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s4'; btn.innerText = o.txt; btn.onclick = function() { if(o.correct) { sentenceParts.s4 = o.txt; updateBuilder(); finishGame(); } else showError(); }; grid.appendChild(btn); }); }
         
-        function finishGame() { hideAllStages(); document.getElementById('stage-final').classList.add('active'); document.getElementById('progress-bar').style.width = '100%'; gameState.streak++; updateScoreBoard(); if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) { setTimeout(triggerLevelUp, 500); } }
-        function resetGame() { sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" }; updateBuilder(); renderStage0(); }
+        function finishGame() {
+            // Calculate Points: 2 * 2^(level-1)
+            // Lvl 1 = 2, Lvl 2 = 4, Lvl 3 = 8
+            var points = 2 * Math.pow(2, gameState.currentLevel - 1);
+            gameState.score += points;
+            
+            gameState.streak++;
+            updateScoreBoard();
+
+            // Check for Level Up OR Game Win
+            if(gameState.streak >= config.settings.streakThreshold) {
+                if(gameState.currentLevel < config.settings.maxLevel) {
+                    // Level Up
+                    document.getElementById('levelup-msg').innerText = "You have reached Level " + (gameState.currentLevel + 1) + "! (+"+points+" pts)";
+                    setTimeout(() => { document.getElementById('levelup-overlay').style.display = 'flex'; }, 500);
+                } else {
+                    // Game Won
+                    document.getElementById('final-score').innerText = gameState.score;
+                    setTimeout(() => { document.getElementById('win-overlay').style.display = 'flex'; }, 500);
+                }
+            } else {
+                // Just finished question
+                hideAllStages();
+                document.getElementById('stage-final').classList.add('active');
+                document.getElementById('progress-bar').style.width = '100%';
+            }
+        }
+
+        function resetGame() { 
+            sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" }; 
+            updateBuilder(); 
+            renderStage0(); 
+        }
         function updateBuilder() { var b = document.getElementById('sentence-builder'); if(!sentenceParts.s1 && !sentenceParts.quote) { b.innerHTML = '<span style="color:#ccc;">Your sentence will appear here...</span>'; return; } var html = ""; if(sentenceParts.s1) html += `<span class="fragment" style="background:var(--col-1-pink)">${sentenceParts.s1}</span> `; if(sentenceParts.s2) html += `<span class="fragment" style="background:var(--col-2-yellow)">${sentenceParts.s2}</span> `; if(sentenceParts.quote) html += `<span class="fragment" style="background:white; border:1px solid #ccc;">${sentenceParts.quote}</span> `; if(sentenceParts.s3) html += `<span class="fragment" style="background:var(--col-3-blue)">${sentenceParts.s3}</span> `; if(sentenceParts.s4) html += `<span class="fragment" style="background:var(--col-4-green)">${sentenceParts.s4}</span>`; b.innerHTML = html; }
         function showError() { document.getElementById('overlay').style.display = 'flex'; document.getElementById('overlay').querySelector('.shake').classList.add('shake'); gameState.streak = 0; updateScoreBoard(); }
         function closeOverlay() { document.getElementById('overlay').style.display = 'none'; }
-        function triggerLevelUp() { gameState.currentLevel++; gameState.streak = 0; document.getElementById('levelup-msg').innerText = "You have reached Level " + gameState.currentLevel; document.getElementById('levelup-overlay').style.display = 'flex'; updateScoreBoard(); }
-        function closeLevelUp() { document.getElementById('levelup-overlay').style.display = 'none'; }
-        function updateScoreBoard() { document.getElementById('streak-val').innerText = gameState.streak; document.getElementById('target-val').innerText = config.settings.streakThreshold; var badge = document.getElementById('level-badge'); var l = gameState.currentLevel; badge.innerText = "LEVEL " + l; badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)"; }
+        
+        function triggerLevelUp() { 
+            // This function is now handled inside finishGame logic, but we need the button handler
+            gameState.currentLevel++; 
+            gameState.streak = 0; 
+            document.getElementById('levelup-overlay').style.display = 'none'; 
+            updateScoreBoard(); 
+            renderStage0(); // Force restart new level
+        }
+        function closeLevelUp() { triggerLevelUp(); } // Click handler maps to trigger
+
+        function updateScoreBoard() { 
+            document.getElementById('streak-val').innerText = gameState.streak + "/" + config.settings.streakThreshold;
+            document.getElementById('score-val').innerText = gameState.score;
+            var badge = document.getElementById('level-badge'); 
+            var l = gameState.currentLevel; 
+            badge.innerText = "LEVEL " + l; 
+            badge.style.background = l===1 ? "var(--level-1)" : l===2 ? "var(--level-2)" : "var(--level-3)"; 
+        }
 
         // --- CONTENT HELPERS ---
         function renderList(elId, arr, key) {
