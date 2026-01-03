@@ -7,21 +7,15 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
     <script>
-        // --- 1. ROBUST DEFAULT DATA ---
+        // --- 1. DEFAULT DATA (The Safety Net) ---
         var defaultData = {
             appTitle: "Evaluation Architect",
             topic: "How is the character presented?",
             adminPass: "teacher",
             settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3 },
             worksheetSettings: {
-                showTask1: true, 
-                showTask2: true,
-                // These defaults match the dropdown values
-                s1_mode: "text", 
-                s2_mode: "text", 
-                quote_mode: "text", 
-                s3_mode: "text", 
-                s4_mode: "text"
+                showTask1: true, showTask2: true,
+                s1_mode: "text", s2_mode: "line", quote_mode: "text", s3_mode: "line", s4_mode: "line"
             },
             starters_evidence: [ "The writer uses", "The author explicitly chooses", "The text presents" ],
             starters_evaluative: [ "to effectively suggest", "in order to imply", "which creates the impression" ],
@@ -31,28 +25,39 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v62'; // Version bump
+        // --- 2. CONFIGURATION ---
+        // Changed Key to force fresh start
+        var STORE_KEY = 'eval_arch_v63_clean'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         var gameState = { currentLevel: 1, streak: 0 };
         var currentTypingStage = "";
 
-        // --- 2. INIT ---
+        // --- 3. INITIALIZATION ---
         function init() {
             try {
                 var local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     var saved = JSON.parse(local);
-                    // Merge saved data with defaults to ensure all keys exist
+                    // Merge saved data with defaults
                     config = Object.assign({}, defaultData, saved);
                     if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
                     if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
                 }
             } catch(e) {
-                console.log("Load error, using defaults.");
+                console.log("Load error, resetting to defaults.");
                 config = JSON.parse(JSON.stringify(defaultData));
             }
+
+            // SAFETY CHECK: If content became empty, restore defaults
+            if (!config.content_pairs || config.content_pairs.length === 0) {
+                config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+            }
+            if (!config.starters_evidence || config.starters_evidence.length === 0) {
+                config.starters_evidence = JSON.parse(JSON.stringify(defaultData.starters_evidence));
+            }
+
             updateDOM();
         }
 
@@ -65,7 +70,7 @@
             renderStage0();
         }
 
-        // --- 3. CORE FUNCTIONS ---
+        // --- 4. CORE FUNCTIONS ---
         function forceReset() {
             if(confirm("Factory Reset: This will wipe all saved data and reload.")) {
                 localStorage.removeItem(STORE_KEY);
@@ -76,56 +81,43 @@
         function saveLocal(render) {
             if(render === undefined) render = true;
             try {
-                // If Admin UI is open, grab values
+                // Only capture from UI if UI is actually open
                 if(document.getElementById('admin-modal').style.display === 'flex') {
                     updateSettingsFromUI();
                 }
                 
                 localStorage.setItem(STORE_KEY, JSON.stringify(config));
                 
-                // Update Game Title/Topic immediately
                 document.getElementById('app-title-display').innerText = config.appTitle;
                 document.getElementById('topic-display').innerText = "Question: " + config.topic;
                 
-                // Update Export Code Box
                 if(document.getElementById('config-io-area')) {
                     document.getElementById('config-io-area').value = JSON.stringify(config);
                 }
 
                 if(render) {
-                    // Re-render admin to confirm save
                     renderAdminUI();
-                    // Restart game stage to apply changes (e.g. buttons vs typing)
-                    if(currentQuoteId) {
-                        // If in middle of game, just refresh UI
-                        updateBuilder();
-                    } else {
-                        renderStage0(); 
-                    }
+                    if(currentQuoteId) updateBuilder();
+                    else renderStage0();
                 }
             } catch(e) {
-                console.error("Save error:", e);
                 alert("Error saving: " + e.message);
             }
         }
 
         function updateSettingsFromUI() {
-            // General
             config.appTitle = getSafeVal('edit-app-title');
             config.adminPass = getSafeVal('edit-admin-pass');
             config.topic = getSafeVal('edit-topic');
             
-            // Rules
             var el;
             if(el = document.getElementById('edit-start-lvl')) config.settings.startLevel = parseInt(el.value);
             if(el = document.getElementById('edit-max-lvl')) config.settings.maxLevel = parseInt(el.value);
             if(el = document.getElementById('edit-streak')) config.settings.streakThreshold = parseInt(el.value);
 
-            // Scaffolding
             if(document.getElementById('ws-task1')) config.worksheetSettings.showTask1 = document.getElementById('ws-task1').checked;
             if(document.getElementById('ws-task2')) config.worksheetSettings.showTask2 = document.getElementById('ws-task2').checked;
             
-            // Dropdowns (The Hybrid Modes)
             if(el = document.getElementById('s1-mode')) config.worksheetSettings.s1_mode = el.value;
             if(el = document.getElementById('s2-mode')) config.worksheetSettings.s2_mode = el.value;
             if(el = document.getElementById('quote-mode')) config.worksheetSettings.quote_mode = el.value;
@@ -133,8 +125,9 @@
             if(el = document.getElementById('s4-mode')) config.worksheetSettings.s4_mode = el.value;
         }
 
-        // --- 4. DOM HELPERS ---
+        // --- DOM HELPERS ---
         function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+        function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
         function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
         function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
 
@@ -264,6 +257,7 @@
 
                 <div class="section-box" style="border-left: 5px solid #2ecc71;">
                     <span class="section-title">2. Worksheet & Game Scaffolding</span>
+                    <p style="font-size:0.9rem; margin-bottom:15px;">Configure how each element appears in the Game versus the PDF.</p>
                     <div style="background:#f0f9f0; padding:10px; border-radius:5px;">
                         <div class="scaffold-row"><span class="scaffold-label">1. Evidence Starter</span><select id="s1-mode" class="scaffold-select" onchange="saveLocal(false)"><option value="text">Game: Buttons / PDF: Text</option><option value="scaffold">Game: Buttons / PDF: Blank</option><option value="line">Game: Typing / PDF: Blank</option><option value="none">Remove from Both</option></select></div>
                         <div class="scaffold-row"><span class="scaffold-label">2. Method</span><select id="s2-mode" class="scaffold-select" onchange="saveLocal(false)"><option value="text">Game: Buttons / PDF: Text</option><option value="scaffold">Game: Buttons / PDF: Blank</option><option value="line">Game: Typing / PDF: Blank</option><option value="none">Remove from Both</option></select></div>
@@ -303,6 +297,12 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <div id="worksheet-area">
+        <div id="ws-task-container-1"></div>
+        <div style="height:40px;"></div>
+        <div id="ws-task-container-2"></div>
     </div>
 
     <script>
