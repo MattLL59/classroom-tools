@@ -25,7 +25,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v64'; // Version bump
+        var STORE_KEY = 'eval_arch_v65'; // Version bump
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -38,12 +38,10 @@
                 var local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     var saved = JSON.parse(local);
-                    // Merge saved data with defaults
                     config = Object.assign({}, defaultData, saved);
                     if(saved.settings) config.settings = Object.assign({}, defaultData.settings, saved.settings);
                     if(saved.worksheetSettings) config.worksheetSettings = Object.assign({}, defaultData.worksheetSettings, saved.worksheetSettings);
                     
-                    // Critical: If content array is empty/broken, restore default
                     if(!config.content_pairs || config.content_pairs.length === 0) {
                         config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
                     }
@@ -53,9 +51,8 @@
                 config = JSON.parse(JSON.stringify(defaultData));
             }
             
-            // Render everything immediately
             updateDOM();
-            renderAdminUI(); // Pre-populate Admin panel
+            renderAdminUI(); 
         }
 
         function updateDOM() {
@@ -72,11 +69,7 @@
         function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
         function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
         function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
-        // Safe string escaper for inputs
-        function esc(str) {
-            if (str === undefined || str === null) return "";
-            return str.toString().replace(/"/g, '&quot;');
-        }
+        function esc(str) { return str ? str.toString().replace(/"/g, '&quot;') : ""; }
 
         // --- 4. CORE FUNCTIONS ---
         function forceReset() {
@@ -89,7 +82,6 @@
         function saveLocal(render) {
             if(render === undefined) render = true;
             try {
-                // If Admin UI is open, grab values
                 if(document.getElementById('admin-modal').style.display === 'flex') {
                     updateSettingsFromUI();
                 }
@@ -105,10 +97,9 @@
 
                 if(render) {
                     renderAdminUI();
-                    if(!currentQuoteId) renderStage0(); // Only refresh game if not in middle of play
+                    if(!currentQuoteId) renderStage0(); 
                 }
             } catch(e) {
-                console.error("Save error:", e);
                 alert("Error saving: " + e.message);
             }
         }
@@ -322,7 +313,6 @@
             if (input === config.adminPass || input === "teacher" || input === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
-                // Trigger Render explicitly
                 renderAdminUI();
             } else {
                 alert("Incorrect Password");
@@ -332,51 +322,57 @@
         // --- GAME LOGIC ---
         function hideAllStages() { document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active')); document.getElementById('typing-interface').style.display = 'none'; }
         function showTypingMode(title, key) { hideAllStages(); document.getElementById('typing-interface').style.display = 'flex'; document.getElementById('typing-title').innerText = title; document.getElementById('typing-input').value = ""; document.getElementById('typing-input').focus(); currentTypingStage = key; }
-        function submitTyping() { var val = document.getElementById('typing-input').value; if(val.trim() === "") { alert("Please type an answer."); return; } if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } }
+        
+        function submitTyping() { 
+            var val = document.getElementById('typing-input').value; 
+            if(val.trim() === "") { alert("Please type an answer."); return; } 
+            
+            if(currentTypingStage === "s1") { sentenceParts.s1 = val; updateBuilder(); checkNextStageAfter1(); } 
+            else if(currentTypingStage === "s2") { sentenceParts.s2 = val; updateBuilder(); checkNextStageAfter2(); } 
+            else if(currentTypingStage === "quote") { sentenceParts.quote = val; updateBuilder(); checkNextStageAfterQuote(); } 
+            else if(currentTypingStage === "s3") { sentenceParts.s3 = val; updateBuilder(); checkNextStageAfter3(); } 
+            else if(currentTypingStage === "s4") { sentenceParts.s4 = val; updateBuilder(); finishGame(); } 
+        }
+
         function renderStage0() { hideAllStages(); document.getElementById('stage-0').classList.add('active'); var grid = document.getElementById('grid-quotes'); grid.innerHTML = ''; config.content_pairs.forEach(p => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-white'; var displayQuote = p.quote.length > 50 ? p.quote.substring(0,47) + "..." : p.quote; btn.innerHTML = `"${displayQuote}"`; btn.onclick = function() { startBuild(p.id, p.quote); }; grid.appendChild(btn); }); updateBuilder(); }
         
         function startBuild(id, quoteText) { 
             currentQuoteId = id; 
             sentenceParts = { s1: "", s2: "", quote: `"${quoteText}"`, s3: "", s4: "" }; 
             updateBuilder(); 
-            // Treat 'scaffold' same as 'text' for GAME (Buttons)
-            if(config.worksheetSettings.s1_mode === "line") { showTypingMode("1. Evidence Starter", "s1"); }
-            else if(config.worksheetSettings.s1_mode === "none") { checkNextStageAfter1(); } 
-            else { renderStage1(); } // 'text' or 'scaffold'
+            // Logic: Buttons in Game = Text OR Scaffold. Typing = Line. None = Skip.
+            var mode = config.worksheetSettings.s1_mode;
+            if(mode === 'line') showTypingMode("1. Evidence Starter", "s1");
+            else if(mode === 'none') checkNextStageAfter1();
+            else renderStage1(); // Handles both 'text' and 'scaffold'
         }
 
         function renderStage1() { hideAllStages(); document.getElementById('stage-1').classList.add('active'); document.getElementById('progress-bar').style.width = '20%'; var grid = document.getElementById('grid-s1'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s1 && pair.specific_s1.trim() !== "") ? [pair.specific_s1] : config.starters_evidence; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s1'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s1 = txt; updateBuilder(); checkNextStageAfter1(); }; grid.appendChild(btn); }); }
         
         function checkNextStageAfter1() { 
             if(gameState.currentLevel === 1) { finishGame(); return; } 
-            if(gameState.currentLevel === 2) { 
-                // In Lvl 2 skip Method
-                if(config.worksheetSettings.s3_mode === "line") showTypingMode("3. Evaluative Link", "s3");
-                else if(config.worksheetSettings.s3_mode === "none") checkNextStageAfter3();
-                else renderStage3();
-                return;
-            }
-            if(config.worksheetSettings.s2_mode === "line") showTypingMode("2. The Method", "s2");
-            else if(config.worksheetSettings.s2_mode === "none") {
-                if(config.worksheetSettings.s3_mode === "line") showTypingMode("3. Evaluative Link", "s3");
-                else if(config.worksheetSettings.s3_mode === "none") checkNextStageAfter3();
-                else renderStage3();
-            } else renderStage2(); 
+            
+            var mode = config.worksheetSettings.s2_mode;
+            if(mode === 'line') showTypingMode("2. The Method", "s2");
+            else if(mode === 'none') checkNextStageAfter2();
+            else renderStage2();
         }
 
         function renderStage2() { hideAllStages(); document.getElementById('stage-2').classList.add('active'); document.getElementById('progress-bar').style.width = '40%'; var grid = document.getElementById('grid-s2'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var opts = [{ txt: pair.method, correct: true }]; var others = config.content_pairs.filter(p => p.id !== currentQuoteId); if(others.length > 0) opts.push({ txt: others[0].method, correct: false }); if(others.length > 1) opts.push({ txt: others[1].method, correct: false }); opts.sort(() => Math.random() - 0.5); opts.forEach(o => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s2'; btn.innerText = o.txt; btn.onclick = function() { if(o.correct) { sentenceParts.s2 = o.txt; updateBuilder(); checkNextStageAfter2(); } else showError(); }; grid.appendChild(btn); }); }
         
         function checkNextStageAfter2() { 
-            if(config.worksheetSettings.s3_mode === "line") showTypingMode("3. Evaluative Link", "s3");
-            else if(config.worksheetSettings.s3_mode === "none") checkNextStageAfter3();
+            var mode = config.worksheetSettings.s3_mode;
+            if(mode === 'line') showTypingMode("3. Evaluative Link", "s3");
+            else if(mode === 'none') checkNextStageAfter3();
             else renderStage3();
         }
 
         function renderStage3() { hideAllStages(); document.getElementById('stage-3').classList.add('active'); document.getElementById('progress-bar').style.width = '60%'; var grid = document.getElementById('grid-s3'); grid.innerHTML = ''; var pair = config.content_pairs.find(p => p.id === currentQuoteId); var options = (pair && pair.specific_s3 && pair.specific_s3.trim() !== "") ? [pair.specific_s3] : config.starters_evaluative; options.forEach(txt => { var btn = document.createElement('button'); btn.className = 'choice-btn btn-s3'; btn.innerText = txt; btn.onclick = function() { sentenceParts.s3 = txt; updateBuilder(); checkNextStageAfter3(); }; grid.appendChild(btn); }); }
         
         function checkNextStageAfter3() { 
-            if(config.worksheetSettings.s4_mode === "line") showTypingMode("4. Inference & Effect", "s4");
-            else if(config.worksheetSettings.s4_mode === "none") finishGame();
+            var mode = config.worksheetSettings.s4_mode;
+            if(mode === 'line') showTypingMode("4. Inference & Effect", "s4");
+            else if(mode === 'none') finishGame();
             else renderStage4();
         }
 
@@ -446,7 +442,7 @@
 
                     var getPart = function(mode, text) {
                         if(mode === 'text') return text;
-                        if(mode === 'scaffold') return blank; 
+                        if(mode === 'scaffold') return blank; // Buttons game, Blank PDF
                         if(mode === 'line') return blank;
                         return "";
                     };
@@ -501,37 +497,6 @@
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-        }
-
-        function renderAdminUI() {
-            safeSetVal('edit-topic', config.topic);
-            safeSetVal('edit-start-lvl', config.settings.startLevel);
-            safeSetVal('edit-max-lvl', config.settings.maxLevel);
-            safeSetVal('edit-streak', config.settings.streakThreshold);
-            safeSetVal('edit-app-title', config.appTitle);
-            safeSetVal('edit-admin-pass', config.adminPass);
-            
-            safeSetCheck('ws-task1', config.worksheetSettings.showTask1);
-            safeSetCheck('ws-task2', config.worksheetSettings.showTask2);
-            
-            safeSetVal('s1-mode', config.worksheetSettings.s1_mode);
-            safeSetVal('s2-mode', config.worksheetSettings.s2_mode);
-            safeSetVal('quote-mode', config.worksheetSettings.quote_mode);
-            safeSetVal('s3-mode', config.worksheetSettings.s3_mode);
-            safeSetVal('s4-mode', config.worksheetSettings.s4_mode);
-
-            renderList('list-s1', config.starters_evidence, 'starters_evidence');
-            renderList('list-s3', config.starters_evaluative, 'starters_evaluative');
-            
-            var cList = document.getElementById('list-content');
-            cList.innerHTML = '';
-            config.content_pairs.forEach(function(p, i) {
-                var div = document.createElement('div');
-                div.className = "content-card";
-                div.innerHTML = `<div class="content-card-header"><span>Answer Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div><div class="step-1"><span class="step-label">1. Specific Starter <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i}, 'specific_s1', this.value)"></div><div class="step-2"><span class="step-label">2. Method / Terminology</span><input class="admin-input" style="width:95%; border-color:var(--col-2-yellow);" value="${esc(p.method)}" onchange="updateContent(${i}, 'method', this.value)"></div><div class="step-3"><span class="step-label">3. Evidence / Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i}, 'quote', this.value)">${esc(p.quote)}</textarea></div><div class="step-4"><span class="step-label">4. Specific Link <span class="step-sublabel">(Leave empty to use generic list)</span></span><input class="admin-input" style="width:95%; border-color:var(--col-3-blue);" value="${esc(p.specific_s3)}" onchange="updateContent(${i}, 'specific_s3', this.value)"></div><div class="step-5"><span class="step-label">5. Effect / Analysis</span><textarea class="admin-textarea" style="width:95%; height:50px; border-color:var(--col-4-green);" onchange="updateContent(${i}, 'effect', this.value)">${esc(p.effect)}</textarea></div><div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:5px;"><span class="step-label" style="color:red">Distractor (Wrong Answer for S4)</span><input class="admin-input" style="width:95%; border-color:red;" value="${esc(p.distractor)}" onchange="updateContent(${i}, 'distractor', this.value)"></div>`;
-                cList.appendChild(div);
-            });
-            if(document.getElementById('config-io-area')) document.getElementById('config-io-area').value = JSON.stringify(config);
         }
     </script>
 </body>
