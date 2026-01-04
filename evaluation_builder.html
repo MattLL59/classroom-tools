@@ -69,8 +69,8 @@
         #topic-display { background: #eaf2f8; color: var(--app-color); padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; font-size: 1.1rem; border-left: 5px solid var(--level-1); text-align: left; flex-shrink: 0; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
-        button.choice-btn { padding: 20px; border: 2px solid transparent; border-radius: 10px; font-size: 1.1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; color: #333; }
-        button.choice-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); }
+        button.choice-btn { padding: 20px; border: 2px solid transparent; border-radius: 10px; font-size: 1.1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; color: #333; opacity: 0.9; }
+        button.choice-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); opacity: 1; }
         
         /* Selected State */
         button.choice-btn.selected { border: 4px solid #333; transform: scale(1.05); opacity: 1; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
@@ -78,8 +78,11 @@
         .btn-s1 { background: var(--col-1-pink); } .btn-s2 { background: var(--col-2-yellow); } .btn-s3 { background: var(--col-3-blue); } .btn-s4 { background: var(--col-4-green); } .btn-white { background: white; border-color: #ddd; }
         
         #confirm-bar { margin-top:20px; padding-top:15px; border-top:1px solid #eee; display:none; }
-        #confirm-btn { background: #27ae60; color: white; padding: 15px 40px; font-size: 1.2rem; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); transition: transform 0.2s; }
+        #confirm-btn { background: #27ae60; color: white; padding: 12px 30px; font-size: 1.1rem; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); transition: transform 0.2s; margin-left: 10px;}
         #confirm-btn:hover { transform: scale(1.05); }
+        
+        #back-btn { background: #95a5a6; color: white; padding: 12px 30px; font-size: 1.1rem; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); transition: transform 0.2s; }
+        #back-btn:hover { transform: scale(1.05); }
 
         #typing-interface { display: none; flex-direction: column; align-items: center; width: 100%; }
         #typing-input { width: 80%; padding: 15px; font-size: 1.1rem; border: 2px solid #ccc; border-radius: 8px; margin-bottom: 15px; font-family: inherit; resize: vertical; min-height: 80px; }
@@ -164,7 +167,8 @@
             <p id="stage-subtitle" class="stage-subtitle">Instruction goes here</p>
             <div class="grid" id="game-grid"></div>
             <div id="confirm-bar">
-                <button id="confirm-btn" onclick="confirmChoice()">Confirm Selection</button>
+                <button id="back-btn" onclick="goBack()">Back</button>
+                <button id="confirm-btn" onclick="confirmChoice()">Confirm</button>
             </div>
         </div>
         
@@ -218,7 +222,7 @@
                 
                 <div style="margin-bottom: 20px;">
                     <label style="font-weight:bold;">Exam Question / Topic</label>
-                    <input id="edit-topic" class="admin-input" style="width:95%; font-size:1.1rem; border:2px solid var(--app-color);" onchange="updateConfigVal('topic', this.value)">
+                    <input id="edit-topic" class="admin-input" style="width:95%; font-size:1.1rem; border:2px solid var(--app-color);" onchange="saveLocal(false)">
                 </div>
 
                 <div class="section-box" style="border-left: 5px solid #8e44ad; background:#fbf5ff;">
@@ -374,7 +378,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v86_stable'; 
+        var STORE_KEY = 'eval_arch_v87_revised'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -383,7 +387,7 @@
         var currentGameStructure = [];
         var currentSelectedOption = null;
 
-        // --- GLOBAL FUNCTIONS (Must be here for buttons to find them) ---
+        // --- GLOBAL FUNCTIONS ---
         
         function openAdmin() { document.getElementById('admin-modal').style.display = 'flex'; }
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
@@ -421,9 +425,8 @@
             else if(path === 'settings.streakThreshold') config.settings.streakThreshold = parseInt(val);
             else config[path] = val;
             
-            // Immediate rerender for critical changes
             if(path === 'gameMode') {
-                renderAdminUI(); // To update bank titles
+                renderAdminUI(); 
                 resetGame();
             }
         }
@@ -440,7 +443,7 @@
             if(newDef.length === 5) config.default_structure = newDef;
         }
 
-        // --- EXPORT FUNCTIONS (GLOBAL) ---
+        // --- EXPORT FUNCTIONS ---
         function getExportHTML(isWordDoc) {
             var html = "<h1>Worksheet: " + config.topic + "</h1>";
             
@@ -505,7 +508,6 @@
         function exportApp() {
             var json = JSON.stringify(config, null, 4);
             var html = document.documentElement.outerHTML;
-            // Inject the current config into the exported file so it opens with these settings
             var bakedHtml = html.replace(/var defaultData = \{.*?\};/s, "var defaultData = " + json + ";");
             var blob = new Blob([bakedHtml], {type:'text/html'});
             var url = URL.createObjectURL(blob);
@@ -630,13 +632,26 @@
             var grid = document.getElementById('game-grid');
             grid.innerHTML = '';
 
+            // STAGE 0: INITIAL QUOTE SELECTION
             if(key === 'quote_select_mode') {
                 document.getElementById('stage-title').innerText = "Select Evidence";
                 document.getElementById('stage-subtitle').innerText = "Which quote best answers the question?";
                 config.content_pairs.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure; 
+                        // Determine Structure
+                        var rawStruct = (p.structure && p.structure.length===5) ? p.structure : config.default_structure;
+                        
+                        // --- LEVEL 1 LOGIC: OVERRIDE STRUCTURE ---
+                        // Only Quote + Point (s4)
+                        if(gameState.currentLevel === 1) {
+                            // Filter current structure to just 'quote' and 's4' to preserve their relative order if possible
+                            // Or just force ['quote', 's4']
+                            currentGameStructure = ['quote', 's4']; 
+                        } else {
+                            currentGameStructure = rawStruct;
+                        }
+
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -773,6 +788,17 @@
 
         function advanceStage() { currentStageIndex++; loadStage(); }
         
+        function goBack() {
+            // Decrement
+            currentStageIndex--;
+            if(currentStageIndex < 0) {
+                // If going back from first stage, return to Quote Select (reset)
+                resetGame();
+            } else {
+                loadStage();
+            }
+        }
+
         function submitTyping() {
             var val = document.getElementById('typing-input').value.trim();
             if(!val) return alert("Type something.");
@@ -805,7 +831,9 @@
 
         function updateBuilder() {
             var html = "";
+            // Use effective structure
             var struct = (currentGameStructure && currentGameStructure.length > 0) ? currentGameStructure : config.default_structure;
+            
             struct.forEach(key => {
                 var txt = sentenceParts[key];
                 if(txt) {
@@ -885,7 +913,7 @@
                         </div>`;
                     };
 
-                    // Distractors for Point
+                    // Distractor List for Point
                     var distListHTML = `<div style="margin-top:5px; border-top:1px dashed #ccc; padding-top:5px;">
                         <span class="step-label" style="color:red">Specific Distractors (Point)</span>
                         <div id="dist-list-${i}">`;
