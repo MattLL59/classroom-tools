@@ -39,7 +39,7 @@
         #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
         
-        /* FLOATING ADMIN BTN - MAX Z-INDEX */
+        /* FLOATING ADMIN BTN */
         .admin-btn { 
             position: fixed; 
             top: 15px; 
@@ -230,18 +230,9 @@
                 <p>Password:</p> <input type="password" id="admin-pass-input" style="padding:10px;"> <button onclick="unlockAdmin()" style="margin-top:10px; padding:10px;">Unlock</button>
             </div>
             <div id="admin-edit" class="panel-body" style="display:none;">
-                
                 <div style="margin-bottom:20px;"><label>Topic</label><input id="edit-topic" class="admin-input" style="width:95%" onchange="updateConfigVal('topic', this.value)"></div>
+                <div class="section-box"><button onclick="triggerSave()" id="save-btn" style="background:#3498db; color:white; padding:10px; width:100%;">Save Settings</button></div>
                 
-                <div class="section-box" style="border-left: 5px solid #8e44ad; background:#fbf5ff;">
-                    <span class="section-title" style="color:#8e44ad;">Backup & Share</span>
-                    <textarea id="config-io-area" onclick="this.select()"></textarea>
-                    <div style="display:flex; gap:10px; margin-top:10px;">
-                        <button onclick="copyToClipboard()" id="copy-btn" style="background:#9b59b6; color:white; border:none; padding:5px 15px; border-radius:4px;">Copy Code</button>
-                        <button onclick="loadConfigFromText()" style="background:#34495e; color:white; border:none; padding:5px 15px; border-radius:4px;">Load Config</button>
-                    </div>
-                </div>
-
                 <div class="section-box">
                     <strong>Banks (Manage Global Options)</strong>
                     <div style="margin-top:5px;"><button onclick="addItem('s1')">+ Add Starter</button> <button onclick="addItem('s2')">+ Add Method/Marker</button> <button onclick="addItem('quote_bank')">+ Add Distractor Quote</button> <button onclick="addItem('s3')">+ Add Link</button> <button onclick="addItem('point_bank')">+ Add Distractor Point</button></div>
@@ -334,7 +325,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v93_complete'; 
+        var STORE_KEY = 'eval_arch_v94_complete'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -441,7 +432,11 @@
                 config.content_pairs.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure;
+                        
+                        // NEW LOGIC: Use Custom Structure and filter out 'none'
+                        var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
+                        currentGameStructure = rawStruct.filter(k => k !== 'none');
+                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -587,7 +582,24 @@
                     return `<div><span class="mode-toggle ${m==='single'?'active':''}" onclick="setMode(${i},'${key}','single')">Single</span><span class="mode-toggle ${m==='multiple'?'active':''}" onclick="setMode(${i},'${key}','multiple')">Multiple</span></div>`;
                 };
                 
+                // Structure Dropdowns
+                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
+                        <small><strong>Sentence Order (Custom):</strong></small><br>
+                        <div style="display:flex; gap:3px;">`;
+                p.structure.forEach((sVal, sIdx) => {
+                    structHTML += `<select class="admin-input" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
+                        <option value="s1" ${sVal=='s1'?'selected':''}>Starter</option>
+                        <option value="s2" ${sVal=='s2'?'selected':''}>Method</option>
+                        <option value="quote" ${sVal=='quote'?'selected':''}>Quote</option>
+                        <option value="s3" ${sVal=='s3'?'selected':''}>Link</option>
+                        <option value="s4" ${sVal=='s4'?'selected':''}>Point</option>
+                        <option value="none" ${sVal=='none'?'selected':''}>-- Remove --</option>
+                    </select>`;
+                });
+                structHTML += `</div></div>`;
+                
                 div.innerHTML = `<div class="content-card-header">Question #${i+1} <button class="del-btn" onclick="delContent(${i})">Delete</button></div>
+                ${structHTML}
                 <div class="step-1"><div style="display:flex;justify-content:space-between;"><span>1. Starter</span>${toggle('s1')}</div><input class="admin-input" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
                 <div class="step-2"><div style="display:flex;justify-content:space-between;"><span>2. Method</span>${toggle('s2')}</div><input class="admin-input" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
                 <div class="step-3"><div style="display:flex;justify-content:space-between;"><span>3. Quote</span>${toggle('quote')}</div><textarea class="admin-textarea" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
@@ -613,11 +625,12 @@
         
         function setMode(i,k,m){ config.content_pairs[i].modes[k]=m; renderAdminUI(); }
         function updateContent(i,f,v) { config.content_pairs[i][f] = v; }
+        function updateCardStruct(i,p,v) { config.content_pairs[i].structure[p]=v; }
         function updateDist(i,di,v){ config.content_pairs[i].distractors[di]=v; }
         function removeDist(i,di){ config.content_pairs[i].distractors.splice(di,1); renderAdminUI(); }
         function addDist(i){ config.content_pairs[i].distractors.push("Wrong Answer"); renderAdminUI(); }
         function delContent(i) { config.content_pairs.splice(i,1); renderAdminUI(); }
-        function addContent() { config.content_pairs.push({id:"c"+Date.now(), specific_s1:"", quote:"New", method:"", specific_s3:"", effect:"", distractors:[], structure: defaultStructure, modes:{s1:'multiple',s2:'multiple',quote:'multiple',s3:'multiple',s4:'multiple'}}); renderAdminUI(); }
+        function addContent() { config.content_pairs.push({id:"c"+Date.now(), specific_s1:"", quote:"New", method:"", specific_s3:"", effect:"", distractors:[], structure: JSON.parse(JSON.stringify(config.default_structure)), modes:{s1:'multiple',s2:'multiple',quote:'multiple',s3:'multiple',s4:'multiple'}}); renderAdminUI(); }
         function updateConfigVal(k,v) { if(k.includes('settings')) config.settings[k.split('.')[1]]=parseInt(v); else config[k]=v; if(k==='gameMode') resetGame(); }
         function updateWSSetting(k,v) { config.worksheetSettings[k]=v; }
         function updateDefaultStruct() { var n=[]; for(var i=0;i<5;i++) n.push(document.getElementById('def-struct-'+i).value); config.default_structure=n; }
@@ -653,7 +666,11 @@
             if(config.worksheetSettings.showTask2) {
                 h+="<h2>Task 2: Sentence Builder</h2>";
                 config.content_pairs.forEach(p=>{
-                    var parts = p.structure.map(k=>{
+                    // Filter "none" from structure before printing
+                    var effectiveStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
+                    var validKeys = effectiveStruct.filter(k => k !== 'none');
+                    
+                    var parts = validKeys.map(k=>{
                         var m = config.worksheetSettings[k+'_mode']||(k=='quote'?config.worksheetSettings.quote_mode:'text');
                         if(m=='none') return null;
                         if(m=='scaffold'||m=='line') return "__________";
