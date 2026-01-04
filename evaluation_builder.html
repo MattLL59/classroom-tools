@@ -143,10 +143,9 @@
         .step-4 { border-left: 4px solid var(--col-3-blue); padding-left: 10px; margin-bottom: 10px; }
         .step-5 { border-left: 4px solid var(--col-4-green); padding-left: 10px; margin-bottom: 10px; }
         
-        .mode-toggle { 
-            display:inline-block; font-size:0.75rem; background:#eee; padding:2px 5px; border-radius:3px; border:1px solid #ccc; cursor:pointer; margin-right:5px;
+        .mode-select { 
+            font-size:0.75rem; background:#fff; padding:3px; border-radius:3px; border:1px solid #ccc; margin-right:5px; width: 140px;
         }
-        .mode-toggle.active { background: #3498db; color:white; border-color:#2980b9; }
 
         .scaffold-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom:8px; border-bottom:1px solid #eee; }
         .scaffold-select { padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
@@ -193,7 +192,7 @@
     </header>
 
     <div class="container" id="game-container">
-        <div id="topic-display">Question: ...</div>
+        <div id="topic-display">Question: How is the text presented?</div>
         <div class="progress-track"><div class="progress-fill" id="progress-bar"></div></div>
         
         <div id="stage-area" class="stage-area">
@@ -234,7 +233,7 @@
                 <p>Password:</p> <input type="password" id="admin-pass-input" style="padding:10px;"> <button onclick="unlockAdmin()" style="margin-top:10px; padding:10px;">Unlock</button>
             </div>
             <div id="admin-edit" class="panel-body" style="display:none;">
-                <div style="margin-bottom:20px;"><label>Topic (Main Question)</label><input id="edit-topic" class="admin-input" style="width:95%" onchange="updateConfigVal('topic', this.value)"></div>
+                <div style="margin-bottom:20px;"><label>Topic</label><input id="edit-topic" class="admin-input" style="width:95%" onchange="updateConfigVal('topic', this.value)"></div>
                 <div class="section-box"><button onclick="triggerSave()" id="save-btn" style="background:#3498db; color:white; padding:10px; width:100%;">Save Settings</button></div>
                 
                 <div class="section-box">
@@ -299,7 +298,7 @@
     <div id="emergency-reset" onclick="forceReset()">Emergency Factory Reset</div>
 
     <script>
-        // --- 0. CRITICAL FUNCTIONS (Loaded First) ---
+        // --- 0. CRITICAL FUNCTIONS ---
         function openAdmin() { document.getElementById('admin-modal').style.display = 'flex'; }
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
         function unlockAdmin() {
@@ -325,11 +324,11 @@
             ao4_starters: [ "I agree that" ], ao4_markers: [ "However,", "Furthermore," ], ao4_links: [ "evident when" ],
             quote_bank: ["Random Quote 1"], point_bank: ["Random Point 1"],
             content_pairs: [
-                { id: "c1", level: 1, specific_s1: "", quote: "neighbour from hell", method: "metaphor", specific_s3: "", effect: "that the BBC is impossible.", distractors: [], structure: defaultStructure, modes: { s1:'multiple', s2:'multiple', quote:'multiple', s3:'multiple', s4:'multiple' } }
+                { id: "c1", level: 1, specific_s1: "", quote: "neighbour from hell", method: "metaphor", specific_s3: "", effect: "that the BBC is impossible.", distractors: [], structure: defaultStructure, modes: { s1:'open', s2:'open', quote:'quiz', s3:'open', s4:'quiz' } }
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v95_levels'; 
+        var STORE_KEY = 'eval_arch_v96_modes'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -338,7 +337,6 @@
         var currentGameStructure = [];
         var currentSelectedOption = null;
 
-        // EMERGENCY KEYBOARD ACCESS
         document.addEventListener('keydown', function(event) {
             if (event.key === "Escape") {
                 var modal = document.getElementById('admin-modal');
@@ -359,7 +357,6 @@
                 config = JSON.parse(JSON.stringify(defaultData));
             }
             
-            // CLEAN UI
             document.getElementById('admin-modal').style.display = 'none';
             document.getElementById('overlay').style.display = 'none';
             
@@ -371,9 +368,9 @@
         function sanitizeData() {
             if(!config.content_pairs || !Array.isArray(config.content_pairs)) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
             config.content_pairs.forEach(p => {
-                if(!p.level) p.level = 1; // Default to Level 1
+                if(!p.level) p.level = 1; 
                 if(!p.distractors) p.distractors = [];
-                if(!p.modes) p.modes = { s1: 'multiple', s2: 'multiple', quote: 'multiple', s3: 'multiple', s4: 'multiple' };
+                if(!p.modes) p.modes = { s1: 'open', s2: 'open', quote: 'quiz', s3: 'open', s4: 'quiz' };
                 if(!p.structure) p.structure = ['s1', 's2', 'quote', 's3', 's4'];
             });
             if(!config.quote_bank) config.quote_bank = [];
@@ -411,7 +408,7 @@
 
             var stageKey = currentGameStructure[currentStageIndex];
             
-            // --- LEVEL 1 LOGIC ---
+            // Level 1 Logic
             if(gameState.currentLevel === 1) {
                 if(stageKey !== 's1' && stageKey !== 'quote' && stageKey !== 's4') {
                     currentStageIndex++; 
@@ -433,9 +430,7 @@
                 document.getElementById('stage-title').innerText = "Select Evidence";
                 document.getElementById('stage-subtitle').innerText = "Which quote best answers the question?";
                 
-                // FILTER QUESTIONS BY LEVEL
                 var levelQuestions = config.content_pairs.filter(p => parseInt(p.level) === gameState.currentLevel);
-                
                 if(levelQuestions.length === 0) {
                     grid.innerHTML = `<p style="grid-column:1/-1;">No questions found for Level ${gameState.currentLevel}. Please add them in settings.</p>`;
                     return;
@@ -444,10 +439,8 @@
                 levelQuestions.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        // NEW LOGIC: Use Custom Structure and filter out 'none'
                         var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
                         currentGameStructure = rawStruct.filter(k => k !== 'none');
-                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -459,39 +452,33 @@
             }
 
             document.getElementById('stage-title').innerText = (currentStageIndex + 1) + ". " + getStageLabel(key);
-            document.getElementById('stage-subtitle').innerText = "Select the best option.";
+            document.getElementById('stage-subtitle').innerText = getStageSubtitle(key);
 
             var pair = config.content_pairs.find(p => p.id === currentQuoteId);
             var isAO4 = (config.gameMode === "AO4");
-            var mode = pair.modes[key];
+            var mode = pair.modes[key] || 'quiz'; // Default to quiz if undefined
             var options = [];
 
-            // GENERATE OPTIONS
-            var correctText = "";
-            var isBlankAny = false;
-
-            if(key === 'quote') correctText = pair.quote;
-            else if(key === 's1') { if(pair.specific_s1) correctText=pair.specific_s1; else isBlankAny=true; }
-            else if(key === 's2') { if(pair.method) correctText=pair.method; else if(isAO4) isBlankAny=true; else correctText="Method"; }
-            else if(key === 's3') { if(pair.specific_s3) correctText=pair.specific_s3; else isBlankAny=true; }
-            else if(key === 's4') correctText = pair.effect;
-
-            if(!isBlankAny) options.push({ txt: correctText, correct: true });
-
-            var dists = [];
-            if(key==='quote') dists = config.quote_bank.concat(config.content_pairs.filter(p=>p.id!==currentQuoteId).map(p=>p.quote));
-            else if(key==='s4') dists = config.point_bank.concat(pair.distractors || []);
-            else if(key==='s1') dists = isAO4 ? config.ao4_starters : config.starters_evidence;
-            else if(key==='s2') dists = isAO4 ? config.ao4_markers : config.ao2_methods;
-            else if(key==='s3') dists = isAO4 ? config.ao4_links : config.starters_evaluative;
-
-            if(isBlankAny) {
-                dists.sort(()=>Math.random()-0.5);
-                for(var i=0; i<4 && i<dists.length; i++) options.push({ txt: dists[i], correct: true });
-            } else {
-                dists = dists.filter(t=>t!==correctText);
+            // 1. SCAFFOLD (Fixed)
+            if(mode === 'scaffold') {
+                var correctText = getSpecificText(key, pair, isAO4);
+                options.push({ txt: correctText, correct: true });
+            } 
+            // 2. QUIZ (Specific vs Distractors)
+            else if (mode === 'quiz') {
+                var correctText = getSpecificText(key, pair, isAO4);
+                options.push({ txt: correctText, correct: true });
+                
+                var dists = getDistractors(key, pair, isAO4, correctText);
+                dists = dists.filter(t => t !== correctText);
                 dists.sort(()=>Math.random()-0.5);
                 for(var i=0; i<3 && i<dists.length; i++) options.push({ txt: dists[i], correct: false });
+            }
+            // 3. OPEN (Any Bank)
+            else if (mode === 'open') {
+                var bankItems = getBankItems(key, isAO4);
+                bankItems.sort(()=>Math.random()-0.5);
+                for(var i=0; i<4 && i<bankItems.length; i++) options.push({ txt: bankItems[i], correct: true });
             }
 
             options.sort(()=>Math.random()-0.5);
@@ -505,6 +492,44 @@
                 btn.classList.add(cls);
                 grid.appendChild(btn);
             });
+        }
+
+        function getSpecificText(key, pair, isAO4) {
+            if(key === 'quote') return pair.quote;
+            if(key === 's1') return pair.specific_s1 || (isAO4 ? config.ao4_starters[0] : config.starters_evidence[0]);
+            if(key === 's2') return pair.method || (isAO4 ? "However," : "metaphor");
+            if(key === 's3') return pair.specific_s3 || (isAO4 ? config.ao4_links[0] : config.starters_evaluative[0]);
+            if(key === 's4') return pair.effect;
+            return "...";
+        }
+
+        function getBankItems(key, isAO4) {
+            if(key==='s1') return isAO4 ? config.ao4_starters : config.starters_evidence;
+            if(key==='s2') return isAO4 ? config.ao4_markers : config.ao2_methods;
+            if(key==='s3') return isAO4 ? config.ao4_links : config.starters_evaluative;
+            return []; // Quote/Point don't support 'open' typically
+        }
+
+        function getDistractors(key, pair, isAO4, correctText) {
+            var dists = [];
+            if(key==='quote') {
+                dists = config.quote_bank.concat(config.content_pairs.filter(p=>p.id!==currentQuoteId).map(p=>p.quote));
+            } else if(key==='s4') {
+                dists = config.point_bank.concat(pair.distractors || []);
+            } else {
+                dists = getBankItems(key, isAO4);
+            }
+            return dists;
+        }
+
+        function getStageSubtitle(key) {
+            var isAO4 = (config.gameMode === "AO4");
+            if(key === 's1') return isAO4 ? "State your opinion." : "How will you introduce the quote?";
+            if(key === 's2') return isAO4 ? "Choose a signpost." : "What terminology applies?";
+            if(key === 'quote') return "Select the evidence.";
+            if(key === 's3') return "Connect to the meaning.";
+            if(key === 's4') return "What is the deeper meaning/effect?";
+            return "Select the correct option.";
         }
 
         function selectOption(btn, opt, key) {
@@ -587,12 +612,15 @@
             var list = document.getElementById('list-content'); list.innerHTML = '';
             config.content_pairs.forEach((p, i) => {
                 var div = document.createElement('div'); div.className='content-card';
-                // Toggle HTML for modes
-                var toggle = (key) => {
-                    var m = p.modes[key] || 'multiple';
-                    return `<div><span class="mode-toggle ${m==='single'?'active':''}" onclick="setMode(${i},'${key}','single')">Single</span><span class="mode-toggle ${m==='multiple'?'active':''}" onclick="setMode(${i},'${key}','multiple')">Multiple</span></div>`;
-                };
-                
+                // Modes Logic
+                var getMode = (k) => p.modes[k] || 'open';
+                var sel = (k, v) => getMode(k) === v ? 'selected' : '';
+                var mSelect = (k) => `<select class="mode-select" onchange="setMode(${i},'${k}',this.value)">
+                    <option value="scaffold" ${sel(k,'scaffold')}>1. Scaffold (Fixed)</option>
+                    <option value="quiz" ${sel(k,'quiz')}>2. Quiz (Specific)</option>
+                    ${ (k!=='quote' && k!=='s4') ? `<option value="open" ${sel(k,'open')}>3. Open (Any)</option>` : '' }
+                </select>`;
+
                 // Structure Dropdowns
                 var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
                         <small><strong>Sentence Order (Custom):</strong></small><br>
@@ -621,11 +649,11 @@
                 div.innerHTML = `<div class="content-card-header">Question #${i+1} <button class="del-btn" onclick="delContent(${i})">Delete</button></div>
                 ${levelHTML}
                 ${structHTML}
-                <div class="step-1"><div style="display:flex;justify-content:space-between;"><span>1. Starter</span>${toggle('s1')}</div><input class="admin-input" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
-                <div class="step-2"><div style="display:flex;justify-content:space-between;"><span>2. Method</span>${toggle('s2')}</div><input class="admin-input" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
-                <div class="step-3"><div style="display:flex;justify-content:space-between;"><span>3. Quote</span>${toggle('quote')}</div><textarea class="admin-textarea" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
-                <div class="step-4"><div style="display:flex;justify-content:space-between;"><span>4. Link</span>${toggle('s3')}</div><input class="admin-input" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
-                <div class="step-5"><div style="display:flex;justify-content:space-between;"><span>5. Point</span>${toggle('s4')}</div><textarea class="admin-textarea" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>`;
+                <div class="step-1"><div style="display:flex;justify-content:space-between;"><span>1. Starter</span>${mSelect('s1')}</div><input class="admin-input" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
+                <div class="step-2"><div style="display:flex;justify-content:space-between;"><span>2. Method</span>${mSelect('s2')}</div><input class="admin-input" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
+                <div class="step-3"><div style="display:flex;justify-content:space-between;"><span>3. Quote</span>${mSelect('quote')}</div><textarea class="admin-textarea" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
+                <div class="step-4"><div style="display:flex;justify-content:space-between;"><span>4. Link</span>${mSelect('s3')}</div><input class="admin-input" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
+                <div class="step-5"><div style="display:flex;justify-content:space-between;"><span>5. Point</span>${mSelect('s4')}</div><textarea class="admin-textarea" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>`;
                 
                 // Specific Distractors for this question
                 var distHTML = `<div style="margin-top:5px; border-top:1px dashed #ccc; padding-top:5px;"><span style="font-size:0.8rem; color:red;">Specific Distractors (Point)</span>`;
@@ -651,7 +679,7 @@
         function removeDist(i,di){ config.content_pairs[i].distractors.splice(di,1); renderAdminUI(); }
         function addDist(i){ config.content_pairs[i].distractors.push("Wrong Answer"); renderAdminUI(); }
         function delContent(i) { config.content_pairs.splice(i,1); renderAdminUI(); }
-        function addContent() { config.content_pairs.push({id:"c"+Date.now(), level: 1, specific_s1:"", quote:"New", method:"", specific_s3:"", effect:"", distractors:[], structure: JSON.parse(JSON.stringify(config.default_structure)), modes:{s1:'multiple',s2:'multiple',quote:'multiple',s3:'multiple',s4:'multiple'}}); renderAdminUI(); }
+        function addContent() { config.content_pairs.push({id:"c"+Date.now(), level: 1, specific_s1:"", quote:"New", method:"", specific_s3:"", effect:"", distractors:[], structure: JSON.parse(JSON.stringify(config.default_structure)), modes:{s1:'open',s2:'open',quote:'quiz',s3:'open',s4:'quiz'}}); renderAdminUI(); }
         function updateConfigVal(k,v) { if(k.includes('settings')) config.settings[k.split('.')[1]]=parseInt(v); else config[k]=v; if(k==='topic'||k==='gameMode') updateDOM(); }
         function updateWSSetting(k,v) { config.worksheetSettings[k]=v; }
         function updateDefaultStruct() { var n=[]; for(var i=0;i<5;i++) n.push(document.getElementById('def-struct-'+i).value); config.default_structure=n; }
@@ -687,7 +715,6 @@
             if(config.worksheetSettings.showTask2) {
                 h+="<h2>Task 2: Sentence Builder</h2>";
                 config.content_pairs.forEach(p=>{
-                    // Filter "none" from structure before printing
                     var effectiveStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
                     var validKeys = effectiveStruct.filter(k => k !== 'none');
                     
