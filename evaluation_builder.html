@@ -24,7 +24,6 @@
             overflow: hidden; 
             text-align: center;
         }
-        /* HEADER FIX: High Z-Index to ensure Cog is always clickable */
         header { 
             display: flex; 
             justify-content: space-between; 
@@ -33,18 +32,36 @@
             padding-bottom: 10px; 
             border-bottom: 2px solid #e0e0e0; 
             flex-shrink: 0;
-            position: relative;
-            z-index: 5000; 
-            background-color: #f4f6f7; /* Ensure opaque background */
+            min-height: 50px;
         }
         h1 { margin: 0; color: var(--app-color); font-size: 1.6rem; }
         
         #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
         
-        .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; }
-        .admin-btn:hover { color: var(--app-color); }
-        .reset-btn { background: #c0392b; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+        /* FLOATING ADMIN BTN - THE FIX */
+        .admin-btn { 
+            position: fixed; 
+            top: 15px; 
+            right: 15px; 
+            font-size: 1.8rem; 
+            color: #7f8c8d; 
+            background: white;
+            border: 2px solid #ccc;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer; 
+            z-index: 99999; /* Highest Priority */
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+        }
+        .admin-btn:hover { color: var(--app-color); transform: scale(1.1); border-color: var(--app-color); }
+        
+        .reset-btn { background: #c0392b; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 70px; /* Space for cog */ }
 
         .container { 
             flex-grow: 1; 
@@ -101,7 +118,7 @@
         #overlay { background: rgba(231, 76, 60, 0.95); } 
         #levelup-overlay { background: rgba(46, 204, 113, 0.98); }
         #win-overlay { background: rgba(241, 196, 15, 0.98); color: #333; }
-        #admin-modal { background: rgba(0,0,0,0.5); z-index: 6000; color: #333; }
+        #admin-modal { background: rgba(0,0,0,0.5); z-index: 100000; color: #333; }
         
         .shake { animation: shake 0.4s; }
         
@@ -150,6 +167,8 @@
 </head>
 <body>
 
+    <button class="admin-btn" id="cog-btn" onclick="openAdmin()" title="Settings (Press ESC)"><i class="fas fa-cog"></i></button>
+
     <header>
         <h1 id="app-title-display">Evaluation Architect</h1>
         <div style="display:flex; gap:15px; align-items:center;">
@@ -159,7 +178,6 @@
                 <span style="border-left:1px solid #ccc; padding-left:15px;">Score: <span id="score-val" style="font-size:1.2rem; color:#f1c40f;">0</span></span>
             </div>
             <button onclick="forceReset()" class="reset-btn">⚠ RESET</button>
-            <button class="admin-btn" id="cog-btn" onclick="openAdmin()"><i class="fas fa-cog"></i></button>
         </div>
     </header>
 
@@ -249,6 +267,14 @@
         var currentGameStructure = [];
         var currentSelectedOption = null;
 
+        // EMERGENCY KEYBOARD ACCESS
+        document.addEventListener('keydown', function(event) {
+            if (event.key === "Escape") {
+                var modal = document.getElementById('admin-modal');
+                if (modal.style.display === 'none') openAdmin(); else closeAdmin();
+            }
+        });
+
         window.onload = function() {
             try {
                 var local = localStorage.getItem(STORE_KEY);
@@ -267,6 +293,7 @@
             resetGame();
         }
 
+        // --- GAME ENGINE ---
         function getStageLabel(key) {
             if(key === 's1') return "Starter";
             if(key === 's2') return "Method/Marker";
@@ -293,10 +320,8 @@
             
             // --- LEVEL 1 LOGIC: SKIP s2 and s3 ---
             if(gameState.currentLevel === 1) {
-                // We keep s1 (Starter), quote, s4 (Point). Skip others.
+                // Keep Starter (s1), Quote, Point (s4). Skip others.
                 if(stageKey !== 's1' && stageKey !== 'quote' && stageKey !== 's4') {
-                    // Check if we need to go forward or backward based on current Index vs intended
-                    // But simpler: just increment index and recursive call
                     currentStageIndex++; 
                     loadStage(); 
                     return;
@@ -366,7 +391,6 @@
             }
 
             options.sort(()=>Math.random()-0.5);
-            // Dedup
             var seen=new Set(); var final=[];
             options.forEach(o=>{if(!seen.has(o.txt)){seen.add(o.txt); final.push(o);}});
 
@@ -395,22 +419,19 @@
 
         function goBack() {
             currentStageIndex--;
-            // If going back lands us on a skipped stage (in Level 1), keep going back
             if(gameState.currentLevel === 1) {
-                // simple check loop
+                // If skipping s2/s3, ensure we jump back correctly
                 while(currentStageIndex >= 0) {
                     var k = currentGameStructure[currentStageIndex];
-                    if(k === 's1' || k === 'quote' || k === 's4') break; // valid
+                    if(k === 's1' || k === 'quote' || k === 's4') break;
                     currentStageIndex--;
                 }
             }
-            
             if(currentStageIndex < 0) resetGame();
             else loadStage();
         }
 
         function goBackFromFinal() {
-            // Find last valid stage
             currentStageIndex = currentGameStructure.length - 1;
             if(gameState.currentLevel === 1) {
                 while(currentStageIndex >= 0) {
