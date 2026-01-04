@@ -24,6 +24,7 @@
             overflow: hidden; 
             text-align: center;
         }
+        /* HEADER */
         header { 
             display: flex; 
             justify-content: space-between; 
@@ -33,6 +34,9 @@
             border-bottom: 2px solid #e0e0e0; 
             flex-shrink: 0;
             min-height: 50px;
+            background-color: #f4f6f7;
+            position: relative;
+            z-index: 5000;
         }
         h1 { margin: 0; color: var(--app-color); font-size: 1.6rem; }
         
@@ -189,7 +193,7 @@
     </header>
 
     <div class="container" id="game-container">
-        <div id="topic-display">Question: How is the text presented?</div>
+        <div id="topic-display">Question: ...</div>
         <div class="progress-track"><div class="progress-fill" id="progress-bar"></div></div>
         
         <div id="stage-area" class="stage-area">
@@ -230,7 +234,7 @@
                 <p>Password:</p> <input type="password" id="admin-pass-input" style="padding:10px;"> <button onclick="unlockAdmin()" style="margin-top:10px; padding:10px;">Unlock</button>
             </div>
             <div id="admin-edit" class="panel-body" style="display:none;">
-                <div style="margin-bottom:20px;"><label>Topic</label><input id="edit-topic" class="admin-input" style="width:95%" onchange="updateConfigVal('topic', this.value)"></div>
+                <div style="margin-bottom:20px;"><label>Topic (Main Question)</label><input id="edit-topic" class="admin-input" style="width:95%" onchange="updateConfigVal('topic', this.value)"></div>
                 <div class="section-box"><button onclick="triggerSave()" id="save-btn" style="background:#3498db; color:white; padding:10px; width:100%;">Save Settings</button></div>
                 
                 <div class="section-box">
@@ -321,11 +325,11 @@
             ao4_starters: [ "I agree that" ], ao4_markers: [ "However,", "Furthermore," ], ao4_links: [ "evident when" ],
             quote_bank: ["Random Quote 1"], point_bank: ["Random Point 1"],
             content_pairs: [
-                { id: "c1", specific_s1: "", quote: "neighbour from hell", method: "metaphor", specific_s3: "", effect: "that the BBC is impossible.", distractors: [], structure: defaultStructure, modes: { s1:'multiple', s2:'multiple', quote:'multiple', s3:'multiple', s4:'multiple' } }
+                { id: "c1", level: 1, specific_s1: "", quote: "neighbour from hell", method: "metaphor", specific_s3: "", effect: "that the BBC is impossible.", distractors: [], structure: defaultStructure, modes: { s1:'multiple', s2:'multiple', quote:'multiple', s3:'multiple', s4:'multiple' } }
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v94_complete'; 
+        var STORE_KEY = 'eval_arch_v95_levels'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -347,7 +351,6 @@
                 var local = localStorage.getItem(STORE_KEY);
                 if(local) {
                     var parsed = JSON.parse(local);
-                    // MERGE DEFAULTS TO PREVENT CRASH
                     config = Object.assign({}, defaultData, parsed);
                     if(!config.content_pairs) config.content_pairs = defaultData.content_pairs;
                 }
@@ -366,9 +369,9 @@
         };
 
         function sanitizeData() {
-            // Ensure no nulls in arrays
             if(!config.content_pairs || !Array.isArray(config.content_pairs)) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
             config.content_pairs.forEach(p => {
+                if(!p.level) p.level = 1; // Default to Level 1
                 if(!p.distractors) p.distractors = [];
                 if(!p.modes) p.modes = { s1: 'multiple', s2: 'multiple', quote: 'multiple', s3: 'multiple', s4: 'multiple' };
                 if(!p.structure) p.structure = ['s1', 's2', 'quote', 's3', 's4'];
@@ -408,7 +411,7 @@
 
             var stageKey = currentGameStructure[currentStageIndex];
             
-            // --- LEVEL 1 LOGIC: SKIP s2 and s3 ---
+            // --- LEVEL 1 LOGIC ---
             if(gameState.currentLevel === 1) {
                 if(stageKey !== 's1' && stageKey !== 'quote' && stageKey !== 's4') {
                     currentStageIndex++; 
@@ -428,11 +431,19 @@
 
             if(key === 'quote_select_mode') {
                 document.getElementById('stage-title').innerText = "Select Evidence";
-                document.getElementById('stage-subtitle').innerText = "Start by choosing a quote.";
-                config.content_pairs.forEach(p => {
+                document.getElementById('stage-subtitle').innerText = "Which quote best answers the question?";
+                
+                // FILTER QUESTIONS BY LEVEL
+                var levelQuestions = config.content_pairs.filter(p => parseInt(p.level) === gameState.currentLevel);
+                
+                if(levelQuestions.length === 0) {
+                    grid.innerHTML = `<p style="grid-column:1/-1;">No questions found for Level ${gameState.currentLevel}. Please add them in settings.</p>`;
+                    return;
+                }
+
+                levelQuestions.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        
                         // NEW LOGIC: Use Custom Structure and filter out 'none'
                         var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
                         currentGameStructure = rawStruct.filter(k => k !== 'none');
@@ -598,7 +609,17 @@
                 });
                 structHTML += `</div></div>`;
                 
+                // Level Dropdown
+                var levelHTML = `<div style="margin-bottom:5px;"><label>Assign to Level:</label> 
+                    <select class="admin-input" style="width:auto;" onchange="updateContent(${i}, 'level', this.value)">
+                        <option value="1" ${p.level==1?'selected':''}>Level 1</option>
+                        <option value="2" ${p.level==2?'selected':''}>Level 2</option>
+                        <option value="3" ${p.level==3?'selected':''}>Level 3</option>
+                    </select>
+                </div>`;
+                
                 div.innerHTML = `<div class="content-card-header">Question #${i+1} <button class="del-btn" onclick="delContent(${i})">Delete</button></div>
+                ${levelHTML}
                 ${structHTML}
                 <div class="step-1"><div style="display:flex;justify-content:space-between;"><span>1. Starter</span>${toggle('s1')}</div><input class="admin-input" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
                 <div class="step-2"><div style="display:flex;justify-content:space-between;"><span>2. Method</span>${toggle('s2')}</div><input class="admin-input" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
@@ -630,8 +651,8 @@
         function removeDist(i,di){ config.content_pairs[i].distractors.splice(di,1); renderAdminUI(); }
         function addDist(i){ config.content_pairs[i].distractors.push("Wrong Answer"); renderAdminUI(); }
         function delContent(i) { config.content_pairs.splice(i,1); renderAdminUI(); }
-        function addContent() { config.content_pairs.push({id:"c"+Date.now(), specific_s1:"", quote:"New", method:"", specific_s3:"", effect:"", distractors:[], structure: JSON.parse(JSON.stringify(config.default_structure)), modes:{s1:'multiple',s2:'multiple',quote:'multiple',s3:'multiple',s4:'multiple'}}); renderAdminUI(); }
-        function updateConfigVal(k,v) { if(k.includes('settings')) config.settings[k.split('.')[1]]=parseInt(v); else config[k]=v; if(k==='gameMode') resetGame(); }
+        function addContent() { config.content_pairs.push({id:"c"+Date.now(), level: 1, specific_s1:"", quote:"New", method:"", specific_s3:"", effect:"", distractors:[], structure: JSON.parse(JSON.stringify(config.default_structure)), modes:{s1:'multiple',s2:'multiple',quote:'multiple',s3:'multiple',s4:'multiple'}}); renderAdminUI(); }
+        function updateConfigVal(k,v) { if(k.includes('settings')) config.settings[k.split('.')[1]]=parseInt(v); else config[k]=v; if(k==='topic'||k==='gameMode') updateDOM(); }
         function updateWSSetting(k,v) { config.worksheetSettings[k]=v; }
         function updateDefaultStruct() { var n=[]; for(var i=0;i<5;i++) n.push(document.getElementById('def-struct-'+i).value); config.default_structure=n; }
         function applyDefaultStructureToAll() { if(confirm("Apply to all?")) { config.content_pairs.forEach(p=>p.structure=JSON.parse(JSON.stringify(config.default_structure))); renderAdminUI(); } }
