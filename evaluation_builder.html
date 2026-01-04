@@ -64,16 +64,23 @@
         .stage-area.active { display: block; }
         
         h2.stage-title { font-size: 1.4rem; margin-bottom: 5px; color: #444; }
-        p.stage-subtitle { color: #777; margin-bottom: 20px; font-style: italic; }
+        p.stage-subtitle { color: #777; margin-bottom: 10px; font-style: italic; }
         
         #topic-display { background: #eaf2f8; color: var(--app-color); padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; font-size: 1.1rem; border-left: 5px solid var(--level-1); text-align: left; flex-shrink: 0; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
-        button.choice-btn { padding: 20px; border: 2px solid transparent; border-radius: 10px; font-size: 1.1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; color: #333; }
-        button.choice-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); }
+        
+        button.choice-btn { padding: 20px; border: 2px solid transparent; border-radius: 10px; font-size: 1.1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; color: #333; opacity: 0.8; }
+        button.choice-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); opacity: 1; }
+        /* Selected State */
+        button.choice-btn.selected { border: 4px solid #333; transform: scale(1.05); opacity: 1; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
         
         .btn-s1 { background: var(--col-1-pink); } .btn-s2 { background: var(--col-2-yellow); } .btn-s3 { background: var(--col-3-blue); } .btn-s4 { background: var(--col-4-green); } .btn-white { background: white; border-color: #ddd; }
         
+        #confirm-bar { margin-top:20px; padding-top:15px; border-top:1px solid #eee; display:none; }
+        #confirm-btn { background: #27ae60; color: white; padding: 15px 40px; font-size: 1.2rem; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); transition: transform 0.2s; }
+        #confirm-btn:hover { transform: scale(1.05); }
+
         #typing-interface { display: none; flex-direction: column; align-items: center; width: 100%; }
         #typing-input { width: 80%; padding: 15px; font-size: 1.1rem; border: 2px solid #ccc; border-radius: 8px; margin-bottom: 15px; font-family: inherit; resize: vertical; min-height: 80px; }
         #typing-submit { padding: 12px 30px; font-size: 1.1rem; background: var(--app-color); color: white; border: none; border-radius: 6px; cursor: pointer; }
@@ -156,6 +163,9 @@
             <h2 id="stage-title" class="stage-title">Select Evidence</h2>
             <p id="stage-subtitle" class="stage-subtitle">Instruction goes here</p>
             <div class="grid" id="game-grid"></div>
+            <div id="confirm-bar">
+                <button id="confirm-btn" onclick="confirmChoice()">Confirm Selection</button>
+            </div>
         </div>
         
         <div id="typing-interface">
@@ -238,7 +248,7 @@
                 </div>
 
                 <div class="section-box" style="border-left: 5px solid var(--col-4-green);">
-                    <span class="section-title">Stage 5: Point Bank (Global Distractors)</span>
+                    <span class="section-title">Stage 5: Point Bank (Distractors)</span>
                     <div id="list-point-bank"></div><button onclick="addItem('point_bank')" style="margin-top:5px; width:100%; padding:8px;">+ Add Distractor Point</button>
                 </div>
 
@@ -374,13 +384,14 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v84_specifics'; 
+        var STORE_KEY = 'eval_arch_v85_sandbox'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
         var gameState = { currentLevel: 1, streak: 0, score: 0 };
         var currentStageIndex = 0;
         var currentGameStructure = [];
+        var currentSelectedOption = null; // New state for "Review"
 
         // --- 2. INIT ---
         window.onload = function() {
@@ -408,16 +419,12 @@
 
         function sanitizeData() {
             if(!config.content_pairs || !Array.isArray(config.content_pairs)) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
-            // Ensure at least one empty set if empty
-            if(config.content_pairs.length === 0) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
-
             if(!config.quote_bank) config.quote_bank = defaultData.quote_bank;
             if(!config.point_bank) config.point_bank = defaultData.point_bank;
             
             config.content_pairs.forEach(p => {
                 if(!p.structure || p.structure.length !== 5) p.structure = ['s1', 's2', 'quote', 's3', 's4'];
                 if(!p.modes) p.modes = { s1: 'multiple', s2: 'multiple', quote: 'multiple', s3: 'multiple', s4: 'multiple' };
-                // Ensure specific distractors array
                 if(!p.distractors) p.distractors = p.distractor ? [p.distractor] : [];
             });
             if(!config.default_structure) config.default_structure = ['s1', 's2', 'quote', 's3', 's4'];
@@ -458,6 +465,7 @@
             currentStageIndex = 0; 
             currentQuoteId = null; 
             currentGameStructure = []; 
+            currentSelectedOption = null;
             updateBuilder();
             renderGameGrid('quote_select_mode'); 
         }
@@ -467,6 +475,10 @@
                 finishGame();
                 return;
             }
+
+            // Hide confirm bar initially for new stage
+            document.getElementById('confirm-bar').style.display = 'none';
+            currentSelectedOption = null;
 
             var stageKey = currentGameStructure[currentStageIndex];
             var wsMode = config.worksheetSettings[stageKey + "_mode"] || "text";
@@ -498,6 +510,7 @@
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
                         currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure; 
+                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -517,6 +530,7 @@
 
             var options = [];
 
+            // SINGLE CHOICE (Scaffolded)
             if(mode === 'single') {
                 var correctText = "";
                 if(key === 'quote') correctText = pair.quote;
@@ -525,24 +539,42 @@
                 else if(key === 's3') correctText = pair.specific_s3 || (isAO4 ? config.ao4_links[0] : config.starters_evaluative[0]);
                 else if(key === 's4') correctText = pair.effect;
                 
-                options.push({ txt: correctText, correct: true });
+                options.push({ txt: correctText, correct: true }); // Always correct in single mode
             } 
             else {
                 // MULTIPLE CHOICE LOGIC
+                // Determine Correct Answer
                 var correctText = "";
-                if(key === 'quote') correctText = pair.quote;
-                else if(key === 's1') correctText = pair.specific_s1 || (isAO4 ? config.ao4_starters[0] : config.starters_evidence[0]);
-                else if(key === 's2') correctText = pair.method;
-                else if(key === 's3') correctText = pair.specific_s3 || (isAO4 ? config.ao4_links[0] : config.starters_evaluative[0]);
-                else if(key === 's4') correctText = pair.effect;
+                var isBlankAny = false; // Flag for "Blank Field = Any is Correct"
 
-                if(isAO4 && key === 's2' && !correctText) correctText = "However,";
+                if(key === 'quote') {
+                    correctText = pair.quote;
+                }
+                else if(key === 's1') {
+                    if(pair.specific_s1 && pair.specific_s1.trim() !== "") correctText = pair.specific_s1;
+                    else isBlankAny = true; // No specific starter -> Any starter is fine
+                }
+                else if(key === 's2') {
+                    if(pair.method && pair.method.trim() !== "") correctText = pair.method;
+                    else if(isAO4) isBlankAny = true; // Any marker is fine if not specified
+                    else correctText = "Method"; // AO2 fallback if empty
+                }
+                else if(key === 's3') {
+                    if(pair.specific_s3 && pair.specific_s3.trim() !== "") correctText = pair.specific_s3;
+                    else isBlankAny = true;
+                }
+                else if(key === 's4') {
+                    correctText = pair.effect; // Point always needs specific correctness usually
+                }
 
-                options.push({ txt: correctText, correct: true });
+                // If strict correct answer exists, add it
+                if(!isBlankAny) {
+                    options.push({ txt: correctText, correct: true });
+                }
 
-                // ALWAYS SHOW 4 OPTIONS (Correct + 3 Distractors) for robustness
-                var numDistractors = 3; 
+                // ADD DISTRACTORS / OTHER OPTIONS
                 var dists = [];
+                var sourceList = [];
 
                 if(key === 'quote') {
                     var others = config.content_pairs.filter(p => p.id !== currentQuoteId).map(p => p.quote);
@@ -550,12 +582,24 @@
                     dists = others;
                 }
                 else if(key === 's2' && isAO4) {
-                    var correctCat = getDiscourseCategory(correctText);
-                    var allCats = ['further', 'counter', 'evidence', 'conclude'];
-                    var badCats = allCats.filter(c => c !== correctCat);
-                    badCats.forEach(c => {
-                        if(config.discourseCategories[c]) dists = dists.concat(config.discourseCategories[c]);
-                    });
+                    // Combine all markers
+                    var allM = [];
+                    for(var cat in config.discourseCategories) {
+                        allM = allM.concat(config.discourseCategories[cat]);
+                    }
+                    if(isBlankAny) {
+                        // Any marker is correct. 
+                        // Just pick 4 random ones from the big list and mark them all correct.
+                        dists = allM;
+                    } else {
+                        // Correct one already added. Add distractors from different categories.
+                        var correctCat = getDiscourseCategory(correctText);
+                        var allCats = ['further', 'counter', 'evidence', 'conclude'];
+                        var badCats = allCats.filter(c => c !== correctCat);
+                        badCats.forEach(c => {
+                            if(config.discourseCategories[c]) dists = dists.concat(config.discourseCategories[c]);
+                        });
+                    }
                 }
                 else if(key === 's2') { 
                     dists = config.ao2_methods || [];
@@ -569,23 +613,32 @@
                     dists = isAO4 ? config.ao4_links : config.starters_evaluative;
                 }
                 else if(key === 's4') {
-                    // Use Specific Distractors first
                     if(pair.distractors && pair.distractors.length > 0) dists = dists.concat(pair.distractors);
-                    // Then use Global Bank
                     if(config.point_bank) dists = dists.concat(config.point_bank);
                 }
 
-                dists = dists.filter(t => t !== correctText);
-                dists.sort(() => Math.random() - 0.5);
-                
-                // Fill up to numDistractors
-                for(var i=0; i<numDistractors && i<dists.length; i++) {
-                    options.push({ txt: dists[i], correct: false });
+                // Filtering and Selection
+                if(isBlankAny) {
+                    // We need 4 options, all are "Correct"
+                    dists.sort(() => Math.random() - 0.5);
+                    var limit = 4;
+                    for(var i=0; i<limit && i<dists.length; i++) {
+                        options.push({ txt: dists[i], correct: true }); // ALL CORRECT
+                    }
+                } else {
+                    // Strict Mode: Filter out correct answer from distractors
+                    dists = dists.filter(t => t !== correctText);
+                    dists.sort(() => Math.random() - 0.5);
+                    var numDistractors = 3; // Always show 4 options total
+                    for(var i=0; i<numDistractors && i<dists.length; i++) {
+                        options.push({ txt: dists[i], correct: false });
+                    }
                 }
             }
 
             options.sort(() => Math.random() - 0.5);
             
+            // Remove duplicates visually
             var uniqueOptions = [];
             var seen = new Set();
             options.forEach(o => {
@@ -599,17 +652,42 @@
                 var colorClass = key === 's1' ? 'btn-s1' : key === 's2' ? 'btn-s2' : key === 's3' ? 'btn-s3' : 'btn-s4';
                 if(key === 'quote') colorClass = 'btn-white';
                 
-                var btn = createBtn(opt.txt, () => {
-                    if(opt.correct) {
-                        sentenceParts[key] = key === 'quote' ? `"${opt.txt}"` : opt.txt;
-                        advanceStage();
-                    } else {
-                        showError();
-                    }
+                var btn = createBtn(opt.txt, function() {
+                    // On Click logic for Review
+                    selectOption(this, opt, key);
                 });
                 btn.classList.add(colorClass);
                 grid.appendChild(btn);
             });
+        }
+
+        function selectOption(btnElement, optionObj, key) {
+            // Deselect others
+            var allBtns = document.querySelectorAll('#game-grid .choice-btn');
+            allBtns.forEach(b => b.classList.remove('selected'));
+            
+            // Select this
+            btnElement.classList.add('selected');
+            
+            // Update Builder Visual Preview
+            sentenceParts[key] = key === 'quote' ? `"${optionObj.txt}"` : optionObj.txt;
+            updateBuilder();
+            
+            // Store selection for confirmation
+            currentSelectedOption = optionObj;
+            
+            // Show Confirm Button
+            document.getElementById('confirm-bar').style.display = 'block';
+        }
+
+        function confirmChoice() {
+            if(!currentSelectedOption) return;
+            
+            if(currentSelectedOption.correct) {
+                advanceStage();
+            } else {
+                showError();
+            }
         }
 
         function getDiscourseCategory(text) {
@@ -633,7 +711,6 @@
         }
 
         function advanceStage() {
-            updateBuilder();
             currentStageIndex++;
             loadStage();
         }
@@ -782,10 +859,10 @@
 
                     div.innerHTML = `<div class="content-card-header"><span>Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div>
                     ${structHTML}
-                    <div class="step-1"><div style="display:flex; justify-content:space-between;"><span class="step-label">1. Starter</span>${toggleHTML('s1')}</div><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
-                    <div class="step-2"><div style="display:flex; justify-content:space-between;"><span class="step-label">2. Method/Marker</span>${toggleHTML('s2')}</div><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
+                    <div class="step-1"><div style="display:flex; justify-content:space-between;"><span class="step-label">1. Starter (Blank = Any Correct)</span>${toggleHTML('s1')}</div><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
+                    <div class="step-2"><div style="display:flex; justify-content:space-between;"><span class="step-label">2. Method/Marker (Blank = Any)</span>${toggleHTML('s2')}</div><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
                     <div class="step-3"><div style="display:flex; justify-content:space-between;"><span class="step-label">3. Quote</span>${toggleHTML('quote')}</div><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
-                    <div class="step-4"><div style="display:flex; justify-content:space-between;"><span class="step-label">4. Link</span>${toggleHTML('s3')}</div><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
+                    <div class="step-4"><div style="display:flex; justify-content:space-between;"><span class="step-label">4. Link (Blank = Any)</span>${toggleHTML('s3')}</div><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
                     <div class="step-5"><div style="display:flex; justify-content:space-between;"><span class="step-label">5. Point</span>${toggleHTML('s4')}</div><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>
                     ${distListHTML}`;
                     cList.appendChild(div);
