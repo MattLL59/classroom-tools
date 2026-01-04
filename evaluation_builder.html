@@ -215,7 +215,7 @@
                 </div>
 
                 <div class="section-box" style="border-left: 5px solid var(--col-1-pink);">
-                    <span class="section-title" id="lbl-s1-bank">Stage 1: Multiple Choice Bank</span><div id="list-s1"></div><button onclick="addItem('s1')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
+                    <span class="section-title" id="lbl-s1-bank">Stage 1: Starter Bank</span><div id="list-s1"></div><button onclick="addItem('s1')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
                 </div>
                 
                 <div class="section-box" style="border-left: 5px solid var(--col-2-yellow);">
@@ -224,12 +224,16 @@
 
                 <div class="section-box" style="border-left: 5px solid #333;">
                     <span class="section-title">Stage 3: Quote Bank (Distractors)</span>
-                    <p style="font-size:0.8rem; margin:0 0 5px 0;">Add generic incorrect quotes to appear as multiple choice options.</p>
                     <div id="list-quote-bank"></div><button onclick="addItem('quote_bank')" style="margin-top:5px; width:100%; padding:8px;">+ Add Distractor Quote</button>
                 </div>
 
                 <div class="section-box" style="border-left: 5px solid var(--col-3-blue);">
                     <span class="section-title" id="lbl-s3-bank">Stage 4: Link Bank</span><div id="list-s3"></div><button onclick="addItem('s3')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
+                </div>
+
+                <div class="section-box" style="border-left: 5px solid var(--col-4-green);">
+                    <span class="section-title">Stage 5: Point Bank (Distractors)</span>
+                    <div id="list-point-bank"></div><button onclick="addItem('point_bank')" style="margin-top:5px; width:100%; padding:8px;">+ Add Distractor Point</button>
                 </div>
 
                 <div class="section-box" style="border-left: 5px solid var(--col-2-yellow);">
@@ -316,18 +320,17 @@
                 s1_mode: "text", s2_mode: "text", quote_mode: "text", s3_mode: "text", s4_mode: "text"
             },
             
-            // AO2 BANKS
+            // BANKS
             starters_evidence: [ "The writer uses", "The author explicitly chooses", "The text presents" ],
             ao2_methods: ["Metaphor", "Simile", "Personification", "Adjective"], 
             starters_evaluative: [ "to effectively suggest", "in order to imply", "which creates the impression" ],
             
-            // AO4 BANKS
             ao4_starters: [ "I completely agree that", "The writer successfully conveys that", "It is clear that" ],
             ao4_markers: [ "Furthermore,", "However,", "Above all,", "Consequently,", "Similarly,", "In contrast," ],
             ao4_links: [ "which is evident when", "as seen in the line", "demonstrated by the phrase" ],
             
-            // NEW QUOTE BANK (Distractors)
             quote_bank: ["This is a random quote.", "The text does not suggest this.", "Another irrelevant point."],
+            point_bank: ["This has no effect.", "The writer creates a confused tone.", "This makes the reader stop reading."],
 
             content_pairs: [
                 { 
@@ -343,7 +346,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v79_quotebank'; 
+        var STORE_KEY = 'eval_arch_v80_full'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -354,7 +357,6 @@
         // --- 2. INIT ---
         window.onload = function() {
             try {
-                // Force Clean UI
                 document.getElementById('admin-modal').style.display = 'none';
                 document.getElementById('levelup-overlay').style.display = 'none';
                 document.getElementById('win-overlay').style.display = 'none';
@@ -372,22 +374,15 @@
                 config = JSON.parse(JSON.stringify(defaultData));
             }
 
-            // SAFETY
             sanitizeData();
-
             updateDOM();
             setTimeout(renderAdminUI, 10);
         };
 
         function sanitizeData() {
-            if(!config.content_pairs || !Array.isArray(config.content_pairs)) {
-                config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
-            }
-            if(!config.ao4_markers) config.ao4_markers = defaultData.ao4_markers;
-            if(!config.ao4_starters) config.ao4_starters = defaultData.ao4_starters;
-            if(!config.ao4_links) config.ao4_links = defaultData.ao4_links;
-            if(!config.ao2_methods) config.ao2_methods = defaultData.ao2_methods;
+            if(!config.content_pairs || !Array.isArray(config.content_pairs)) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
             if(!config.quote_bank) config.quote_bank = defaultData.quote_bank;
+            if(!config.point_bank) config.point_bank = defaultData.point_bank;
             
             config.content_pairs.forEach(p => {
                 if(!p.structure || !Array.isArray(p.structure) || p.structure.length !== 5) {
@@ -530,14 +525,11 @@
 
             if(key === 'quote') {
                 options.push({ txt: pair.quote, correct: true });
-                // Use quotes from other questions first
                 var dists = config.content_pairs.filter(p => p.id !== currentQuoteId).map(p => p.quote);
-                // Then use quotes from the Quote Bank
-                if(config.quote_bank && config.quote_bank.length > 0) {
-                    dists = dists.concat(config.quote_bank);
-                }
+                if(config.quote_bank) dists = dists.concat(config.quote_bank);
                 
                 var numDistractors = gameState.currentLevel; 
+                dists.sort(() => Math.random() - 0.5);
                 for(var i=0; i<numDistractors && i<dists.length; i++) {
                     options.push({ txt: dists[i], correct: false });
                 }
@@ -556,7 +548,6 @@
                         if(gameState.currentLevel > 1 && list[1]) options.push({ txt: list[1], correct: false });
                     }
                 } else {
-                    // Show bank items
                     list.forEach(t => options.push({ txt: t, correct: true }));
                 }
             }
@@ -567,12 +558,19 @@
             }
             else if(key === 's4') {
                 options.push({ txt: pair.effect, correct: true });
-                if(gameState.currentLevel >= 1 && pair.distractor) options.push({ txt: pair.distractor, correct: false });
+                var dists = [];
+                if(pair.distractor) dists.push(pair.distractor);
+                if(config.point_bank) dists = dists.concat(config.point_bank);
+                
+                dists.sort(() => Math.random() - 0.5);
+                var numDistractors = gameState.currentLevel;
+                for(var i=0; i<numDistractors && i<dists.length; i++) {
+                    options.push({ txt: dists[i], correct: false });
+                }
             }
 
             options.sort(() => Math.random() - 0.5);
             
-            // Remove duplicates
             var uniqueOptions = [];
             var seen = new Set();
             options.forEach(o => {
@@ -733,16 +731,15 @@
                     if(document.getElementById('def-struct-'+i)) document.getElementById('def-struct-'+i).value = config.default_structure[i];
                 }
 
-                // Render Banks
                 renderList('list-s1', (config.gameMode === "AO4" ? config.ao4_starters : config.starters_evidence), (config.gameMode === "AO4" ? 'ao4_starters' : 'starters_evidence'));
                 renderList('list-s2', (config.gameMode === "AO4" ? config.ao4_markers : config.ao2_methods), (config.gameMode === "AO4" ? 'ao4_markers' : 'ao2_methods'));
                 renderList('list-s3', (config.gameMode === "AO4" ? config.ao4_links : config.starters_evaluative), (config.gameMode === "AO4" ? 'ao4_links' : 'starters_evaluative'));
                 renderList('list-quote-bank', config.quote_bank, 'quote_bank');
+                renderList('list-point-bank', config.point_bank, 'point_bank');
 
-                // Update Bank Titles
                 document.getElementById('lbl-s1-bank').innerText = (config.gameMode === "AO4" ? "Stage 1: AO4 Starters Bank" : "Stage 1: AO2 Starters Bank");
                 document.getElementById('lbl-s2-bank').innerText = (config.gameMode === "AO4" ? "Stage 2: AO4 Markers Bank" : "Stage 2: AO2 Methods Bank");
-                document.getElementById('lbl-s3-bank').innerText = (config.gameMode === "AO4" ? "Stage 3: AO4 Links Bank" : "Stage 3: AO2 Links Bank");
+                document.getElementById('lbl-s3-bank').innerText = (config.gameMode === "AO4" ? "Stage 4: AO4 Links Bank" : "Stage 4: AO2 Links Bank");
 
                 var cList = document.getElementById('list-content');
                 cList.innerHTML = '';
@@ -826,6 +823,7 @@
             else if(key === 'ao4_links') config.ao4_links.splice(idx, 1);
             else if(key === 'starters_evaluative') config.starters_evaluative.splice(idx, 1);
             else if(key === 'quote_bank') config.quote_bank.splice(idx, 1);
+            else if(key === 'point_bank') config.point_bank.splice(idx, 1);
             
             renderAdminUI(); 
         }
@@ -843,6 +841,8 @@
                 else config.starters_evaluative.push(val);
             } else if(type === 'quote_bank') {
                 config.quote_bank.push(val);
+            } else if(type === 'point_bank') {
+                config.point_bank.push(val);
             }
             renderAdminUI();
         }
