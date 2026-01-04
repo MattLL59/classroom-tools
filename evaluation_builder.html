@@ -38,7 +38,6 @@
         #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
         
-        /* ADMIN BTN Z-INDEX BOOSTED TO 10000 */
         .admin-btn { border: none; background: none; font-size: 1.5rem; color: #999; cursor: pointer; z-index: 10000; position: relative; }
         .admin-btn:hover { color: var(--app-color); }
         .reset-btn { background: #c0392b; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
@@ -264,14 +263,14 @@
                 <div style="margin-bottom: 20px;"><label style="font-weight:bold;">Admin Password</label><input id="edit-admin-pass" class="admin-input" onchange="saveLocal(false)"></div>
                 
                 <div class="section-box" style="border-left: 5px solid var(--col-1-pink);">
-                    <span class="section-title">Generic Starters (Stage 1)</span><div id="list-s1"></div><button onclick="addItem('s1')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
+                    <span class="section-title" id="lbl-s1-bank">Stage 1: Multiple Choice Bank</span><div id="list-s1"></div><button onclick="addItem('s1')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
                 </div>
                 <div class="section-box" style="border-left: 5px solid var(--col-3-blue);">
-                    <span class="section-title">Generic Links (Stage 3)</span><div id="list-s3"></div><button onclick="addItem('s3')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
+                    <span class="section-title" id="lbl-s3-bank">Stage 3: Multiple Choice Bank</span><div id="list-s3"></div><button onclick="addItem('s3')" style="margin-top:5px; width:100%; padding:8px;">+ Add Item</button>
                 </div>
                 
                 <div class="section-box" style="border-left: 5px solid var(--col-2-yellow); display:none;" id="box-s2-markers">
-                    <span class="section-title">Discourse Markers (AO4 Only)</span><div id="list-s2"></div><button onclick="addItem('s2')" style="margin-top:5px; width:100%; padding:8px;">+ Add Marker</button>
+                    <span class="section-title">Stage 2 (AO4): Multiple Choice Bank</span><div id="list-s2"></div><button onclick="addItem('s2')" style="margin-top:5px; width:100%; padding:8px;">+ Add Marker</button>
                 </div>
 
                 <div style="display:flex; justify-content: space-between; padding-top:20px; border-top:1px solid #eee;">
@@ -328,7 +327,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v75_final'; 
+        var STORE_KEY = 'eval_arch_v76_final'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -357,11 +356,10 @@
                 config = JSON.parse(JSON.stringify(defaultData));
             }
 
-            // SAFETY: Self-Repair Corrupt Data
+            // SAFETY
             sanitizeData();
 
             updateDOM();
-            // We delay renderAdminUI slightly to ensure DOM is ready, though onload handles it.
             setTimeout(renderAdminUI, 10);
         };
 
@@ -369,6 +367,10 @@
             if(!config.content_pairs || !Array.isArray(config.content_pairs)) {
                 config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
             }
+            if(!config.ao4_markers) config.ao4_markers = defaultData.ao4_markers;
+            if(!config.ao4_starters) config.ao4_starters = defaultData.ao4_starters;
+            if(!config.ao4_links) config.ao4_links = defaultData.ao4_links;
+            
             config.content_pairs.forEach(p => {
                 if(!p.structure || !Array.isArray(p.structure) || p.structure.length !== 5) {
                     p.structure = JSON.parse(JSON.stringify(config.default_structure));
@@ -464,8 +466,11 @@
             
             var pair = config.content_pairs.find(p => p.id === currentQuoteId);
             if(!sentenceParts.s2) {
-                if(isAO4) sentenceParts.s2 = config.ao4_markers[Math.floor(Math.random() * config.ao4_markers.length)];
-                else sentenceParts.s2 = pair ? pair.method : "the method";
+                if(isAO4) {
+                    sentenceParts.s2 = config.ao4_markers[Math.floor(Math.random() * config.ao4_markers.length)];
+                } else {
+                    sentenceParts.s2 = pair ? pair.method : "the method";
+                }
             }
             if(!sentenceParts.s3) sentenceParts.s3 = s3List[Math.floor(Math.random() * s3List.length)];
             updateBuilder();
@@ -486,7 +491,6 @@
                 config.content_pairs.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        // Use the quote's specific structure, or default if missing
                         currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure; 
                         sentenceParts.quote = `"${p.quote}"`;
                         currentStageIndex = 0;
@@ -514,7 +518,7 @@
 
             if(key === 's1') {
                 var list = isAO4 ? config.ao4_starters : config.starters_evidence;
-                if(pair && pair.specific_s1) list = [pair.specific_s1];
+                if(pair && pair.specific_s1 && pair.specific_s1.trim() !== "") list = [pair.specific_s1];
                 list.forEach(t => options.push({ txt: t, correct: true }));
             }
             else if(key === 's2') {
@@ -529,7 +533,7 @@
             }
             else if(key === 's3') {
                 var list = isAO4 ? config.ao4_links : config.starters_evaluative;
-                if(pair && pair.specific_s3) list = [pair.specific_s3];
+                if(pair && pair.specific_s3 && pair.specific_s3.trim() !== "") list = [pair.specific_s3];
                 list.forEach(t => options.push({ txt: t, correct: true }));
             }
             else if(key === 's4') {
@@ -719,13 +723,16 @@
                     });
                     structHTML += `</div></div>`;
 
+                    // Dynamic label for S1 based on mode
+                    var s1_lbl = (config.gameMode === "AO4") ? "Specific Judgement (Override Bank)" : "Specific Starter (Override Bank)";
+                    
                     div.innerHTML = `<div class="content-card-header"><span>Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div>
                     ${structHTML}
-                    <div class="step-1"><span class="step-label">Specific Starter</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
-                    <div class="step-2"><span class="step-label">Method</span><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
+                    <div class="step-1"><span class="step-label">${s1_lbl}</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s1)}" onchange="updateContent(${i},'specific_s1',this.value)"></div>
+                    <div class="step-2"><span class="step-label">Method (Required for AO2)</span><input class="admin-input" style="width:95%" value="${esc(p.method)}" onchange="updateContent(${i},'method',this.value)"></div>
                     <div class="step-3"><span class="step-label">Quote</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'quote',this.value)">${esc(p.quote)}</textarea></div>
-                    <div class="step-4"><span class="step-label">Link</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
-                    <div class="step-5"><span class="step-label">Effect</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>
+                    <div class="step-4"><span class="step-label">Link (Override Bank)</span><input class="admin-input" style="width:95%" value="${esc(p.specific_s3)}" onchange="updateContent(${i},'specific_s3',this.value)"></div>
+                    <div class="step-5"><span class="step-label">Effect / Comment</span><textarea class="admin-textarea" style="width:95%" onchange="updateContent(${i},'effect',this.value)">${esc(p.effect)}</textarea></div>
                     <div style="margin-top:5px; border-top:1px dashed #ccc;"><span class="step-label" style="color:red">Distractor</span><input class="admin-input" style="width:95%" value="${esc(p.distractor)}" onchange="updateContent(${i},'distractor',this.value)"></div>`;
                     cList.appendChild(div);
                 });
