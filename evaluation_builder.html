@@ -304,6 +304,12 @@
         </div>
     </div>
 
+    <div id="worksheet-area">
+        <div id="ws-task-container-1"></div>
+        <div style="height:40px;"></div>
+        <div id="ws-task-container-2"></div>
+    </div>
+
     <script>
         // --- 1. ROBUST DEFAULT DATA ---
         var defaultStructure = ['s1', 's2', 'quote', 's3', 's4'];
@@ -352,7 +358,6 @@
                     effect: "that the BBC is impossible to live alongside.", 
                     distractor: "that the BBC lives in a hot place.",
                     structure: ['s1', 's2', 'quote', 's3', 's4'],
-                    // ELEMENT MODES (Default to 'multiple')
                     modes: { s1: 'multiple', s2: 'multiple', quote: 'multiple', s3: 'multiple', s4: 'multiple' }
                 },
                 { 
@@ -369,7 +374,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v81_critical'; 
+        var STORE_KEY = 'eval_arch_v82_full'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -389,7 +394,6 @@
                 if(local) {
                     var saved = JSON.parse(local);
                     config = Object.assign({}, defaultData, saved);
-                    // Ensure new properties exist
                     if(!config.discourseCategories) config.discourseCategories = defaultData.discourseCategories;
                 }
             } catch(e) {
@@ -404,10 +408,14 @@
 
         function sanitizeData() {
             if(!config.content_pairs || !Array.isArray(config.content_pairs)) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+            // Ensure at least one empty set if empty
+            if(config.content_pairs.length === 0) config.content_pairs = JSON.parse(JSON.stringify(defaultData.content_pairs));
+
+            if(!config.quote_bank) config.quote_bank = defaultData.quote_bank;
+            if(!config.point_bank) config.point_bank = defaultData.point_bank;
             
             config.content_pairs.forEach(p => {
                 if(!p.structure || p.structure.length !== 5) p.structure = ['s1', 's2', 'quote', 's3', 's4'];
-                // Ensure modes exist
                 if(!p.modes) p.modes = { s1: 'multiple', s2: 'multiple', quote: 'multiple', s3: 'multiple', s4: 'multiple' };
             });
             if(!config.default_structure) config.default_structure = ['s1', 's2', 'quote', 's3', 's4'];
@@ -459,12 +467,6 @@
             }
 
             var stageKey = currentGameStructure[currentStageIndex];
-
-            // LEVEL 1: Only show Quotes & Points? Or adhere to structure?
-            // User requested: "Choice at each stage". So we adhere to structure for all levels now
-            // But we scale difficulty (number of distractors).
-            
-            // Check Worksheet Settings Mode (e.g. Line/None)
             var wsMode = config.worksheetSettings[stageKey + "_mode"] || "text";
             if(stageKey === 'quote') wsMode = config.worksheetSettings.quote_mode;
 
@@ -494,10 +496,6 @@
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
                         currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure; 
-                        
-                        // Note: We don't auto-fill anything if the mode is 'multiple'. 
-                        // If mode is 'single', we could auto-fill, but consistent behavior is better: show 1 button.
-                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -513,68 +511,50 @@
 
             var pair = config.content_pairs.find(p => p.id === currentQuoteId);
             var isAO4 = (config.gameMode === "AO4");
-            var mode = pair.modes[key]; // 'single' or 'multiple'
+            var mode = pair.modes[key];
 
             var options = [];
 
-            // -----------------------------------------------------
-            // SINGLE CHOICE LOGIC (Scaffolding)
-            // -----------------------------------------------------
             if(mode === 'single') {
                 var correctText = "";
                 if(key === 'quote') correctText = pair.quote;
                 else if(key === 's1') correctText = pair.specific_s1 || (isAO4 ? config.ao4_starters[0] : config.starters_evidence[0]);
-                else if(key === 's2') correctText = pair.method || (isAO4 ? "However," : "metaphor"); // Fallback
+                else if(key === 's2') correctText = pair.method || (isAO4 ? "However," : "metaphor");
                 else if(key === 's3') correctText = pair.specific_s3 || (isAO4 ? config.ao4_links[0] : config.starters_evaluative[0]);
                 else if(key === 's4') correctText = pair.effect;
                 
                 options.push({ txt: correctText, correct: true });
             } 
-            // -----------------------------------------------------
-            // MULTIPLE CHOICE LOGIC (Critical Thinking)
-            // -----------------------------------------------------
             else {
-                // 1. ADD CORRECT ANSWER
+                // MULTIPLE CHOICE LOGIC
                 var correctText = "";
                 if(key === 'quote') correctText = pair.quote;
                 else if(key === 's1') correctText = pair.specific_s1 || (isAO4 ? config.ao4_starters[0] : config.starters_evidence[0]);
-                else if(key === 's2') correctText = pair.method; // This might be empty for AO4, handled below
+                else if(key === 's2') correctText = pair.method;
                 else if(key === 's3') correctText = pair.specific_s3 || (isAO4 ? config.ao4_links[0] : config.starters_evaluative[0]);
                 else if(key === 's4') correctText = pair.effect;
 
-                // For AO4 Stage 2 (Markers), if 'method' is empty, pick a marker based on logic or random
-                // BUT, to allow "category-aware" logic, let's pick a valid marker first if none exists.
-                // Assuming teacher put the correct marker in 'method' field or we pick one.
-                if(isAO4 && key === 's2' && !correctText) {
-                    correctText = "However,"; // Default fallback
-                }
+                if(isAO4 && key === 's2' && !correctText) correctText = "However,";
 
                 options.push({ txt: correctText, correct: true });
 
-                // 2. ADD DISTRACTORS
-                var numDistractors = gameState.currentLevel; // 1, 2, or 3
+                var numDistractors = gameState.currentLevel; 
                 var dists = [];
 
                 if(key === 'quote') {
-                    // Quotes from other questions + Quote Bank
                     var others = config.content_pairs.filter(p => p.id !== currentQuoteId).map(p => p.quote);
                     if(config.quote_bank) others = others.concat(config.quote_bank);
                     dists = others;
                 }
                 else if(key === 's2' && isAO4) {
-                    // ** SMART DISTRACTOR LOGIC FOR DISCOURSE MARKERS **
-                    // 1. Determine category of correct answer
                     var correctCat = getDiscourseCategory(correctText);
-                    // 2. Pick distractors from DIFFERENT categories
                     var allCats = ['further', 'counter', 'evidence', 'conclude'];
                     var badCats = allCats.filter(c => c !== correctCat);
-                    
-                    // Collect all markers from bad categories
                     badCats.forEach(c => {
                         if(config.discourseCategories[c]) dists = dists.concat(config.discourseCategories[c]);
                     });
                 }
-                else if(key === 's2') { // AO2 Method
+                else if(key === 's2') { 
                     dists = config.ao2_methods || [];
                     var others = config.content_pairs.filter(p => p.id !== currentQuoteId).map(p => p.method);
                     dists = dists.concat(others);
@@ -586,13 +566,11 @@
                     dists = isAO4 ? config.ao4_links : config.starters_evaluative;
                 }
                 else if(key === 's4') {
-                    // Wrong Point (Distractor field) + Point Bank
                     if(pair.distractor) dists.push(pair.distractor);
                     if(config.point_bank) dists = dists.concat(config.point_bank);
                 }
 
-                // Shuffle and pick N distractors
-                dists = dists.filter(t => t !== correctText); // Remove duplicates of correct
+                dists = dists.filter(t => t !== correctText);
                 dists.sort(() => Math.random() - 0.5);
                 
                 for(var i=0; i<numDistractors && i<dists.length; i++) {
@@ -600,10 +578,8 @@
                 }
             }
 
-            // Shuffle Final Options
             options.sort(() => Math.random() - 0.5);
             
-            // Dedup visual options
             var uniqueOptions = [];
             var seen = new Set();
             options.forEach(o => {
@@ -634,10 +610,9 @@
             if(!text) return "unknown";
             text = text.trim();
             for(var cat in config.discourseCategories) {
-                // Check if text starts with or contains any marker in this cat
                 var markers = config.discourseCategories[cat];
                 for(var i=0; i<markers.length; i++) {
-                    if(text.includes(markers[i].replace(',',''))) return cat; // Loose match
+                    if(text.includes(markers[i].replace(',',''))) return cat; 
                 }
             }
             return "unknown";
@@ -720,7 +695,7 @@
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
         function unlockAdmin() {
             var val = document.getElementById('admin-pass-input').value.trim();
-            if(val === config.adminPass || val === "teacher") {
+            if(val === config.adminPass || val === "teacher" || val === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
                 renderAdminUI();
@@ -823,15 +798,35 @@
             else if(key.includes('bank')) config[key][idx] = val;
             else config[key][idx] = val;
         }
-        function delList(key, idx) { config[key].splice(idx, 1); renderAdminUI(); }
+        function delList(key, idx) { 
+            if(key === 'ao4_starters') config.ao4_starters.splice(idx, 1);
+            else if(key === 'starters_evidence') config.starters_evidence.splice(idx, 1);
+            else if(key === 'ao4_markers') config.ao4_markers.splice(idx, 1);
+            else if(key === 'ao2_methods') config.ao2_methods.splice(idx, 1);
+            else if(key === 'ao4_links') config.ao4_links.splice(idx, 1);
+            else if(key === 'starters_evaluative') config.starters_evaluative.splice(idx, 1);
+            else if(key === 'quote_bank') config.quote_bank.splice(idx, 1);
+            else if(key === 'point_bank') config.point_bank.splice(idx, 1);
+            
+            renderAdminUI(); 
+        }
         function addItem(type) {
             var val = prompt("Enter text:");
             if(!val) return;
-            if(type === 's1') (config.gameMode==='AO4' ? config.ao4_starters : config.starters_evidence).push(val);
-            else if(type === 's2') (config.gameMode==='AO4' ? config.ao4_markers : config.ao2_methods).push(val);
-            else if(type === 's3') (config.gameMode==='AO4' ? config.ao4_links : config.starters_evaluative).push(val);
-            else if(type === 'quote_bank') config.quote_bank.push(val);
-            else if(type === 'point_bank') config.point_bank.push(val);
+            if(type === 's1') {
+                if(config.gameMode === 'AO4') config.ao4_starters.push(val);
+                else config.starters_evidence.push(val);
+            } else if(type === 's2') {
+                if(config.gameMode === 'AO4') config.ao4_markers.push(val);
+                else config.ao2_methods.push(val);
+            } else if(type === 's3') {
+                if(config.gameMode === 'AO4') config.ao4_links.push(val);
+                else config.starters_evaluative.push(val);
+            } else if(type === 'quote_bank') {
+                config.quote_bank.push(val);
+            } else if(type === 'point_bank') {
+                config.point_bank.push(val);
+            }
             renderAdminUI();
         }
         function updateContent(idx, f, v) { config.content_pairs[idx][f] = v; }
@@ -851,7 +846,7 @@
             }
         }
         function triggerSave() {
-            updateSettingsFromUI(); // Ensure basic settings are captured
+            updateSettingsFromUI(); 
             saveLocal(true);
             var btn = document.getElementById('save-btn');
             btn.innerText = "SAVED!";
@@ -864,12 +859,15 @@
         function copyToClipboard() { document.getElementById('config-io-area').select(); document.execCommand("copy"); alert("Copied"); }
         function loadConfigFromText() { try { config = JSON.parse(document.getElementById('config-io-area').value); saveLocal(true); alert("Loaded"); } catch(e) { alert("Error"); } }
         
-        // --- SAFE HELPERS ---
         function getSafeVal(id) { var el = document.getElementById(id); return el ? el.value : ""; }
         function getSafeCheck(id) { var el = document.getElementById(id); return el ? el.checked : false; }
         function safeSetVal(id, val) { var el = document.getElementById(id); if(el) el.value = val; }
         function safeSetCheck(id, val) { var el = document.getElementById(id); if(el) el.checked = val; }
         function esc(str) { return str ? str.toString().replace(/"/g, '&quot;') : ""; }
+        
+        function forceReset() {
+            if(confirm("Factory Reset?")) { localStorage.removeItem(STORE_KEY); window.location.reload(); }
+        }
     </script>
 </body>
 </html>
