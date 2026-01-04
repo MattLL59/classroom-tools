@@ -279,7 +279,7 @@
                         <button onclick="downloadWordDoc()" style="background:#2980b9; color:white; border:none; padding:12px 20px; border-radius:6px; font-weight:bold;">Download Word Doc</button>
                     </div>
                     <div style="display:flex; gap:10px;">
-                        <button id="save-btn" onclick="triggerSave()" style="background:#3498db; color:white; border:none; padding:12px 20px; border-radius:6px; font-weight:bold;">Save Settings</button>
+                        <button id="save-btn" onclick="triggerSave()" style="background:#3498db; color:white; border:none; padding:12px 20px; border-radius:6px; font-weight:bold; width:150px;">Save Settings</button>
                         <button onclick="exportApp()" style="background:#27ae60; color:white; border:none; padding:12px 20px; border-radius:6px; font-weight:bold;">Download App</button>
                     </div>
                 </div>
@@ -327,7 +327,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v76_final'; 
+        var STORE_KEY = 'eval_arch_v77_final'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -426,23 +426,6 @@
 
             var stageKey = currentGameStructure[currentStageIndex];
 
-            // LEVEL 1 LOGIC
-            if(gameState.currentLevel === 1) {
-               if(stageKey === 's4') {
-                    autoFillIntermediates(); 
-                    renderGameGrid('s4');
-                    return;
-                } else if(stageKey === 'quote') {
-                    currentStageIndex++;
-                    loadStage();
-                    return;
-                } else {
-                    currentStageIndex++;
-                    loadStage();
-                    return;
-                }
-            }
-
             // LEVEL 2 & 3
             var mode = config.worksheetSettings[stageKey + "_mode"] || "text";
             if(stageKey === 'quote') mode = config.worksheetSettings.quote_mode;
@@ -457,25 +440,6 @@
             }
         }
 
-        function autoFillIntermediates() {
-            var isAO4 = (config.gameMode === "AO4");
-            var s1List = isAO4 ? config.ao4_starters : config.starters_evidence;
-            var s3List = isAO4 ? config.ao4_links : config.starters_evaluative;
-            
-            if(!sentenceParts.s1) sentenceParts.s1 = s1List[Math.floor(Math.random() * s1List.length)];
-            
-            var pair = config.content_pairs.find(p => p.id === currentQuoteId);
-            if(!sentenceParts.s2) {
-                if(isAO4) {
-                    sentenceParts.s2 = config.ao4_markers[Math.floor(Math.random() * config.ao4_markers.length)];
-                } else {
-                    sentenceParts.s2 = pair ? pair.method : "the method";
-                }
-            }
-            if(!sentenceParts.s3) sentenceParts.s3 = s3List[Math.floor(Math.random() * s3List.length)];
-            updateBuilder();
-        }
-
         function renderGameGrid(key) {
             hideAllStages();
             document.getElementById('stage-area').style.display = 'block';
@@ -483,16 +447,21 @@
             var grid = document.getElementById('game-grid');
             grid.innerHTML = '';
 
-            // INITIAL QUOTE SELECTION
+            // INITIAL QUOTE SELECTION (Stage 0)
             if(key === 'quote_select_mode') {
                 document.getElementById('stage-title').innerText = "Select Evidence";
-                document.getElementById('stage-subtitle').innerText = "Which quote best answers the question?";
+                document.getElementById('stage-subtitle').innerText = "Select a quote to begin.";
                 
                 config.content_pairs.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
+                        // Use the quote's specific structure, or default if missing
                         currentGameStructure = (p.structure && p.structure.length===5) ? p.structure : config.default_structure; 
-                        sentenceParts.quote = `"${p.quote}"`;
+                        
+                        // NOTE: We do NOT auto-fill the quote in the sentenceParts here if we want them to select it again later.
+                        // However, for visual flow, it helps to show it.
+                        // Decision: We will let them select it again if it appears in the sequence.
+                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -506,17 +475,23 @@
             document.getElementById('stage-title').innerText = (currentStageIndex + 1) + ". " + getStageLabel(key);
             document.getElementById('stage-subtitle').innerText = getStageSubtitle(key);
 
-            if(key === 'quote') {
-                currentStageIndex++;
-                loadStage();
-                return;
-            }
-
             var pair = config.content_pairs.find(p => p.id === currentQuoteId);
             var options = [];
             var isAO4 = (config.gameMode === "AO4");
 
-            if(key === 's1') {
+            // --- OPTION GENERATION ---
+            
+            if(key === 'quote') {
+                // Correct
+                options.push({ txt: pair.quote, correct: true });
+                // Distractors (Other Quotes)
+                var dists = config.content_pairs.filter(p => p.id !== currentQuoteId);
+                var numDistractors = gameState.currentLevel; // Lvl 1=1, Lvl 2=2...
+                for(var i=0; i<numDistractors && i<dists.length; i++) {
+                    options.push({ txt: dists[i].quote, correct: false });
+                }
+            }
+            else if(key === 's1') {
                 var list = isAO4 ? config.ao4_starters : config.starters_evidence;
                 if(pair && pair.specific_s1 && pair.specific_s1.trim() !== "") list = [pair.specific_s1];
                 list.forEach(t => options.push({ txt: t, correct: true }));
@@ -526,9 +501,10 @@
                     config.ao4_markers.forEach(t => options.push({ txt: t, correct: true }));
                 } else {
                     options.push({ txt: pair.method, correct: true });
+                    // Method Distractors based on Level
                     var others = config.content_pairs.filter(p => p.id !== currentQuoteId);
-                    if(others[0]) options.push({ txt: others[0].method, correct: false });
-                    if(others[1]) options.push({ txt: others[1].method, correct: false });
+                    if(gameState.currentLevel >= 2 && others[0]) options.push({ txt: others[0].method, correct: false });
+                    if(gameState.currentLevel >= 3 && others[1]) options.push({ txt: others[1].method, correct: false });
                 }
             }
             else if(key === 's3') {
@@ -538,16 +514,19 @@
             }
             else if(key === 's4') {
                 options.push({ txt: pair.effect, correct: true });
-                if(pair.distractor) options.push({ txt: pair.distractor, correct: false });
+                if(gameState.currentLevel >= 1 && pair.distractor) options.push({ txt: pair.distractor, correct: false });
+                // Add more distractors for higher levels if available?
             }
 
             options.sort(() => Math.random() - 0.5);
             
             options.forEach(opt => {
                 var colorClass = key === 's1' ? 'btn-s1' : key === 's2' ? 'btn-s2' : key === 's3' ? 'btn-s3' : 'btn-s4';
+                if(key === 'quote') colorClass = 'btn-white';
+                
                 var btn = createBtn(opt.txt, () => {
                     if(opt.correct) {
-                        sentenceParts[key] = opt.txt;
+                        sentenceParts[key] = key === 'quote' ? `"${opt.txt}"` : opt.txt;
                         advanceStage();
                     } else {
                         showError();
@@ -663,8 +642,8 @@
         function openAdmin() { document.getElementById('admin-modal').style.display = 'flex'; }
         function closeAdmin() { document.getElementById('admin-modal').style.display = 'none'; }
         function unlockAdmin() {
-            var val = document.getElementById('admin-pass-input').value;
-            if(val === config.adminPass || val === "teacher") {
+            var val = document.getElementById('admin-pass-input').value.trim();
+            if(val === config.adminPass || val === "teacher" || val === "admin") {
                 document.getElementById('admin-lock').style.display = 'none';
                 document.getElementById('admin-edit').style.display = 'block';
                 renderAdminUI();
@@ -723,7 +702,6 @@
                     });
                     structHTML += `</div></div>`;
 
-                    // Dynamic label for S1 based on mode
                     var s1_lbl = (config.gameMode === "AO4") ? "Specific Judgement (Override Bank)" : "Specific Starter (Override Bank)";
                     
                     div.innerHTML = `<div class="content-card-header"><span>Set #${i+1}</span><button class="del-btn" onclick="delContent(${i})">Delete</button></div>
@@ -803,6 +781,20 @@
                 renderAdminUI();
                 alert("Updated all questions!");
             }
+        }
+
+        function triggerSave() {
+            var btn = document.getElementById('save-btn');
+            btn.innerText = "SAVING...";
+            saveLocal(true);
+            setTimeout(function() {
+                btn.innerText = "SAVED!";
+                btn.style.background = "#27ae60";
+            }, 500);
+            setTimeout(function() {
+                btn.innerText = "Save Settings";
+                btn.style.background = "#3498db";
+            }, 1500);
         }
 
         function copyToClipboard() { document.getElementById('config-io-area').select(); document.execCommand("copy"); alert("Copied"); }
