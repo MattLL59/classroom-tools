@@ -24,7 +24,6 @@
             overflow: hidden; 
             text-align: center;
         }
-        /* HEADER */
         header { 
             display: flex; 
             justify-content: space-between; 
@@ -134,7 +133,7 @@
         .del-btn { background: #ffdddd; border: 1px solid #ffaaaa; color: red; cursor: pointer; padding: 5px 10px; border-radius: 4px; white-space: nowrap; }
         .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #eef; padding: 10px; border-radius: 5px; }
         .content-card { background: #fdfdfd; border: 1px solid #ddd; border-left: 5px solid #333; padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .content-card-header { display: flex; justify-content: space-between; margin-bottom: 15px; font-weight: bold; color: #333; border-bottom:1px solid #eee; padding-bottom:5px; align-items:center;}
+        .content-card-header { display: flex; justify-content: space-between; margin-bottom: 15px; font-weight: bold; color: #333; border-bottom:1px solid #eee; padding-bottom:5px;}
         .step-label { font-size: 0.8rem; font-weight: bold; color: #666; display: block; margin-bottom: 3px; }
         .step-sublabel { font-size: 0.75rem; color: #999; font-weight: normal; margin-left: 5px; font-style: italic; }
         .step-1 { border-left: 4px solid var(--col-1-pink); padding-left: 10px; margin-bottom: 10px; }
@@ -149,6 +148,8 @@
 
         .scaffold-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom:8px; border-bottom:1px solid #eee; }
         .scaffold-select { padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
+        
+        .duplicate-error { border: 2px solid red !important; background-color: #ffeeee; }
 
         #config-io-area { width: 100%; height: 100px; font-family: monospace; font-size: 0.8rem; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; color: #555; display:block; margin-bottom:10px; }
         #worksheet-area { display: none; }
@@ -330,7 +331,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v97_full'; 
+        var STORE_KEY = 'eval_arch_v99_cleaner'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -442,8 +443,12 @@
                 levelQuestions.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
+                        // DE-DUPLICATE STRUCTURE
                         var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
-                        currentGameStructure = rawStruct.filter(k => k !== 'none');
+                        // Use Set to remove dups, then filter none
+                        var uniqueStruct = [...new Set(rawStruct)];
+                        currentGameStructure = uniqueStruct.filter(k => k !== 'none');
+                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -624,10 +629,15 @@
                     ${ (k!=='quote' && k!=='s4') ? `<option value="open" ${sel(k,'open')}>3. Open (Any)</option>` : '' }
                 </select>`;
 
-                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
-                        <div style="display:flex; gap:3px;">`;
+                // Struct and Dup Check
+                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px; display:flex; gap:3px;">`;
+                var seenKeys = {};
                 p.structure.forEach((sVal, sIdx) => {
-                    structHTML += `<select class="admin-input" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
+                    var isDup = seenKeys[sVal] && sVal !== 'none';
+                    if(sVal !== 'none') seenKeys[sVal] = true;
+                    var cls = isDup ? 'admin-input duplicate-error' : 'admin-input';
+                    
+                    structHTML += `<select class="${cls}" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
                         <option value="s1" ${sVal=='s1'?'selected':''}>Starter</option>
                         <option value="s2" ${sVal=='s2'?'selected':''}>Method</option>
                         <option value="quote" ${sVal=='quote'?'selected':''}>Quote</option>
@@ -636,7 +646,7 @@
                         <option value="none" ${sVal=='none'?'selected':''}>-- Remove --</option>
                     </select>`;
                 });
-                structHTML += `</div></div>`;
+                structHTML += `</div>`;
                 
                 var levelHTML = `<div style="margin-bottom:5px;"><label>Assign to Level:</label> <select class="admin-input" style="width:auto;" onchange="updateContent(${i}, 'level', this.value)"><option value="1" ${p.level==1?'selected':''}>1</option><option value="2" ${p.level==2?'selected':''}>2</option><option value="3" ${p.level==3?'selected':''}>3</option></select></div>`;
                 
@@ -667,7 +677,7 @@
         
         function setMode(i,k,m){ config.content_pairs[i].modes[k]=m; renderAdminUI(); }
         function updateContent(i,f,v) { config.content_pairs[i][f] = v; }
-        function updateCardStruct(i,p,v) { config.content_pairs[i].structure[p]=v; }
+        function updateCardStruct(i,p,v) { config.content_pairs[i].structure[p]=v; renderAdminUI(); }
         function updateDist(i,di,v){ config.content_pairs[i].distractors[di]=v; }
         function removeDist(i,di){ config.content_pairs[i].distractors.splice(di,1); renderAdminUI(); }
         function addDist(i){ config.content_pairs[i].distractors.push("Wrong Answer"); renderAdminUI(); }
