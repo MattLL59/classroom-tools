@@ -24,6 +24,7 @@
             overflow: hidden; 
             text-align: center;
         }
+        /* HEADER */
         header { 
             display: flex; 
             justify-content: space-between; 
@@ -148,8 +149,6 @@
 
         .scaffold-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom:8px; border-bottom:1px solid #eee; }
         .scaffold-select { padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
-        
-        .duplicate-error { border: 2px solid red !important; background-color: #ffeeee; }
 
         #config-io-area { width: 100%; height: 100px; font-family: monospace; font-size: 0.8rem; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; color: #555; display:block; margin-bottom:10px; }
         #worksheet-area { display: none; }
@@ -160,6 +159,11 @@
             z-index: 999999;
         }
         #emergency-reset:hover { color: red; }
+
+        /* DATA MANAGER STYLES */
+        .data-manager { background: #e8f6f3; border: 2px solid #1abc9c; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .data-btn { background: #16a085; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-weight: bold; }
+        .data-btn:hover { background: #1abc9c; }
 
         /* CSS FIREWORKS */
         @keyframes firework {
@@ -234,8 +238,16 @@
                 <p>Password:</p> <input type="password" id="admin-pass-input" style="padding:10px;"> <button onclick="unlockAdmin()" style="margin-top:10px; padding:10px;">Unlock</button>
             </div>
             <div id="admin-edit" class="panel-body" style="display:none;">
+                
+                <div class="data-manager">
+                    <h3 style="margin-top:0; color:#16a085;">💾 Data Manager</h3>
+                    <p style="margin:5px 0 15px 0; font-size:0.9rem;">Save your work to a file so you don't lose it between updates.</p>
+                    <button class="data-btn" onclick="downloadConfig()"><i class="fas fa-download"></i> Save Progress to File</button>
+                    <button class="data-btn" onclick="document.getElementById('file-upload').click()"><i class="fas fa-folder-open"></i> Load Progress from File</button>
+                    <input type="file" id="file-upload" style="display:none" onchange="uploadConfig(this)">
+                </div>
+
                 <div style="margin-bottom:20px;"><label>Topic</label><input id="edit-topic" class="admin-input" style="width:95%" onchange="updateConfigVal('topic', this.value)"></div>
-                <div class="section-box"><button onclick="triggerSave()" id="save-btn" style="background:#3498db; color:white; padding:10px; width:100%;">Save Settings</button></div>
                 
                 <div class="section-box">
                     <strong>Banks (Manage Global Options)</strong>
@@ -331,7 +343,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v99_cleaner'; 
+        var STORE_KEY = 'eval_arch_v97_full'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -443,12 +455,8 @@
                 levelQuestions.forEach(p => {
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
-                        // DE-DUPLICATE STRUCTURE
                         var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
-                        // Use Set to remove dups, then filter none
-                        var uniqueStruct = [...new Set(rawStruct)];
-                        currentGameStructure = uniqueStruct.filter(k => k !== 'none');
-                        
+                        currentGameStructure = rawStruct.filter(k => k !== 'none');
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -615,6 +623,30 @@
         function showError() { var o=document.getElementById('overlay'); o.style.display='flex'; gameState.streak=0; updateScoreBoard(); }
         function closeOverlay() { document.getElementById('overlay').style.display='none'; }
         
+        // --- DATA MANAGER ---
+        function downloadConfig() {
+            var blob = new Blob([JSON.stringify(config)], {type: "application/json"});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = "evaluation_data.json";
+            a.click();
+        }
+
+        function uploadConfig(input) {
+            var file = input.files[0];
+            if(!file) return;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    config = JSON.parse(e.target.result);
+                    saveLocal(true);
+                    alert("Data Loaded Successfully!");
+                } catch(e) { alert("Invalid File"); }
+            };
+            reader.readAsText(file);
+        }
+
         // --- ADMIN ---
         function renderAdminUI() {
             var list = document.getElementById('list-content'); list.innerHTML = '';
@@ -629,15 +661,12 @@
                     ${ (k!=='quote' && k!=='s4') ? `<option value="open" ${sel(k,'open')}>3. Open (Any)</option>` : '' }
                 </select>`;
 
-                // Struct and Dup Check
-                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px; display:flex; gap:3px;">`;
-                var seenKeys = {};
+                // Structure Dropdowns
+                var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
+                        <small><strong>Sentence Order (Custom):</strong></small><br>
+                        <div style="display:flex; gap:3px;">`;
                 p.structure.forEach((sVal, sIdx) => {
-                    var isDup = seenKeys[sVal] && sVal !== 'none';
-                    if(sVal !== 'none') seenKeys[sVal] = true;
-                    var cls = isDup ? 'admin-input duplicate-error' : 'admin-input';
-                    
-                    structHTML += `<select class="${cls}" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
+                    structHTML += `<select class="admin-input" style="padding:2px; font-size:0.8rem;" onchange="updateCardStruct(${i}, ${sIdx}, this.value)">
                         <option value="s1" ${sVal=='s1'?'selected':''}>Starter</option>
                         <option value="s2" ${sVal=='s2'?'selected':''}>Method</option>
                         <option value="quote" ${sVal=='quote'?'selected':''}>Quote</option>
@@ -646,7 +675,7 @@
                         <option value="none" ${sVal=='none'?'selected':''}>-- Remove --</option>
                     </select>`;
                 });
-                structHTML += `</div>`;
+                structHTML += `</div></div>`;
                 
                 var levelHTML = `<div style="margin-bottom:5px;"><label>Assign to Level:</label> <select class="admin-input" style="width:auto;" onchange="updateContent(${i}, 'level', this.value)"><option value="1" ${p.level==1?'selected':''}>1</option><option value="2" ${p.level==2?'selected':''}>2</option><option value="3" ${p.level==3?'selected':''}>3</option></select></div>`;
                 
