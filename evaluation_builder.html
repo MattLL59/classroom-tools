@@ -36,14 +36,14 @@
             min-height: 50px;
             background-color: #f4f6f7;
             position: relative;
-            z-index: 5000;
+            z-index: 50; 
         }
         h1 { margin: 0; color: var(--app-color); font-size: 1.6rem; }
         
         #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
         
-        /* FLOATING ADMIN BTN */
+        /* FLOATING ADMIN BTN - MAX Z-INDEX & !IMPORTANT */
         .admin-btn { 
             position: fixed; 
             top: 15px; 
@@ -59,9 +59,10 @@
             justify-content: center;
             align-items: center;
             cursor: pointer; 
-            z-index: 2147483647; 
+            z-index: 2147483647 !important; /* Force Top */
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             transition: all 0.2s;
+            pointer-events: auto !important; /* Force Clickable */
         }
         .admin-btn:hover { transform: scale(1.1); background: #fdfdfd; }
         
@@ -119,7 +120,7 @@
         #overlay { background: rgba(231, 76, 60, 0.95); } 
         #levelup-overlay { background: rgba(46, 204, 113, 0.98); }
         #win-overlay { background: rgba(241, 196, 15, 0.98); color: #333; }
-        #admin-modal { background: rgba(0,0,0,0.5); z-index: 100000; color: #333; }
+        #admin-modal { background: rgba(0,0,0,0.5); z-index: 2147483646; color: #333; } /* High Z-index but below button */
         
         .shake { animation: shake 0.4s; }
         
@@ -134,7 +135,7 @@
         .del-btn { background: #ffdddd; border: 1px solid #ffaaaa; color: red; cursor: pointer; padding: 5px 10px; border-radius: 4px; white-space: nowrap; }
         .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #eef; padding: 10px; border-radius: 5px; }
         .content-card { background: #fdfdfd; border: 1px solid #ddd; border-left: 5px solid #333; padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .content-card-header { display: flex; justify-content: space-between; margin-bottom: 15px; font-weight: bold; color: #333; border-bottom:1px solid #eee; padding-bottom:5px;}
+        .content-card-header { display: flex; justify-content: space-between; margin-bottom: 15px; font-weight: bold; color: #333; border-bottom:1px solid #eee; padding-bottom:5px; align-items:center;}
         .step-label { font-size: 0.8rem; font-weight: bold; color: #666; display: block; margin-bottom: 3px; }
         .step-sublabel { font-size: 0.75rem; color: #999; font-weight: normal; margin-left: 5px; font-style: italic; }
         .step-1 { border-left: 4px solid var(--col-1-pink); padding-left: 10px; margin-bottom: 10px; }
@@ -162,6 +163,16 @@
             z-index: 999999;
         }
         #emergency-reset:hover { color: red; }
+        
+        /* FOOTER SETTINGS LINK */
+        #footer-settings {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: #95a5a6;
+            cursor: pointer;
+            text-decoration: underline;
+            padding-bottom: 20px;
+        }
 
         /* DATA MANAGER STYLES */
         .data-manager { background: #e8f6f3; border: 2px solid #1abc9c; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
@@ -229,6 +240,8 @@
         
         <div id="sentence-builder"><span style="color:#ccc;">Your sentence will appear here...</span></div>
     </div>
+    
+    <div id="footer-settings" onclick="openAdmin()">⚙ Teacher Settings (Click here if button missing)</div>
 
     <div id="overlay" onclick="closeOverlay()"><div id="overlay-msg"><i class="fas fa-times-circle" style="font-size:3rem; color:#e74c3c; margin-bottom:15px;"></i><h2>Incorrect</h2><p>Try again.</p></div></div>
     <div id="levelup-overlay" onclick="closeLevelUp()"><div class="overlay-content"><div class="firework"></div><h2 style="margin-top:50px;">LEVEL UP!</h2><p id="levelup-msg"></p><button class="choice-btn btn-white">Continue</button></div></div>
@@ -345,7 +358,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v100_visual'; 
+        var STORE_KEY = 'eval_arch_v101_fail_safe'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -750,4 +763,38 @@
 
         // --- EXPORT (Restored) ---
         function getExportHTML() {
-            var h = "<h1>"+config
+            var h = "<h1>"+config.topic+"</h1>";
+            if(config.worksheetSettings.showTask1) {
+                h+="<h2>Task 1: Matching</h2><table border='1' cellspacing='0' cellpadding='10' style='width:100%;border-collapse:collapse'>";
+                var shuf = [].concat(config.content_pairs).sort(()=>Math.random()-0.5);
+                config.content_pairs.forEach((p,i)=>{ h+=`<tr><td>${p.quote}</td><td>&rarr;</td><td>${shuf[i].effect}</td></tr>`; });
+                h+="</table>";
+            }
+            if(config.worksheetSettings.showTask2) {
+                h+="<h2>Task 2: Sentence Builder</h2>";
+                config.content_pairs.forEach(p=>{
+                    var effectiveStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
+                    var validKeys = effectiveStruct.filter(k => k !== 'none');
+                    
+                    var parts = validKeys.map(k=>{
+                        var m = config.worksheetSettings[k+'_mode']||(k=='quote'?config.worksheetSettings.quote_mode:'text');
+                        if(m=='none') return null;
+                        if(m=='scaffold'||m=='line') return "__________";
+                        if(k=='s1') return p.specific_s1||"...";
+                        if(k=='s2') return p.method||"...";
+                        if(k=='quote') return `"${p.quote}"`;
+                        if(k=='s3') return p.specific_s3||"...";
+                        if(k=='s4') return p.effect;
+                    }).filter(x=>x);
+                    h+=`<p style="line-height:2;border-bottom:1px dashed #ccc;padding:10px;">${parts.join(" ")}</p>`;
+                });
+            }
+            return h;
+        }
+        function printWorksheet() { var w=window.open(); w.document.write(getExportHTML()); w.print(); w.close(); }
+        function downloadWordDoc() { var b=new Blob(['\ufeff', "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><body>"+getExportHTML()+"</body></html>"],{type:'application/msword'}); var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='worksheet.doc'; a.click(); }
+        function exportApp() { var h=document.documentElement.outerHTML.replace(/var defaultData = \{.*?\};/s, "var defaultData = "+JSON.stringify(config)+";"); var b=new Blob([h],{type:'text/html'}); var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='evaluation_architect.html'; a.click(); }
+
+    </script>
+</body>
+</html>
