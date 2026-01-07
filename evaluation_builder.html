@@ -311,10 +311,17 @@
                 </div>
 
                 <div style="display:flex; justify-content: space-between; padding-top:20px; border-top:1px solid #eee;">
-                    <div style="display:flex; gap:10px;">
+                    
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <select id="ws-style" class="admin-input" onchange="updateWSSetting('style', this.value)" style="width:200px; border:2px solid #2980b9;">
+                            <option value="mcq">Paper Game (Multiple Choice)</option>
+                            <option value="blank">Fill-in-the-Blanks</option>
+                            <option value="key">Answer Key (Completed)</option>
+                        </select>
                         <button onclick="printWorksheet()" style="background:#f39c12; color:white; border:none; padding:10px;">Print PDF</button>
                         <button onclick="downloadWordDoc()" style="background:#2980b9; color:white; border:none; padding:10px;">Word Doc</button>
                     </div>
+                    
                     <div style="display:flex; gap:10px;">
                         <button onclick="triggerSave()" id="save-btn" style="background:#3498db; color:white; padding:10px;">Save Settings</button>
                         <button onclick="exportApp()" style="background:#27ae60; color:white; border:none; padding:10px;">Download App</button>
@@ -349,7 +356,7 @@
             appTitle: "Evaluation Architect", topic: "How is the character presented?", adminPass: "teacher", gameMode: "AO2", 
             settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3 },
             default_structure: defaultStructure, 
-            worksheetSettings: { showTask1: true, showTask2: true, s1_mode: "text", s2_mode: "text", quote_mode: "text", s3_mode: "text", s4_mode: "text" },
+            worksheetSettings: { showTask1: true, showTask2: true, style: "mcq", s1_mode: "text", s2_mode: "text", quote_mode: "text", s3_mode: "text", s4_mode: "text" },
             starters_evidence: [ "The writer uses", "The author explicitly chooses" ], ao2_methods: ["Metaphor", "Simile"], starters_evaluative: [ "to suggest", "to imply" ],
             ao4_starters: [ "I agree that" ], ao4_markers: [ "However,", "Furthermore," ], ao4_links: [ "evident when" ],
             quote_bank: ["Random Quote 1"], point_bank: ["Random Point 1"],
@@ -358,7 +365,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v102_sync'; 
+        var STORE_KEY = 'eval_arch_v104_paper_game'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -390,6 +397,10 @@
             document.getElementById('admin-modal').style.display = 'none';
             document.getElementById('overlay').style.display = 'none';
             
+            // Set worksheet dropdown
+            var wsStyle = document.getElementById('ws-style');
+            if(wsStyle && config.worksheetSettings.style) wsStyle.value = config.worksheetSettings.style;
+
             sanitizeData();
             updateDOM();
             setTimeout(renderAdminUI, 100);
@@ -438,8 +449,6 @@
             currentSelectedOption = null;
 
             var stageKey = currentGameStructure[currentStageIndex];
-            
-            // NO LEVEL RESTRICTIONS - Follow Structure Exactly
             renderGameGrid(stageKey);
         }
 
@@ -463,10 +472,8 @@
                     var btn = createBtn(p.quote, () => {
                         currentQuoteId = p.id;
                         var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
-                        // Use Set to remove dups, then filter none
                         var uniqueStruct = [...new Set(rawStruct)];
                         currentGameStructure = uniqueStruct.filter(k => k !== 'none');
-                        
                         currentStageIndex = 0;
                         updateBuilder();
                         loadStage();
@@ -485,22 +492,18 @@
             var mode = pair.modes[key] || 'quiz'; 
             var options = [];
 
-            // 1. SCAFFOLD (Fixed)
             if(mode === 'scaffold') {
                 var correctText = getSpecificText(key, pair, isAO4);
                 options.push({ txt: correctText, correct: true });
             } 
-            // 2. QUIZ (Specific vs Distractors)
             else if (mode === 'quiz') {
                 var correctText = getSpecificText(key, pair, isAO4);
                 options.push({ txt: correctText, correct: true });
-                
-                var dists = getDistractors(key, pair, isAO4, correctText);
+                var dists = getDistractors(key, pair, isAO4, correctText, currentQuoteId);
                 dists = dists.filter(t => t !== correctText);
                 dists.sort(()=>Math.random()-0.5);
                 for(var i=0; i<3 && i<dists.length; i++) options.push({ txt: dists[i], correct: false });
             }
-            // 3. OPEN (Any Bank)
             else if (mode === 'open') {
                 var bankItems = getBankItems(key, isAO4);
                 bankItems.sort(()=>Math.random()-0.5);
@@ -536,10 +539,10 @@
             return [];
         }
 
-        function getDistractors(key, pair, isAO4, correctText) {
+        function getDistractors(key, pair, isAO4, correctText, qId) {
             var dists = [];
             if(key==='quote') {
-                dists = config.quote_bank.concat(config.content_pairs.filter(p=>p.id!==currentQuoteId).map(p=>p.quote));
+                dists = config.quote_bank.concat(config.content_pairs.filter(p=>p.id!==qId).map(p=>p.quote));
             } else if(key==='s4') {
                 dists = config.point_bank.concat(pair.distractors || []);
             } else {
@@ -650,6 +653,8 @@
             reader.onload = function(e) {
                 try {
                     config = JSON.parse(e.target.result);
+                    // Ensure worksheet style is preserved
+                    if(!config.worksheetSettings.style) config.worksheetSettings.style = "mcq";
                     saveLocal(true);
                     alert("Data Loaded Successfully!");
                 } catch(e) { alert("Invalid File"); }
@@ -662,7 +667,6 @@
             var list = document.getElementById('list-content'); list.innerHTML = '';
             config.content_pairs.forEach((p, i) => {
                 var div = document.createElement('div'); div.className='content-card';
-                // Modes Logic
                 var getMode = (k) => p.modes[k] || 'open';
                 var sel = (k, v) => getMode(k) === v ? 'selected' : '';
                 var mSelect = (k) => `<select class="mode-select" onchange="setMode(${i},'${k}',this.value)">
@@ -671,7 +675,6 @@
                     ${ (k!=='quote' && k!=='s4') ? `<option value="open" ${sel(k,'open')}>3. Open (Any)</option>` : '' }
                 </select>`;
 
-                // Structure Dropdowns
                 var structHTML = `<div style="background:#eef; padding:5px; margin-bottom:5px; border-radius:3px;">
                         <small><strong>Sentence Order (Custom):</strong></small><br>
                         <div style="display:flex; gap:3px;">`;
@@ -689,7 +692,6 @@
                 
                 var levelHTML = `<div style="margin-bottom:5px;"><label>Assign to Level:</label> <select class="admin-input" style="width:auto;" onchange="updateContent(${i}, 'level', this.value)"><option value="1" ${p.level==1?'selected':''}>1</option><option value="2" ${p.level==2?'selected':''}>2</option><option value="3" ${p.level==3?'selected':''}>3</option></select></div>`;
                 
-                // Add labels for hints
                 var getHint = (k) => {
                     var m = getMode(k);
                     if(m==='open') return '<span class="source-hint">(Source: Global Bank)</span>';
@@ -753,32 +755,78 @@
             if(arr) arr.splice(i,1); renderAdminUI(); 
         }
 
-        // --- EXPORT (Restored) ---
+        // --- EXPORT FUNCTION (PAPER GAME) ---
         function getExportHTML() {
+            var style = config.worksheetSettings.style || "mcq";
             var h = "<h1>"+config.topic+"</h1>";
+            
+            // Task 1: Matching
             if(config.worksheetSettings.showTask1) {
-                h+="<h2>Task 1: Matching</h2><table border='1' cellspacing='0' cellpadding='10' style='width:100%;border-collapse:collapse'>";
+                h+="<h2>Task 1: Match the Evidence to the Effect</h2>";
+                h+="<table border='1' cellspacing='0' cellpadding='10' style='width:100%;border-collapse:collapse; margin-bottom:20px;'>";
                 var shuf = [].concat(config.content_pairs).sort(()=>Math.random()-0.5);
-                config.content_pairs.forEach((p,i)=>{ h+=`<tr><td>${p.quote}</td><td>&rarr;</td><td>${shuf[i].effect}</td></tr>`; });
+                config.content_pairs.forEach((p,i)=>{ h+=`<tr><td style="width:40%">${p.quote}</td><td style="width:10%;text-align:center;">&rarr;</td><td style="width:40%">${shuf[i].effect}</td></tr>`; });
                 h+="</table>";
             }
+
+            // Task 2: Paper Game
             if(config.worksheetSettings.showTask2) {
-                h+="<h2>Task 2: Sentence Builder</h2>";
-                config.content_pairs.forEach(p=>{
-                    var effectiveStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
-                    var validKeys = effectiveStruct.filter(k => k !== 'none');
+                h+="<h2>Task 2: Build the Evaluation</h2>";
+                
+                config.content_pairs.forEach((p, idx)=>{
+                    h+=`<div style="border:1px solid #333; padding:15px; margin-bottom:20px; page-break-inside:avoid;">`;
+                    h+=`<h3>${idx+1}. ${p.title || "Question"}</h3>`;
                     
-                    var parts = validKeys.map(k=>{
-                        var m = config.worksheetSettings[k+'_mode']||(k=='quote'?config.worksheetSettings.quote_mode:'text');
-                        if(m=='none') return null;
-                        if(m=='scaffold'||m=='line') return "__________";
-                        if(k=='s1') return p.specific_s1||"...";
-                        if(k=='s2') return p.method||"...";
-                        if(k=='quote') return `"${p.quote}"`;
-                        if(k=='s3') return p.specific_s3||"...";
-                        if(k=='s4') return p.effect;
-                    }).filter(x=>x);
-                    h+=`<p style="line-height:2;border-bottom:1px dashed #ccc;padding:10px;">${parts.join(" ")}</p>`;
+                    // Respect Structure
+                    var effectiveStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
+                    var uniqueStruct = [...new Set(effectiveStruct)].filter(k => k !== 'none');
+                    var isAO4 = (config.gameMode === "AO4");
+
+                    uniqueStruct.forEach(stepKey => {
+                        // Check Scaffolding Overrides
+                        var scaffoldMode = config.worksheetSettings[stepKey+'_mode'] || "text";
+                        var label = getStageLabel(stepKey);
+                        var correctText = getSpecificText(stepKey, p, isAO4);
+                        
+                        h+=`<div style="margin-bottom:10px;"><strong>${label}:</strong><br>`;
+
+                        if (style === "key") {
+                            h+=`<span style="color:green; font-weight:bold;">${correctText}</span>`;
+                        } else if (style === "blank" || scaffoldMode === "scaffold" || scaffoldMode === "line") {
+                            h+=`___________________________________________________________`;
+                        } else {
+                            // MCQ / Paper Game
+                            var mode = p.modes[stepKey] || 'quiz';
+                            var options = [];
+                            
+                            // 1. Always include Correct Answer
+                            options.push(correctText);
+                            
+                            // 2. Add Distractors
+                            var dists = [];
+                            if (mode === 'open') {
+                                dists = getBankItems(stepKey, isAO4); // Add multiple banks
+                            } else {
+                                dists = getDistractors(stepKey, p, isAO4, correctText, p.id);
+                            }
+                            
+                            // Filter duplicates and merge
+                            dists = dists.filter(d => d !== correctText);
+                            dists = dists.sort(() => Math.random() - 0.5).slice(0, 3); // Take 3 dists max
+                            options = options.concat(dists);
+                            options.sort(() => Math.random() - 0.5);
+
+                            // Render Options
+                            h+=`<div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">`;
+                            options.forEach(opt => {
+                                h+=`<div style="border:1px solid #ccc; padding:5px;">&#9711; ${opt}</div>`;
+                            });
+                            h+=`</div>`;
+                        }
+                        h+=`</div>`;
+                    });
+                    
+                    h+=`</div>`;
                 });
             }
             return h;
