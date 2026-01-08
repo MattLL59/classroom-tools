@@ -100,6 +100,7 @@
         button.choice-btn { padding: 20px; border: 2px solid transparent; border-radius: 10px; font-size: 1.1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; color: #333; opacity: 0.9; }
         button.choice-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); opacity: 1; }
         button.choice-btn.selected { border: 4px solid #333; transform: scale(1.05); opacity: 1; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
+        button.choice-btn.completed { background: #d5f5e3; border-color: #2ecc71; color: #27ae60; opacity: 0.8; }
         
         .btn-s1 { background: var(--col-1-pink); } .btn-s2 { background: var(--col-2-yellow); } .btn-s3 { background: var(--col-3-blue); } .btn-s4 { background: var(--col-4-green); } .btn-white { background: white; border-color: #ddd; }
         
@@ -332,6 +333,13 @@
                     <strong>Game Rules</strong>
                     <div class="toggle-row"><label>Mode</label><select id="edit-gamemode" onchange="updateConfigVal('gameMode', this.value)"><option value="AO2">AO2</option><option value="AO4">AO4</option></select></div>
                     <div class="toggle-row"><label>Start Level</label><select id="edit-start-lvl" onchange="updateConfigVal('settings.startLevel', this.value)"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+                    <div class="toggle-row"><label>Progression</label>
+                        <select id="edit-progression" onchange="updateConfigVal('settings.progressionMode', this.value)">
+                            <option value="level_up">🚀 Linear (Auto-Level Up)</option>
+                            <option value="loop">🔁 Single Level (Loop & Win)</option>
+                        </select>
+                    </div>
+                    <div class="toggle-row"><label>Target Streak</label><input type="number" id="edit-streak" class="admin-input" style="width:60px" onchange="updateConfigVal('settings.streakThreshold', this.value)"></div>
                 </div>
 
                 <div style="display:flex; justify-content: space-between; padding-top:20px; border-top:1px solid #eee;">
@@ -382,7 +390,7 @@
         var defaultStructure = ['s1', 's2', 'quote', 's3', 's4'];
         var defaultData = {
             appTitle: "Evaluation Architect", topic: "How is the character presented?", adminPass: "teacher", gameMode: "AO2", 
-            settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3 },
+            settings: { startLevel: 1, maxLevel: 3, streakThreshold: 3, progressionMode: "level_up" },
             default_structure: defaultStructure, 
             worksheetSettings: { showTask1: true, showTask2: true, style: "mcq", s1_mode: "text", s2_mode: "text", quote_mode: "text", s3_mode: "text", s4_mode: "text" },
             starters_evidence: [ "The writer uses", "The author explicitly chooses" ], ao2_methods: ["Metaphor", "Simile"], starters_evaluative: [ "to suggest", "to imply" ],
@@ -393,11 +401,11 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v109_bulk_sync'; 
+        var STORE_KEY = 'eval_arch_v110_loop'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
-        var gameState = { currentLevel: 1, streak: 0, score: 0, roundScoreAdded: false };
+        var gameState = { currentLevel: 1, streak: 0, score: 0, roundScoreAdded: false, completedIds: [] };
         var currentStageIndex = 0;
         var currentGameStructure = [];
         var currentSelectedOption = null;
@@ -448,6 +456,7 @@
             if(!config.ao4_starters) config.ao4_starters = ["I agree that"];
             if(!config.ao4_markers) config.ao4_markers = ["However,", "Therefore,"];
             if(!config.ao4_links) config.ao4_links = ["evident because"];
+            if(!config.settings.progressionMode) config.settings.progressionMode = "level_up";
         }
 
         function updateDOM() {
@@ -461,6 +470,8 @@
             document.getElementById('edit-topic').value = config.topic || "";
             document.getElementById('edit-gamemode').value = config.gameMode || "AO2";
             document.getElementById('edit-start-lvl').value = config.settings.startLevel || 1;
+            document.getElementById('edit-progression').value = config.settings.progressionMode || "level_up";
+            document.getElementById('edit-streak').value = config.settings.streakThreshold || 3;
         }
 
         function getStageLabel(key) {
@@ -516,6 +527,11 @@
                         loadStage();
                     });
                     btn.classList.add('btn-white');
+                    // Check if already completed
+                    if(gameState.completedIds && gameState.completedIds.includes(p.id)) {
+                        btn.classList.add('completed');
+                        btn.innerHTML += ' ✅';
+                    }
                     grid.appendChild(btn);
                 });
                 return;
@@ -643,9 +659,21 @@
                 gameState.score += pts;
                 gameState.streak++;
                 gameState.roundScoreAdded = true;
+                
+                // Track Completion
+                if(currentQuoteId && !gameState.completedIds.includes(currentQuoteId)) {
+                    gameState.completedIds.push(currentQuoteId);
+                }
+
                 updateScoreBoard();
-                if(gameState.streak >= config.settings.streakThreshold && gameState.currentLevel < config.settings.maxLevel) {
-                    showLevelUp(pts); return; 
+                
+                if(gameState.streak >= config.settings.streakThreshold) {
+                    if (config.settings.progressionMode === 'level_up' && gameState.currentLevel < config.settings.maxLevel) {
+                        showLevelUp(pts);
+                    } else {
+                        showWin(pts); // Win / Loop
+                    }
+                    return; 
                 }
             }
             hideAllStages();
@@ -668,8 +696,19 @@
         }
         function hideAllStages() { document.getElementById('stage-area').style.display='none'; document.getElementById('typing-interface').style.display='none'; document.getElementById('stage-final').style.display='none'; }
         function updateScoreBoard() { document.getElementById('score-val').innerText=gameState.score; document.getElementById('streak-val').innerText=gameState.streak+"/"+config.settings.streakThreshold; document.getElementById('level-badge').innerText="LEVEL "+gameState.currentLevel; }
-        function closeLevelUp() { gameState.currentLevel++; gameState.streak=0; document.getElementById('levelup-overlay').style.display='none'; updateScoreBoard(); resetGame(); }
+        function closeLevelUp() { 
+            gameState.currentLevel++; 
+            gameState.streak=0; 
+            gameState.completedIds = []; // Reset visual tracking for new level
+            document.getElementById('levelup-overlay').style.display='none'; 
+            updateScoreBoard(); 
+            resetGame(); 
+        }
         function showLevelUp(p) { document.getElementById('levelup-overlay').style.display='flex'; document.getElementById('levelup-msg').innerText=`+${p}`; }
+        function showWin(p) { 
+            document.getElementById('win-overlay').style.display='flex'; 
+            document.getElementById('final-score').innerText = "Score: " + gameState.score;
+        }
         function showError() { var o=document.getElementById('overlay'); o.style.display='flex'; gameState.streak=0; updateScoreBoard(); }
         function closeOverlay() { document.getElementById('overlay').style.display='none'; }
         
@@ -690,7 +729,6 @@
             reader.onload = function(e) {
                 try {
                     config = JSON.parse(e.target.result);
-                    // Force worksheet style default
                     if(!config.worksheetSettings.style) config.worksheetSettings.style = "mcq";
                     saveLocal(true);
                     updateAdminInputs();
