@@ -29,16 +29,16 @@
             display: flex; 
             justify-content: space-between; 
             align-items: center; 
-            margin-bottom: 15px; 
-            padding-bottom: 10px; 
+            margin-bottom: 5px; 
+            padding-bottom: 5px; 
             border-bottom: 2px solid #e0e0e0; 
             flex-shrink: 0;
-            min-height: 50px;
+            min-height: 40px;
             background-color: #f4f6f7;
             position: relative;
             z-index: 50; 
         }
-        h1 { margin: 0; color: var(--app-color); font-size: 1.6rem; }
+        h1 { margin: 0; color: var(--app-color); font-size: 1.4rem; }
         
         #score-board { background: var(--app-color); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; display: flex; gap: 15px; align-items: center; }
         .level-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; color: white; }
@@ -93,7 +93,22 @@
         h2.stage-title { font-size: 1.4rem; margin-bottom: 5px; color: #444; }
         p.stage-subtitle { color: #777; margin-bottom: 10px; font-style: italic; }
         
-        #topic-display { background: #eaf2f8; color: var(--app-color); padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; font-size: 1.1rem; border-left: 5px solid var(--level-1); text-align: left; flex-shrink: 0; }
+        /* TOPIC DISPLAY - VISIBLE */
+        #topic-display { 
+            background: #3498db; 
+            color: white; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 10px; 
+            font-weight: bold; 
+            font-size: 1.2rem; 
+            text-align: center; 
+            flex-shrink: 0; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        #current-task-info {
+            font-size: 0.9rem; color: #7f8c8d; margin-bottom: 10px; font-weight: bold;
+        }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
         
@@ -212,9 +227,12 @@
 
     <div class="container" id="game-container">
         <div id="topic-display">Question: How is the text presented?</div>
+        
         <div class="progress-track"><div class="progress-fill" id="progress-bar"></div></div>
         
         <div id="stage-area" class="stage-area">
+            <div id="current-task-info"></div>
+            
             <h2 id="stage-title" class="stage-title">Select Evidence</h2>
             <p id="stage-subtitle" class="stage-subtitle">Instruction goes here</p>
             <div class="grid" id="game-grid"></div>
@@ -245,7 +263,8 @@
 
     <div id="overlay" onclick="closeOverlay()"><div id="overlay-msg"><i class="fas fa-times-circle" style="font-size:3rem; color:#e74c3c; margin-bottom:15px;"></i><h2>Incorrect</h2><p>Try again.</p></div></div>
     <div id="levelup-overlay" onclick="closeLevelUp()"><div class="overlay-content"><div class="firework"></div><h2 style="margin-top:50px;">LEVEL UP!</h2><p id="levelup-msg"></p><button class="choice-btn btn-white">Continue</button></div></div>
-    <div id="win-overlay"><div class="overlay-content"><div style="font-size:5rem;">🏆</div><h1>CONGRATULATIONS!</h1><p id="final-score">0</p><button class="choice-btn" onclick="forceReset()">Play Again</button></div></div>
+    
+    <div id="win-overlay"><div class="overlay-content"><div style="font-size:5rem;">🏆</div><h1>CONGRATULATIONS!</h1><p id="final-score">0</p><button class="choice-btn" onclick="restartSession()">Play Again</button></div></div>
 
     <div id="admin-modal">
         <div class="admin-panel">
@@ -385,6 +404,22 @@
         function forceReset() {
             if(confirm("Factory Reset? This clears all saved data.")) { localStorage.removeItem(STORE_KEY); window.location.reload(); }
         }
+        
+        // --- NEW: SAFE RESTART FUNCTION ---
+        function restartSession() {
+            // Reset Game State but keep Config/Data
+            gameState = {
+                currentLevel: parseInt(config.settings.startLevel),
+                streak: 0,
+                score: 0,
+                roundScoreAdded: false,
+                completedIds: []
+            };
+            
+            document.getElementById('win-overlay').style.display = 'none';
+            updateScoreBoard();
+            resetGame();
+        }
 
         // --- 1. DEFAULT DATA ---
         var defaultStructure = ['s1', 's2', 'quote', 's3', 's4'];
@@ -401,7 +436,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v113_visible_fix'; 
+        var STORE_KEY = 'eval_arch_v115_safe_restart'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -460,7 +495,7 @@
         }
 
         function updateDOM() {
-            document.getElementById('topic-display').innerText = "Question: " + config.topic;
+            document.getElementById('topic-display').innerText = config.topic;
             gameState.currentLevel = parseInt(config.settings.startLevel);
             updateScoreBoard();
             resetGame();
@@ -508,6 +543,7 @@
 
             // --- MAIN GRID (Acts as Menu AND Quote Selection) ---
             if(key === 'quote_select_mode') {
+                document.getElementById('current-task-info').innerText = ""; // Clear task info
                 document.getElementById('stage-title').innerText = "Select Evidence to Analyse";
                 document.getElementById('stage-subtitle').innerText = "Choose a quote to build your sentence around.";
                 
@@ -519,15 +555,10 @@
 
                 levelQuestions.forEach(p => {
                     var btn = createBtn(p.quote, () => {
-                        // 1. SET ID
                         currentQuoteId = p.id;
-                        
-                        // 2. AUTO-FILL QUOTE
                         sentenceParts['quote'] = `"${p.quote}"`;
                         
-                        // 3. CALCULATE STRUCTURE & REMOVE QUOTE STEP
                         var rawStruct = (p.structure && p.structure.length>0) ? p.structure : config.default_structure;
-                        // Unique set, then remove 'none' AND 'quote' (since we just picked it)
                         var uniqueStruct = [...new Set(rawStruct)];
                         currentGameStructure = uniqueStruct.filter(k => k !== 'none' && k !== 'quote');
                         
@@ -536,7 +567,6 @@
                         loadStage();
                     });
                     btn.classList.add('btn-white');
-                    // Check if already completed
                     if(gameState.completedIds && gameState.completedIds.includes(p.id)) {
                         btn.classList.add('completed');
                         btn.innerHTML += ' ✅';
@@ -546,10 +576,15 @@
                 return;
             }
 
+            // --- SUB STAGES ---
+            var pair = config.content_pairs.find(p => p.id === currentQuoteId);
+            
+            // SHOW CURRENT TASK
+            document.getElementById('current-task-info').innerText = "Working on: " + (pair.title || "Question");
+
             document.getElementById('stage-title').innerText = (currentStageIndex + 1) + ". " + getStageLabel(key);
             document.getElementById('stage-subtitle').innerText = getStageSubtitle(key);
 
-            var pair = config.content_pairs.find(p => p.id === currentQuoteId);
             var isAO4 = (config.gameMode === "AO4");
             var mode = pair.modes[key] || 'quiz'; 
             var options = [];
@@ -567,8 +602,17 @@
                 for(var i=0; i<3 && i<dists.length; i++) options.push({ txt: dists[i], correct: false });
             }
             else if (mode === 'open') {
+                // FORCE BANK ITEMS IF OPEN
                 var bankItems = getBankItems(key, isAO4);
+                
+                // Also add the specific correct text if it exists (so it's not missing)
+                var specific = getSpecificText(key, pair, isAO4);
+                if(specific && specific !== "..." && !bankItems.includes(specific)) {
+                    bankItems.push(specific);
+                }
+
                 bankItems.sort(()=>Math.random()-0.5);
+                // Ensure at least 4 items if possible
                 for(var i=0; i<4 && i<bankItems.length; i++) options.push({ txt: bankItems[i], correct: true });
             }
 
@@ -578,7 +622,8 @@
 
             final.forEach(opt => {
                 var btn = createBtn(opt.txt, function() { selectOption(this, opt, key); });
-                var cls = key==='s1'?'btn-s1':key==='s2'?'btn-s2':key==='s3'?'btn-s3':'btn-s4';
+                var cls = key==='s1'?'btn-s1':key==='s2'?'btn-s2':key==='s3'?'btn-s3':'btn-s3'; // Link is Blue
+                if(key==='s4') cls='btn-s4'; // Point is Green
                 if(key==='quote') cls='btn-white';
                 btn.classList.add(cls);
                 grid.appendChild(btn);
@@ -595,6 +640,7 @@
         }
 
         function getBankItems(key, isAO4) {
+            // STRICT SEPARATION OF BANKS
             if(key==='s1') return isAO4 ? config.ao4_starters : config.starters_evidence;
             if(key==='s2') return isAO4 ? config.ao4_markers : config.ao2_methods;
             if(key==='s3') return isAO4 ? config.ao4_links : config.starters_evaluative;
@@ -638,27 +684,16 @@
         }
 
         function goBack() {
-            currentStageIndex--;
-            if(gameState.currentLevel === 1) {
-                while(currentStageIndex >= 0) {
-                    var k = currentGameStructure[currentStageIndex];
-                    if(k === 's1' || k === 'quote' || k === 's4') break;
-                    currentStageIndex--;
-                }
+            if(currentStageIndex === 0) {
+                resetGame(); // Go back to Grid
+            } else {
+                currentStageIndex--;
+                loadStage();
             }
-            if(currentStageIndex < 0) resetGame();
-            else loadStage();
         }
 
         function goBackFromFinal() {
             currentStageIndex = currentGameStructure.length - 1;
-            if(gameState.currentLevel === 1) {
-                while(currentStageIndex >= 0) {
-                    var k = currentGameStructure[currentStageIndex];
-                    if(k === 's1' || k === 'quote' || k === 's4') break;
-                    currentStageIndex--;
-                }
-            }
             loadStage();
         }
 
@@ -669,7 +704,6 @@
                 gameState.streak++;
                 gameState.roundScoreAdded = true;
                 
-                // Track Completion
                 if(currentQuoteId && !gameState.completedIds.includes(currentQuoteId)) {
                     gameState.completedIds.push(currentQuoteId);
                 }
@@ -680,7 +714,7 @@
                     if (config.settings.progressionMode === 'level_up' && gameState.currentLevel < config.settings.maxLevel) {
                         showLevelUp(pts);
                     } else {
-                        showWin(pts); // Win / Loop
+                        showWin(pts); 
                     }
                     return; 
                 }
@@ -695,14 +729,11 @@
         
         function updateBuilder() {
             var h=""; 
-            // V113 FIX: Use the Question's Full Structure, not the "Remaining Steps" list
             var structToUse = config.default_structure;
             if(currentQuoteId) {
                 var p = config.content_pairs.find(x => x.id === currentQuoteId);
                 if(p && p.structure && p.structure.length > 0) structToUse = p.structure;
             }
-            
-            // Filter duplicates and 'none'
             var uniqueStruct = [...new Set(structToUse)].filter(k => k !== 'none');
 
             uniqueStruct.forEach(k=>{
@@ -719,7 +750,7 @@
         function closeLevelUp() { 
             gameState.currentLevel++; 
             gameState.streak=0; 
-            gameState.completedIds = []; // Reset visual tracking for new level
+            gameState.completedIds = []; 
             document.getElementById('levelup-overlay').style.display='none'; 
             updateScoreBoard(); 
             resetGame(); 
