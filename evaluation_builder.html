@@ -555,6 +555,37 @@
                 document.getElementById('essay-display').style.display = 'none';
             }
         }
+        
+        // --- NEW: SAVE HELPER (Used by both saveAndNext AND finishGame) ---
+        function saveEssayContent() {
+            if(config.settings.accumulateEssay === "true" || config.settings.accumulateEssay === true) {
+                // Build Sentence based on structure
+                let fullSentence = "";
+                let struct = config.default_structure;
+                
+                // Safety check for quote ID
+                if (!currentQuoteId) return;
+
+                let q = config.content_pairs.find(x => x.id === currentQuoteId);
+                if(q && q.structure) struct = q.structure;
+                
+                let uniqueStruct = [...new Set(struct)].filter(k => k !== 'none');
+                
+                uniqueStruct.forEach(k => {
+                    if(sentenceParts[k]) fullSentence += sentenceParts[k] + " ";
+                });
+                
+                // Append to Essay Box
+                let essayDiv = document.getElementById('essay-content');
+                if(fullSentence.trim() !== "") {
+                    // Check if sentence already exists to prevent double add on win
+                    if(!essayDiv.innerText.includes(fullSentence.trim())) {
+                         essayDiv.innerText += fullSentence.trim() + "\n\n";
+                         document.getElementById('essay-display').style.display = 'block';
+                    }
+                }
+            }
+        }
 
         // --- 1. DEFAULT DATA ---
         var defaultStructure = ['s1', 's2', 'quote', 's3', 's4'];
@@ -571,7 +602,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v123_persistent_essay'; 
+        var STORE_KEY = 'eval_arch_v124_final_logic'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -665,29 +696,7 @@
         
         // --- NEW: SAVE AND NEXT LOGIC ---
         function saveAndNext() {
-            // 1. Check if Essay Mode is ON
-            if(config.settings.accumulateEssay === "true" || config.settings.accumulateEssay === true) {
-                
-                // 2. Build Sentence based on structure
-                let fullSentence = "";
-                let struct = config.default_structure;
-                let q = config.content_pairs.find(x => x.id === currentQuoteId);
-                if(q && q.structure) struct = q.structure;
-                
-                let uniqueStruct = [...new Set(struct)].filter(k => k !== 'none');
-                
-                uniqueStruct.forEach(k => {
-                    if(sentenceParts[k]) fullSentence += sentenceParts[k] + " ";
-                });
-                
-                // 3. Append to Essay Box
-                let essayDiv = document.getElementById('essay-content');
-                if(fullSentence.trim() !== "") {
-                    essayDiv.innerText += fullSentence.trim() + "\n\n";
-                    document.getElementById('essay-display').style.display = 'block';
-                }
-            }
-            // 4. Then Reset
+            saveEssayContent();
             resetGame();
         }
 
@@ -904,6 +913,10 @@
                 updateScoreBoard();
                 
                 if(gameState.streak >= config.settings.streakThreshold) {
+                    
+                    // SAVE ESSAY BEFORE WIN SCREEN
+                    saveEssayContent();
+
                     if (config.settings.progressionMode === 'level_up' && gameState.currentLevel < config.settings.maxLevel) {
                         showLevelUp(pts);
                     } else {
@@ -914,11 +927,6 @@
             }
             hideAllStages();
             document.getElementById('stage-final').style.display = 'block';
-            
-            // Trigger Confetti on Win
-            if(gameState.streak >= config.settings.streakThreshold) {
-               showWin(pts);
-            }
         }
 
         // --- HELPERS ---
@@ -1015,31 +1023,12 @@
             var reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    // PARSE
-                    var loaded = JSON.parse(e.target.result);
-                    
-                    // MERGE CAREFULLY
-                    config = Object.assign({}, defaultData, loaded);
-                    // Ensure content_pairs is an array
-                    if(loaded.content_pairs && Array.isArray(loaded.content_pairs)) {
-                        config.content_pairs = loaded.content_pairs;
-                    }
-                    
-                    // Force worksheet style default if missing
+                    config = JSON.parse(e.target.result);
                     if(!config.worksheetSettings.style) config.worksheetSettings.style = "mcq";
-                    
-                    // SAVE
                     saveLocal(true);
-                    
-                    // UPDATE UI INSTANTLY
-                    updateDOM();
                     updateAdminInputs();
-                    
                     alert("Data Loaded Successfully!");
-                } catch(e) { 
-                    console.error(e);
-                    alert("Invalid File: " + e.message); 
-                }
+                } catch(e) { alert("Invalid File"); }
             };
             reader.readAsText(file);
         }
