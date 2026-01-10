@@ -186,7 +186,7 @@
                 
                 <div style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding:20px; border-radius:8px; color:white; margin-bottom:20px; text-align:center;">
                     <h3 style="margin:0 0 10px 0;">✨ AI Import Wizard</h3>
-                    <p style="margin:0 0 15px 0;">Paste text, get prompt, load JSON.</p>
+                    <p style="margin:0 0 15px 0;">Paste text, get prompt, review & edit.</p>
                     <button class="choice-btn" style="border:none; color:#333; padding:10px 20px;" onclick="openWizard()">Open Wizard</button>
                 </div>
 
@@ -221,18 +221,21 @@
         <h2>✨ AI Import Wizard</h2>
         <div style="display:flex; gap:20px; height:100%;">
             <div style="flex:1; display:flex; flex-direction:column;">
-                <p><strong>Step 1:</strong> Paste your Text and Question below.</p>
+                <p><strong>Step 1:</strong> Paste your Text, Question, and choose count.</p>
                 <textarea id="wiz-text" class="admin-input" style="flex:1; resize:none;" placeholder="Paste the book extract here..."></textarea>
-                <input id="wiz-q" class="admin-input" style="margin-top:10px;" placeholder="Question">
+                <div style="display:flex; gap:10px; margin-top:10px;">
+                    <input id="wiz-q" class="admin-input" style="flex:2;" placeholder="Question">
+                    <input id="wiz-count" type="number" class="admin-input" style="flex:1;" value="3" min="1" max="10" title="Number of Quotes">
+                </div>
             </div>
             <div style="flex:1; display:flex; flex-direction:column;">
-                <p><strong>Step 2:</strong> Click 'Generate Prompt', then copy it to ChatGPT.</p>
+                <p><strong>Step 2:</strong> Generate Prompt & Copy to ChatGPT.</p>
                 <button class="choice-btn" style="background:#3498db; color:white; margin-bottom:10px;" onclick="generatePrompt()">Generate Prompt</button>
                 <textarea id="wiz-prompt" class="admin-input" style="height:100px; background:#eee;" readonly></textarea>
                 
-                <p><strong>Step 3:</strong> Paste the result here. (I will auto-clean the code).</p>
+                <p><strong>Step 3:</strong> Paste Result & Load for Review.</p>
                 <textarea id="wiz-json" class="admin-input" style="flex:1; resize:none;" placeholder="Paste whatever ChatGPT gives you here..."></textarea>
-                <button class="choice-btn" style="background:#27ae60; color:white; margin-top:10px;" onclick="loadFromWizard()">🚀 Load Lesson</button>
+                <button class="choice-btn" style="background:#27ae60; color:white; margin-top:10px;" onclick="loadFromWizard()">🚀 Review & Load</button>
                 <button class="choice-btn" style="background:#95a5a6; color:white; margin-top:5px;" onclick="document.getElementById('wizard-overlay').style.display='none'">Cancel</button>
             </div>
         </div>
@@ -255,7 +258,7 @@
     // 2. CORE LOGIC
     // ==========================================
     function init() {
-        var local = localStorage.getItem('tsa_data_v4_robust');
+        var local = localStorage.getItem('tsa_data_v5_final');
         if(local) try { appData = JSON.parse(local); } catch(e) {}
         updateDOM();
         loadStage1();
@@ -271,9 +274,8 @@
     function updateDOM() {
         document.getElementById('text-display').innerText = "Text: " + appData.textTitle;
         document.getElementById('question-display').innerText = "Q: " + (appData.question || "Analysis");
-        // Check if no quotes
         if(!appData.quotes || appData.quotes.length === 0) {
-            document.getElementById('quote-grid').innerHTML = "<p>No data loaded. Please use the <strong>AI Import Wizard</strong> in Settings.</p>";
+            document.getElementById('quote-grid').innerHTML = "<p>No data loaded. Use Settings > AI Import Wizard.</p>";
         }
     }
 
@@ -343,9 +345,8 @@
         var q = appData.quotes[state.currentQuoteIdx];
         var lvlKey = 'level' + state.level;
         
-        // Error handling if data is missing for a level
         if(!q[lvlKey] || !q[lvlKey][lens]) {
-            alert("Data missing for Level " + state.level + ". Please check Teacher Settings.");
+            alert("Data missing for Level " + state.level);
             loadStage1();
             return;
         }
@@ -429,7 +430,7 @@
     }
 
     // ==========================================
-    // 4. ADMIN & IMPORT LOGIC (THE FIX)
+    // 4. ADMIN & IMPORT LOGIC
     // ==========================================
     function openAdmin() { 
         document.getElementById('admin-modal').style.display = 'flex'; 
@@ -439,23 +440,29 @@
     }
     function closeAdmin() { 
         document.getElementById('admin-modal').style.display = 'none'; 
-        localStorage.setItem('tsa_data_v4_robust', JSON.stringify(appData));
+        localStorage.setItem('tsa_data_v5_final', JSON.stringify(appData));
         updateDOM();
         loadStage1();
     }
     
     function updateGlobal(k, v) { appData[k] = v; }
 
-    // WIZARD FUNCTIONS - THE ROBUST FIX
+    // WIZARD FUNCTIONS - IMPROVED PROMPT & FLOW
     function openWizard() { document.getElementById('wizard-overlay').style.display = 'flex'; }
     function generatePrompt() {
         var text = document.getElementById('wiz-text').value;
         var q = document.getElementById('wiz-q').value;
+        var count = document.getElementById('wiz-count').value || 3;
+        
         var prompt = `I need you to act as a JSON generator.
-I have a text: "${text.substring(0, 100)}..."
+I have a text: "${text.substring(0, 150)}..."
 And a question: "${q}"
-Please extract 3 key quotes.
-For each quote, provide analysis for 3 levels (Level 1, 2, 3) covering Tone, Structure, and Language.
+Please extract ${count} key quotes relevant to the question.
+For each quote:
+1. Provide a translation (modern english).
+2. Provide a DISTRACTOR translation (Make this plausible, e.g. a literal reading of a metaphor or a common student misconception, not obviously foolish).
+3. Provide analysis for 3 levels (Level 1, 2, 3) covering Tone, Structure, and Language.
+
 Return ONLY valid JSON matching this exact structure:
 {
   "textTitle": "Title",
@@ -465,7 +472,7 @@ Return ONLY valid JSON matching this exact structure:
       "id": "q1",
       "original": "quote",
       "translation": "meaning",
-      "distractor": "wrong meaning",
+      "distractor": "plausible wrong meaning",
       "level1": { "tone": {"prompt": "Q", "correct": "A", "options": ["A","B"]}, "structure": {"prompt": "Q", "correct": "A", "options": ["A","B"]}, "language": {"prompt": "Q", "correct": "A", "options": ["A","B"]} },
       "level2": { "tone": {"prompt": "Q", "correct": "A", "options": ["A","B"]}, "structure": {"prompt": "Q", "correct": "A", "options": ["A","B"]}, "language": {"prompt": "Q", "correct": "A", "options": ["A","B"]} },
       "level3": { "tone": {"prompt": "Q", "correct": "A", "options": ["A","B"]}, "structure": {"prompt": "Q", "correct": "A", "options": ["A","B"]}, "language": {"prompt": "Q", "correct": "A", "options": ["A","B"]} }
@@ -477,37 +484,24 @@ Return ONLY valid JSON matching this exact structure:
     
     function loadFromWizard() {
         var raw = document.getElementById('wiz-json').value.trim();
-        
-        // --- THE SANITIZER ---
-        // 1. Remove Markdown backticks
         raw = raw.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '');
-        
-        // 2. Find the actual JSON object (start at { end at })
         var first = raw.indexOf('{');
         var last = raw.lastIndexOf('}');
         
-        if (first === -1 || last === -1) {
-            alert("Could not find JSON object (missing { or }).");
-            return;
-        }
+        if (first === -1 || last === -1) { alert("Could not find JSON object."); return; }
         
-        raw = raw.substring(first, last + 1);
-        
-        // 3. Try to parse
         try {
-            var json = JSON.parse(raw);
+            var json = JSON.parse(raw.substring(first, last + 1));
             if(json.quotes) {
                 appData = json;
-                closeAdmin();
+                // Don't close admin, just render editor for review
+                renderEditor();
+                document.getElementById('edit-title').value = appData.textTitle;
+                document.getElementById('edit-question').value = appData.question;
                 document.getElementById('wizard-overlay').style.display = 'none';
-                alert("Success! Lesson Loaded.");
-                init();
-            } else {
-                alert("JSON parsed but missing 'quotes' array.");
-            }
-        } catch(e) {
-            alert("Still Invalid JSON. Error: " + e.message);
-        }
+                alert("Data Loaded! Please review the quotes in the list below before saving.");
+            } else { alert("JSON missing 'quotes' array."); }
+        } catch(e) { alert("JSON Error: " + e.message); }
     }
 
     function renderEditor() {
@@ -539,7 +533,10 @@ Return ONLY valid JSON matching this exact structure:
                     <button onclick="delQuote(${i})" style="color:red;border:none;">Del</button>
                 </div>
                 <div class="input-row"><label>Original:</label><input class="admin-input" value="${q.original}" onchange="editQ(${i}, 'original', this.value)"></div>
-                <div class="input-row"><label>Translation:</label><input class="admin-input" value="${q.translation}" onchange="editQ(${i}, 'translation', this.value)"></div>
+                <div style="display:flex; gap:10px;">
+                    <div class="input-row" style="flex:1"><label>Translation:</label><input class="admin-input" value="${q.translation}" onchange="editQ(${i}, 'translation', this.value)"></div>
+                    <div class="input-row" style="flex:1"><label>Distractor:</label><input class="admin-input" value="${q.distractor}" onchange="editQ(${i}, 'distractor', this.value)"></div>
+                </div>
                 ${levelsHTML}
             `;
             con.appendChild(div);
@@ -551,7 +548,7 @@ Return ONLY valid JSON matching this exact structure:
         var val = appData.quotes[qIdx][k] ? appData.quotes[qIdx][k][type] : { correct: "" };
         return `
             <div>
-                <label style="font-size:0.8rem; color:gray;">${label} Ans</label>
+                <label style="font-size:0.8rem; color:gray;">${label} Answer</label>
                 <input class="admin-input" style="font-size:0.8rem" value="${val.correct}" onchange="editDeep(${qIdx}, ${lvl}, '${type}', 'correct', this.value)">
             </div>
         `;
@@ -562,7 +559,6 @@ Return ONLY valid JSON matching this exact structure:
         var key = 'level'+lvl;
         if(!appData.quotes[i][key]) appData.quotes[i][key] = {};
         if(!appData.quotes[i][key][type]) appData.quotes[i][key][type] = { options: [] };
-        
         appData.quotes[i][key][type][field] = v;
         if(!appData.quotes[i][key][type].options.includes(v)) {
             appData.quotes[i][key][type].options[0] = v; 
