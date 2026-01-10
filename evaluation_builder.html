@@ -488,8 +488,8 @@
     <div id="emergency-reset" onclick="forceReset()">Emergency Factory Reset</div>
 
     <script>
-        // --- 0. HELPERS & GLOBAL FUNCTIONS ---
-        // Defined early to avoid reference errors
+        // --- 0. CRITICAL FUNCTIONS (MOVED TO TOP TO PREVENT 'NOT DEFINED' ERRORS) ---
+        
         function updateBankHighlights() {
             var isAO4 = (config.gameMode === "AO4");
             var col2 = document.getElementById('bank-col-ao2');
@@ -512,6 +512,27 @@
             document.getElementById('edit-progression').value = config.settings.progressionMode || "level_up";
             document.getElementById('edit-essaymode').value = config.settings.accumulateEssay || "false";
             document.getElementById('edit-streak').value = config.settings.streakThreshold || 3;
+        }
+
+        function updateDOM() {
+            // FIXED: Ensure dynamic topic display (REMOVED hardcoded default so user input is respected)
+            document.getElementById('topic-display').innerText = config.topic || "Enter a Question in Settings";
+            gameState.currentLevel = parseInt(config.settings.startLevel);
+            updateScoreBoard();
+            
+            // Show/Hide Essay Box
+            var essayBox = document.getElementById('essay-display');
+            if(config.settings.accumulateEssay === "true") {
+                if(document.getElementById('essay-content').innerText.trim() !== "") {
+                    essayBox.style.display = "block";
+                } else {
+                    essayBox.style.display = "none";
+                }
+            } else {
+                essayBox.style.display = "none";
+            }
+            
+            resetGame();
         }
 
         function openAdmin() { 
@@ -664,26 +685,6 @@
             if(!config.settings.accumulateEssay) config.settings.accumulateEssay = "false";
         }
 
-        function updateDOM() {
-            // FIXED: Ensure dynamic topic display (REMOVED hardcoded default so user input is respected)
-            document.getElementById('topic-display').innerText = config.topic || "Enter a Question in Settings";
-            gameState.currentLevel = parseInt(config.settings.startLevel);
-            updateScoreBoard();
-            
-            // Show/Hide Essay Box
-            var essayBox = document.getElementById('essay-display');
-            if(config.settings.accumulateEssay === "true") {
-                if(document.getElementById('essay-content').innerText.trim() !== "") {
-                    essayBox.style.display = "block";
-                } else {
-                    essayBox.style.display = "none";
-                }
-            } else {
-                essayBox.style.display = "none";
-            }
-            
-            resetGame();
-        }
 
         function getStageLabel(key) {
             if(key === 's1') return "Starter";
@@ -927,6 +928,11 @@
             }
             hideAllStages();
             document.getElementById('stage-final').style.display = 'block';
+            
+            // Trigger Confetti on Win
+            if(gameState.streak >= config.settings.streakThreshold) {
+               showWin(pts);
+            }
         }
 
         // --- HELPERS ---
@@ -1023,12 +1029,31 @@
             var reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    config = JSON.parse(e.target.result);
+                    // PARSE
+                    var loaded = JSON.parse(e.target.result);
+                    
+                    // MERGE CAREFULLY
+                    config = Object.assign({}, defaultData, loaded);
+                    // Ensure content_pairs is an array
+                    if(loaded.content_pairs && Array.isArray(loaded.content_pairs)) {
+                        config.content_pairs = loaded.content_pairs;
+                    }
+                    
+                    // Force worksheet style default if missing
                     if(!config.worksheetSettings.style) config.worksheetSettings.style = "mcq";
+                    
+                    // SAVE
                     saveLocal(true);
+                    
+                    // UPDATE UI INSTANTLY
+                    updateDOM();
                     updateAdminInputs();
+                    
                     alert("Data Loaded Successfully!");
-                } catch(e) { alert("Invalid File"); }
+                } catch(e) { 
+                    console.error(e);
+                    alert("Invalid File: " + e.message); 
+                }
             };
             reader.readAsText(file);
         }
