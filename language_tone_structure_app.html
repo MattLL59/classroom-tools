@@ -92,19 +92,13 @@
         }
         .panel-body { padding: 20px; overflow-y: auto; flex-grow: 1; text-align: left; }
         
-        /* Admin Tabs */
-        .tab-nav { display: flex; border-bottom: 1px solid #ccc; margin-bottom: 15px; }
-        .tab-btn { 
-            padding: 10px 20px; cursor: pointer; border: none; background: #eee; margin-right: 5px; border-radius: 5px 5px 0 0; 
-        }
-        .tab-btn.active { background: white; border: 1px solid #ccc; border-bottom: 2px solid white; font-weight: bold; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-
         .editor-section { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 5px; }
         .input-row { margin-bottom: 10px; }
         .input-row label { display: block; font-weight: bold; font-size: 0.9rem; margin-bottom: 5px; }
         .admin-input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        
+        /* Wizard Styles */
+        #wizard-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:white; z-index: 2500; flex-direction:column; padding:20px; box-sizing:border-box; }
 
         /* --- OVERLAYS --- */
         #overlay-msg { 
@@ -131,7 +125,7 @@
     <div class="container">
         <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-weight:bold; color:#7f8c8d;">
             <span id="text-display">Text: Loading...</span>
-            <span>Streak: <span id="streak-val">0</span></span>
+            <span id="question-display">Question: ...</span>
         </div>
 
         <div id="stage-quote" class="stage-area active">
@@ -199,6 +193,12 @@
             </div>
             <div class="panel-body">
                 
+                <div style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding:20px; border-radius:8px; color:white; margin-bottom:20px; text-align:center;">
+                    <h3 style="margin:0 0 10px 0;">✨ AI Import Wizard</h3>
+                    <p style="margin:0 0 15px 0;">Automatically find quotes and generate analysis from any text.</p>
+                    <button class="choice-btn" style="border:none; color:#333; padding:10px 20px;" onclick="openWizard()">Open Wizard</button>
+                </div>
+
                 <div style="margin-bottom:20px; padding:15px; background:#e3f2fd; border-radius:5px;">
                     <h3>💾 Data & Worksheet</h3>
                     <button class="choice-btn" style="padding:5px 15px; display:inline-block;" onclick="downloadData()">Save Data</button>
@@ -214,10 +214,35 @@
                     <label>Text Title:</label>
                     <input id="edit-title" class="admin-input" onchange="updateGlobal('textTitle', this.value)">
                 </div>
+                <div class="input-row">
+                    <label>Focus Question:</label>
+                    <input id="edit-question" class="admin-input" onchange="updateGlobal('question', this.value)">
+                </div>
 
                 <h3>Quote Editor</h3>
                 <div id="quote-editor-container"></div>
                 <button class="choice-btn" style="width:100%; background:#27ae60; color:white;" onclick="addQuote()">+ Add New Quote</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="wizard-overlay">
+        <h2>✨ AI Import Wizard</h2>
+        <div style="display:flex; gap:20px; height:100%;">
+            <div style="flex:1; display:flex; flex-direction:column;">
+                <p><strong>Step 1:</strong> Paste your Text and Question below.</p>
+                <textarea id="wiz-text" class="admin-input" style="flex:1; resize:none;" placeholder="Paste the book extract here..."></textarea>
+                <input id="wiz-q" class="admin-input" style="margin-top:10px;" placeholder="Question (e.g. How does the writer create tension?)">
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column;">
+                <p><strong>Step 2:</strong> Click 'Generate Prompt', then copy it to ChatGPT.</p>
+                <button class="choice-btn" style="background:#3498db; color:white; margin-bottom:10px;" onclick="generatePrompt()">Generate Prompt for ChatGPT</button>
+                <textarea id="wiz-prompt" class="admin-input" style="height:100px; background:#eee;" readonly></textarea>
+                
+                <p><strong>Step 3:</strong> Paste ChatGPT's JSON response here and click Load.</p>
+                <textarea id="wiz-json" class="admin-input" style="flex:1; resize:none;" placeholder="Paste the JSON code here..."></textarea>
+                <button class="choice-btn" style="background:#27ae60; color:white; margin-top:10px;" onclick="loadFromWizard()">🚀 Load Lesson</button>
+                <button class="choice-btn" style="background:#95a5a6; color:white; margin-top:5px;" onclick="document.getElementById('wizard-overlay').style.display='none'">Cancel</button>
             </div>
         </div>
     </div>
@@ -228,6 +253,7 @@
     // ==========================================
     var defaultData = {
         textTitle: "The Electric Telegraph (1851)",
+        question: "How does the writer convey the impact of the telegraph?",
         quotes: [
             {
                 id: "q1",
@@ -261,7 +287,7 @@
     // ==========================================
     
     function init() {
-        var local = localStorage.getItem('tsa_data_v2');
+        var local = localStorage.getItem('tsa_data_v3');
         if(local) try { appData = JSON.parse(local); } catch(e) {}
         updateDOM();
         loadStage1();
@@ -276,6 +302,7 @@
 
     function updateDOM() {
         document.getElementById('text-display').innerText = "Text: " + appData.textTitle;
+        document.getElementById('question-display').innerText = "Q: " + (appData.question || "General Analysis");
         document.getElementById('streak-val').innerText = state.streak;
     }
 
@@ -342,7 +369,7 @@
         showStage('stage-analysis');
         var q = appData.quotes[state.currentQuoteIdx];
         var lvlKey = 'level' + state.level;
-        var data = q[lvlKey][lens]; // Access nested data: q.level1.tone
+        var data = q[lvlKey][lens]; 
 
         document.getElementById('analysis-title').innerText = "Analyzing " + lens.charAt(0).toUpperCase() + lens.slice(1);
         document.getElementById('analysis-prompt').innerText = data.prompt;
@@ -428,21 +455,64 @@
     }
 
     // ==========================================
-    // 4. ADMIN & WORKSHEET
+    // 4. ADMIN & WORKSHEET & WIZARD
     // ==========================================
     function openAdmin() { 
         document.getElementById('admin-modal').style.display = 'flex'; 
         document.getElementById('edit-title').value = appData.textTitle;
+        document.getElementById('edit-question').value = appData.question || "";
         renderEditor(); 
     }
     function closeAdmin() { 
         document.getElementById('admin-modal').style.display = 'none'; 
-        localStorage.setItem('tsa_data_v2', JSON.stringify(appData));
+        localStorage.setItem('tsa_data_v3', JSON.stringify(appData));
         updateDOM();
         loadStage1();
     }
     
     function updateGlobal(k, v) { appData[k] = v; }
+
+    // WIZARD FUNCTIONS
+    function openWizard() { document.getElementById('wizard-overlay').style.display = 'flex'; }
+    function generatePrompt() {
+        var text = document.getElementById('wiz-text').value;
+        var q = document.getElementById('wiz-q').value;
+        var prompt = `I need you to act as a JSON generator for a teaching app. 
+I have a text: "${text.substring(0, 100)}..."
+And a question: "${q}"
+Please analyze the text and extract 3 key quotes relevant to the question.
+For each quote, provide a simple translation, a distractor translation, and analysis for 3 levels (Foundation, Intermediate, Advanced) covering Tone, Structure, and Language.
+Return ONLY valid JSON matching this structure:
+{
+  "textTitle": "Title Here",
+  "question": "${q}",
+  "quotes": [
+    {
+      "id": "q1",
+      "original": "quote text",
+      "translation": "modern meaning",
+      "distractor": "wrong meaning",
+      "level1": { "tone": {"prompt": "Q?", "correct": "A", "options": ["A","B"]}, "structure": {"prompt": "Q?", "correct": "A", "options": ["A","B"]}, "language": {"prompt": "Q?", "correct": "A", "options": ["A","B"]} },
+      "level2": { ... same structure ... },
+      "level3": { ... same structure ... }
+    }
+  ]
+}`;
+        document.getElementById('wiz-prompt').value = prompt;
+    }
+    
+    function loadFromWizard() {
+        try {
+            var json = JSON.parse(document.getElementById('wiz-json').value);
+            if(json.quotes) {
+                appData = json;
+                closeAdmin();
+                document.getElementById('wizard-overlay').style.display = 'none';
+                alert("Lesson Loaded Successfully!");
+                init();
+            }
+        } catch(e) { alert("Invalid JSON. Please try again."); }
+    }
 
     function renderEditor() {
         var con = document.getElementById('quote-editor-container');
@@ -452,7 +522,6 @@
             var div = document.createElement('div');
             div.className = 'editor-section';
             
-            // Build the complicated HTML for nested levels
             var levelsHTML = '';
             [1, 2, 3].forEach(lvl => {
                 var k = 'level'+lvl;
@@ -483,12 +552,9 @@
     function renderFieldBlock(qIdx, lvl, type, label) {
         var k = 'level'+lvl;
         var val = appData.quotes[qIdx][k][type];
-        // We just show the Correct Answer field for brevity in this UI, 
-        // realistically you'd want fields for Prompt + Options too.
-        // For this demo, we edit the "Correct Answer" which updates the logic.
         return `
             <div>
-                <label style="font-size:0.8rem; color:gray;">${label} Answer</label>
+                <label style="font-size:0.8rem; color:gray;">${label} Correct Ans</label>
                 <input class="admin-input" style="font-size:0.8rem" value="${val.correct}" onchange="editDeep(${qIdx}, ${lvl}, '${type}', 'correct', this.value)">
             </div>
         `;
@@ -498,7 +564,6 @@
     function editDeep(i, lvl, type, field, v) {
         var key = 'level'+lvl;
         appData.quotes[i][key][type][field] = v;
-        // Auto-update options to include the new correct answer
         if(!appData.quotes[i][key][type].options.includes(v)) {
             appData.quotes[i][key][type].options[0] = v; 
         }
@@ -506,9 +571,9 @@
     
     function addQuote() {
         var blankLvl = {
-            tone: { prompt: "Tone?", correct: "Ans", options: ["Ans", "Dist"] },
-            structure: { prompt: "Struct?", correct: "Ans", options: ["Ans", "Dist"] },
-            language: { prompt: "Lang?", correct: "Ans", options: ["Ans", "Dist"] }
+            tone: { prompt: "Tone Q?", correct: "Ans", options: ["Ans", "Dist"] },
+            structure: { prompt: "Struct Q?", correct: "Ans", options: ["Ans", "Dist"] },
+            language: { prompt: "Lang Q?", correct: "Ans", options: ["Ans", "Dist"] }
         };
         appData.quotes.push({
             id: Date.now(), original: "New", translation: "Trans", distractor: "Bad",
@@ -539,7 +604,7 @@
         <style>body{font-family:sans-serif; padding:20px;} table{width:100%; border-collapse:collapse; margin-bottom:20px;} td,th{border:1px solid #333; padding:10px; text-align:left;} .box{border:1px dashed #999; height:50px; background:#f9f9f9;}</style>
         </head><body>
         <h1>Analysis Worksheet: ${appData.textTitle}</h1>
-        <h3>Level ${lvl} Focus</h3>
+        <h3>Level ${lvl} Focus | Question: ${appData.question || "Analysis"}</h3>
         
         <h4>Task 1: Decoding</h4>
         <table><tr><th>Quote</th><th>Meaning</th></tr>
