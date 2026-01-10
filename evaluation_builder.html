@@ -146,9 +146,13 @@
             line-height: 1.6;
             max-height: 200px;
             overflow-y: auto;
+            position: relative;
         }
         #essay-display h3 { margin-top: 0; font-size: 1rem; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 10px; }
         #essay-content { font-size: 1.1rem; color: #2c3e50; white-space: pre-wrap; }
+        #clear-essay-btn {
+            position: absolute; top: 15px; right: 15px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; padding: 5px 10px;
+        }
 
         /* OVERLAYS */
         #overlay, #levelup-overlay, #win-overlay, #admin-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; justify-content: center; align-items: center; text-align: center; color: white; }
@@ -338,6 +342,7 @@
         <div id="sentence-builder"><span style="color:#ccc;">Your sentence will appear here...</span></div>
         
         <div id="essay-display">
+            <button id="clear-essay-btn" onclick="clearEssay()">Clear</button>
             <h3>Your Essay So Far:</h3>
             <div id="essay-content"></div>
         </div>
@@ -513,13 +518,18 @@
                 completedIds: []
             };
             
-            // Clear Essay
-            document.getElementById('essay-content').innerText = "";
-            document.getElementById('essay-display').style.display = 'none';
-            
+            // NOTE: Do NOT clear essay content here to allow persist across plays
+            // Only hide the win screen
             document.getElementById('win-overlay').style.display = 'none';
             updateScoreBoard();
             resetGame();
+        }
+        
+        function clearEssay() {
+            if(confirm("Clear your essay?")) {
+                document.getElementById('essay-content').innerText = "";
+                document.getElementById('essay-display').style.display = 'none';
+            }
         }
 
         // --- 1. DEFAULT DATA ---
@@ -537,7 +547,7 @@
             ]
         };
 
-        var STORE_KEY = 'eval_arch_v122_logic_fix'; 
+        var STORE_KEY = 'eval_arch_v123_persistent_essay'; 
         var config = JSON.parse(JSON.stringify(defaultData));
         var currentQuoteId = null;
         var sentenceParts = { s1: "", s2: "", quote: "", s3: "", s4: "" };
@@ -990,12 +1000,31 @@
             var reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    config = JSON.parse(e.target.result);
+                    // PARSE
+                    var loaded = JSON.parse(e.target.result);
+                    
+                    // MERGE CAREFULLY
+                    config = Object.assign({}, defaultData, loaded);
+                    // Ensure content_pairs is an array
+                    if(loaded.content_pairs && Array.isArray(loaded.content_pairs)) {
+                        config.content_pairs = loaded.content_pairs;
+                    }
+                    
+                    // Force worksheet style default if missing
                     if(!config.worksheetSettings.style) config.worksheetSettings.style = "mcq";
+                    
+                    // SAVE
                     saveLocal(true);
+                    
+                    // UPDATE UI INSTANTLY
+                    updateDOM();
                     updateAdminInputs();
+                    
                     alert("Data Loaded Successfully!");
-                } catch(e) { alert("Invalid File"); }
+                } catch(e) { 
+                    console.error(e);
+                    alert("Invalid File: " + e.message); 
+                }
             };
             reader.readAsText(file);
         }
@@ -1101,7 +1130,6 @@
         function removeDist(i,di){ config.content_pairs[i].distractors.splice(di,1); renderAdminUI(); }
         function addDist(i){ config.content_pairs[i].distractors.push("Wrong Answer"); renderAdminUI(); }
         function delContent(i) { config.content_pairs.splice(i,1); renderAdminUI(); }
-        
         // FIXED UPDATE CONFIG VAL
         function updateConfigVal(k,v) { 
             if(k.includes('settings')) {
