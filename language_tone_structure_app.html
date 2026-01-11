@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v24 (Bulletproof)</title>
+    <title>Tone & Structure Architect v25 (Safe Mode)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -28,7 +28,7 @@
         header { 
             display: flex; justify-content: space-between; align-items: center; 
             padding: 15px; background: white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-            flex-shrink: 0; margin-bottom: 20px; position: relative;
+            flex-shrink: 0; margin-bottom: 20px;
         }
         h1 { margin: 0; color: var(--primary); font-size: 1.4rem; display:flex; align-items:center; gap:10px; }
         
@@ -37,13 +37,6 @@
             border-radius: 5px; padding: 8px 12px; cursor: pointer; transition: all 0.2s;
         }
         .admin-btn:hover { background: #ddd; }
-
-        /* HARD RESET BUTTON */
-        .hard-reset-btn {
-            background: #e74c3c; color: white; border: none; padding: 10px; 
-            border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 10px;
-        }
-        .hard-reset-btn:hover { background: #c0392b; }
 
         /* --- CONTAINER --- */
         .container { 
@@ -120,14 +113,16 @@
         #wizard-overlay { flex-direction:column; padding:20px; box-sizing:border-box; background: white; }
         
         #overlay-msg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(44, 62, 80, 0.95); z-index: 3000; color: white; flex-direction: column; justify-content: center; align-items: center; }
+        
+        /* DEBUG LOG */
+        #debug-log { position: fixed; bottom: 0; left: 0; width: 100%; background: #333; color: #0f0; font-family: monospace; font-size: 10px; padding: 5px; display: none; }
     </style>
 </head>
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v24</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v25</h1>
         <div>
-            <button class="hard-reset-btn" onclick="hardReset()">⚠️ HARD RESET</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
                 <option value="1">Level 1: Foundation</option>
                 <option value="2">Level 2: Developing</option>
@@ -292,8 +287,17 @@
         <i id="overlay-icon" class="fas fa-check-circle" style="font-size:4rem; margin-bottom:20px;"></i>
         <h2 id="overlay-text">Correct!</h2>
     </div>
+    
+    <div id="debug-log"></div>
 
 <script>
+    function log(msg) {
+        console.log(msg);
+        const d = document.getElementById('debug-log');
+        d.innerHTML += msg + " | ";
+        // d.style.display = 'block'; // Uncomment to see debug
+    }
+
     // --- DEFAULT DATA ---
     const defaultData = {
         textTitle: "The Electric Telegraph",
@@ -319,36 +323,29 @@
     let appData = JSON.parse(JSON.stringify(defaultData));
     let state = { level: 1, currentIdx: 0, buffer: {} };
 
-    // --- INIT (SELF HEALING) ---
+    // --- INIT (SAFE MODE) ---
     function init() {
-        const local = localStorage.getItem('tsa_v23_safe');
+        log("Init start");
+        const local = localStorage.getItem('tsa_v25_clean'); // NEW KEY FOR FRESH START
         if(local) {
             try { 
                 const saved = JSON.parse(local);
-                // SELF HEALING: Merge with defaults to ensure missing arrays exist
                 appData = { ...defaultData, ...saved };
-                
-                // Force check critical arrays
-                if(!Array.isArray(appData.sentenceOrder)) appData.sentenceOrder = defaultData.sentenceOrder;
-                if(!Array.isArray(appData.markers)) appData.markers = defaultData.markers;
-                if(!Array.isArray(appData.starters)) appData.starters = defaultData.starters;
-                if(!Array.isArray(appData.methods)) appData.methods = defaultData.methods;
-                if(!Array.isArray(appData.links)) appData.links = defaultData.links;
-                
+                // Ensure arrays exist
+                ['markers','starters','methods','links','sentenceOrder'].forEach(k => {
+                    if(!Array.isArray(appData[k])) appData[k] = defaultData[k];
+                });
             } catch(e) { 
-                console.log("Data corrupted, resetting."); 
+                log("Data corrupt, using defaults"); 
                 appData = defaultData;
             }
+        } else {
+            log("No save found, using defaults");
         }
-        updateUI();
-        loadStageSelect();
-    }
-
-    function hardReset() {
-        if(confirm("Clicking this will DELETE your current lesson and reset the app. Are you sure?")) {
-            localStorage.removeItem('tsa_v23_safe');
-            location.reload();
-        }
+        
+        try { updateUI(); } catch(e) { log("UI Error: " + e.message); }
+        try { loadStageSelect(); } catch(e) { log("Stage Error: " + e.message); }
+        log("Init done");
     }
 
     function updateUI() {
@@ -359,11 +356,11 @@
 
     function renderBuilderUI() {
         const container = document.getElementById('dynamic-builder-controls');
+        if(!container) return;
         container.innerHTML = '';
         
-        // Loop through configured order
         appData.sentenceOrder.forEach((type, index) => {
-            if(type === 'none') return; // Skip
+            if(type === 'none') return;
             
             const group = document.createElement('div');
             group.className = 'bank-group';
@@ -391,7 +388,7 @@
                 select.onchange = () => insertScaffold(type);
                 select.innerHTML = `<option value="">➕ ${labelText}</option>`;
                 
-                let key = type + 's'; // markers, starters...
+                let key = type + 's'; 
                 if(appData[key]) {
                     appData[key].forEach(opt => select.add(new Option(opt, opt)));
                 }
@@ -520,21 +517,25 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'essay.doc'; a.click();
     }
 
-    // --- ADMIN ---
+    // --- ADMIN (SAFE MODE) ---
     function openAdmin() {
         try {
             document.getElementById('modal-admin').style.display='flex';
-            document.getElementById('edit-title').value = appData.textTitle || "";
-            document.getElementById('edit-question').value = appData.question || "";
+            if(document.getElementById('edit-title')) document.getElementById('edit-title').value = appData.textTitle || "";
+            if(document.getElementById('edit-question')) document.getElementById('edit-question').value = appData.question || "";
+            
+            // Render Lists safely
             renderList('markers', 'list-markers');
             renderList('starters', 'list-starters');
             renderList('methods', 'list-methods');
             renderList('links', 'list-links');
             renderItems();
+            
+            // Render Config safely
             initAdminConfig();
         } catch(e) {
-            console.error(e);
-            alert("Error opening Settings. Please click the 'Hard Reset' button at the bottom right.");
+            log("Admin Error: " + e.message);
+            alert("Settings Error: " + e.message);
         }
     }
     function closeAdmin() { document.getElementById('modal-admin').style.display='none'; }
@@ -543,6 +544,7 @@
     // LIST MANAGER
     function renderList(key, divId) {
         const div = document.getElementById(divId);
+        if(!div) return;
         div.innerHTML = '';
         if(!appData[key]) appData[key] = [];
         appData[key].forEach((item, i) => {
@@ -680,7 +682,7 @@ Structure:
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
 
-    function saveLocal() { localStorage.setItem('tsa_v23_safe', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v25_clean', JSON.stringify(appData)); }
     function downloadJSON() {
         const a = document.createElement('a');
         a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData));
