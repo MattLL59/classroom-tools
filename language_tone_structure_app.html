@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v16</title>
+    <title>Tone & Structure Architect v17</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -91,7 +91,7 @@
         .modal-header { padding: 15px; background: #eee; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
         .modal-body { padding: 20px; overflow-y: auto; text-align: left; }
 
-        /* --- BOX STRUCTURE LISTS (The requested feature) --- */
+        /* --- LIST MANAGERS --- */
         .list-container { margin-bottom: 15px; }
         .list-item { display: flex; align-items: center; margin-bottom: 5px; }
         .list-input { flex-grow: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
@@ -103,7 +103,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v16</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v17</h1>
         <div>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
                 <option value="1">Level 1: Foundation</option>
@@ -216,8 +216,12 @@
                 
                 <div style="display:flex; gap:10px; margin-top:10px;">
                     <div style="flex:1">
-                        <label>Items to Generate:</label>
-                        <input id="wiz-count" type="number" class="admin-input" value="3" min="1">
+                        <label>Quotes to Find:</label>
+                        <input id="wiz-quote-count" type="number" class="admin-input" value="3" min="0">
+                    </div>
+                    <div style="flex:1">
+                        <label>Structure Points:</label>
+                        <input id="wiz-struct-count" type="number" class="admin-input" value="2" min="0">
                     </div>
                     <div style="flex:1">
                         <label>Distractors per Item:</label>
@@ -263,7 +267,7 @@
 
     // --- INIT ---
     function init() {
-        const local = localStorage.getItem('tsa_v16');
+        const local = localStorage.getItem('tsa_v17');
         if(local) try { appData = JSON.parse(local); } catch(e){}
         if(!appData.starters) appData.starters = defaultData.starters;
         if(!appData.connects) appData.connects = defaultData.connects;
@@ -341,8 +345,6 @@
         const grid = document.getElementById('grid-analysis');
         grid.innerHTML = '';
         
-        // If distractor array exists in level data, use it, else fallback
-        // Note: The wizard generates options array directly in the level object
         let opts = data.options.map(o => ({txt:o, correct: o===data.correct}));
         opts.sort(()=>Math.random()-0.5).forEach(opt => {
             const btn = document.createElement('div');
@@ -396,7 +398,7 @@
     function closeAdmin() { document.getElementById('modal-admin').style.display='none'; }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
     
-    // LIST MANAGER (BOX STRUCTURE)
+    // LIST MANAGER
     function renderList(key, divId) {
         const div = document.getElementById(divId);
         div.innerHTML = '';
@@ -411,9 +413,8 @@
     function updateListItem(key, i, val) { appData[key][i] = val; saveLocal(); }
     function deleteListItem(key, i) { appData[key].splice(i,1); renderList(key, key==='starters'?'list-starters':'list-connects'); saveLocal(); updateUI(); }
     function addItem(key) { appData[key].push("New Item"); renderList(key, key==='starters'?'list-starters':'list-connects'); }
-    function saveBanks() { /* Handled by individual updates */ }
 
-    // ITEM EDITOR (Complex)
+    // ITEM EDITOR
     function renderItems() {
         const con = document.getElementById('items-container');
         con.innerHTML = '';
@@ -421,7 +422,7 @@
             const div = document.createElement('div');
             div.className = 'editor-section';
             
-            // Distractor List logic for this item
+            // Distractor List
             let distHTML = `<div style="margin-top:5px; border-top:1px dashed #ccc; padding-top:5px;"><label>Distractors:</label>`;
             const dists = item.distractors || (item.distractor ? [item.distractor] : []);
             dists.forEach((d, di) => {
@@ -434,9 +435,6 @@
                 <input class="admin-input" value="${item.original}" placeholder="Original Quote/Label" onchange="updateItem(${i},'original',this.value)">
                 <input class="admin-input" value="${item.translation||item.detail}" placeholder="Translation/Detail" onchange="updateItem(${i},'translation',this.value)">
                 ${distHTML}
-                <div style="margin-top:10px; background:#fff; padding:5px; border:1px solid #eee;">
-                    <small>Level 1 Tone Answer:</small> <input class="admin-input" value="${item.level1?.tone?.correct||''}" onchange="updateAns(${i},1,'tone',this.value)">
-                </div>
             `;
             con.appendChild(div);
         });
@@ -455,14 +453,6 @@
         if(!appData.items[i].distractors) appData.items[i].distractors = [];
         appData.items[i].distractors.push("New Distractor"); renderItems(); saveLocal();
     }
-    function updateAns(i, l, k, v) {
-        const lk = 'level'+l;
-        if(!appData.items[i][lk]) appData.items[i][lk] = {};
-        if(!appData.items[i][lk][k]) appData.items[i][lk][k] = {options:[]};
-        appData.items[i][lk][k].correct = v;
-        if(!appData.items[i][lk][k].options.includes(v)) appData.items[i][lk][k].options.push(v);
-        saveLocal();
-    }
 
     // --- WIZARD ---
     function openWizard() { document.getElementById('modal-wizard').style.display='flex'; }
@@ -471,13 +461,16 @@
     function genPrompt() {
         const txt = document.getElementById('wiz-text').value;
         const q = document.getElementById('wiz-q').value;
-        const count = document.getElementById('wiz-count').value;
+        const qCount = document.getElementById('wiz-quote-count').value;
+        const sCount = document.getElementById('wiz-struct-count').value;
         const distCount = document.getElementById('wiz-dist-count').value;
+        
         const prompt = `Act as a JSON generator for a GCSE English App.
 Text: "${txt.substring(0,250)}..."
 Question: "${q}"
 
-Create ${count} items. Mix of Quotes & Macro-Structure.
+Create ${qCount} Quotes (Micro-Analysis).
+Create ${sCount} Structure Points (Macro-Analysis - Whole text shifts/Openings/Endings).
 For each item, provide ${distCount} PLAUSIBLE DISTRACTORS (Near-Misses).
 
 Structure:
@@ -511,13 +504,14 @@ Structure:
                     appData.question = json.question || appData.question;
                 }
                 saveLocal();
+                updateUI();
                 closeWizard();
                 openAdmin();
             }
         } catch(e) { alert("Invalid JSON"); }
     }
 
-    function saveLocal() { localStorage.setItem('tsa_v16', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v17', JSON.stringify(appData)); }
     function downloadJSON() {
         const a = document.createElement('a');
         a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData));
