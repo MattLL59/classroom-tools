@@ -48,7 +48,6 @@
         .stage-area.active { display: block; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* Updated Grid for Split View */
         .section-title { text-align: left; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 20px; color: #7f8c8d; font-weight: bold; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 10px; }
         
@@ -60,7 +59,6 @@
         }
         button.choice-btn:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
         
-        /* Structural Cards have a specific look */
         .struct-card { border-left: 5px solid var(--struct-col) !important; background: #f4faff !important; text-align: left; align-items: flex-start !important; }
         .lang-card { border-left: 5px solid var(--lang-col) !important; }
 
@@ -190,9 +188,20 @@
             <div class="panel-body">
                 
                 <div style="background:linear-gradient(135deg, #e67e22 0%, #d35400 100%); padding:20px; border-radius:8px; color:white; margin-bottom:20px; text-align:center;">
-                    <h3 style="margin:0 0 10px 0;">✨ AI Import Wizard (Macro-Structure)</h3>
-                    <p style="margin:0 0 15px 0;">Analyzes paragraphs and whole-text shifts.</p>
+                    <h3 style="margin:0 0 10px 0;">✨ AI Import Wizard</h3>
+                    <p style="margin:0 0 15px 0;">Generate Macro-Structure and Quotes. (Text is saved automatically).</p>
                     <button class="choice-btn" style="border:none; color:#333; padding:10px 20px;" onclick="openWizard()">Open Wizard</button>
+                </div>
+
+                <div style="margin-bottom:20px; padding:15px; background:#e3f2fd; border-radius:5px;">
+                    <h3>💾 Data & Worksheet</h3>
+                    <button class="choice-btn" style="padding:5px 15px; display:inline-block;" onclick="downloadData()">Save Data</button>
+                    <button class="choice-btn" style="padding:5px 15px; display:inline-block;" onclick="document.getElementById('file-in').click()">Load Data</button>
+                    <input type="file" id="file-in" style="display:none" onchange="loadData(this)">
+                    <hr>
+                    <label><strong>Print Worksheet for Level:</strong></label>
+                    <select id="print-level" style="padding:5px;"><option value="1">Level 1</option><option value="2">Level 2</option><option value="3">Level 3</option></select>
+                    <button class="choice-btn" style="padding:5px 15px; background:var(--primary); color:white; display:inline-block;" onclick="printWorksheet()">Generate PDF</button>
                 </div>
 
                 <div class="input-row">
@@ -215,19 +224,37 @@
         <h2>✨ AI Import Wizard</h2>
         <div style="display:flex; gap:20px; height:100%;">
             <div style="flex:1; display:flex; flex-direction:column;">
-                <p><strong>Step 1:</strong> Paste FULL Text (Keep formatting).</p>
-                <textarea id="wiz-text" class="admin-input" style="flex:1; resize:none; white-space: pre-wrap;" placeholder="Paste text here..."></textarea>
+                <p><strong>Step 1:</strong> Paste FULL Text (I will save this for next time).</p>
+                <textarea id="wiz-text" class="admin-input" style="flex:1; resize:none; white-space: pre-wrap;" placeholder="Paste text here..." onchange="saveSourceText(this.value)"></textarea>
                 <div style="display:flex; gap:10px; margin-top:10px;">
                     <input id="wiz-q" class="admin-input" style="flex:2;" placeholder="Question">
                 </div>
             </div>
             <div style="flex:1; display:flex; flex-direction:column;">
-                <p><strong>Step 2:</strong> Generate Prompt.</p>
+                <p><strong>Step 2:</strong> Configure Generation.</p>
+                <div style="margin-bottom:10px;">
+                    <label>What to find:</label>
+                    <select id="wiz-type" class="admin-input">
+                        <option value="mix">Mix (Macro Structure + Quotes)</option>
+                        <option value="macro">Only Macro-Structure (Paragraphs/Whole Text)</option>
+                        <option value="quotes">Only Micro-Quotes (Language/Tone)</option>
+                    </select>
+                </div>
+                <div style="margin-bottom:10px;">
+                    <label>Number of items:</label>
+                    <input id="wiz-count" type="number" class="admin-input" value="3" min="1" max="10">
+                </div>
+                
                 <button class="choice-btn" style="background:#3498db; color:white; margin-bottom:10px;" onclick="generatePrompt()">Generate Prompt</button>
-                <textarea id="wiz-prompt" class="admin-input" style="height:100px; background:#eee;" readonly></textarea>
+                <textarea id="wiz-prompt" class="admin-input" style="height:80px; background:#eee;" readonly></textarea>
                 
                 <p><strong>Step 3:</strong> Paste JSON.</p>
                 <textarea id="wiz-json" class="admin-input" style="flex:1; resize:none;" placeholder="Paste JSON here..."></textarea>
+                
+                <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                    <input type="checkbox" id="wiz-append"> <label for="wiz-append">Append to existing list (Don't delete old points)</label>
+                </div>
+                
                 <button class="choice-btn" style="background:#27ae60; color:white; margin-top:10px;" onclick="loadFromWizard()">🚀 Review & Load</button>
                 <button class="choice-btn" style="background:#95a5a6; color:white; margin-top:5px;" onclick="document.getElementById('wizard-overlay').style.display='none'">Cancel</button>
             </div>
@@ -236,47 +263,21 @@
 
 <script>
     // ==========================================
-    // 1. DATA STRUCTURE (UPDATED FOR MACRO STRUCTURE)
+    // 1. DATA STRUCTURE
     // ==========================================
     var defaultData = {
         textTitle: "The Electric Telegraph (1851)",
         question: "How does the writer convey the impact of the telegraph?",
+        sourceText: "", // New Field for Persistence
         items: [
-            // MACRO STRUCTURE ITEM
             {
                 id: "s1",
-                type: "structure", // 'structure' or 'quote'
+                type: "structure", 
                 label: "The Beginning vs The End",
                 detail: "Compare Para 1 (Wondrous) with the Final Para (Revolution).",
-                level1: {
-                    structure: { prompt: "How does the text change from start to finish?", correct: "It starts with surprise and ends with a revolution.", options: ["It starts with surprise and ends with a revolution.", "It stays the same."] }
-                },
-                level2: {
-                    structure: { prompt: "The text moves from specific details to:", correct: "A global prediction", options: ["A global prediction", "A small story", "A joke"] }
-                },
-                level3: {
-                    structure: { prompt: "Analyze the structural arc.", correct: "The text shifts from describing the mechanism ('currents') to predicting a societal 'revolution', widening the scope.", options: ["It shifts from mechanism to revolution, widening the scope.", "It focuses only on the wires.", "It creates a circular structure."] }
-                }
-            },
-            // MICRO QUOTE ITEM
-            {
-                id: "q1",
-                type: "quote",
-                original: "a wondrous invention",
-                translation: "an amazing machine",
-                distractor: "a boring tool",
-                level1: {
-                    tone: { prompt: "The tone is:", correct: "Excited", options: ["Excited", "Bored"] },
-                    language: { prompt: "Word Class:", correct: "Adjective", options: ["Adjective", "Verb"] }
-                },
-                level2: {
-                    tone: { prompt: "Select the specific tone:", correct: "Awe-inspired", options: ["Awe-inspired", "Fearful"] },
-                    language: { prompt: "Effect of 'wondrous':", correct: "Suggests magic", options: ["Suggests magic", "Suggests science"] }
-                },
-                level3: {
-                    tone: { prompt: "Analyze tone:", correct: "Establishes a reverent tone.", options: ["Reverent tone.", "Sarcastic tone."] },
-                    language: { prompt: "Analyze diction:", correct: "Elevates technology to the sublime.", options: ["Elevates to sublime.", "Technical jargon."] }
-                }
+                level1: { structure: { prompt: "How does the text change from start to finish?", correct: "It starts with surprise and ends with a revolution.", options: ["It starts with surprise and ends with a revolution.", "It stays the same."] } },
+                level2: { structure: { prompt: "The text moves from specific details to:", correct: "A global prediction", options: ["A global prediction", "A small story", "A joke"] } },
+                level3: { structure: { prompt: "Analyze the structural arc.", correct: "The text shifts from describing the mechanism ('currents') to predicting a societal 'revolution', widening the scope.", options: ["It shifts from mechanism to revolution, widening the scope.", "It focuses only on the wires.", "It creates a circular structure."] } }
             }
         ]
     };
@@ -288,7 +289,7 @@
     // 2. CORE LOGIC
     // ==========================================
     function init() {
-        var local = localStorage.getItem('tsa_data_v10_macro');
+        var local = localStorage.getItem('tsa_data_v11_persist');
         if(local) try { appData = JSON.parse(local); } catch(e) {}
         updateDOM();
         loadStage1();
@@ -344,7 +345,6 @@
         var item = appData.items[idx];
         
         if(item.type === 'structure') {
-            // Structure skips Decoder, goes straight to Analysis
             state.buffer.part1 = `Regarding the structure, specifically ${item.label.toLowerCase()}...`;
             updateBuilder();
             loadAnalysis('structure');
@@ -353,7 +353,7 @@
         }
     }
 
-    // STAGE 2: DECODER (Only for Quotes)
+    // STAGE 2: DECODER
     function loadStage2() {
         showStage('stage-decoder');
         var q = appData.items[state.currentIdx];
@@ -394,11 +394,9 @@
         var item = appData.items[state.currentIdx];
         var lvlKey = 'level' + state.level;
         
-        // Handle missing data gently
         if(!item[lvlKey] || !item[lvlKey][lens]) {
-            // If Structural item selected, it ONLY has 'structure' data.
             if(item.type === 'structure' && lens !== 'structure') {
-                alert("For this Macro-Structure item, please select 'Structure' lens.");
+                alert("For Macro-Structure items, please select 'Structure' lens.");
                 return;
             }
             alert("Data missing for this level/lens.");
@@ -438,9 +436,6 @@
         }
     }
 
-    // ==========================================
-    // 3. UI HELPERS
-    // ==========================================
     function showStage(id) {
         document.querySelectorAll('.stage-area').forEach(el => el.classList.remove('active'));
         document.getElementById(id).classList.add('active');
@@ -483,7 +478,7 @@
     }
 
     // ==========================================
-    // 4. ADMIN & WIZARD (THE MACRO LOGIC)
+    // 4. ADMIN & WIZARD (PERSISTENCE + APPEND)
     // ==========================================
     function openAdmin() { 
         document.getElementById('admin-modal').style.display = 'flex'; 
@@ -493,30 +488,47 @@
     }
     function closeAdmin() { 
         document.getElementById('admin-modal').style.display = 'none'; 
-        localStorage.setItem('tsa_data_v10_macro', JSON.stringify(appData));
+        localStorage.setItem('tsa_data_v11_persist', JSON.stringify(appData));
         updateDOM();
         loadStage1();
     }
     
     function updateGlobal(k, v) { appData[k] = v; }
 
-    function openWizard() { document.getElementById('wizard-overlay').style.display = 'flex'; }
+    function openWizard() { 
+        document.getElementById('wizard-overlay').style.display = 'flex'; 
+        // PRE-FILL TEXT FROM STORAGE
+        if(appData.sourceText) {
+            document.getElementById('wiz-text').value = appData.sourceText;
+        }
+        if(appData.question) {
+            document.getElementById('wiz-q').value = appData.question;
+        }
+    }
+
+    function saveSourceText(val) {
+        appData.sourceText = val;
+    }
+
     function generatePrompt() {
         var text = document.getElementById('wiz-text').value;
         var q = document.getElementById('wiz-q').value;
+        var type = document.getElementById('wiz-type').value;
+        var count = document.getElementById('wiz-count').value || 3;
         
         var prompt = `I need you to act as a JSON generator for a GCSE English App.
-I have a text. Please analyze it carefully.
+I have a text. Analyze it carefully.
 Question: "${q}"
 
-TASK 1: Extract 3 Key Quotes (for Language/Tone analysis).
-TASK 2: Identify 2 "Structural Moments" (Macro-Structure).
-   - Moment 1: Compare the Opening Paragraph vs the Ending Paragraph.
-   - Moment 2: Identify a shift between two paragraphs (e.g. Para 2 to Para 3).
+REQUIREMENT: Generate ${count} items.
+MODE: ${type === 'macro' ? 'ONLY Macro-Structure (Paragraph Comparison)' : type === 'quotes' ? 'ONLY Micro Quotes (Lang/Tone)' : 'A mix of Macro-Structure and Quotes'}.
 
 CRITICAL INSTRUCTIONS:
-- Structure Analysis MUST focus on the WHOLE TEXT (Sequencing, Shifts, Arcs).
-- Quotes MUST focus on Language/Tone.
+1. MACRO-STRUCTURE: Focus on WHOLE TEXT.
+   - Example Label: "Opening vs Ending" or "Shift in Para 3".
+   - Detail: "Compare the calm opening with the violent ending."
+   - Analysis: MUST discuss sequencing/shifts.
+2. QUOTES: Focus on Language/Tone.
 
 Return ONLY valid JSON matching this structure:
 {
@@ -544,7 +556,11 @@ Return ONLY valid JSON matching this structure:
     }
   ]
 }`;
-        document.getElementById('wiz-prompt').value = prompt;
+        var promptArea = document.getElementById('wiz-prompt');
+        promptArea.value = prompt;
+        promptArea.select();
+        document.execCommand('copy');
+        alert("Prompt copied to clipboard!");
     }
     
     function loadFromWizard() {
@@ -557,13 +573,34 @@ Return ONLY valid JSON matching this structure:
         
         try {
             var json = JSON.parse(raw.substring(first, last + 1));
+            
+            // SAVE TEXT AND QUESTION ALWAYS
+            appData.textTitle = json.textTitle || appData.textTitle;
+            appData.question = json.question || appData.question;
+            appData.sourceText = document.getElementById('wiz-text').value; // Ensure text is saved
+
             if(json.items) {
-                appData = json;
+                var appendMode = document.getElementById('wiz-append').checked;
+                
+                if (appendMode) {
+                    // Append new items to existing list
+                    if (!appData.items) appData.items = [];
+                    // Ensure unique IDs to prevent conflicts
+                    json.items.forEach(item => {
+                        item.id = "gen_" + Date.now() + "_" + Math.random().toString(16).slice(2);
+                        appData.items.push(item);
+                    });
+                    alert("Added " + json.items.length + " new items to your list.");
+                } else {
+                    // Replace list
+                    appData.items = json.items;
+                    alert("List replaced with " + json.items.length + " new items.");
+                }
+
                 renderEditor();
                 document.getElementById('edit-title').value = appData.textTitle;
                 document.getElementById('edit-question').value = appData.question;
                 document.getElementById('wizard-overlay').style.display = 'none';
-                alert("Data Loaded!");
             } else { alert("JSON missing 'items' array."); }
         } catch(e) { alert("JSON Error: " + e.message); }
     }
@@ -584,7 +621,6 @@ Return ONLY valid JSON matching this structure:
                 div.style.borderLeft = "5px solid var(--lang-col)";
                 div.innerHTML = `<strong>🔤 Quote:</strong> ${item.original}`;
             }
-            // Simplified editor view for brevity
             div.innerHTML += `<br><button onclick="delQuote(${i})" style="color:red;border:none;">Delete</button>`;
             con.appendChild(div);
         });
@@ -592,7 +628,6 @@ Return ONLY valid JSON matching this structure:
 
     function delQuote(i) { appData.items.splice(i,1); renderEditor(); }
     
-    // Add generic empty items
     function addQuote() {
         appData.items.push({ type: "quote", original: "New Quote", translation: "Meaning", distractor: "Wrong", level1:{}, level2:{}, level3:{} });
         renderEditor();
@@ -608,6 +643,40 @@ Return ONLY valid JSON matching this structure:
         var fr = new FileReader();
         fr.onload = (e) => { appData = JSON.parse(e.target.result); renderEditor(); updateDOM(); loadStage1(); };
         fr.readAsText(input.files[0]);
+    }
+
+    function printWorksheet() {
+        var lvl = document.getElementById('print-level').value;
+        var w = window.open();
+        var h = `<html><head><title>Worksheet Level ${lvl}</title>
+        <style>body{font-family:sans-serif; padding:20px;} table{width:100%; border-collapse:collapse; margin-bottom:20px;} td,th{border:1px solid #333; padding:10px; text-align:left;} .box{border:1px dashed #999; height:50px; background:#f9f9f9;}</style>
+        </head><body>
+        <h1>Analysis Worksheet: ${appData.textTitle}</h1>
+        <h3>Level ${lvl} Focus | Question: ${appData.question || "Analysis"}</h3>
+        
+        <h4>Task 1: Decoding & Evidence</h4>
+        <table><tr><th>Evidence</th><th>Meaning/Detail</th></tr>
+        ${appData.items.map(q => `<tr><td>${q.type === 'structure' ? '🏗️ '+q.label : '"'+q.original+'"'}</td><td>${q.type === 'structure' ? q.detail : '__________________'}</td></tr>`).join('')}
+        </table>
+        
+        <h4>Task 2: Targeted Analysis</h4>
+        ${appData.items.map((q, i) => {
+            var lData = q['level'+lvl];
+            if (!lData) return '';
+            var html = `<div style="border:1px solid #ccc; padding:15px; margin-bottom:15px; break-inside:avoid;">
+                    <strong>${i+1}. ${q.type === 'structure' ? q.label : '"'+q.original+'"'}</strong><br><br>`;
+            
+            if(lData.tone) html += `<strong>Tone:</strong> ${lData.tone.prompt}<br><div class="box"></div><br>`;
+            if(lData.structure) html += `<strong>Structure:</strong> ${lData.structure.prompt}<br><div class="box"></div><br>`;
+            if(lData.language) html += `<strong>Language:</strong> ${lData.language.prompt}<br><div class="box"></div>`;
+            
+            html += `</div>`;
+            return html;
+        }).join('')}
+        </body></html>`;
+        w.document.write(h);
+        w.print();
+        w.close();
     }
 
     init();
