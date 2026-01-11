@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v25 (Safe Mode)</title>
+    <title>Tone & Structure Architect v26 (Fixed)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -28,7 +28,7 @@
         header { 
             display: flex; justify-content: space-between; align-items: center; 
             padding: 15px; background: white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-            flex-shrink: 0; margin-bottom: 20px;
+            flex-shrink: 0; margin-bottom: 20px; position: relative;
         }
         h1 { margin: 0; color: var(--primary); font-size: 1.4rem; display:flex; align-items:center; gap:10px; }
         
@@ -37,6 +37,13 @@
             border-radius: 5px; padding: 8px 12px; cursor: pointer; transition: all 0.2s;
         }
         .admin-btn:hover { background: #ddd; }
+
+        /* HARD RESET BUTTON */
+        .hard-reset-btn {
+            background: #e74c3c; color: white; border: none; padding: 10px; 
+            border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 10px;
+        }
+        .hard-reset-btn:hover { background: #c0392b; }
 
         /* --- CONTAINER --- */
         .container { 
@@ -114,15 +121,16 @@
         
         #overlay-msg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(44, 62, 80, 0.95); z-index: 3000; color: white; flex-direction: column; justify-content: center; align-items: center; }
         
-        /* DEBUG LOG */
-        #debug-log { position: fixed; bottom: 0; left: 0; width: 100%; background: #333; color: #0f0; font-family: monospace; font-size: 10px; padding: 5px; display: none; }
+        .reset-link { position:fixed; bottom:5px; right:5px; font-size:0.7rem; color:#ccc; cursor:pointer; }
+        .reset-link:hover { color:red; }
     </style>
 </head>
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v25</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v26</h1>
         <div>
+            <button class="hard-reset-btn" onclick="hardReset()">⚠️ HARD RESET</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
                 <option value="1">Level 1: Foundation</option>
                 <option value="2">Level 2: Developing</option>
@@ -288,16 +296,9 @@
         <h2 id="overlay-text">Correct!</h2>
     </div>
     
-    <div id="debug-log"></div>
+    <div class="reset-link" onclick="hardReset()">⚠️ Factory Reset (Fix Stuck App)</div>
 
 <script>
-    function log(msg) {
-        console.log(msg);
-        const d = document.getElementById('debug-log');
-        d.innerHTML += msg + " | ";
-        // d.style.display = 'block'; // Uncomment to see debug
-    }
-
     // --- DEFAULT DATA ---
     const defaultData = {
         textTitle: "The Electric Telegraph",
@@ -323,34 +324,53 @@
     let appData = JSON.parse(JSON.stringify(defaultData));
     let state = { level: 1, currentIdx: 0, buffer: {} };
 
-    // --- INIT (SAFE MODE) ---
+    // --- INIT (SELF HEALING) ---
     function init() {
-        log("Init start");
-        const local = localStorage.getItem('tsa_v25_clean'); // NEW KEY FOR FRESH START
+        const local = localStorage.getItem('tsa_v26_fixed');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
+                // SELF HEALING: Merge with defaults to ensure missing arrays exist
                 appData = { ...defaultData, ...saved };
-                // Ensure arrays exist
-                ['markers','starters','methods','links','sentenceOrder'].forEach(k => {
-                    if(!Array.isArray(appData[k])) appData[k] = defaultData[k];
-                });
+                
+                // Force check critical arrays
+                if(!Array.isArray(appData.sentenceOrder)) appData.sentenceOrder = defaultData.sentenceOrder;
+                if(!Array.isArray(appData.markers)) appData.markers = defaultData.markers;
+                if(!Array.isArray(appData.starters)) appData.starters = defaultData.starters;
+                if(!Array.isArray(appData.methods)) appData.methods = defaultData.methods;
+                if(!Array.isArray(appData.links)) appData.links = defaultData.links;
+                
             } catch(e) { 
-                log("Data corrupt, using defaults"); 
+                console.log("Data corrupted, resetting."); 
                 appData = defaultData;
             }
-        } else {
-            log("No save found, using defaults");
         }
         
-        try { updateUI(); } catch(e) { log("UI Error: " + e.message); }
-        try { loadStageSelect(); } catch(e) { log("Stage Error: " + e.message); }
-        log("Init done");
+        // Safety: Wait for DOM
+        if(document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', runStartup);
+        } else {
+            runStartup();
+        }
+    }
+    
+    function runStartup() {
+        updateUI();
+        loadStageSelect();
+    }
+
+    function hardReset() {
+        if(confirm("Factory Reset? This deletes all your saved questions.")) {
+            localStorage.removeItem('tsa_v26_fixed');
+            location.reload();
+        }
     }
 
     function updateUI() {
-        document.getElementById('text-display').innerText = appData.textTitle;
-        document.getElementById('q-display').innerText = appData.question;
+        const titleEl = document.getElementById('text-display');
+        if(titleEl) titleEl.innerText = appData.textTitle;
+        const qEl = document.getElementById('q-display');
+        if(qEl) qEl.innerText = appData.question;
         renderBuilderUI();
     }
 
@@ -359,6 +379,8 @@
         if(!container) return;
         container.innerHTML = '';
         
+        if(!appData.sentenceOrder) appData.sentenceOrder = defaultData.sentenceOrder;
+
         appData.sentenceOrder.forEach((type, index) => {
             if(type === 'none') return;
             
@@ -423,6 +445,7 @@
         document.querySelectorAll('.stage').forEach(e=>e.classList.remove('active'));
         document.getElementById('stage-select').classList.add('active');
         const grid = document.getElementById('grid-main');
+        if(!grid) return;
         grid.innerHTML = '';
         
         if(!appData.items) return;
@@ -517,34 +540,30 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'essay.doc'; a.click();
     }
 
-    // --- ADMIN (SAFE MODE) ---
+    // --- ADMIN (FIXED ID REFERENCES) ---
     function openAdmin() {
         try {
-            document.getElementById('modal-admin').style.display='flex';
+            document.getElementById('admin-modal').style.display='flex'; // Corrected ID from 'modal-admin' to 'admin-modal'
             if(document.getElementById('edit-title')) document.getElementById('edit-title').value = appData.textTitle || "";
             if(document.getElementById('edit-question')) document.getElementById('edit-question').value = appData.question || "";
             
-            // Render Lists safely
             renderList('markers', 'list-markers');
             renderList('starters', 'list-starters');
             renderList('methods', 'list-methods');
             renderList('links', 'list-links');
             renderItems();
-            
-            // Render Config safely
             initAdminConfig();
         } catch(e) {
-            log("Admin Error: " + e.message);
-            alert("Settings Error: " + e.message);
+            console.error(e);
+            alert("Error opening Settings. Please click the 'Hard Reset' button at the bottom right.");
         }
     }
-    function closeAdmin() { document.getElementById('modal-admin').style.display='none'; }
+    function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
     
     // LIST MANAGER
     function renderList(key, divId) {
         const div = document.getElementById(divId);
-        if(!div) return;
         div.innerHTML = '';
         if(!appData[key]) appData[key] = [];
         appData[key].forEach((item, i) => {
@@ -621,8 +640,8 @@
     }
 
     // --- WIZARD ---
-    function openWizard() { document.getElementById('modal-wizard').style.display='flex'; }
-    function closeWizard() { document.getElementById('modal-wizard').style.display='none'; }
+    function openWizard() { document.getElementById('wizard-overlay').style.display='flex'; }
+    function closeWizard() { document.getElementById('wizard-overlay').style.display='none'; }
     
     function genPrompt() {
         const txt = document.getElementById('wiz-text').value;
@@ -682,7 +701,7 @@ Structure:
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
 
-    function saveLocal() { localStorage.setItem('tsa_v25_clean', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v26_fixed', JSON.stringify(appData)); }
     function downloadJSON() {
         const a = document.createElement('a');
         a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData));
