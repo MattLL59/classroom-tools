@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v23 (Fixed)</title>
+    <title>Tone & Structure Architect v24 (Bulletproof)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -28,7 +28,7 @@
         header { 
             display: flex; justify-content: space-between; align-items: center; 
             padding: 15px; background: white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-            flex-shrink: 0; margin-bottom: 20px;
+            flex-shrink: 0; margin-bottom: 20px; position: relative;
         }
         h1 { margin: 0; color: var(--primary); font-size: 1.4rem; display:flex; align-items:center; gap:10px; }
         
@@ -37,6 +37,13 @@
             border-radius: 5px; padding: 8px 12px; cursor: pointer; transition: all 0.2s;
         }
         .admin-btn:hover { background: #ddd; }
+
+        /* HARD RESET BUTTON */
+        .hard-reset-btn {
+            background: #e74c3c; color: white; border: none; padding: 10px; 
+            border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 10px;
+        }
+        .hard-reset-btn:hover { background: #c0392b; }
 
         /* --- CONTAINER --- */
         .container { 
@@ -113,16 +120,14 @@
         #wizard-overlay { flex-direction:column; padding:20px; box-sizing:border-box; background: white; }
         
         #overlay-msg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(44, 62, 80, 0.95); z-index: 3000; color: white; flex-direction: column; justify-content: center; align-items: center; }
-        
-        .reset-link { position:fixed; bottom:5px; right:5px; font-size:0.7rem; color:#ccc; cursor:pointer; }
-        .reset-link:hover { color:red; }
     </style>
 </head>
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v23</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v24</h1>
         <div>
+            <button class="hard-reset-btn" onclick="hardReset()">⚠️ HARD RESET</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
                 <option value="1">Level 1: Foundation</option>
                 <option value="2">Level 2: Developing</option>
@@ -287,11 +292,9 @@
         <i id="overlay-icon" class="fas fa-check-circle" style="font-size:4rem; margin-bottom:20px;"></i>
         <h2 id="overlay-text">Correct!</h2>
     </div>
-    
-    <div class="reset-link" onclick="factoryReset()">⚠️ Factory Reset (Fix Stuck App)</div>
 
 <script>
-    // --- DATA ---
+    // --- DEFAULT DATA ---
     const defaultData = {
         textTitle: "The Electric Telegraph",
         question: "How is impact conveyed?",
@@ -316,18 +319,24 @@
     let appData = JSON.parse(JSON.stringify(defaultData));
     let state = { level: 1, currentIdx: 0, buffer: {} };
 
-    // --- INIT ---
+    // --- INIT (SELF HEALING) ---
     function init() {
-        const local = localStorage.getItem('tsa_v22_fix');
+        const local = localStorage.getItem('tsa_v23_safe');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
-                // AUTO-REPAIR: Merge with defaults to ensure new fields (like sentenceOrder) exist
+                // SELF HEALING: Merge with defaults to ensure missing arrays exist
                 appData = { ...defaultData, ...saved };
-                // Double check deeply nested arrays if they are empty
-                if(!appData.sentenceOrder || appData.sentenceOrder.length === 0) appData.sentenceOrder = defaultData.sentenceOrder;
+                
+                // Force check critical arrays
+                if(!Array.isArray(appData.sentenceOrder)) appData.sentenceOrder = defaultData.sentenceOrder;
+                if(!Array.isArray(appData.markers)) appData.markers = defaultData.markers;
+                if(!Array.isArray(appData.starters)) appData.starters = defaultData.starters;
+                if(!Array.isArray(appData.methods)) appData.methods = defaultData.methods;
+                if(!Array.isArray(appData.links)) appData.links = defaultData.links;
+                
             } catch(e) { 
-                console.log("Data corrupted, using default"); 
+                console.log("Data corrupted, resetting."); 
                 appData = defaultData;
             }
         }
@@ -335,9 +344,9 @@
         loadStageSelect();
     }
 
-    function factoryReset() {
-        if(confirm("Factory Reset? This deletes all your saved questions.")) {
-            localStorage.removeItem('tsa_v22_fix');
+    function hardReset() {
+        if(confirm("Clicking this will DELETE your current lesson and reset the app. Are you sure?")) {
+            localStorage.removeItem('tsa_v23_safe');
             location.reload();
         }
     }
@@ -352,8 +361,9 @@
         const container = document.getElementById('dynamic-builder-controls');
         container.innerHTML = '';
         
+        // Loop through configured order
         appData.sentenceOrder.forEach((type, index) => {
-            if(type === 'none') return;
+            if(type === 'none') return; // Skip
             
             const group = document.createElement('div');
             group.className = 'bank-group';
@@ -381,7 +391,7 @@
                 select.onchange = () => insertScaffold(type);
                 select.innerHTML = `<option value="">➕ ${labelText}</option>`;
                 
-                let key = type + 's'; 
+                let key = type + 's'; // markers, starters...
                 if(appData[key]) {
                     appData[key].forEach(opt => select.add(new Option(opt, opt)));
                 }
@@ -514,8 +524,8 @@
     function openAdmin() {
         try {
             document.getElementById('modal-admin').style.display='flex';
-            document.getElementById('edit-title').value = appData.textTitle;
-            document.getElementById('edit-question').value = appData.question;
+            document.getElementById('edit-title').value = appData.textTitle || "";
+            document.getElementById('edit-question').value = appData.question || "";
             renderList('markers', 'list-markers');
             renderList('starters', 'list-starters');
             renderList('methods', 'list-methods');
@@ -524,7 +534,7 @@
             initAdminConfig();
         } catch(e) {
             console.error(e);
-            alert("Error opening Settings. Try 'Factory Reset' at bottom right.");
+            alert("Error opening Settings. Please click the 'Hard Reset' button at the bottom right.");
         }
     }
     function closeAdmin() { document.getElementById('modal-admin').style.display='none'; }
@@ -670,7 +680,7 @@ Structure:
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
 
-    function saveLocal() { localStorage.setItem('tsa_v22_fix', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v23_safe', JSON.stringify(appData)); }
     function downloadJSON() {
         const a = document.createElement('a');
         a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData));
