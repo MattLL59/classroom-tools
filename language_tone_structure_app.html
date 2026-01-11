@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v22</title>
+    <title>Tone & Structure Architect v23 (Fixed)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -121,7 +121,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v22</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v23</h1>
         <div>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
                 <option value="1">Level 1: Foundation</option>
@@ -288,7 +288,7 @@
         <h2 id="overlay-text">Correct!</h2>
     </div>
     
-    <div class="reset-link" onclick="factoryReset()">⚠️ Factory Reset</div>
+    <div class="reset-link" onclick="factoryReset()">⚠️ Factory Reset (Fix Stuck App)</div>
 
 <script>
     // --- DATA ---
@@ -319,11 +319,18 @@
     // --- INIT ---
     function init() {
         const local = localStorage.getItem('tsa_v22_fix');
-        if(local) try { appData = JSON.parse(local); } catch(e){}
-        // Ensure defaults exist
-        ['markers','starters','methods','links','sentenceOrder'].forEach(k => { 
-            if(!appData[k]) appData[k] = defaultData[k]; 
-        });
+        if(local) {
+            try { 
+                const saved = JSON.parse(local);
+                // AUTO-REPAIR: Merge with defaults to ensure new fields (like sentenceOrder) exist
+                appData = { ...defaultData, ...saved };
+                // Double check deeply nested arrays if they are empty
+                if(!appData.sentenceOrder || appData.sentenceOrder.length === 0) appData.sentenceOrder = defaultData.sentenceOrder;
+            } catch(e) { 
+                console.log("Data corrupted, using default"); 
+                appData = defaultData;
+            }
+        }
         updateUI();
         loadStageSelect();
     }
@@ -345,9 +352,8 @@
         const container = document.getElementById('dynamic-builder-controls');
         container.innerHTML = '';
         
-        // Loop through configured order
         appData.sentenceOrder.forEach((type, index) => {
-            if(type === 'none') return; // Skip
+            if(type === 'none') return;
             
             const group = document.createElement('div');
             group.className = 'bank-group';
@@ -361,7 +367,6 @@
             group.appendChild(label);
 
             if(type === 'quote') {
-                // Placeholder for where analysis goes
                 const placeholder = document.createElement('div');
                 placeholder.style.padding = '8px';
                 placeholder.style.background = '#e3f2fd';
@@ -376,8 +381,7 @@
                 select.onchange = () => insertScaffold(type);
                 select.innerHTML = `<option value="">➕ ${labelText}</option>`;
                 
-                // Populate options
-                let key = type + 's'; // e.g. marker -> markers
+                let key = type + 's'; 
                 if(appData[key]) {
                     appData[key].forEach(opt => select.add(new Option(opt, opt)));
                 }
@@ -386,7 +390,6 @@
             container.appendChild(group);
         });
         
-        // Add Button
         const btn = document.createElement('button');
         btn.className = 'btn btn-primary';
         btn.onclick = commitSentence;
@@ -397,7 +400,7 @@
 
     function insertScaffold(type) {
         const el = document.getElementById(`sel-${type}`);
-        if(el.value) {
+        if(el && el.value) {
             addToBuilder(el.value);
             el.value = "";
         }
@@ -415,6 +418,8 @@
         const grid = document.getElementById('grid-main');
         grid.innerHTML = '';
         
+        if(!appData.items) return;
+
         appData.items.forEach((item, i) => {
             const div = document.createElement('div');
             div.className = item.type === 'structure' ? 'card card-struct' : 'card card-lang';
@@ -447,7 +452,7 @@
             btn.innerText = opt.txt;
             btn.onclick = () => {
                 if(opt.correct) {
-                    addToBuilder(`"${item.original}"`); // Add quote to builder
+                    addToBuilder(`"${item.original}"`); 
                     document.getElementById('stage-decoder').classList.remove('active');
                     document.getElementById('stage-lens').classList.add('active');
                 } else alert("Try again.");
@@ -516,9 +521,10 @@
             renderList('methods', 'list-methods');
             renderList('links', 'list-links');
             renderItems();
-            initAdminConfig(); 
+            initAdminConfig();
         } catch(e) {
-            alert("Error opening Settings: " + e.message + "\nTry the Factory Reset link at the bottom.");
+            console.error(e);
+            alert("Error opening Settings. Try 'Factory Reset' at bottom right.");
         }
     }
     function closeAdmin() { document.getElementById('modal-admin').style.display='none'; }
@@ -528,6 +534,7 @@
     function renderList(key, divId) {
         const div = document.getElementById(divId);
         div.innerHTML = '';
+        if(!appData[key]) appData[key] = [];
         appData[key].forEach((item, i) => {
             const row = document.createElement('div');
             row.className = 'list-item';
@@ -565,6 +572,7 @@
     function renderItems() {
         const con = document.getElementById('items-container');
         con.innerHTML = '';
+        if(!appData.items) return;
         appData.items.forEach((item, i) => {
             const div = document.createElement('div');
             div.className = 'editor-section';
