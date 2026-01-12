@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v30</title>
+    <title>Tone & Structure Architect v31</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -118,7 +118,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v30</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v31</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -199,7 +199,7 @@
 
                 <div class="editor-section" style="border-left: 5px solid var(--accent);">
                     <h3>⚙️ Sentence Structure Config</h3>
-                    <p style="font-size:0.9rem;">Decide the order of elements for the student.</p>
+                    <p style="font-size:0.9rem;">Define the order of elements in the Sentence Builder.</p>
                     <div style="display:flex; gap:5px; margin-bottom:10px; flex-wrap:wrap;">
                         <select class="admin-input" id="cfg-slot1" onchange="saveStructureConfig()" style="width:auto;"></select>
                         <select class="admin-input" id="cfg-slot2" onchange="saveStructureConfig()" style="width:auto;"></select>
@@ -210,9 +210,19 @@
                     </div>
                 </div>
 
+                <div class="editor-section" style="border-left: 5px solid var(--primary);">
+                    <h3>📝 Worksheet Options</h3>
+                    <p style="font-size:0.9rem;">Which levels should appear on the printed worksheet?</p>
+                    <div style="display:flex; gap:15px;">
+                        <label><input type="checkbox" id="ws-lvl1" checked onchange="saveWSOptions()"> Include Level 1</label>
+                        <label><input type="checkbox" id="ws-lvl2" checked onchange="saveWSOptions()"> Include Level 2</label>
+                        <label><input type="checkbox" id="ws-lvl3" checked onchange="saveWSOptions()"> Include Level 3</label>
+                    </div>
+                </div>
+
                 <div class="editor-section">
                     <h3>🏦 Scaffolding Banks</h3>
-                    <label><strong>1. Discourse Markers</strong></label>
+                    <label><strong>1. Markers</strong></label>
                     <div id="list-markers" class="list-container"></div>
                     <button class="btn btn-add" onclick="addItem('markers')">+ Add Marker</button>
                     
@@ -300,8 +310,9 @@
     const defaultData = {
         textTitle: "The Electric Telegraph",
         question: "How is impact conveyed?",
-        // Fixed Sentence Order: Starter -> Quote -> Method -> Point -> Link
+        // Fixed Sentence Order: Starter -> Quote -> Method -> Point -> Link -> None
         sentenceOrder: ['starter', 'quote', 'method', 'point', 'link', 'none'], 
+        worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
         markers: ["However,", "Furthermore,", "In contrast,", "Significantly,"],
         starters: ["The writer implies", "This suggests", "It is evident that"],
         points: ["The writer presents a negative view", "The writer highlights the danger"],
@@ -324,7 +335,7 @@
 
     // --- INIT ---
     function init() {
-        const local = localStorage.getItem('tsa_v30_final');
+        const local = localStorage.getItem('tsa_v31_ws');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
@@ -333,6 +344,7 @@
                 ['markers','starters','points','methods','links','sentenceOrder'].forEach(k => { 
                     if(!Array.isArray(appData[k])) appData[k] = defaultData[k]; 
                 });
+                if(!appData.worksheetOptions) appData.worksheetOptions = defaultData.worksheetOptions;
             } catch(e) { 
                 console.log("Data corrupted, resetting."); 
                 appData = defaultData;
@@ -355,7 +367,7 @@
 
     function hardReset() {
         if(confirm("Factory Reset? This deletes all your saved questions.")) {
-            localStorage.removeItem('tsa_v30_final');
+            localStorage.removeItem('tsa_v31_ws');
             location.reload();
         }
     }
@@ -448,7 +460,6 @@
             const div = document.createElement('div');
             div.className = item.type === 'structure' ? 'card card-struct' : 'card card-lang';
             
-            // FIXED: Card shows Quote/Label primarily. Question is subtitle.
             const mainText = item.type==='structure' ? item.label : '"'+item.original+'"';
             const subText = item.custom_q ? item.custom_q : (item.type==='structure' ? item.detail : "Analyze this quote");
             
@@ -538,52 +549,68 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'essay.doc'; a.click();
     }
 
-    // --- WORKSHEET GENERATOR (BLOB METHOD) ---
+    // --- WORKSHEET GENERATOR (SHUFFLED) ---
     function downloadWorksheetDoc() {
-        // Construct Word-compatible HTML
+        // Prepare Shuffled Match-up
+        let evidenceList = [];
+        let meaningList = [];
+        appData.items.forEach(i => {
+            evidenceList.push(i.type==='structure' ? '🏗️ '+i.label : '"'+i.original+'"');
+            meaningList.push(i.type==='structure' ? i.detail : i.translation);
+        });
+        
+        // Simple Shuffle for Column B
+        meaningList.sort(() => Math.random() - 0.5);
+
+        // Construct HTML
         let html = `
         <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'>
         <head><meta charset='utf-8'><title>Worksheet</title>
         <style>
-            body { font-family: 'Calibri', sans-serif; }
-            h1 { color: #2c3e50; }
+            body { font-family: 'Calibri', sans-serif; font-size:11pt; }
+            h1 { color: #2c3e50; font-size:16pt; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            td, th { border: 1px solid #999; padding: 8px; text-align: left; }
-            th { background-color: #eee; }
-            .box { border: 1px solid #000; height: 100px; margin-bottom: 10px; }
+            td, th { border: 1px solid #999; padding: 8px; text-align: left; vertical-align: top; }
+            th { background-color: #eee; font-weight: bold; }
+            .box-row { height: 30px; }
         </style>
         </head><body>
         <h1>Worksheet: ${appData.textTitle}</h1>
         <p><strong>Question:</strong> ${appData.question}</p>
         <hr>
-        <h2>Task 1: Evidence Bank</h2>
+        
+        <h2>Task 1: Evidence Match-Up</h2>
+        <p>Draw lines to match the Evidence (Column A) with the correct Meaning (Column B).</p>
         <table>
-            <tr><th>Evidence / Structure</th><th>Notes & Meanings</th></tr>
-            ${appData.items.map(i => `
-                <tr>
-                    <td>${i.type==='structure' ? '🏗️ '+i.label : '"'+i.original+'"'}</td>
-                    <td>${i.type==='structure' ? i.detail : i.translation}</td>
-                </tr>
-            `).join('')}
+            <tr><th width="50%">Column A: Evidence</th><th width="50%">Column B: Meaning (Jumbled)</th></tr>
+            ${evidenceList.map((ev, i) => `<tr><td>${ev}</td><td>${meaningList[i]}</td></tr>`).join('')}
         </table>
-        <h2>Task 2: Detailed Analysis</h2>
-        <p>Choose an item from above and analyze it using the questions below.</p>
-        ${appData.items.map((i, idx) => `
-            <div style="border:1px solid #ccc; padding:10px; margin-bottom:15px;">
-                <h3>${idx+1}. ${i.type==='structure' ? i.label : '"'+i.original+'"'}</h3>
-                <p><em>${i.custom_q || "Analyze this element:"}</em></p>
-                
-                <p><strong>Level 1 (Basic):</strong> ${i.level1?.tone?.prompt || "How does it sound?"}</p>
-                <div class="box" style="height:50px;"></div>
-                
-                <p><strong>Level 2 (Developing):</strong> ${i.level2?.tone?.prompt || "What is the deeper implication?"}</p>
-                <div class="box" style="height:50px;"></div>
-                
-                <p><strong>Level 3 (Advanced):</strong> ${i.level3?.tone?.prompt || "What is the specific effect?"}</p>
-                <div class="box" style="height:50px;"></div>
-            </div>
-        `).join('')}
-        </body></html>`;
+        
+        <br>
+        <h2>Task 2: Analysis</h2>
+        `;
+
+        // Render selected levels
+        appData.items.forEach((i, idx) => {
+            html += `<div style="border:1px solid #333; padding:10px; margin-bottom:15px; page-break-inside:avoid;">
+                <p><strong>${idx+1}. ${i.type==='structure' ? i.label : '"'+i.original+'"'}</strong></p>`;
+            
+            if(appData.worksheetOptions.lvl1 && i.level1) {
+                html += `<p><strong>Level 1 (Tone):</strong> ${i.level1.tone.prompt || 'How does it sound?'}</p>
+                         <table style="width:100%; border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table><br>`;
+            }
+            if(appData.worksheetOptions.lvl2 && i.level2) {
+                html += `<p><strong>Level 2 (Implication):</strong> ${i.level2.tone.prompt || 'What does this suggest?'}</p>
+                         <table style="width:100%; border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table><br>`;
+            }
+            if(appData.worksheetOptions.lvl3 && i.level3) {
+                html += `<p><strong>Level 3 (Effect):</strong> ${i.level3.tone.prompt || 'Analyze the specific effect.'}</p>
+                         <table style="width:100%; border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
+            }
+            html += `</div>`;
+        });
+
+        html += "</body></html>";
 
         const blob = new Blob([html], {type: 'application/msword'});
         const url = URL.createObjectURL(blob);
@@ -595,6 +622,15 @@
         document.body.removeChild(a);
     }
 
+    function saveWSOptions() {
+        appData.worksheetOptions = {
+            lvl1: document.getElementById('ws-lvl1').checked,
+            lvl2: document.getElementById('ws-lvl2').checked,
+            lvl3: document.getElementById('ws-lvl3').checked
+        };
+        saveLocal();
+    }
+
     // --- ADMIN ---
     function openAdmin() {
         try {
@@ -602,6 +638,13 @@
             if(document.getElementById('edit-title')) document.getElementById('edit-title').value = appData.textTitle || "";
             if(document.getElementById('edit-question')) document.getElementById('edit-question').value = appData.question || "";
             
+            // Set Checkboxes
+            if(appData.worksheetOptions) {
+                document.getElementById('ws-lvl1').checked = appData.worksheetOptions.lvl1;
+                document.getElementById('ws-lvl2').checked = appData.worksheetOptions.lvl2;
+                document.getElementById('ws-lvl3').checked = appData.worksheetOptions.lvl3;
+            }
+
             renderList('markers', 'list-markers');
             renderList('starters', 'list-starters');
             renderList('points', 'list-points');
