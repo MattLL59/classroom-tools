@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v43 (Clean Editor)</title>
+    <title>Tone & Structure Architect v44 (Logic Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -145,7 +145,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v43</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v44</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -218,11 +218,6 @@
         <div class="modal-content">
             <div class="modal-header">Teacher Settings <button onclick="closeAdmin()" style="border:none;background:none;font-size:1.5rem;cursor:pointer;">&times;</button></div>
             <div class="modal-body">
-                
-                <div style="background:#e0f7fa; padding:15px; border-radius:5px; margin-bottom:20px; text-align:center;">
-                    <button class="btn btn-primary" onclick="openWizard()">✨ Open AI Wizard</button>
-                </div>
-
                 <div class="editor-section">
                     <h3>Basic Info</h3>
                     <label>Text Title:</label><input id="edit-title" class="admin-input" onchange="updateGlobal('textTitle', this.value)">
@@ -364,7 +359,7 @@
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
-        const local = localStorage.getItem('tsa_v43_clean');
+        const local = localStorage.getItem('tsa_v44_fix');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
@@ -375,34 +370,12 @@
                 if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
             } catch(e) { appData = defaultData; }
         }
-        
-        if(document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', runStartup);
-        } else {
-            runStartup();
-        }
+        if(document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', runStartup); } else { runStartup(); }
     }
     
-    function runStartup() {
-        state.currentIdx = -1;
-        state.completed = [];
-        updateUI();
-        loadStageSelect();
-    }
-
-    function hardReset() {
-        if(confirm("Factory Reset?")) {
-            localStorage.removeItem('tsa_v43_clean');
-            location.reload();
-        }
-    }
-
-    function updateUI() {
-        document.getElementById('text-display').innerText = appData.textTitle;
-        document.getElementById('q-display').innerText = appData.question;
-        renderBuilderUI();
-    }
-
+    function runStartup() { state.currentIdx = -1; state.completed = []; updateUI(); loadStageSelect(); }
+    function hardReset() { if(confirm("Factory Reset?")) { localStorage.removeItem('tsa_v44_fix'); location.reload(); } }
+    function updateUI() { document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; renderBuilderUI(); }
     function uploadJSON(input) {
         const fr = new FileReader();
         fr.onload = (e) => {
@@ -424,11 +397,8 @@
         const container = document.getElementById('dynamic-builder-controls');
         if(!container) return;
         container.innerHTML = '';
-        
         if(!appData.sentenceOrder) appData.sentenceOrder = defaultData.sentenceOrder;
-
         let previewStr = "";
-
         appData.sentenceOrder.forEach((type, index) => {
             if(type === 'none') return;
             previewStr += `[${type}] + `;
@@ -437,12 +407,10 @@
             let labelText = type.charAt(0).toUpperCase() + type.slice(1);
             if(type === 'quote') labelText = "Quote (From Card)";
             if(type === 'analysis') labelText = "Analysis (From Game)";
-            
             const label = document.createElement('span');
             label.className = 'bank-label';
             label.innerText = `${index+1}. ${labelText}`;
             group.appendChild(label);
-
             if(type === 'quote' || type === 'analysis') {
                 const placeholder = document.createElement('div');
                 placeholder.className = 'locked-slot';
@@ -459,7 +427,6 @@
                 select.id = `sel-${type}`;
                 select.onchange = () => updateSlot(type);
                 select.innerHTML = `<option value="">➕ ${labelText}</option>`;
-                
                 let key = type + 's'; 
                 if(appData[key]) {
                     appData[key].forEach(opt => select.add(new Option(opt, opt)));
@@ -468,9 +435,7 @@
             }
             container.appendChild(group);
         });
-        
         document.getElementById('structure-preview').innerText = "Structure: " + previewStr.slice(0, -3);
-
         const btnGroup = document.createElement('div');
         btnGroup.style.display = 'flex'; btnGroup.style.gap = '5px'; btnGroup.style.alignSelf = 'flex-end';
         const btnUndo = document.createElement('button'); btnUndo.className = 'btn btn-warning'; btnUndo.onclick = undoLast; btnUndo.innerHTML = '↩ Undo';
@@ -528,7 +493,13 @@
         document.getElementById('stage-lens').classList.remove('active'); document.getElementById('stage-analysis').classList.add('active');
         const data = item[lvlKey][lens]; document.getElementById('analysis-prompt').innerText = data.prompt;
         const grid = document.getElementById('grid-analysis'); grid.innerHTML = '';
-        let opts = data.options.map(o => ({txt:o, correct: o===data.correct}));
+        
+        // FIX: Ensure options array exists and includes correct answer
+        let rawOptions = data.options ? [...data.options] : [];
+        if(data.correct && !rawOptions.includes(data.correct)) rawOptions.push(data.correct);
+        
+        let opts = rawOptions.map(o => ({txt:o, correct: o===data.correct}));
+        
         opts.sort(()=>Math.random()-0.5).forEach(opt => {
             const btn = document.createElement('div'); btn.className = 'card ' + (lens==='tone'?'card-tone':lens==='structure'?'card-struct':'card-lang'); btn.innerText = opt.txt;
             btn.onclick = () => {
@@ -568,7 +539,6 @@
             document.getElementById('admin-modal').style.display='flex';
             if(document.getElementById('edit-title')) document.getElementById('edit-title').value = appData.textTitle || "";
             if(document.getElementById('edit-question')) document.getElementById('edit-question').value = appData.question || "";
-            
             renderTemplateList('tone', 'list-tmpl-tone'); renderTemplateList('structure', 'list-tmpl-structure'); renderTemplateList('language', 'list-tmpl-language');
             renderList('markers', 'list-markers'); renderList('starters', 'list-starters'); renderList('points', 'list-points'); renderList('methods', 'list-methods'); renderList('links', 'list-links'); renderItems(); initAdminConfig();
         } catch(e) { alert("Settings Error. Try Hard Reset."); }
@@ -597,15 +567,11 @@
         if(!appData.items) return;
         appData.items.forEach((item, i) => {
             const div = document.createElement('div'); div.className = 'editor-section';
-            
-            // Set default view based on type
             const defaultLens = item.type === 'structure' ? 'structure' : 'tone';
-            
             div.innerHTML = `
                 <div style="display:flex;justify-content:space-between;"><strong>#${i+1} (${item.type})</strong> <div><button class="btn" style="font-size:0.8rem;" onclick="toggleDetails(${i})">Edit Analysis</button> <button class="btn btn-danger" onclick="delItem(${i})">Delete</button></div></div>
                 <input class="admin-input" value="${item.custom_q||''}" placeholder="Question" onchange="updateItem(${i},'custom_q',this.value)">
                 <input class="admin-input" value="${item.original}" placeholder="Quote" onchange="updateItem(${i},'original',this.value)">
-                
                 <div id="details-${i}" class="analysis-details">
                     <label><strong>Editing Focus:</strong></label>
                     <select class="admin-input" onchange="updateLensVisibility(${i}, this.value)">
@@ -613,27 +579,9 @@
                         <option value="structure" ${defaultLens==='structure'?'selected':''}>Structure</option>
                         <option value="language">Language</option>
                     </select>
-                    
-                    <div id="lens-tone-${i}" class="lens-group ${defaultLens==='tone'?'active':''}">
-                        <h4>Tone Analysis</h4>
-                        <div class="level-block">L1 Correct: <input class="admin-input" value="${item.level1?.tone?.correct||''}" onchange="updateDeep(${i},'level1','tone','correct',this.value)"> Opts: <input class="admin-input" value="${item.level1?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','tone',this.value)"></div>
-                        <div class="level-block">L2 Correct: <input class="admin-input" value="${item.level2?.tone?.correct||''}" onchange="updateDeep(${i},'level2','tone','correct',this.value)"> Opts: <input class="admin-input" value="${item.level2?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level2','tone',this.value)"></div>
-                        <div class="level-block">L3 Correct: <input class="admin-input" value="${item.level3?.tone?.correct||''}" onchange="updateDeep(${i},'level3','tone','correct',this.value)"> Opts: <input class="admin-input" value="${item.level3?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level3','tone',this.value)"></div>
-                    </div>
-
-                    <div id="lens-structure-${i}" class="lens-group ${defaultLens==='structure'?'active':''}">
-                        <h4>Structure Analysis</h4>
-                        <div class="level-block">L1 Correct: <input class="admin-input" value="${item.level1?.structure?.correct||''}" onchange="updateDeep(${i},'level1','structure','correct',this.value)"> Opts: <input class="admin-input" value="${item.level1?.structure?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','structure',this.value)"></div>
-                        <div class="level-block">L2 Correct: <input class="admin-input" value="${item.level2?.structure?.correct||''}" onchange="updateDeep(${i},'level2','structure','correct',this.value)"> Opts: <input class="admin-input" value="${item.level2?.structure?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level2','structure',this.value)"></div>
-                        <div class="level-block">L3 Correct: <input class="admin-input" value="${item.level3?.structure?.correct||''}" onchange="updateDeep(${i},'level3','structure','correct',this.value)"> Opts: <input class="admin-input" value="${item.level3?.structure?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level3','structure',this.value)"></div>
-                    </div>
-
-                    <div id="lens-language-${i}" class="lens-group">
-                        <h4>Language Analysis</h4>
-                        <div class="level-block">L1 Correct: <input class="admin-input" value="${item.level1?.language?.correct||''}" onchange="updateDeep(${i},'level1','language','correct',this.value)"> Opts: <input class="admin-input" value="${item.level1?.language?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','language',this.value)"></div>
-                        <div class="level-block">L2 Correct: <input class="admin-input" value="${item.level2?.language?.correct||''}" onchange="updateDeep(${i},'level2','language','correct',this.value)"> Opts: <input class="admin-input" value="${item.level2?.language?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level2','language',this.value)"></div>
-                        <div class="level-block">L3 Correct: <input class="admin-input" value="${item.level3?.language?.correct||''}" onchange="updateDeep(${i},'level3','language','correct',this.value)"> Opts: <input class="admin-input" value="${item.level3?.language?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level3','language',this.value)"></div>
-                    </div>
+                    <div id="lens-tone-${i}" class="lens-group ${defaultLens==='tone'?'active':''}"><h4>Tone Analysis</h4><div class="level-block">L1 Correct: <input class="admin-input" value="${item.level1?.tone?.correct||''}" onchange="updateDeep(${i},'level1','tone','correct',this.value)"> Opts: <input class="admin-input" value="${item.level1?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','tone',this.value)"></div><div class="level-block">L2 Correct: <input class="admin-input" value="${item.level2?.tone?.correct||''}" onchange="updateDeep(${i},'level2','tone','correct',this.value)"> Opts: <input class="admin-input" value="${item.level2?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level2','tone',this.value)"></div><div class="level-block">L3 Correct: <input class="admin-input" value="${item.level3?.tone?.correct||''}" onchange="updateDeep(${i},'level3','tone','correct',this.value)"> Opts: <input class="admin-input" value="${item.level3?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level3','tone',this.value)"></div></div>
+                    <div id="lens-structure-${i}" class="lens-group ${defaultLens==='structure'?'active':''}"><h4>Structure Analysis</h4><div class="level-block">L1 Correct: <input class="admin-input" value="${item.level1?.structure?.correct||''}" onchange="updateDeep(${i},'level1','structure','correct',this.value)"> Opts: <input class="admin-input" value="${item.level1?.structure?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','structure',this.value)"></div><div class="level-block">L2 Correct: <input class="admin-input" value="${item.level2?.structure?.correct||''}" onchange="updateDeep(${i},'level2','structure','correct',this.value)"> Opts: <input class="admin-input" value="${item.level2?.structure?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level2','structure',this.value)"></div><div class="level-block">L3 Correct: <input class="admin-input" value="${item.level3?.structure?.correct||''}" onchange="updateDeep(${i},'level3','structure','correct',this.value)"> Opts: <input class="admin-input" value="${item.level3?.structure?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level3','structure',this.value)"></div></div>
+                    <div id="lens-language-${i}" class="lens-group"><h4>Language Analysis</h4><div class="level-block">L1 Correct: <input class="admin-input" value="${item.level1?.language?.correct||''}" onchange="updateDeep(${i},'level1','language','correct',this.value)"> Opts: <input class="admin-input" value="${item.level1?.language?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','language',this.value)"></div><div class="level-block">L2 Correct: <input class="admin-input" value="${item.level2?.language?.correct||''}" onchange="updateDeep(${i},'level2','language','correct',this.value)"> Opts: <input class="admin-input" value="${item.level2?.language?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level2','language',this.value)"></div><div class="level-block">L3 Correct: <input class="admin-input" value="${item.level3?.language?.correct||''}" onchange="updateDeep(${i},'level3','language','correct',this.value)"> Opts: <input class="admin-input" value="${item.level3?.language?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level3','language',this.value)"></div></div>
                 </div>
             `;
             con.appendChild(div);
@@ -677,7 +625,7 @@
             }
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
-    function saveLocal() { localStorage.setItem('tsa_v43_clean', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v44_fix', JSON.stringify(appData)); }
     function downloadJSON() { const a = document.createElement('a'); a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData)); a.download = 'architect_data.json'; a.click(); }
     
     init();
