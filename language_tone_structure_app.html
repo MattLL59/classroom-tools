@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v38 (Revision Tools)</title>
+    <title>Tone & Structure Architect v39 (Phrasing Fixed)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -130,7 +130,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v38</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v39</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -219,7 +219,7 @@
 
                 <div class="editor-section" style="border-left: 5px solid #9c27b0;">
                     <h3>🗣️ Analysis Phrasing</h3>
-                    <p style="font-size:0.9rem;">These templates wrap the student's answer. Use <strong>{word}</strong> as the placeholder.</p>
+                    <p style="font-size:0.9rem;">Define how the chosen word fits into the sentence. Use <strong>{word}</strong>.</p>
                     <label><strong>Tone Template:</strong></label>
                     <input class="admin-input" id="tmpl-tone" onchange="updateTemplate('tone', this.value)" placeholder="e.g. creates a {word} tone">
                     
@@ -241,6 +241,15 @@
                         <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()" style="width:auto;"></select>
                     </div>
                     <button class="btn btn-danger" style="width:100%; margin-top:5px; background:#e74c3c;" onclick="resetSentenceOrder()">↺ Reset to Default</button>
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid var(--primary);">
+                    <h3>📝 Worksheet Options</h3>
+                    <div style="display:flex; gap:15px;">
+                        <label><input type="checkbox" id="ws-lvl1" checked onchange="saveWSOptions()"> Level 1</label>
+                        <label><input type="checkbox" id="ws-lvl2" checked onchange="saveWSOptions()"> Level 2</label>
+                        <label><input type="checkbox" id="ws-lvl3" checked onchange="saveWSOptions()"> Level 3</label>
+                    </div>
                 </div>
 
                 <div class="editor-section">
@@ -311,7 +320,7 @@
         // DEFAULT ORDER: Starter -> Quote -> Method -> Point -> Analysis -> Link
         sentenceOrder: ['starter', 'quote', 'method', 'point', 'analysis', 'link'], 
         worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
-        // PHRASING TEMPLATES (Ensured Default)
+        // DEFAULT TEMPLATES (Forces this if missing)
         analysisTemplates: {
             tone: "creates a {word} tone",
             structure: "structurally highlights {word}",
@@ -339,7 +348,7 @@
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
-        const local = localStorage.getItem('tsa_v38_undo');
+        const local = localStorage.getItem('tsa_v39_fix');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
@@ -348,9 +357,11 @@
                 ['markers','starters','points','methods','links','sentenceOrder'].forEach(k => { 
                     if(!Array.isArray(appData[k])) appData[k] = defaultData[k]; 
                 });
-                // Ensure templates exist
+                // CRITICAL: Ensure templates exist even if loaded from old data
                 if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
-                if(!appData.analysisTemplates.tone) appData.analysisTemplates.tone = "creates a {word} tone";
+                if(!appData.analysisTemplates.tone) appData.analysisTemplates.tone = defaultData.analysisTemplates.tone;
+                if(!appData.analysisTemplates.structure) appData.analysisTemplates.structure = defaultData.analysisTemplates.structure;
+                if(!appData.analysisTemplates.language) appData.analysisTemplates.language = defaultData.analysisTemplates.language;
             } catch(e) { appData = defaultData; }
         }
         
@@ -370,7 +381,7 @@
 
     function hardReset() {
         if(confirm("Factory Reset?")) {
-            localStorage.removeItem('tsa_v38_undo');
+            localStorage.removeItem('tsa_v39_fix');
             location.reload();
         }
     }
@@ -389,13 +400,11 @@
         
         if(!appData.sentenceOrder) appData.sentenceOrder = defaultData.sentenceOrder;
 
-        // Visual Preview string
         let previewStr = "";
 
         appData.sentenceOrder.forEach((type, index) => {
             if(type === 'none') return;
             
-            // Build visual preview
             previewStr += `[${type}] + `;
 
             const group = document.createElement('div');
@@ -436,10 +445,8 @@
             container.appendChild(group);
         });
         
-        // Remove trailing +
         document.getElementById('structure-preview').innerText = "Structure: " + previewStr.slice(0, -3);
 
-        // Buttons
         const btnGroup = document.createElement('div');
         btnGroup.style.display = 'flex';
         btnGroup.style.gap = '5px';
@@ -470,7 +477,6 @@
     }
 
     function undoLast() {
-        // Reverse iterate order to find last filled slot
         let order = [...appData.sentenceOrder].reverse();
         for(let key of order) {
             if(sentenceSlots[key]) {
@@ -546,7 +552,6 @@
             grid.innerHTML = `<div style="grid-column:1/-1; text-align:center;"><h3>🎉 Analysis Complete!</h3><button class="btn btn-accent" onclick="runStartup()">Start Over</button></div>`;
         }
         
-        // Reset Logic
         sentenceSlots.quote = "";
         sentenceSlots.analysis = "";
         rebuildSentenceBox();
@@ -599,8 +604,11 @@
             btn.innerText = opt.txt;
             btn.onclick = () => {
                 if(opt.correct) {
-                    // PHRASING ENGINE
-                    let template = (appData.analysisTemplates && appData.analysisTemplates[lens]) || "{word}";
+                    // CRITICAL FIX: Ensure template exists before replace
+                    let template = (appData.analysisTemplates && appData.analysisTemplates[lens]) 
+                                   ? appData.analysisTemplates[lens] 
+                                   : "creates a {word} tone"; // Fallback
+                    
                     let text = template.replace("{word}", opt.txt.toLowerCase());
                     
                     sentenceSlots.analysis = text;
@@ -609,7 +617,6 @@
                     document.getElementById('overlay-msg').style.display='flex';
                     setTimeout(() => {
                         document.getElementById('overlay-msg').style.display='none';
-                        // STAY ON SCREEN TO ALLOW FINISHING SENTENCE
                     }, 1000);
                 } else alert("Try again.");
             };
@@ -625,13 +632,10 @@
         document.getElementById('essay-controls').style.display='flex';
         area.value += (area.value ? "\n\n" : "") + val;
         
-        // Mark done
         if(state.currentIdx !== -1) state.completed.push(state.currentIdx);
         
-        // Reset slots
         sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
         document.getElementById('sentence-stage').value = "";
-        
         loadStageSelect();
     }
     
