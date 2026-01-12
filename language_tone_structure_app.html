@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v36 (Phrasing)</title>
+    <title>Tone & Structure Architect v37 (Workflow Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -120,7 +120,6 @@
         
         .hard-reset-btn { background: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 0.7rem; cursor: pointer; }
         
-        /* FILTER BAR */
         .filter-bar { display: flex; gap: 5px; justify-content: center; margin-bottom: 15px; }
         .filter-btn { padding: 5px 15px; border: 1px solid #ccc; background: white; border-radius: 20px; cursor: pointer; font-size: 0.8rem; }
         .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
@@ -129,7 +128,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v36</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v37</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -217,7 +216,7 @@
 
                 <div class="editor-section" style="border-left: 5px solid #9c27b0;">
                     <h3>🗣️ Analysis Phrasing</h3>
-                    <p style="font-size:0.9rem;">Define how the chosen word fits into the sentence. Use <strong>{word}</strong> where the student's answer goes.</p>
+                    <p style="font-size:0.9rem;">Define how the chosen word fits into the sentence. Use <strong>{word}</strong>.</p>
                     <label><strong>Tone Template:</strong></label>
                     <input class="admin-input" id="tmpl-tone" onchange="updateTemplate('tone', this.value)" placeholder="e.g. creates a {word} tone">
                     
@@ -230,7 +229,6 @@
 
                 <div class="editor-section" style="border-left: 5px solid var(--accent);">
                     <h3>⚙️ Sentence Structure Config</h3>
-                    <p style="font-size:0.9rem;">Configure Builder slots. Set "Analysis" to catch the Game result.</p>
                     <div style="display:flex; gap:5px; margin-bottom:10px; flex-wrap:wrap;">
                         <select class="admin-input" id="cfg-slot1" onchange="saveStructureConfig()" style="width:auto;"></select>
                         <select class="admin-input" id="cfg-slot2" onchange="saveStructureConfig()" style="width:auto;"></select>
@@ -240,6 +238,15 @@
                         <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()" style="width:auto;"></select>
                     </div>
                     <button class="btn btn-danger" style="width:100%; margin-top:5px; background:#e74c3c;" onclick="resetSentenceOrder()">↺ Reset to Default</button>
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid var(--primary);">
+                    <h3>📝 Worksheet Options</h3>
+                    <div style="display:flex; gap:15px;">
+                        <label><input type="checkbox" id="ws-lvl1" checked onchange="saveWSOptions()"> Level 1</label>
+                        <label><input type="checkbox" id="ws-lvl2" checked onchange="saveWSOptions()"> Level 2</label>
+                        <label><input type="checkbox" id="ws-lvl3" checked onchange="saveWSOptions()"> Level 3</label>
+                    </div>
                 </div>
 
                 <div class="editor-section">
@@ -307,10 +314,8 @@
     const defaultData = {
         textTitle: "The Electric Telegraph",
         question: "How is impact conveyed?",
-        // DEFAULT ORDER: Starter -> Quote -> Method -> Point -> Analysis -> Link
         sentenceOrder: ['starter', 'quote', 'method', 'point', 'analysis', 'link'], 
         worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
-        // NEW PHRASING TEMPLATES
         analysisTemplates: {
             tone: "creates a {word} tone",
             structure: "structurally highlights {word}",
@@ -334,11 +339,11 @@
     };
 
     let appData = JSON.parse(JSON.stringify(defaultData));
-    let state = { level: 1, currentIdx: 0, filter: 'all' };
+    let state = { level: 1, currentIdx: 0, filter: 'all', completed: [] };
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
-        const local = localStorage.getItem('tsa_v36_phrasing');
+        const local = localStorage.getItem('tsa_v37_flow');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
@@ -360,13 +365,14 @@
     
     function runStartup() {
         state.currentIdx = -1;
+        state.completed = [];
         updateUI();
         loadStageSelect();
     }
 
     function hardReset() {
         if(confirm("Factory Reset?")) {
-            localStorage.removeItem('tsa_v36_phrasing');
+            localStorage.removeItem('tsa_v37_flow');
             location.reload();
         }
     }
@@ -426,11 +432,12 @@
             container.appendChild(group);
         });
         
+        // Add Button is now the TRIGGER for next quote
         const btn = document.createElement('button');
         btn.className = 'btn btn-primary';
-        btn.onclick = commitSentence;
+        btn.onclick = commitSentence; // Commit and Loop
         btn.style.alignSelf = 'flex-end';
-        btn.innerHTML = '⬇️ Add';
+        btn.innerHTML = '⬇️ Add to Answer';
         container.appendChild(btn);
     }
 
@@ -481,10 +488,15 @@
         
         if(!appData.items) return;
 
+        let availableCount = 0;
         appData.items.forEach((item, i) => {
+            // CHECK IF COMPLETED
+            if(state.completed.includes(i)) return; 
+
             if(state.filter === 'structure' && item.type !== 'structure') return;
             if(state.filter === 'language' && item.type === 'structure') return;
 
+            availableCount++;
             const div = document.createElement('div');
             div.className = item.type === 'structure' ? 'card card-struct' : 'card card-lang';
             
@@ -499,6 +511,10 @@
             };
             grid.appendChild(div);
         });
+
+        if(availableCount === 0 && appData.items.length > 0) {
+            grid.innerHTML = `<div style="grid-column:1/-1; text-align:center;"><h3>🎉 Analysis Complete!</h3><button class="btn btn-accent" onclick="runStartup()">Start Over</button></div>`;
+        }
         
         sentenceSlots.quote = "";
         sentenceSlots.analysis = "";
@@ -552,17 +568,17 @@
             btn.innerText = opt.txt;
             btn.onclick = () => {
                 if(opt.correct) {
-                    // PHRASING ENGINE
-                    let template = appData.analysisTemplates[lens] || "{word}";
+                    let template = (appData.analysisTemplates && appData.analysisTemplates[lens]) || "{word}";
                     let text = template.replace("{word}", opt.txt.toLowerCase());
                     
                     sentenceSlots.analysis = text;
                     rebuildSentenceBox();
                     
+                    // Show success but STAY here to let user finish sentence
                     document.getElementById('overlay-msg').style.display='flex';
                     setTimeout(() => {
                         document.getElementById('overlay-msg').style.display='none';
-                        loadStageSelect();
+                        // DO NOT navigate back yet.
                     }, 1000);
                 } else alert("Try again.");
             };
@@ -577,10 +593,19 @@
         area.style.display='block';
         document.getElementById('essay-controls').style.display='flex';
         area.value += (area.value ? "\n\n" : "") + val;
+        
+        // MARK COMPLETE AND LOOP BACK
+        if(state.currentIdx !== -1) {
+            state.completed.push(state.currentIdx);
+        }
+        
+        // Reset slots
         sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
         document.getElementById('sentence-stage').value = "";
-        renderBuilderUI();
+        
+        loadStageSelect(); // Go back to selection with item removed
     }
+    
     function clearEssay() { if(confirm("Clear answer?")) { document.getElementById('answer-area').value=""; } }
     function downloadDoc() {
         const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'});
@@ -737,7 +762,7 @@
             }
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
-    function saveLocal() { localStorage.setItem('tsa_v36_phrasing', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v37_flow', JSON.stringify(appData)); }
     function downloadJSON() { const a = document.createElement('a'); a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData)); a.download = 'architect_data.json'; a.click(); }
     function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
 
