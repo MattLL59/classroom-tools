@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v39 (Phrasing Fixed)</title>
+    <title>Tone & Structure Architect v40 (Multi-Phrasing)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -119,6 +119,14 @@
         
         #wizard-overlay { flex-direction:column; padding:20px; box-sizing:border-box; background: white; }
         
+        /* PHRASING MODAL */
+        #phrasing-overlay { z-index: 2000; background: rgba(0,0,0,0.8); }
+        .phrase-option { 
+            background: #f0f4c3; padding: 15px; margin-bottom: 10px; border-radius: 8px; 
+            cursor: pointer; font-size: 1.1rem; border: 2px solid transparent; transition:0.2s; 
+        }
+        .phrase-option:hover { border-color: var(--primary); background: #fff; transform: scale(1.02); }
+
         #overlay-msg { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(44, 62, 80, 0.95); z-index: 3000; color: white; flex-direction: column; justify-content: center; align-items: center; }
         
         .hard-reset-btn { background: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 0.7rem; cursor: pointer; }
@@ -130,7 +138,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v39</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v40</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -151,13 +159,11 @@
 
         <div id="stage-select" class="stage active">
             <div class="instruction">Step 1: Evidence</div>
-            
             <div class="filter-bar">
                 <button class="filter-btn active" onclick="filterGrid('all', this)">All</button>
                 <button class="filter-btn" onclick="filterGrid('language', this)">Tone/Lang</button>
                 <button class="filter-btn" onclick="filterGrid('structure', this)">Structure</button>
             </div>
-
             <div id="dynamic-question-display" class="dynamic-question">Select Evidence to Analyze</div>
             <div class="grid" id="grid-main"></div>
         </div>
@@ -189,8 +195,7 @@
     <div class="builder-panel">
         <div class="instruction" style="text-align:center;">Answer Builder</div>
         
-        <div class="controls" id="dynamic-builder-controls">
-            </div>
+        <div class="controls" id="dynamic-builder-controls"></div>
 
         <input type="text" id="sentence-stage" placeholder="Answer builds here...">
         <div id="structure-preview">Structure: [Empty]</div>
@@ -206,11 +211,6 @@
         <div class="modal-content">
             <div class="modal-header">Teacher Settings <button onclick="closeAdmin()" style="border:none;background:none;font-size:1.5rem;cursor:pointer;">&times;</button></div>
             <div class="modal-body">
-                
-                <div style="background:#e0f7fa; padding:15px; border-radius:5px; margin-bottom:20px; text-align:center;">
-                    <button class="btn btn-primary" onclick="openWizard()">✨ Open AI Wizard</button>
-                </div>
-
                 <div class="editor-section">
                     <h3>Basic Info</h3>
                     <label>Text Title:</label><input id="edit-title" class="admin-input" onchange="updateGlobal('textTitle', this.value)">
@@ -218,16 +218,20 @@
                 </div>
 
                 <div class="editor-section" style="border-left: 5px solid #9c27b0;">
-                    <h3>🗣️ Analysis Phrasing</h3>
-                    <p style="font-size:0.9rem;">Define how the chosen word fits into the sentence. Use <strong>{word}</strong>.</p>
-                    <label><strong>Tone Template:</strong></label>
-                    <input class="admin-input" id="tmpl-tone" onchange="updateTemplate('tone', this.value)" placeholder="e.g. creates a {word} tone">
+                    <h3>🗣️ Analysis Phrasing (Multi-Choice)</h3>
+                    <p style="font-size:0.9rem;">Add multiple templates for each category. Use <strong>{word}</strong>.</p>
                     
-                    <label><strong>Structure Template:</strong></label>
-                    <input class="admin-input" id="tmpl-structure" onchange="updateTemplate('structure', this.value)" placeholder="e.g. structurally highlights {word}">
+                    <label><strong>Tone Templates:</strong></label>
+                    <div id="list-tmpl-tone" class="list-container"></div>
+                    <button class="btn btn-add" onclick="addTemplate('tone')">+ Add Tone Template</button>
                     
-                    <label><strong>Language Template:</strong></label>
-                    <input class="admin-input" id="tmpl-language" onchange="updateTemplate('language', this.value)" placeholder="e.g. suggests the idea of {word}">
+                    <label style="margin-top:15px;display:block;"><strong>Structure Templates:</strong></label>
+                    <div id="list-tmpl-structure" class="list-container"></div>
+                    <button class="btn btn-add" onclick="addTemplate('structure')">+ Add Structure Template</button>
+                    
+                    <label style="margin-top:15px;display:block;"><strong>Language Templates:</strong></label>
+                    <div id="list-tmpl-language" class="list-container"></div>
+                    <button class="btn btn-add" onclick="addTemplate('language')">+ Add Language Template</button>
                 </div>
 
                 <div class="editor-section" style="border-left: 5px solid var(--accent);">
@@ -241,15 +245,6 @@
                         <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()" style="width:auto;"></select>
                     </div>
                     <button class="btn btn-danger" style="width:100%; margin-top:5px; background:#e74c3c;" onclick="resetSentenceOrder()">↺ Reset to Default</button>
-                </div>
-
-                <div class="editor-section" style="border-left: 5px solid var(--primary);">
-                    <h3>📝 Worksheet Options</h3>
-                    <div style="display:flex; gap:15px;">
-                        <label><input type="checkbox" id="ws-lvl1" checked onchange="saveWSOptions()"> Level 1</label>
-                        <label><input type="checkbox" id="ws-lvl2" checked onchange="saveWSOptions()"> Level 2</label>
-                        <label><input type="checkbox" id="ws-lvl3" checked onchange="saveWSOptions()"> Level 3</label>
-                    </div>
                 </div>
 
                 <div class="editor-section">
@@ -268,13 +263,21 @@
                 </div>
                 
                 <div style="margin-top:20px; padding:15px; background:#e3f2fd; border-radius:5px;">
-                    <div style="display:flex; gap:10px; margin-bottom:10px;">
-                        <button class="btn btn-doc" onclick="downloadJSON()">Save Settings</button>
-                        <button class="btn btn-doc" onclick="document.getElementById('file-up').click()">Load Settings</button>
-                        <input type="file" id="file-up" style="display:none;" onchange="uploadJSON(this)">
-                    </div>
-                    <button class="btn btn-accent" style="width:100%" onclick="downloadWorksheetDoc()">📝 Download Worksheet (.doc)</button>
+                    <button class="btn btn-doc" onclick="downloadJSON()">Save Settings</button>
+                    <button class="btn btn-doc" onclick="document.getElementById('file-up').click()">Load Settings</button>
+                    <input type="file" id="file-up" style="display:none;" onchange="uploadJSON(this)">
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="phrasing-overlay" class="modal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">Select Phrasing</div>
+            <div class="modal-body">
+                <p>You chose: <strong id="phrase-word" style="color:var(--primary);"></strong></p>
+                <p>Choose how to say it:</p>
+                <div id="phrase-options"></div>
             </div>
         </div>
     </div>
@@ -317,14 +320,13 @@
     const defaultData = {
         textTitle: "The Electric Telegraph",
         question: "How is impact conveyed?",
-        // DEFAULT ORDER: Starter -> Quote -> Method -> Point -> Analysis -> Link
         sentenceOrder: ['starter', 'quote', 'method', 'point', 'analysis', 'link'], 
         worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
-        // DEFAULT TEMPLATES (Forces this if missing)
+        // NEW ARRAY FORMAT FOR TEMPLATES
         analysisTemplates: {
-            tone: "creates a {word} tone",
-            structure: "structurally highlights {word}",
-            language: "suggests the idea of {word}"
+            tone: ["creates a {word} tone", "evokes a sense of {word}", "establishes a {word} atmosphere"],
+            structure: ["structurally highlights {word}", "draws attention to the {word}", "focuses the reader on {word}"],
+            language: ["suggests the idea of {word}", "conveys a feeling of {word}", "implies that it is {word}"]
         },
         markers: ["However,", "Furthermore,", "In contrast,", "Significantly,"],
         starters: ["The writer implies", "This suggests", "It is evident that"],
@@ -348,20 +350,23 @@
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
-        const local = localStorage.getItem('tsa_v39_fix');
+        const local = localStorage.getItem('tsa_v40_multi');
         if(local) {
             try { 
                 const saved = JSON.parse(local);
                 appData = { ...defaultData, ...saved };
-                // Ensure critical arrays
                 ['markers','starters','points','methods','links','sentenceOrder'].forEach(k => { 
                     if(!Array.isArray(appData[k])) appData[k] = defaultData[k]; 
                 });
-                // CRITICAL: Ensure templates exist even if loaded from old data
+                
+                // MIGRATION: Convert string template to array if old version
+                ['tone', 'structure', 'language'].forEach(k => {
+                    if (appData.analysisTemplates && typeof appData.analysisTemplates[k] === 'string') {
+                        appData.analysisTemplates[k] = [appData.analysisTemplates[k]];
+                    }
+                });
+                
                 if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
-                if(!appData.analysisTemplates.tone) appData.analysisTemplates.tone = defaultData.analysisTemplates.tone;
-                if(!appData.analysisTemplates.structure) appData.analysisTemplates.structure = defaultData.analysisTemplates.structure;
-                if(!appData.analysisTemplates.language) appData.analysisTemplates.language = defaultData.analysisTemplates.language;
             } catch(e) { appData = defaultData; }
         }
         
@@ -381,7 +386,7 @@
 
     function hardReset() {
         if(confirm("Factory Reset?")) {
-            localStorage.removeItem('tsa_v39_fix');
+            localStorage.removeItem('tsa_v40_multi');
             location.reload();
         }
     }
@@ -604,24 +609,42 @@
             btn.innerText = opt.txt;
             btn.onclick = () => {
                 if(opt.correct) {
-                    // CRITICAL FIX: Ensure template exists before replace
-                    let template = (appData.analysisTemplates && appData.analysisTemplates[lens]) 
-                                   ? appData.analysisTemplates[lens] 
-                                   : "creates a {word} tone"; // Fallback
-                    
-                    let text = template.replace("{word}", opt.txt.toLowerCase());
-                    
-                    sentenceSlots.analysis = text;
-                    rebuildSentenceBox();
-                    
-                    document.getElementById('overlay-msg').style.display='flex';
-                    setTimeout(() => {
-                        document.getElementById('overlay-msg').style.display='none';
-                    }, 1000);
+                    // NEW: SHOW PHRASING SELECTOR
+                    showPhrasingSelector(lens, opt.txt.toLowerCase());
                 } else alert("Try again.");
             };
             grid.appendChild(btn);
         });
+    }
+
+    function showPhrasingSelector(lens, word) {
+        const modal = document.getElementById('phrasing-overlay');
+        const container = document.getElementById('phrase-options');
+        document.getElementById('phrase-word').innerText = word;
+        container.innerHTML = '';
+
+        let templates = appData.analysisTemplates[lens];
+        // Fallback if empty array or missing
+        if(!templates || templates.length === 0) templates = ["creates a {word} tone"];
+
+        templates.forEach(t => {
+            const filled = t.replace("{word}", word);
+            const btn = document.createElement('div');
+            btn.className = 'phrase-option';
+            btn.innerText = filled;
+            btn.onclick = () => {
+                sentenceSlots.analysis = filled;
+                rebuildSentenceBox();
+                modal.style.display = 'none';
+                
+                // Show success
+                document.getElementById('overlay-msg').style.display='flex';
+                setTimeout(() => { document.getElementById('overlay-msg').style.display='none'; }, 1000);
+            };
+            container.appendChild(btn);
+        });
+
+        modal.style.display = 'flex';
     }
 
     function commitSentence() {
@@ -695,12 +718,10 @@
             if(document.getElementById('edit-title')) document.getElementById('edit-title').value = appData.textTitle || "";
             if(document.getElementById('edit-question')) document.getElementById('edit-question').value = appData.question || "";
             
-            // Set Template Values
-            if(appData.analysisTemplates) {
-                document.getElementById('tmpl-tone').value = appData.analysisTemplates.tone || "";
-                document.getElementById('tmpl-structure').value = appData.analysisTemplates.structure || "";
-                document.getElementById('tmpl-language').value = appData.analysisTemplates.language || "";
-            }
+            // Render Template Lists
+            renderTemplateList('tone', 'list-tmpl-tone');
+            renderTemplateList('structure', 'list-tmpl-structure');
+            renderTemplateList('language', 'list-tmpl-language');
 
             if(appData.worksheetOptions) {
                 document.getElementById('ws-lvl1').checked = appData.worksheetOptions.lvl1;
@@ -713,11 +734,23 @@
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
     
-    function updateTemplate(type, val) {
-        if(!appData.analysisTemplates) appData.analysisTemplates = {};
-        appData.analysisTemplates[type] = val;
-        saveLocal();
+    // NEW MULTI-TEMPLATE LOGIC
+    function renderTemplateList(type, divId) {
+        const div = document.getElementById(divId); div.innerHTML = '';
+        if(!appData.analysisTemplates[type]) appData.analysisTemplates[type] = [];
+        appData.analysisTemplates[type].forEach((t, i) => {
+            const row = document.createElement('div'); row.className = 'list-item';
+            row.innerHTML = `<input class="list-input" value="${t}" onchange="updateTemplateItem('${type}',${i},this.value)"><button class="btn btn-danger" onclick="deleteTemplateItem('${type}',${i})">X</button>`;
+            div.appendChild(row);
+        });
     }
+    function addTemplate(type) {
+        if(!appData.analysisTemplates[type]) appData.analysisTemplates[type] = [];
+        appData.analysisTemplates[type].push("New {word} template");
+        renderTemplateList(type, 'list-tmpl-'+type);
+    }
+    function updateTemplateItem(type, i, val) { appData.analysisTemplates[type][i] = val; saveLocal(); }
+    function deleteTemplateItem(type, i) { appData.analysisTemplates[type].splice(i,1); renderTemplateList(type, 'list-tmpl-'+type); saveLocal(); }
 
     function renderList(key, divId) {
         const div = document.getElementById(divId); div.innerHTML = '';
@@ -795,7 +828,7 @@
             }
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
-    function saveLocal() { localStorage.setItem('tsa_v38_undo', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v40_multi', JSON.stringify(appData)); }
     function downloadJSON() { const a = document.createElement('a'); a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(appData)); a.download = 'architect_data.json'; a.click(); }
     function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
 
