@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v53 (Save Fix)</title>
+    <title>Tone & Structure Architect v54 (QR & Hosting)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -152,7 +152,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v53</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v54</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -285,11 +285,21 @@
                         <button class="btn btn-doc" onclick="document.getElementById('file-up').click()">Load Settings JSON</button>
                         <input type="file" id="file-up" style="display:none;" onchange="uploadJSON(this)">
                     </div>
-                    <div style="padding:10px; border:2px dashed var(--primary); border-radius:5px; background:white; margin-bottom:15px;">
-                        <strong>🚀 Student Distribution:</strong><br>
-                        Click below to download a standalone HTML file with your current lesson pre-loaded. Send this file to students.<br>
+                    
+                    <div style="padding:15px; border:2px dashed var(--primary); border-radius:5px; background:white; margin-bottom:15px; text-align:left;">
+                        <strong>🚀 Share with Students</strong><br>
+                        <p style="font-size:0.85rem; margin:5px 0;">1. Click "Download Class App".<br>2. Upload that file to GitHub Pages or Netlify Drop.<br>3. Paste the URL below to get a QR Code.</p>
                         <button class="btn btn-primary" style="width:100%; margin-top:5px;" onclick="downloadStudentApp()">📦 Download Class App (.html)</button>
+                        
+                        <div style="margin-top:15px; border-top:1px solid #eee; padding-top:10px;">
+                            <label style="font-size:0.9rem; font-weight:bold;">Generate QR Code:</label>
+                            <input class="admin-input" id="qr-input" placeholder="Paste your hosted link (e.g. https://...)" oninput="generateQR(this.value)">
+                            <div id="qr-display" style="margin-top:10px; text-align:center; min-height:150px; display:flex; align-items:center; justify-content:center; background:#f9f9f9; border:1px solid #ddd;">
+                                <span style="color:#ccc;">QR will appear here</span>
+                            </div>
+                        </div>
                     </div>
+
                     <hr>
                     <p style="margin-bottom:5px; font-weight:bold;">Select Level to Print:</p>
                     <div style="display:flex; align-items:center; gap:10px;">
@@ -398,15 +408,8 @@
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
-        // --- LEGACY DATA RESCUE ---
-        let local = localStorage.getItem('tsa_v53_blob');
-        if(!local) {
-            const legacyKeys = ['tsa_v52_pack', 'tsa_v51_ws_fix', 'tsa_v50_diff', 'tsa_v49_secure'];
-            for(let key of legacyKeys) {
-                const old = localStorage.getItem(key);
-                if(old) { local = old; break; }
-            }
-        }
+        let local = localStorage.getItem('tsa_v54_qr');
+        if(!local) { local = localStorage.getItem('tsa_v53_blob'); }
 
         if(local) {
             try { 
@@ -424,26 +427,27 @@
     }
     
     function runStartup() { state.currentIdx = -1; state.completed = []; updateUI(); loadStageSelect(); }
-    function hardReset() { if(confirm("Factory Reset? This wipes password and all data.")) { localStorage.removeItem('tsa_v53_blob'); location.reload(); } }
+    function hardReset() { if(confirm("Factory Reset? This wipes password and all data.")) { localStorage.removeItem('tsa_v54_qr'); location.reload(); } }
     function updateUI() { document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; renderBuilderUI(); }
     
-    // --- PASSWORD PROTECTION ---
     function requestAdminAccess() {
         const input = prompt("Enter Admin Password:");
-        if (input === appData.adminPassword) {
-            openAdmin();
-        } else {
-            alert("Incorrect Password.");
-        }
+        if (input === appData.adminPassword) { openAdmin(); } else { alert("Incorrect Password."); }
     }
 
     function changePassword() {
         const newPass = prompt("Enter new password:");
-        if(newPass && newPass.trim() !== "") {
-            appData.adminPassword = newPass.trim();
-            saveLocal();
-            alert("Password changed successfully.");
+        if(newPass && newPass.trim() !== "") { appData.adminPassword = newPass.trim(); saveLocal(); alert("Password changed successfully."); }
+    }
+
+    // --- QR GENERATOR ---
+    function generateQR(url) {
+        const display = document.getElementById('qr-display');
+        if(!url || url.trim() === "") {
+            display.innerHTML = '<span style="color:#ccc;">QR will appear here</span>';
+            return;
         }
+        display.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(url)}" alt="QR Code" style="border:5px solid white;">`;
     }
 
     // --- SMART GRAMMAR ---
@@ -608,16 +612,57 @@
     function clearEssay() { if(confirm("Clear answer?")) { document.getElementById('answer-area').value=""; } }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
     
-    // --- JSON DOWNLOAD FIX ---
-    function downloadJSON() {
-        const blob = new Blob([JSON.stringify(appData)], {type: "text/json;charset=utf-8"});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'architect_data.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        alert("Settings Saved to File!");
+    // --- FULLY RESTORED WORKSHEET GENERATOR ---
+    function downloadWorksheetDoc() {
+        try {
+            const modeEl = document.getElementById('ws-print-mode');
+            const mode = modeEl ? modeEl.value : 'all';
+            let evidenceList = [];
+            let meaningList = [];
+            
+            if(!appData.items || appData.items.length === 0) {
+                alert("No items to print.");
+                return;
+            }
+
+            appData.items.forEach(i => {
+                evidenceList.push(i.type==='structure' ? '🏗️ '+i.label : '"'+i.original+'"');
+                meaningList.push(i.type==='structure' ? i.detail : i.translation);
+            });
+            meaningList.sort(() => Math.random() - 0.5);
+
+            let html = `
+            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'>
+            <head><meta charset='utf-8'><title>Worksheet</title>
+            <style>body{font-family:'Calibri',sans-serif;} table{width:100%;border-collapse:collapse;margin-bottom:20px;} td,th{border:1px solid #999;padding:8px;text-align:left;} th{background-color:#eee;} .box-row{height:30px;}</style></head><body>
+            <h1>Worksheet: ${appData.textTitle}</h1>
+            <p><strong>Question:</strong> ${appData.question}</p>
+            <hr><h2>Task 1: Evidence Match-Up</h2>
+            <table><tr><th>Evidence</th><th>Meaning (Jumbled)</th></tr>
+            ${evidenceList.map((ev, i) => `<tr><td>${ev}</td><td>${meaningList[i]}</td></tr>`).join('')}
+            </table><br><h2>Task 2: Analysis</h2>`;
+
+            appData.items.forEach((i, idx) => {
+                let levelHtml = "";
+                const showL1 = (mode === 'all' && appData.worksheetOptions?.lvl1) || mode === '1';
+                const showL2 = (mode === 'all' && appData.worksheetOptions?.lvl2) || mode === '2';
+                const showL3 = (mode === 'all' && appData.worksheetOptions?.lvl3) || mode === '3';
+
+                if(showL1 && i.level1) levelHtml += `<p>Level 1: ${i.level1.tone?.prompt || 'Tone?'}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
+                if(showL2 && i.level2) levelHtml += `<p>Level 2: ${i.level2.tone?.prompt || 'Implication?'}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
+                if(showL3 && i.level3) levelHtml += `<p>Level 3: ${i.level3.tone?.prompt || 'Effect?'}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
+                
+                if(levelHtml) {
+                    html += `<div style="border:1px solid #333;padding:10px;margin-bottom:15px;"><p><strong>${idx+1}. ${i.type==='structure'?i.label:'"'+i.original+'"'}</strong></p>${levelHtml}</div>`;
+                }
+            });
+            html += "</body></html>";
+            const blob = new Blob([html], {type:'application/msword'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'Worksheet.doc'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        } catch(e) {
+            alert("Worksheet Generation Error: " + e.message);
+        }
     }
 
     // --- STUDENT APP GENERATOR ---
@@ -639,7 +684,7 @@
         a.click();
     }
 
-    function saveLocal() { localStorage.setItem('tsa_v53_blob', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v54_qr', JSON.stringify(appData)); }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
     function openAdmin() { document.getElementById('admin-modal').style.display='flex'; renderTemplateList('tone','list-tmpl-tone'); renderTemplateList('structure','list-tmpl-structure'); renderTemplateList('language','list-tmpl-language'); renderList('markers','list-markers'); renderList('starters','list-starters'); renderList('points','list-points'); renderList('methods','list-methods'); renderList('links','list-links'); renderItems(); initAdminConfig(); 
         if(appData.worksheetOptions) {
@@ -683,6 +728,16 @@
             lvl3: document.getElementById('ws-lvl3').checked
         };
         saveLocal();
+    }
+    function downloadJSON() {
+        const blob = new Blob([JSON.stringify(appData)], {type: "text/json;charset=utf-8"});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'architect_data.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        alert("Settings Saved to File!");
     }
     
     // --- SMART EDITOR WITH LENS TOGGLE ---
