@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tone & Structure Architect v52 (Student App Generator)</title>
+    <title>Tone & Structure Architect v53 (Save Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -152,7 +152,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v52</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v53</h1>
         <div>
             <button class="hard-reset-btn" onclick="hardReset()">⚠️ Factory Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:5px; border-radius:5px; border:1px solid #ccc;">
@@ -233,15 +233,21 @@
                 </div>
 
                 <div class="editor-section" style="border-left: 5px solid #9c27b0;">
-                    <h3>🗣️ Analysis Phrasing</h3>
+                    <h3>🗣️ Analysis Phrasing & Grammar</h3>
+                    <p style="font-size:0.9rem;">
+                        Use <strong>{adj}</strong> for adjective, <strong>{noun}</strong> for noun.<br>
+                    </p>
+                    <label><strong>Tone Templates:</strong></label>
                     <div id="list-tmpl-tone" class="list-container"></div>
-                    <button class="btn btn-add" onclick="addTemplate('tone')">+ Tone Template</button>
+                    <button class="btn btn-add" onclick="addTemplate('tone')">+ Add Tone Template</button>
                     
-                    <div id="list-tmpl-structure" class="list-container" style="margin-top:10px;"></div>
-                    <button class="btn btn-add" onclick="addTemplate('structure')">+ Structure Template</button>
+                    <label style="margin-top:15px;display:block;"><strong>Structure Templates:</strong></label>
+                    <div id="list-tmpl-structure" class="list-container"></div>
+                    <button class="btn btn-add" onclick="addTemplate('structure')">+ Add Structure Template</button>
                     
-                    <div id="list-tmpl-language" class="list-container" style="margin-top:10px;"></div>
-                    <button class="btn btn-add" onclick="addTemplate('language')">+ Language Template</button>
+                    <label style="margin-top:15px;display:block;"><strong>Language Templates:</strong></label>
+                    <div id="list-tmpl-language" class="list-container"></div>
+                    <button class="btn btn-add" onclick="addTemplate('language')">+ Add Language Template</button>
                 </div>
 
                 <div class="editor-section" style="border-left: 5px solid var(--accent);">
@@ -392,10 +398,14 @@
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
-        let local = localStorage.getItem('tsa_v52_pack');
+        // --- LEGACY DATA RESCUE ---
+        let local = localStorage.getItem('tsa_v53_blob');
         if(!local) {
-            // Restore from v51
-            local = localStorage.getItem('tsa_v51_ws_fix');
+            const legacyKeys = ['tsa_v52_pack', 'tsa_v51_ws_fix', 'tsa_v50_diff', 'tsa_v49_secure'];
+            for(let key of legacyKeys) {
+                const old = localStorage.getItem(key);
+                if(old) { local = old; break; }
+            }
         }
 
         if(local) {
@@ -414,19 +424,29 @@
     }
     
     function runStartup() { state.currentIdx = -1; state.completed = []; updateUI(); loadStageSelect(); }
-    function hardReset() { if(confirm("Factory Reset? This wipes password and all data.")) { localStorage.removeItem('tsa_v52_pack'); location.reload(); } }
+    function hardReset() { if(confirm("Factory Reset? This wipes password and all data.")) { localStorage.removeItem('tsa_v53_blob'); location.reload(); } }
     function updateUI() { document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; renderBuilderUI(); }
     
+    // --- PASSWORD PROTECTION ---
     function requestAdminAccess() {
         const input = prompt("Enter Admin Password:");
-        if (input === appData.adminPassword) { openAdmin(); } else { alert("Incorrect Password."); }
+        if (input === appData.adminPassword) {
+            openAdmin();
+        } else {
+            alert("Incorrect Password.");
+        }
     }
 
     function changePassword() {
         const newPass = prompt("Enter new password:");
-        if(newPass && newPass.trim() !== "") { appData.adminPassword = newPass.trim(); saveLocal(); alert("Password changed successfully."); }
+        if(newPass && newPass.trim() !== "") {
+            appData.adminPassword = newPass.trim();
+            saveLocal();
+            alert("Password changed successfully.");
+        }
     }
 
+    // --- SMART GRAMMAR ---
     function getMorphology(word, type) {
         const lower = word.toLowerCase();
         const entry = wordMorphology[lower];
@@ -588,57 +608,16 @@
     function clearEssay() { if(confirm("Clear answer?")) { document.getElementById('answer-area').value=""; } }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
     
-    // --- FULLY RESTORED WORKSHEET GENERATOR ---
-    function downloadWorksheetDoc() {
-        try {
-            const modeEl = document.getElementById('ws-print-mode');
-            const mode = modeEl ? modeEl.value : 'all';
-            let evidenceList = [];
-            let meaningList = [];
-            
-            if(!appData.items || appData.items.length === 0) {
-                alert("No items to print.");
-                return;
-            }
-
-            appData.items.forEach(i => {
-                evidenceList.push(i.type==='structure' ? '🏗️ '+i.label : '"'+i.original+'"');
-                meaningList.push(i.type==='structure' ? i.detail : i.translation);
-            });
-            meaningList.sort(() => Math.random() - 0.5);
-
-            let html = `
-            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'>
-            <head><meta charset='utf-8'><title>Worksheet</title>
-            <style>body{font-family:'Calibri',sans-serif;} table{width:100%;border-collapse:collapse;margin-bottom:20px;} td,th{border:1px solid #999;padding:8px;text-align:left;} th{background-color:#eee;} .box-row{height:30px;}</style></head><body>
-            <h1>Worksheet: ${appData.textTitle}</h1>
-            <p><strong>Question:</strong> ${appData.question}</p>
-            <hr><h2>Task 1: Evidence Match-Up</h2>
-            <table><tr><th>Evidence</th><th>Meaning (Jumbled)</th></tr>
-            ${evidenceList.map((ev, i) => `<tr><td>${ev}</td><td>${meaningList[i]}</td></tr>`).join('')}
-            </table><br><h2>Task 2: Analysis</h2>`;
-
-            appData.items.forEach((i, idx) => {
-                let levelHtml = "";
-                const showL1 = (mode === 'all' && appData.worksheetOptions?.lvl1) || mode === '1';
-                const showL2 = (mode === 'all' && appData.worksheetOptions?.lvl2) || mode === '2';
-                const showL3 = (mode === 'all' && appData.worksheetOptions?.lvl3) || mode === '3';
-
-                if(showL1 && i.level1) levelHtml += `<p>Level 1: ${i.level1.tone?.prompt || 'Tone?'}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-                if(showL2 && i.level2) levelHtml += `<p>Level 2: ${i.level2.tone?.prompt || 'Implication?'}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-                if(showL3 && i.level3) levelHtml += `<p>Level 3: ${i.level3.tone?.prompt || 'Effect?'}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-                
-                if(levelHtml) {
-                    html += `<div style="border:1px solid #333;padding:10px;margin-bottom:15px;"><p><strong>${idx+1}. ${i.type==='structure'?i.label:'"'+i.original+'"'}</strong></p>${levelHtml}</div>`;
-                }
-            });
-            html += "</body></html>";
-            const blob = new Blob([html], {type:'application/msword'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = 'Worksheet.doc'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        } catch(e) {
-            alert("Worksheet Generation Error: " + e.message);
-        }
+    // --- JSON DOWNLOAD FIX ---
+    function downloadJSON() {
+        const blob = new Blob([JSON.stringify(appData)], {type: "text/json;charset=utf-8"});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'architect_data.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        alert("Settings Saved to File!");
     }
 
     // --- STUDENT APP GENERATOR ---
@@ -660,7 +639,7 @@
         a.click();
     }
 
-    function saveLocal() { localStorage.setItem('tsa_v52_pack', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v53_blob', JSON.stringify(appData)); }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
     function openAdmin() { document.getElementById('admin-modal').style.display='flex'; renderTemplateList('tone','list-tmpl-tone'); renderTemplateList('structure','list-tmpl-structure'); renderTemplateList('language','list-tmpl-language'); renderList('markers','list-markers'); renderList('starters','list-starters'); renderList('points','list-points'); renderList('methods','list-methods'); renderList('links','list-links'); renderItems(); initAdminConfig(); 
         if(appData.worksheetOptions) {
@@ -697,6 +676,14 @@
     function initAdminConfig() { const opts = ['marker', 'starter', 'point', 'method', 'quote', 'analysis', 'link', 'none']; for(let i=0; i<6; i++) { const sel = document.getElementById(`cfg-slot${i+1}`); if(!sel) continue; sel.innerHTML = ''; opts.forEach(o => sel.add(new Option(o, o))); sel.value = appData.sentenceOrder[i] || 'none'; } }
     function saveStructureConfig() { const newOrder = []; for(let i=0; i<6; i++) { newOrder.push(document.getElementById(`cfg-slot${i+1}`).value); } appData.sentenceOrder = newOrder; saveLocal(); updateUI(); }
     function resetSentenceOrder() { if(confirm("Revert sentence order to default?")) { appData.sentenceOrder = ['starter', 'quote', 'method', 'point', 'analysis', 'link']; saveLocal(); updateUI(); openAdmin(); } }
+    function saveWSOptions() {
+        appData.worksheetOptions = {
+            lvl1: document.getElementById('ws-lvl1').checked,
+            lvl2: document.getElementById('ws-lvl2').checked,
+            lvl3: document.getElementById('ws-lvl3').checked
+        };
+        saveLocal();
+    }
     
     // --- SMART EDITOR WITH LENS TOGGLE ---
     function renderItems() {
