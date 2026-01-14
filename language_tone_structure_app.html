@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v79 (JSON Repair)</title>
+    <title>Tone & Structure Architect v80 (Convenience Mode)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -152,7 +152,7 @@
     <header>
         <h1>
             <button onclick="hardReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v79
+            <i class="fas fa-cubes"></i> Tone & Structure v80
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn admin-only" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -213,8 +213,10 @@
         <div class="modal-content">
             <div class="modal-header">
                 Settings 
-                <div>
-                    <button class="btn btn-warning" onclick="changePassword()" style="font-size:0.8rem; padding:5px 10px;">Change PW</button>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <label style="font-size:0.8rem; display:flex; align-items:center; cursor:pointer; background:#fff; padding:3px 8px; border-radius:10px; border:1px solid #ccc;">
+                        <input type="checkbox" id="auto-login-check" onchange="toggleAutoLogin(this.checked)" style="margin-right:5px;"> 🔓 Keep Unlocked
+                    </label>
                     <button onclick="closeAdmin()" style="border:none;background:none;font-size:1.5rem;">&times;</button>
                 </div>
             </div>
@@ -370,24 +372,19 @@
             changeLevel(); 
             return;
         }
-        let local = localStorage.getItem('tsa_v79_sanitized');
-        if(!local) local = localStorage.getItem('tsa_v78_unlock');
+        let local = localStorage.getItem('tsa_v80_unlock');
+        if(!local) local = localStorage.getItem('tsa_v79_sanitized');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
-        // --- DATA SANITIZER (AUTO-FIX FOR PARTIAL LOAD ERRORS) ---
-        if(!appData.sentenceConfigs) {
-            // Convert old single config to multi-level
-            const old = appData.sentenceOrder || defaultData.sentenceConfigs[1];
-            appData.sentenceConfigs = { 1: old, 2: old, 3: old };
-        }
+        // SELF HEALING
         ['markers','starters','methods','points','links'].forEach(k => { if(!appData[k]) appData[k] = []; });
         if(!appData.worksheetOptions) appData.worksheetOptions = defaultData.worksheetOptions;
         if(appData.items) appData.items.forEach(i => { if(i.includeInWS===undefined) i.includeInWS=true; if(i.pageBreak===undefined) i.pageBreak=false; });
         if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
-        // ---------------------------------------------------------
+        if(!appData.sentenceConfigs) appData.sentenceConfigs = defaultData.sentenceConfigs;
 
         updateUI();
-        changeLevel(); 
+        changeLevel(); // Ensures L1 logic runs on start
     }
 
     function switchHub(hubId) {
@@ -579,12 +576,13 @@
     function undoLast() { sentenceSlots.analysis = ""; rebuildSentence(); }
     function clearEssay() { if(confirm("Clear?")) document.getElementById('answer-area').value=""; }
 
-    // ADMIN
+    // ADMIN - IMPROVED ACCESS LOGIC
     function openAdmin() { 
         document.getElementById('admin-modal').style.display='flex'; 
         try {
             document.getElementById('edit-title').value = appData.textTitle || "";
             document.getElementById('edit-question').value = appData.question || "";
+            document.getElementById('auto-login-check').checked = (localStorage.getItem('tsa_auto_login') === 'true');
             initAdminConfig();
             renderTemplateList('tone','list-tmpl-tone'); 
             renderTemplateList('structure','list-tmpl-structure'); 
@@ -600,15 +598,38 @@
             alert("Partial Load Error. Use Factory Reset if needed.");
         }
     }
+    
+    function requestAdminAccess() {
+        const autoLogin = localStorage.getItem('tsa_auto_login') === 'true';
+        const sessionLogin = sessionStorage.getItem('tsa_session_login') === 'true';
+        
+        if (autoLogin || sessionLogin) {
+            openAdmin();
+        } else {
+            const p = prompt("Password:");
+            if (p === appData.adminPassword) {
+                sessionStorage.setItem('tsa_session_login', 'true');
+                openAdmin();
+            } else {
+                alert("Incorrect");
+            }
+        }
+    }
+    
+    function toggleAutoLogin(checked) {
+        if(checked) localStorage.setItem('tsa_auto_login', 'true');
+        else localStorage.removeItem('tsa_auto_login');
+    }
+
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
-    function requestAdminAccess() { if(prompt("Password:") === appData.adminPassword) openAdmin(); }
     function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v79_sanitized', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v80_unlock', JSON.stringify(appData)); }
     function updateUI() { 
         document.getElementById('student-title').innerText = appData.textTitle || "Loading..."; 
         document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
         document.getElementById('q-display').innerText = appData.question || "...";
+        // Do not force loadStageSelect here as it might reset user progress
     }
 
     // RENDER FUNCTIONS FOR ADMIN
@@ -704,27 +725,20 @@
     function addBankItem() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); }
 
     function downloadJSON() { const blob = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click(); }
-    function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = sanitizeData(JSON.parse(e.target.result)); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
+    function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
     
-    function sanitizeData(data) {
-        if (!data.sentenceConfigs) {
-            const defaultOrder = data.sentenceOrder || ['starter', 'quote', 'analysis'];
-            data.sentenceConfigs = { 1: defaultOrder, 2: defaultOrder, 3: defaultOrder };
-        }
-        if (!data.analysisTemplates) data.analysisTemplates = defaultData.analysisTemplates;
-        ['markers', 'starters', 'methods', 'points', 'links'].forEach(k => { if (!data[k]) data[k] = []; });
-        if (!data.worksheetOptions) data.worksheetOptions = { lvl1:true, lvl2:true, lvl3:true };
-        return data;
-    }
-
     // EXPORT LOGIC
     function downloadStudentApp() {
         const clone = JSON.parse(JSON.stringify(appData));
         delete clone.adminPassword;
 
         let html = document.documentElement.outerHTML;
+        
+        // 1. Inject Data: Find the data-script ID and replace it
         const regex = /<script id="data-script">([\s\S]*?)<\/script>/;
         html = html.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(clone)};`);
+
+        // 2. Inject CSS Lock to hide Admin UI immediately
         const styleInjection = `<style> .admin-only, #admin-modal, #admin-btn, #reset-btn { display: none !important; } </style>`;
         html = html.replace('</head>', `${styleInjection}\n</head>`);
 
@@ -740,7 +754,7 @@
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v79_sanitized'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v80_unlock'); location.reload(); } }
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
