@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v87 (Loop Fix)</title>
+    <title>Tone & Structure Architect v88 (Context Links)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -105,7 +105,10 @@
         .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
         .admin-only { display: block; } 
         
-        /* MODALS */
+        /* ADMIN UI */
+        .btn-add { background-color: #2e7d32; color: white; padding: 10px; width: 100%; border-radius: 6px; margin-top: 8px; cursor: pointer; font-weight: bold; text-transform: uppercase; border:none; }
+        .btn-edit-item { background: #ff9800; color: white; padding: 8px 15px; border-radius: 4px; font-weight: bold; border:none; cursor: pointer; font-size: 0.9rem; }
+        
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 200000; justify-content: center; align-items: center; }
         .modal-content { 
             background: var(--card); color: var(--text); width: 95%; max-width: 800px; max-height: 90vh; 
@@ -129,9 +132,6 @@
         .list-item { display: flex; align-items:center; margin-bottom:5px; gap:5px; }
         .list-input { flex-grow:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size: 1rem;}
 
-        /* ADMIN BUTTONS */
-        .btn-add { background-color: #2e7d32; color: white; padding: 10px; width: 100%; border-radius: 6px; margin-top: 8px; cursor: pointer; font-weight: bold; text-transform: uppercase; border:none; }
-        .btn-edit-item { background: #ff9800; color: white; padding: 8px 15px; border-radius: 4px; font-weight: bold; border:none; cursor: pointer; font-size: 0.9rem; }
         .admin-tab-bar { display: flex; gap:5px; margin-bottom:10px; }
         .admin-tab { flex:1; padding:10px; border:2px solid #ccc; background:#eee; cursor:pointer; font-weight:bold; border-radius:4px; text-align:center; color:#333; }
         .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
@@ -154,7 +154,7 @@
     <header>
         <h1>
             <button onclick="hardReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v87
+            <i class="fas fa-cubes"></i> Tone & Structure v88
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn admin-only" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -263,6 +263,7 @@
                 
                 <div class="editor-section">
                     <h3>Banks</h3>
+                    <p style="font-size:0.8rem; color:#555;">Use (Tone), (Structure), or (Lang) to filter links for L2/L3.</p>
                     <div style="display:flex; gap:5px; flex-wrap:wrap;">
                         <button class="btn btn-doc" onclick="editBank('markers')">Markers</button>
                         <button class="btn btn-doc" onclick="editBank('starters')">Starters</button>
@@ -345,7 +346,7 @@
         },
         worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
         analysisTemplates: { tone: ["creates a {adj} tone", "evokes {noun}"], structure: ["highlights {noun}"], language: ["suggests {noun}"] },
-        markers: ["However,", "Furthermore,"], starters: ["The writer implies", "This suggests"], points: ["a sense of danger"], methods: ["metaphor", "simile"], links: ["This reinforces"],
+        markers: ["However,", "Furthermore,"], starters: ["The writer implies", "This suggests"], points: ["a sense of danger"], methods: ["metaphor", "simile"], links: ["This reinforces (Tone)", "This structural choice (Structure)", "This word choice (Lang)"],
         items: [
             { id: "q1", type: "quote", original: "Example Quote 1", translation: "Meaning 1", distractors: ["Wrong 1"], custom_q: "Analyze this", includeInWS: true, pageBreak: false, level1: { tone: { prompt:"Tone?", correct:"Happy", options:["Happy","Sad"] } }, level2:{tone:{prompt:"Deep Tone?", correct:"Joy", options:["Joy","Anger"]}}, level3:{tone:{prompt:"Effect?", correct:"Elation", options:["Elation","Despair"]}} },
             { id: "q2", type: "structure", original: "Example Structure", translation: "Meaning 2", distractors: ["Wrong 2"], custom_q: "Analyze structure", includeInWS: true, pageBreak: false, level1: { structure: { prompt:"Structure?", correct:"Shift", options:["Shift","Link"] } }, level2:{structure:{prompt:"Deep Struct?", correct:"Pivot", options:["Pivot","Static"]}}, level3:{structure:{prompt:"Effect?", correct:"Transformation", options:["Transformation","Stasis"]}} },
@@ -354,7 +355,7 @@
     };
 
     let appData = JSON.parse(JSON.stringify(defaultData));
-    let state = { level: 1, currentIdx: -1, filter: 'all', completed: [] };
+    let state = { level: 1, currentIdx: -1, filter: 'all', completed: [], currentLens: '' };
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
     let currentEditingBank = '';
     let adminConfigLevel = 1;
@@ -369,8 +370,8 @@
             changeLevel(); 
             return;
         }
-        let local = localStorage.getItem('tsa_v87_loopfix');
-        if(!local) local = localStorage.getItem('tsa_v86_navfix');
+        let local = localStorage.getItem('tsa_v88_context');
+        if(!local) local = localStorage.getItem('tsa_v87_loopfix');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
         ensureDataIntegrity();
@@ -461,8 +462,14 @@
                     sentenceSlots.quote=`"${item.original}"`; 
                     if (state.level === 1) {
                         alert("Correct! Now build the sentence in the Writing Desk.");
+                        // L1 Auto-detect lens type for context links if possible, else default
+                        if(item.type==='structure') state.currentLens='structure';
+                        else if(item.type==='language') state.currentLens='language';
+                        else state.currentLens='tone';
+                        
                         switchHub('writing');
                         rebuildSentence(); 
+                        renderBuilderDropdowns(); // Re-render to catch context
                         return; 
                     }
                     loadLensChoice(); 
@@ -488,11 +495,12 @@
     }
 
     function loadFinalAnalysis(lens) {
+        state.currentLens = lens; // STORE LENS FOR CONTEXT
         const item = appData.items[state.currentIdx];
         const lvlData = item[`level${state.level}`];
         if (!lvlData || !lvlData[lens]) { 
             const lab = document.getElementById('lab-content');
-            lab.innerHTML = `<div class="instruction">No data for Level ${state.level} (${lens})</div><button class="btn btn-warning" onclick="resetToGrid()">Back</button>`;
+            lab.innerHTML = `<div class="instruction">No data for Level ${state.level} (${lens})</div><button class="btn btn-warning" onclick="loadStageSelect()">Back</button>`;
             return; 
         }
         
@@ -536,6 +544,7 @@
                 rebuildSentence();
                 alert("Sentence Built! Check the Writing Desk.");
                 switchHub('writing');
+                renderBuilderDropdowns(); // Re-render dropdowns to apply context filtering
                 loadStageSelect();
             };
             container.appendChild(div);
@@ -549,12 +558,25 @@
         
         currentConfig.forEach(type => {
             if (['quote', 'analysis', 'none'].includes(type)) return;
+            
+            // CONTEXT AWARE FILTERING FOR LINKS
+            let options = appData[type+'s'] || [];
+            
+            if (type === 'link' && state.level > 1 && state.currentLens) {
+                options = options.filter(opt => {
+                    const lower = opt.toLowerCase();
+                    if (lower.includes(`(${state.currentLens})`)) return true; // Explicit match
+                    if (lower.includes('(tone)') || lower.includes('(structure)') || lower.includes('(lang)')) return false; // Explicit mismatch
+                    return true; // No tag = All
+                });
+            }
+
             const div = document.createElement('div');
             div.className = 'bank-row';
             div.innerHTML = `<span class="bank-label">${type}</span>
                 <select class="bank-select" onchange="sentenceSlots['${type}']=this.value; rebuildSentence();">
                     <option value="">Choose...</option>
-                    ${(appData[type+'s'] || []).map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                    ${options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
                 </select>`;
             container.appendChild(div);
         });
@@ -640,7 +662,7 @@
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v87_loopfix', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v88_context', JSON.stringify(appData)); }
     function updateUI() { 
         document.getElementById('student-title').innerText = appData.textTitle || "Loading..."; 
         document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
@@ -764,7 +786,7 @@
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v87_loopfix'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v88_context'); location.reload(); } }
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
