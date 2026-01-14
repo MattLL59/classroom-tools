@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v76 (L1 Simplified)</title>
+    <title>Tone & Structure Architect v77 (L1 Auto-Pilot)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -141,8 +141,6 @@
         .ws-checkbox { transform: scale(1.3); margin-right: 5px; }
         
         .hard-reset-btn { background: #e74c3c; color: white; border: none; padding: 5px 8px; border-radius: 5px; font-size: 0.7rem; cursor: pointer; }
-        
-        /* FILTER BAR */
         .filter-bar { display: flex; gap: 5px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
         .filter-btn { padding: 8px 12px; border: 1px solid #ccc; background: var(--card); color: var(--text); border-radius: 20px; cursor: pointer; font-size: 0.8rem; }
         .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
@@ -151,7 +149,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v76</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v77</h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn admin-only" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
             <button id="reset-btn" class="hard-reset-btn admin-only" onclick="hardReset()">Reset</button>
@@ -175,13 +173,11 @@
             
             <div id="lab-content">
                 <div class="instruction">Step 1: Choose Evidence</div>
-                
                 <div class="filter-bar" id="main-filter-bar">
                     <button class="filter-btn active" onclick="filterGrid('all', this)">All</button>
                     <button class="filter-btn" onclick="filterGrid('language', this)">Tone/Lang</button>
                     <button class="filter-btn" onclick="filterGrid('structure', this)">Structure</button>
                 </div>
-
                 <div id="dynamic-question-display" class="dynamic-question">Select Evidence</div>
                 <div class="grid" id="grid-main"></div>
             </div>
@@ -367,12 +363,12 @@
             document.getElementById('student-banner').style.display='block';
             document.getElementById('student-title').innerText = appData.textTitle;
             updateUI(); 
-            loadStageSelect();
-            renderBuilderDropdowns();
+            // Trigger L1 specific UI adjustments
+            changeLevel(); 
             return;
         }
-        let local = localStorage.getItem('tsa_v76_l1fix');
-        if(!local) local = localStorage.getItem('tsa_v75_qfix');
+        let local = localStorage.getItem('tsa_v77_autopilot');
+        if(!local) local = localStorage.getItem('tsa_v76_l1fix');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
         // SELF HEALING
@@ -382,9 +378,8 @@
         if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
         if(!appData.sentenceConfigs) appData.sentenceConfigs = defaultData.sentenceConfigs;
 
-        loadStageSelect();
-        renderBuilderDropdowns();
         updateUI();
+        changeLevel(); // Ensures L1 logic runs on start
     }
 
     function switchHub(hubId) {
@@ -422,7 +417,7 @@
         const filterBar = document.getElementById('main-filter-bar');
         if (state.level === 1) {
             filterBar.style.display = 'none';
-            filterGrid('all', document.querySelector('.filter-btn')); // Force ALL to ensure quotes are visible
+            state.filter = 'all'; // Force ALL
         } else {
             filterBar.style.display = 'flex';
         }
@@ -446,7 +441,7 @@
             btn.onclick = () => { 
                 if(o.correct) { 
                     sentenceSlots.quote=`"${item.original}"`; 
-                    loadLensChoice();
+                    loadLensChoice(); // Takes us to next step (Auto or Manual)
                 } else alert("Try again!");
             };
             document.getElementById('grid-decoder').appendChild(btn);
@@ -454,6 +449,22 @@
     }
 
     function loadLensChoice() {
+        // --- AUTO-PILOT FOR LEVEL 1 ---
+        if (state.level === 1) {
+            // Check what data exists for this item at Level 1 and route automatically
+            const item = appData.items[state.currentIdx];
+            const l1 = item.level1 || {};
+            
+            // Prioritize Structure if it is a structure item, otherwise Tone, then Language
+            if (item.type === 'structure' && l1.structure && l1.structure.correct) return loadFinalAnalysis('structure');
+            if (l1.tone && l1.tone.correct) return loadFinalAnalysis('tone');
+            if (l1.language && l1.language.correct) return loadFinalAnalysis('language');
+            
+            // Fallback: Just load tone if nothing specific found, or show empty
+            return loadFinalAnalysis('tone');
+        }
+        // ------------------------------
+
         const lab = document.getElementById('lab-content');
         lab.innerHTML = `<div class="instruction">Step 3: Choose Lens</div>
             <div class="grid">
@@ -466,7 +477,12 @@
     function loadFinalAnalysis(lens) {
         const item = appData.items[state.currentIdx];
         const lvlData = item[`level${state.level}`];
-        if (!lvlData || !lvlData[lens]) { alert("No data for this level/lens."); return loadStageSelect(); }
+        // If data missing, try to fail gracefully or show empty
+        if (!lvlData || !lvlData[lens]) { 
+            const lab = document.getElementById('lab-content');
+            lab.innerHTML = `<div class="instruction">No data for Level ${state.level} (${lens})</div><button class="btn btn-warning" onclick="loadStageSelect()">Back</button>`;
+            return; 
+        }
         
         const data = lvlData[lens];
         const lab = document.getElementById('lab-content');
@@ -580,12 +596,12 @@
     function requestAdminAccess() { if(prompt("Password:") === appData.adminPassword) openAdmin(); }
     function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v76_l1fix', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v77_autopilot', JSON.stringify(appData)); }
     function updateUI() { 
         document.getElementById('student-title').innerText = appData.textTitle || "Loading..."; 
         document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
         document.getElementById('q-display').innerText = appData.question || "...";
-        loadStageSelect(); 
+        // Do not force loadStageSelect here as it might reset user progress mid-flow if called by updateGlobal
     }
 
     // RENDER FUNCTIONS FOR ADMIN
@@ -686,19 +702,11 @@
     // EXPORT LOGIC FOR STUDENT APP
     function downloadStudentApp() {
         const clone = JSON.parse(JSON.stringify(appData));
-        
-        // Remove Admin Password for Security
         delete clone.adminPassword;
 
         let html = document.documentElement.outerHTML;
-        
-        // 1. Inject Data: Find the data-script ID and replace it
-        // We use regex to safely find the script tag content
         const regex = /<script id="data-script">([\s\S]*?)<\/script>/;
-        // Simpler replacement strategy: Target the const definition directly
         html = html.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(clone)};`);
-
-        // 2. Inject CSS Lock to hide Admin UI immediately
         const styleInjection = `<style> .admin-only, #admin-modal, #admin-btn, #reset-btn { display: none !important; } </style>`;
         html = html.replace('</head>', `${styleInjection}\n</head>`);
 
@@ -714,36 +722,7 @@
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    
-    function downloadWorksheetDoc() {
-        const mode = document.getElementById('ws-print-mode').value;
-        let evidenceList = []; let meaningList = [];
-        const printItems = appData.items.filter(i => i.includeInWS);
-        if(printItems.length === 0) { alert("No items selected for worksheet. Check 'WS' in settings."); return; }
-        printItems.forEach(i => { evidenceList.push(i.type==='structure' ? '🏗️ '+i.label : '"'+i.original+'"'); meaningList.push(i.type==='structure' ? i.detail : i.translation); });
-        meaningList.sort(() => Math.random() - 0.5);
-        let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:'Calibri',sans-serif;} table{width:100%;border-collapse:collapse;margin-bottom:20px;} td,th{border:1px solid #999;padding:8px;text-align:left;} th{background-color:#eee;} .box-row{height:30px;}</style></head><body><h1>Worksheet: ${appData.textTitle}</h1><p><strong>Question:</strong> ${appData.question}</p><hr><h2>Task 1: Evidence Match-Up</h2><table><tr><th>Evidence</th><th>Meaning (Jumbled)</th></tr>${evidenceList.map((ev, i) => `<tr><td>${ev}</td><td>${meaningList[i]}</td></tr>`).join('')}</table><br><h2>Task 2: Analysis</h2>`;
-        printItems.forEach((i, idx) => {
-            let levelHtml = "";
-            const showL1 = (mode === 'all' && appData.worksheetOptions?.lvl1) || mode === '1';
-            const showL2 = (mode === 'all' && appData.worksheetOptions?.lvl2) || mode === '2';
-            const showL3 = (mode === 'all' && appData.worksheetOptions?.lvl3) || mode === '3';
-            
-            const p1 = (i.level1 && i.level1.tone && i.level1.tone.prompt) ? i.level1.tone.prompt : "Tone?";
-            const p2 = (i.level2 && i.level2.tone && i.level2.tone.prompt) ? i.level2.tone.prompt : "Implication?";
-            const p3 = (i.level3 && i.level3.tone && i.level3.tone.prompt) ? i.level3.tone.prompt : "Effect?";
-
-            if(showL1 && i.level1) levelHtml += `<p>Level 1: ${p1}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-            if(showL2 && i.level2) levelHtml += `<p>Level 2: ${p2}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-            if(showL3 && i.level3) levelHtml += `<p>Level 3: ${p3}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-            if(levelHtml) { html += `<div style="border:1px solid #333;padding:10px;margin-bottom:15px;"><p><strong>${idx+1}. ${i.type==='structure'?i.label:'"'+i.original+'"'}</strong></p>${levelHtml}</div>`; if(i.pageBreak) html += `<br style="page-break-after:always;">`; }
-        });
-        html += "</body></html>";
-        const blob = new Blob([html], {type:'application/msword'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'Worksheet.doc'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v76_l1fix'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v77_autopilot'); location.reload(); } }
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
