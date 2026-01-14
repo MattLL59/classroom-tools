@@ -2,90 +2,769 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Advanced Data Recovery</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tone & Structure Architect v84 (Zero-Data Fix)</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 40px; background: #f4f6f7; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.1); max-width: 700px; margin: 0 auto; text-align: center; }
-        h1 { color: #2c3e50; margin-top: 0; }
-        .version-row { 
+        /* --- CSS VARIABLES --- */
+        :root {
+            --primary: #009688; 
+            --accent: #ff9800; 
+            --bg: #f0f2f5;
+            --card: #ffffff;
+            --text: #37474f;
+            --tone-col: #9c27b0;
+            --struct-col: #2196f3;
+            --lang-col: #4caf50;
+            --nav-bg: #ffffff;
+        }
+
+        body.theme-dyslexia { --bg: #fdf5e6; --text: #222; --card: #fffcf5; font-family: 'Comic Sans MS', 'Verdana', sans-serif; }
+        body.theme-contrast { --bg: #000; --text: #ffff00; --card: #222; --primary: #ffff00; --accent: #00ffff; --nav-bg: #000; }
+        body.theme-magenta { --bg: #b30089; --text: #ffffff; --card: #800062; --primary: #fff; --accent: #ffeb3b; --nav-bg: #800062; }
+
+        body { 
+            font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: var(--text); 
+            margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        /* HEADER */
+        header { 
             display: flex; justify-content: space-between; align-items: center; 
-            background: #f8f9fa; border: 1px solid #ddd; padding: 15px; 
-            margin-bottom: 10px; border-radius: 8px; text-align: left; 
+            padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 100; flex-shrink: 0;
         }
-        .version-info { flex-grow: 1; }
-        .version-name { font-weight: bold; color: #2980b9; font-size: 1.1rem; }
-        .version-details { font-size: 0.85rem; color: #7f8c8d; }
-        .btn { 
-            background: #27ae60; color: white; border: none; padding: 10px 20px; 
-            border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; 
+        h1 { margin: 0; font-size: 1.1rem; color: var(--primary); display:flex; align-items:center; gap:5px; }
+
+        #student-banner {
+            display: none; width: 100%; background: var(--accent); color: white; 
+            padding: 5px; text-align: center; font-weight: bold; font-size: 0.85rem; flex-shrink:0;
         }
-        .btn:hover { transform: scale(1.05); background: #2ecc71; }
-        .btn-delete { background: #c0392b; margin-left: 10px; }
-        .empty-msg { color: #e74c3c; font-style: italic; margin-top: 20px; }
+
+        .main-viewport { flex-grow: 1; overflow-y: auto; padding: 15px; padding-bottom: 80px; }
+
+        /* NAV */
+        nav.bottom-nav {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            height: 65px; background: var(--nav-bg);
+            display: flex; justify-content: space-around; align-items: center;
+            border-top: 1px solid #ddd; box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+            z-index: 900;
+        }
+        .nav-item {
+            flex: 1; display: flex; flex-direction: column; align-items: center;
+            color: #888; font-size: 0.75rem; cursor: pointer; border: none; background: none;
+        }
+        .nav-item i { font-size: 1.3rem; margin-bottom: 3px; }
+        .nav-item.active { color: var(--primary); font-weight: bold; }
+
+        .hub { display: none; }
+        .hub.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        @media(min-width: 600px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+        .card { 
+            background: var(--card); padding: 20px; border-radius: 12px; border: 2px solid #ddd;
+            text-align: center; font-size: 1.1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            color: var(--text); cursor: pointer; transition: transform 0.1s;
+        }
+        .card:hover { transform: scale(1.02); border-color: var(--primary); }
+        .card-tone { border-left: 10px solid var(--tone-col); }
+        .card-struct { border-left: 10px solid var(--struct-col); text-align: left; }
+        .card-lang { border-left: 10px solid var(--lang-col); }
+
+        /* BUILDER */
+        .bank-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+        .bank-row { text-align: left; }
+        .bank-label { font-size: 0.7rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-left: 5px; }
+        
+        select.bank-select { 
+            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ccc;
+            background: var(--card); color: var(--text); font-size: 1rem;
+        }
+
+        #sentence-stage { 
+            width: 100%; padding: 15px; background: var(--card); border: 2px dashed var(--primary); 
+            border-radius: 10px; margin: 15px 0; font-size: 1.1rem; min-height: 50px;
+            box-sizing: border-box; color: var(--text);
+        }
+
+        #answer-area { 
+            width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; 
+            border-radius: 8px; background: var(--card); color: var(--text); font-family: inherit;
+            margin-bottom: 10px; box-sizing: border-box;
+        }
+
+        .btn { padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; }
+        .btn-primary { background: var(--primary); width: 100%; }
+        .btn-warning { background: var(--accent); }
+        .btn-doc { background: #2b5797; }
+        
+        .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
+        .admin-only { display: block; } 
+        
+        /* MODALS */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 200000; justify-content: center; align-items: center; }
+        .modal-content { 
+            background: var(--card); color: var(--text); width: 95%; max-width: 800px; max-height: 90vh; 
+            border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
+        }
+        .modal-header { padding: 15px; background: rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+        .modal-body { padding: 20px; overflow-y: auto; text-align: left; }
+
+        .editor-section { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 5px; background: rgba(0,0,0,0.02); }
+        .admin-input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 5px; }
+        .analysis-details { margin-top: 10px; padding: 15px; border: 2px solid #9c27b0; border-radius: 5px; display:none; }
+        .lens-group { display: none; } .lens-group.active { display: block; }
+        .level-block { margin-bottom: 15px; border-bottom: 1px dashed #ccc; padding-bottom: 15px; }
+        .level-header { font-weight:bold; color:var(--primary); margin-bottom:5px; display:block;}
+
+        .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .theme-opt { padding: 15px; text-align: center; border: 2px solid #ddd; border-radius: 8px; cursor: pointer; font-weight: bold; color:#333; }
+
+        .list-container { margin-bottom:10px; }
+        .list-item { display: flex; align-items:center; margin-bottom:5px; gap:5px; }
+        .list-input { flex-grow:1; padding:5px; border:1px solid #ccc; border-radius:4px; }
+
+        /* TABS */
+        .admin-tab-bar { display: flex; gap:5px; margin-bottom:10px; }
+        .admin-tab { flex:1; padding:8px; border:1px solid #ccc; background:#eee; cursor:pointer; font-weight:bold; border-radius:4px; text-align:center; color:#333; }
+        .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
+
+        .btn-edit-item { background: #ff9800; color: white; padding: 5px 10px; border-radius: 4px; font-weight: bold; border:none; cursor: pointer; }
+
+        #phrasing-overlay { z-index: 200001; background: rgba(0,0,0,0.9); }
+        .phrase-option { 
+            background: var(--card); color: var(--text); padding: 15px; margin-bottom: 10px; 
+            border-radius: 8px; cursor: pointer; font-size: 1.1rem; border: 1px solid #ddd; 
+        }
+        .ws-checkbox { transform: scale(1.3); margin-right: 5px; }
+        
+        .hard-reset-btn { background: #e74c3c; color: white; border: none; padding: 5px 8px; border-radius: 5px; font-size: 0.7rem; cursor: pointer; }
+        .filter-bar { display: flex; gap: 5px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
+        .filter-btn { padding: 8px 12px; border: 1px solid #ccc; background: var(--card); color: var(--text); border-radius: 20px; cursor: pointer; font-size: 0.8rem; }
+        .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
     </style>
 </head>
 <body>
-    <div class="box">
-        <h1>💾 Save Finder</h1>
-        <p>I found the following saved data in this browser:</p>
-        <div id="list-area">Scanning...</div>
+
+    <header>
+        <h1>
+            <button onclick="hardReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
+            <i class="fas fa-cubes"></i> Tone & Structure v84
+        </h1>
+        <div style="display:flex; gap:10px;">
+            <button class="admin-btn admin-only" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
+            <select id="level-select" onchange="changeLevel()" style="padding:4px; border-radius:4px;">
+                <option value="1">Lvl 1</option><option value="2">L2</option><option value="3">L3</option>
+            </select>
+            <button id="admin-btn" class="admin-btn admin-only" onclick="requestAdminAccess()"><i class="fas fa-cog"></i></button>
+        </div>
+    </header>
+
+    <div id="student-banner">
+        🎓 Student Mode: <span id="student-title"></span>
     </div>
 
-    <script>
-        var knownKeys = [
-            'eval_arch_v81_critical', 'eval_arch_v82_full', 'eval_arch_v83_full',
-            'eval_arch_v84_specifics', 'eval_arch_v85_sandbox', 'eval_arch_v86_stable',
-            'eval_arch_v87_revised', 'eval_arch_v88_review', 'eval_arch_v89_review',
-            'eval_arch_v91_stable', 'eval_arch_v92_reset', 'eval_arch_v93_complete',
-            'eval_arch_v94_complete', 'eval_arch_v95_levels', 'eval_arch_v96_modes',
-            'eval_arch_v97_banks', 'eval_arch_v97_full', 'eval_arch_v99_cleaner'
-        ];
+    <div class="main-viewport">
+        <div id="hub-lab" class="hub active">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:0.9rem;">
+                <span><strong>Text:</strong> <span id="text-display">Loading...</span></span>
+                <span><strong>Q:</strong> <span id="q-display">Loading...</span></span>
+            </div>
+            
+            <div id="lab-content">
+                <div class="instruction">Step 1: Choose Evidence</div>
+                <div class="filter-bar" id="main-filter-bar">
+                    <button class="filter-btn active" onclick="filterGrid('all', this)">All</button>
+                    <button class="filter-btn" onclick="filterGrid('language', this)">Tone/Lang</button>
+                    <button class="filter-btn" onclick="filterGrid('structure', this)">Structure</button>
+                </div>
+                <div id="dynamic-question-display" class="dynamic-question">Select Evidence</div>
+                <div class="grid" id="grid-main"></div>
+            </div>
+        </div>
 
-        window.onload = function() {
-            var container = document.getElementById('list-area');
-            container.innerHTML = "";
-            var foundAny = false;
+        <div id="hub-writing" class="hub">
+            <div class="instruction">Sentence Construction</div>
+            <div class="bank-list" id="dynamic-builder-controls"></div>
+            <div class="instruction">Current Construction:</div>
+            <div id="sentence-stage">Start picking words in the Lab...</div>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <button class="btn btn-warning" style="flex:1" onclick="undoLast()">Undo</button>
+                <button class="btn btn-primary" style="flex:2" onclick="commitSentence()">Add to Answer</button>
+            </div>
+            <hr style="opacity:0.2;">
+            <textarea id="answer-area" placeholder="Your full answer will appear here..."></textarea>
+            <div style="display:flex; gap:5px;">
+                <button class="btn btn-doc" style="flex:1" onclick="downloadDoc()">Download .doc</button>
+                <button class="btn btn-warning" style="flex:0 0 auto; background:#e74c3c;" onclick="clearEssay()">Clear</button>
+            </div>
+        </div>
+    </div>
 
-            knownKeys.forEach(key => {
-                var raw = localStorage.getItem(key);
-                if(raw) {
-                    foundAny = true;
-                    try {
-                        var data = JSON.parse(raw);
-                        var qCount = data.content_pairs ? data.content_pairs.length : 0;
-                        var topic = data.topic || "Untitled Topic";
-                        
-                        var div = document.createElement('div');
-                        div.className = 'version-row';
-                        div.innerHTML = `
-                            <div class="version-info">
-                                <div class="version-name">${key}</div>
-                                <div class="version-details">Questions: ${qCount} | Topic: "${topic}"</div>
-                            </div>
-                            <button class="btn" onclick="downloadKey('${key}')">Download This</button>
-                        `;
-                        container.appendChild(div);
-                    } catch(e) { console.log("Skipping corrupted key", key); }
-                }
-            });
+    <nav class="bottom-nav">
+        <button id="nav-lab" class="nav-item active" onclick="switchHub('lab')"><i class="fas fa-vial"></i><span>Evidence Lab</span></button>
+        <button id="nav-writing" class="nav-item" onclick="switchHub('writing')"><i class="fas fa-pen-fancy"></i><span>Writing Desk</span></button>
+    </nav>
 
-            if(!foundAny) container.innerHTML = "<p class='empty-msg'>No saved data found in this browser.</p>";
-        };
+    <div id="admin-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                Settings 
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <label style="font-size:0.9rem; display:flex; align-items:center; cursor:pointer; background:#fff; padding:5px 10px; border-radius:10px; border:1px solid #ccc;">
+                        <input type="checkbox" id="auto-login-check" onchange="toggleAutoLogin(this.checked)" style="margin-right:5px;"> 🔓 Keep Unlocked
+                    </label>
+                    <button onclick="closeAdmin()" style="border:none;background:none;font-size:2rem; cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="hardReset()">⚠️ Factory Reset (Use if corrupted)</button>
 
-        function downloadKey(key) {
-            var raw = localStorage.getItem(key);
-            if(!raw) return;
-            // Name the file based on the key so you know which is which
-            var filename = key + ".json";
-            var blob = new Blob([raw], {type: "application/json"});
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement("a");
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+                <div class="editor-section">
+                    <h3>Basic Info</h3>
+                    <label>Title:</label><input id="edit-title" class="admin-input" oninput="updateGlobal('textTitle', this.value)">
+                    <label>Question:</label><input id="edit-question" class="admin-input" oninput="updateGlobal('question', this.value)">
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid var(--accent);">
+                    <h3>⚙️ Sentence Structure (By Level)</h3>
+                    <div class="admin-tab-bar">
+                        <div id="cfg-tab-1" class="admin-tab active" onclick="switchAdminConfigLevel(1)">Level 1</div>
+                        <div id="cfg-tab-2" class="admin-tab" onclick="switchAdminConfigLevel(2)">Level 2</div>
+                        <div id="cfg-tab-3" class="admin-tab" onclick="switchAdminConfigLevel(3)">Level 3</div>
+                    </div>
+                    <div style="display:flex; gap:5px; margin-bottom:10px; flex-wrap:wrap;">
+                        <select class="admin-input" id="cfg-slot1" onchange="saveStructureConfig()" style="width:auto;"></select>
+                        <select class="admin-input" id="cfg-slot2" onchange="saveStructureConfig()" style="width:auto;"></select>
+                        <select class="admin-input" id="cfg-slot3" onchange="saveStructureConfig()" style="width:auto;"></select>
+                        <select class="admin-input" id="cfg-slot4" onchange="saveStructureConfig()" style="width:auto;"></select>
+                        <select class="admin-input" id="cfg-slot5" onchange="saveStructureConfig()" style="width:auto;"></select>
+                        <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()" style="width:auto;"></select>
+                    </div>
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid #9c27b0;">
+                    <h3>🗣️ Analysis Phrasing</h3>
+                    <strong>Tone:</strong><div id="list-tmpl-tone" class="list-container"></div><button class="btn btn-add" onclick="addTemplate('tone')">+ Add</button>
+                    <strong style="display:block; margin-top:10px;">Structure:</strong><div id="list-tmpl-structure" class="list-container"></div><button class="btn btn-add" onclick="addTemplate('structure')">+ Add</button>
+                    <strong style="display:block; margin-top:10px;">Language:</strong><div id="list-tmpl-language" class="list-container"></div><button class="btn btn-add" onclick="addTemplate('language')">+ Add</button>
+                </div>
+                
+                <div class="editor-section">
+                    <h3>Analysis Points</h3>
+                    <div id="items-container"></div>
+                    <button class="btn btn-add" style="background:#2ecc71; margin-top:10px; padding:15px;" onclick="addNewItem()">+ Add Analysis Point</button>
+                </div>
+                
+                <div class="editor-section">
+                    <h3>Banks</h3>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        <button class="btn btn-doc" onclick="editBank('markers')">Markers</button>
+                        <button class="btn btn-doc" onclick="editBank('starters')">Starters</button>
+                        <button class="btn btn-doc" onclick="editBank('methods')">Methods</button>
+                        <button class="btn btn-doc" onclick="editBank('points')">Points</button>
+                        <button class="btn btn-doc" onclick="editBank('links')">Links</button>
+                    </div>
+                    <div id="bank-editor-area" style="margin-top:10px; padding:10px; border:1px solid #ccc; display:none;">
+                        <h4 id="bank-editor-title">Editing...</h4>
+                        <div id="bank-list" class="list-container"></div>
+                        <button class="btn btn-add" style="background:#2ecc71;" onclick="addBankItem()">+ Add Item</button>
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <h3>Data & Student App</h3>
+                    <div style="padding:10px; border:2px dashed var(--primary); border-radius:5px; background:#e3f2fd; text-align:left;">
+                        <button class="btn btn-primary" style="width:100%; margin-top:5px; padding:15px; font-size:1.1rem;" onclick="downloadStudentApp()">📦 Download Student App (HTML)</button>
+                    </div>
+                    <div style="display:flex; gap:5px; margin-top:10px;">
+                        <button class="btn btn-doc" onclick="downloadJSON()">Save JSON</button>
+                        <button class="btn btn-doc" onclick="document.getElementById('file-up').click()">Load JSON</button>
+                        <input type="file" id="file-up" style="display:none;" onchange="uploadJSON(this)">
+                    </div>
+                    <hr>
+                    <div style="display:flex; align-items:center; gap:5px; margin-top:10px;">
+                        <select id="ws-print-mode" class="admin-input" style="width:auto; flex-grow:1;">
+                            <option value="all">Merged</option>
+                            <option value="1">L1</option><option value="2">L2</option><option value="3">L3</option>
+                        </select>
+                        <button class="btn btn-accent" onclick="downloadWorksheetDoc()">📝 Worksheet</button>
+                    </div>
+                    <div style="margin-top:5px; display:flex; gap:10px;">
+                        <label><input type="checkbox" id="ws-lvl1" checked onchange="saveWSOptions()"> L1</label>
+                        <label><input type="checkbox" id="ws-lvl2" checked onchange="saveWSOptions()"> L2</label>
+                        <label><input type="checkbox" id="ws-lvl3" checked onchange="saveWSOptions()"> L3</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="theme-modal" class="modal">
+        <div class="modal-content" style="max-width:300px;">
+            <div class="modal-header">Themes <button onclick="document.getElementById('theme-modal').style.display='none'">&times;</button></div>
+            <div class="modal-body">
+                <div class="theme-grid">
+                    <div class="theme-opt" style="background:#f0f2f5;" onclick="setTheme('default')">Default</div>
+                    <div class="theme-opt" style="background:#fdf5e6;" onclick="setTheme('dyslexia')">Cream</div>
+                    <div class="theme-opt" style="background:#000; color:#ff0;" onclick="setTheme('contrast')">High Vis</div>
+                    <div class="theme-opt" style="background:#b30089; color:#fff;" onclick="setTheme('magenta')">Magenta</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="phrasing-overlay" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Select Phrasing</div>
+            <div class="modal-body" id="phrase-options"></div>
+        </div>
+    </div>
+
+    <div id="overlay-msg" onclick="this.style.display='none'">
+        <i id="overlay-icon" class="fas fa-check-circle" style="font-size:4rem; margin-bottom:20px;"></i>
+        <h2 id="overlay-text">Correct!</h2>
+    </div>
+
+<script id="data-script">
+    /* DATA_START */ const teacherConfig = null; /* DATA_END */
+
+    const wordMorphology = { "admiring":{adj:"admiring",noun:"admiration"}, "angry":{adj:"angry",noun:"anger"}, "chaotic":{adj:"chaotic",noun:"chaos"} };
+
+    const defaultData = {
+        textTitle: "The Electric Telegraph", question: "How is impact conveyed?", adminPassword: "1234",
+        sentenceConfigs: {
+            1: ['starter', 'quote', 'analysis', 'none', 'none', 'none'],
+            2: ['starter', 'quote', 'method', 'analysis', 'none', 'none'],
+            3: ['marker', 'starter', 'quote', 'method', 'point', 'analysis']
+        },
+        worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
+        analysisTemplates: { tone: ["creates a {adj} tone", "evokes {noun}"], structure: ["highlights {noun}"], language: ["suggests {noun}"] },
+        markers: ["However,", "Furthermore,"], starters: ["The writer implies", "This suggests"], points: ["a sense of danger"], methods: ["metaphor", "simile"], links: ["This reinforces"],
+        items: [{ id: "q1", type: "quote", original: "Example Quote", translation: "Meaning", distractors: ["Wrong 1"], custom_q: "Analyze this", includeInWS: true, pageBreak: false, level1: { tone: { prompt:"Tone?", correct:"Happy", options:["Happy","Sad"] } }, level2:{tone:{prompt:"Deep Tone?", correct:"Joy", options:["Joy","Anger"]}}, level3:{tone:{prompt:"Effect?", correct:"Elation", options:["Elation","Despair"]}} }]
+    };
+
+    let appData = JSON.parse(JSON.stringify(defaultData));
+    let state = { level: 1, currentIdx: -1, filter: 'all' };
+    let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
+    let currentEditingBank = '';
+    let adminConfigLevel = 1;
+
+    function init() {
+        if (teacherConfig && typeof teacherConfig === 'object') {
+            appData = teacherConfig;
+            document.getElementById('student-banner').style.display='block';
+            document.getElementById('student-title').innerText = appData.textTitle;
+            updateUI(); 
+            changeLevel(); 
+            return;
         }
-    </script>
+        let local = localStorage.getItem('tsa_v84_zero');
+        if(!local) local = localStorage.getItem('tsa_v83_safemode');
+        if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
+        
+        ensureDataIntegrity();
+
+        updateUI();
+        changeLevel(); 
+    }
+    
+    function ensureDataIntegrity() {
+        if (!appData.sentenceConfigs) {
+            const old = appData.sentenceOrder || defaultData.sentenceConfigs[1];
+            appData.sentenceConfigs = { 1: old, 2: old, 3: old };
+        }
+        if (!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
+        ['markers', 'starters', 'methods', 'points', 'links'].forEach(k => { if (!appData[k]) appData[k] = []; });
+        if (!appData.worksheetOptions) appData.worksheetOptions = { lvl1:true, lvl2:true, lvl3:true };
+        
+        // CRITICAL ZERO-DATA FIX
+        if (!appData.items || !Array.isArray(appData.items) || appData.items.length === 0) {
+            appData.items = JSON.parse(JSON.stringify(defaultData.items));
+        }
+        
+        // Ensure properties exist
+        appData.items.forEach(i => { 
+            if(i.includeInWS===undefined) i.includeInWS=true; 
+            if(i.pageBreak===undefined) i.pageBreak=false; 
+        });
+    }
+
+    function switchHub(hubId) {
+        document.querySelectorAll('.hub').forEach(h => h.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById('hub-' + hubId).classList.add('active');
+        document.getElementById('nav-' + hubId).classList.add('active');
+    }
+
+    function loadStageSelect() {
+        const grid = document.getElementById('grid-main');
+        grid.innerHTML = '';
+        
+        // If empty (should be fixed by integrity check, but double safety)
+        if(!appData.items || appData.items.length === 0) {
+            grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; color:#999;">No Evidence Found - Check Settings</div>';
+            return;
+        }
+
+        let visibleCount = 0;
+        appData.items.forEach((item, i) => {
+            if(state.level !== 1 && state.filter !== 'all' && item.type !== state.filter) return;
+            
+            visibleCount++;
+            const div = document.createElement('div');
+            div.className = `card card-${item.type || 'tone'}`;
+            div.innerHTML = `<strong>"${item.original}"</strong><br><small>${item.custom_q || 'Analyze'}</small>`;
+            div.onclick = () => startAnalysis(i);
+            grid.appendChild(div);
+        });
+        
+        if(visibleCount === 0) {
+             grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; color:#999;">No items match this filter.</div>';
+        }
+    }
+    
+    function filterGrid(type, btn) {
+        state.filter = type;
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadStageSelect();
+    }
+
+    function changeLevel() { 
+        state.level = parseInt(document.getElementById('level-select').value); 
+        
+        const filterBar = document.getElementById('main-filter-bar');
+        if (state.level === 1) {
+            filterBar.style.display = 'none';
+            state.filter = 'all'; 
+        } else {
+            filterBar.style.display = 'flex';
+        }
+
+        loadStageSelect();
+        renderBuilderDropdowns(); 
+    }
+
+    function startAnalysis(idx) {
+        state.currentIdx = idx;
+        const item = appData.items[idx];
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">Step 2: Meaning of "${item.original}"</div><div class="grid" id="grid-decoder"></div>`;
+        
+        let opts = [{txt: item.translation, correct: true}, ...item.distractors.map(d => ({txt:d, correct:false}))];
+        opts.sort(() => Math.random() - 0.5).forEach(o => {
+            const btn = document.createElement('div');
+            btn.className = 'card';
+            btn.innerText = o.txt;
+            btn.onclick = () => { 
+                if(o.correct) { 
+                    sentenceSlots.quote=`"${item.original}"`; 
+                    
+                    if (state.level === 1) {
+                        alert("Correct! Now build the sentence in the Writing Desk.");
+                        switchHub('writing');
+                        rebuildSentence(); 
+                        return; 
+                    }
+
+                    loadLensChoice(); 
+                } else alert("Try again!");
+            };
+            document.getElementById('grid-decoder').appendChild(btn);
+        });
+    }
+
+    function loadLensChoice() {
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">Step 3: Choose Lens</div>
+            <div class="grid">
+                <div class="card card-tone" onclick="loadFinalAnalysis('tone')">🎭 Tone</div>
+                <div class="card card-struct" onclick="loadFinalAnalysis('structure')">🏗️ Structure</div>
+                <div class="card card-lang" onclick="loadFinalAnalysis('language')">📖 Language</div>
+            </div>`;
+    }
+
+    function loadFinalAnalysis(lens) {
+        const item = appData.items[state.currentIdx];
+        const lvlData = item[`level${state.level}`];
+        if (!lvlData || !lvlData[lens]) { 
+            const lab = document.getElementById('lab-content');
+            lab.innerHTML = `<div class="instruction">No data for Level ${state.level} (${lens})</div><button class="btn btn-warning" onclick="loadStageSelect()">Back</button>`;
+            return; 
+        }
+        
+        const data = lvlData[lens];
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">${data.prompt || 'Analyze'}</div><div class="grid" id="grid-analysis"></div>`;
+        
+        let rawOpts = data.options ? [...data.options] : [];
+        if(data.correct && !rawOpts.includes(data.correct)) rawOpts.push(data.correct);
+
+        rawOpts.forEach(o => {
+            const btn = document.createElement('div');
+            btn.className = `card card-${lens}`;
+            btn.innerText = o;
+            btn.onclick = () => { 
+                if(o === data.correct) showPhrasingChoices(lens, o); 
+                else alert("Try again!");
+            };
+            document.getElementById('grid-analysis').appendChild(btn);
+        });
+    }
+
+    function showPhrasingChoices(lens, word) {
+        const modal = document.getElementById('phrasing-overlay');
+        const container = document.getElementById('phrase-options');
+        modal.style.display = 'flex';
+        container.innerHTML = '';
+
+        let templates = appData.analysisTemplates[lens] || ["creates a {adj} tone"];
+        templates.forEach(tmpl => {
+            let adj = wordMorphology[word.toLowerCase()]?.adj || word;
+            let noun = wordMorphology[word.toLowerCase()]?.noun || word;
+            let text = tmpl.replace("{adj}", adj).replace("{noun}", noun).replace("{word}", word);
+            
+            const div = document.createElement('div');
+            div.className = 'phrase-option';
+            div.innerText = text;
+            div.onclick = () => {
+                sentenceSlots.analysis = text;
+                modal.style.display = 'none';
+                rebuildSentence();
+                alert("Sentence Built! Check the Writing Desk.");
+                switchHub('writing');
+                loadStageSelect();
+            };
+            container.appendChild(div);
+        });
+    }
+
+    function renderBuilderDropdowns() {
+        const container = document.getElementById('dynamic-builder-controls');
+        container.innerHTML = '';
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        
+        currentConfig.forEach(type => {
+            if (['quote', 'analysis', 'none'].includes(type)) return;
+            const div = document.createElement('div');
+            div.className = 'bank-row';
+            div.innerHTML = `<span class="bank-label">${type}</span>
+                <select class="bank-select" onchange="sentenceSlots['${type}']=this.value; rebuildSentence();">
+                    <option value="">Choose...</option>
+                    ${(appData[type+'s'] || []).map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                </select>`;
+            container.appendChild(div);
+        });
+    }
+
+    function rebuildSentence() {
+        let parts = [];
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        currentConfig.forEach(type => { if(sentenceSlots[type]) parts.push(sentenceSlots[type]); });
+        let str = parts.join(" ");
+        if(str) str = str.charAt(0).toUpperCase() + str.slice(1);
+        document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
+    }
+
+    function commitSentence() {
+        const text = document.getElementById('sentence-stage').innerText;
+        if (text.includes("Start picking")) return;
+        const area = document.getElementById('answer-area');
+        area.value += (area.value ? "\n\n" : "") + text;
+        sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"" };
+        rebuildSentence();
+        renderBuilderDropdowns();
+        switchHub('lab');
+    }
+
+    function undoLast() { sentenceSlots.analysis = ""; rebuildSentence(); }
+    function clearEssay() { if(confirm("Clear?")) document.getElementById('answer-area').value=""; }
+
+    // ADMIN
+    function openAdmin() { 
+        document.getElementById('admin-modal').style.display='flex'; 
+        try {
+            document.getElementById('edit-title').value = appData.textTitle || "";
+            document.getElementById('edit-question').value = appData.question || "";
+            document.getElementById('auto-login-check').checked = (localStorage.getItem('tsa_auto_login') === 'true');
+            initAdminConfig();
+            renderTemplateList('tone','list-tmpl-tone'); 
+            renderTemplateList('structure','list-tmpl-structure'); 
+            renderTemplateList('language','list-tmpl-language'); 
+            renderItems();
+            if(appData.worksheetOptions) {
+                document.getElementById('ws-lvl1').checked = appData.worksheetOptions.lvl1;
+                document.getElementById('ws-lvl2').checked = appData.worksheetOptions.lvl2;
+                document.getElementById('ws-lvl3').checked = appData.worksheetOptions.lvl3;
+            }
+        } catch(e) {
+            console.error(e);
+            alert("Partial Load Error. Use Factory Reset if needed.");
+        }
+    }
+    
+    function requestAdminAccess() {
+        const autoLogin = localStorage.getItem('tsa_auto_login') === 'true';
+        const sessionLogin = sessionStorage.getItem('tsa_session_login') === 'true';
+        if (autoLogin || sessionLogin) openAdmin();
+        else {
+            const p = prompt("Password:");
+            if (p === appData.adminPassword) {
+                sessionStorage.setItem('tsa_session_login', 'true');
+                openAdmin();
+            } else alert("Incorrect");
+        }
+    }
+    
+    function toggleAutoLogin(checked) {
+        if(checked) localStorage.setItem('tsa_auto_login', 'true');
+        else localStorage.removeItem('tsa_auto_login');
+    }
+
+    function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
+    function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
+    function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
+    function saveLocal() { localStorage.setItem('tsa_v84_zero', JSON.stringify(appData)); }
+    function updateUI() { 
+        document.getElementById('student-title').innerText = appData.textTitle || "Loading..."; 
+        document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
+        document.getElementById('q-display').innerText = appData.question || "...";
+    }
+
+    function renderTemplateList(type, divId) {
+        const div = document.getElementById(divId); div.innerHTML = '';
+        if(!appData.analysisTemplates[type]) appData.analysisTemplates[type] = [];
+        appData.analysisTemplates[type].forEach((t, i) => {
+            const row = document.createElement('div'); row.className = 'list-item';
+            row.innerHTML = `<input class="list-input" value="${t.replace(/"/g,'&quot;')}" onchange="updateTemplateItem('${type}',${i},this.value)"><button class="btn btn-danger" onclick="deleteTemplateItem('${type}',${i})">X</button>`;
+            div.appendChild(row);
+        });
+    }
+    function updateTemplateItem(type, i, val) { appData.analysisTemplates[type][i] = val; saveLocal(); }
+    function deleteTemplateItem(type, i) { appData.analysisTemplates[type].splice(i,1); renderTemplateList(type, 'list-tmpl-'+type); saveLocal(); }
+    function addTemplate(type) { if(!appData.analysisTemplates[type]) appData.analysisTemplates[type]=[]; appData.analysisTemplates[type].push("creates a {noun}"); renderTemplateList(type, 'list-tmpl-'+type); saveLocal(); }
+
+    function renderItems() {
+        const con = document.getElementById('items-container'); con.innerHTML = '';
+        if(!appData.items) return;
+        appData.items.forEach((item, i) => {
+            const div = document.createElement('div'); div.className = 'editor-section';
+            div.innerHTML = `
+                <div style="display:flex; justify-content:space-between;"><strong>#${i+1}</strong> 
+                <div>
+                    <label><input type="checkbox" class="ws-checkbox" ${item.includeInWS?'checked':''} onchange="updateItemBool(${i}, 'includeInWS', this.checked)">🖨️ WS</label>
+                    <label style="margin-left:5px;"><input type="checkbox" class="ws-checkbox" ${item.pageBreak?'checked':''} onchange="updateItemBool(${i}, 'pageBreak', this.checked)">✂️ PB</label>
+                    <button class="btn btn-edit-item" onclick="toggleDetails(${i})">Edit</button>
+                </div></div>
+                <input class="admin-input" value="${item.original}" onchange="updateItem(${i},'original',this.value)">
+                <div id="details-${i}" class="analysis-details">
+                    <label>Quote:</label><input class="admin-input" value="${item.original}" onchange="updateItem(${i},'original',this.value)">
+                    <label>Translation:</label><input class="admin-input" value="${item.translation}" onchange="updateItem(${i},'translation',this.value)">
+                    <label>Distractors (comma sep):</label><input class="admin-input" value="${item.distractors.join(',')}" onchange="updateItem(${i},'distractors',this.value.split(','))">
+                    <hr>
+                    <div class="level-block"><span class="level-header">Level 1 Tone</span>
+                    Prompt: <input class="admin-input" value="${item.level1?.tone?.prompt||''}" onchange="updateDeep(${i},'level1','tone','prompt',this.value)">
+                    Correct: <input class="admin-input" value="${item.level1?.tone?.correct||''}" onchange="updateDeep(${i},'level1','tone','correct',this.value)">
+                    Options: <input class="admin-input" value="${item.level1?.tone?.options?.join(',')||''}" onchange="updateDeepOpts(${i},'level1','tone',this.value)">
+                    </div>
+                    <button class="btn btn-danger" style="margin-top:10px;" onclick="delItem(${i})">Delete Item</button>
+                </div>
+            `;
+            con.appendChild(div);
+        });
+    }
+    function toggleDetails(i) { const el=document.getElementById('details-'+i); el.style.display = el.style.display==='block'?'none':'block'; }
+    function updateItem(i,k,v) { appData.items[i][k]=v; saveLocal(); }
+    function updateItemBool(i,k,v) { appData.items[i][k]=v; saveLocal(); }
+    function updateDeep(i,l,t,k,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t][k]=v; saveLocal(); }
+    function updateDeepOpts(i,l,t,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t].options=v.split(','); saveLocal(); }
+    function addNewItem() { appData.items.push({type:"quote", original:"New", translation:"", distractors:[""], level1:{tone:{}}, includeInWS:true}); renderItems(); saveLocal(); }
+    function delItem(i) { appData.items.splice(i,1); renderItems(); saveLocal(); }
+
+    function switchAdminConfigLevel(lvl) {
+        adminConfigLevel = lvl;
+        document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(`cfg-tab-${lvl}`).classList.add('active');
+        initAdminConfig();
+    }
+
+    function initAdminConfig() { 
+        const opts = ['marker', 'starter', 'point', 'method', 'quote', 'analysis', 'link', 'none']; 
+        const currentConfig = appData.sentenceConfigs[adminConfigLevel] || ['none','none','none','none','none','none'];
+        
+        for(let i=0; i<6; i++) { 
+            const sel = document.getElementById(`cfg-slot${i+1}`); 
+            if(!sel) continue; 
+            sel.innerHTML = ''; 
+            opts.forEach(o => sel.add(new Option(o, o))); 
+            sel.value = currentConfig[i] || 'none'; 
+        } 
+    }
+    function saveStructureConfig() { 
+        const newOrder = []; 
+        for(let i=0; i<6; i++) { newOrder.push(document.getElementById(`cfg-slot${i+1}`).value); } 
+        appData.sentenceConfigs[adminConfigLevel] = newOrder; 
+        saveLocal(); 
+        updateUI(); 
+    }
+    function resetSentenceOrder() { if(confirm("Reset Order?")) { appData.sentenceConfigs = {1:['starter','quote','analysis'], 2:['starter','quote','method','analysis'], 3:['marker','starter','quote','method','point','analysis']}; saveLocal(); updateUI(); openAdmin(); } }
+
+    function editBank(type) { currentEditingBank=type; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=type.toUpperCase(); renderBankList(); }
+    function renderBankList() {
+        const list = document.getElementById('bank-list'); list.innerHTML='';
+        (appData[currentEditingBank]||[]).forEach((item,i) => {
+            const row=document.createElement('div'); row.className='list-item';
+            row.innerHTML=`<input class="admin-input" value="${item}" onchange="updateBankItem(${i},this.value)"> <button onclick="delBankItem(${i})" class="btn btn-danger" style="padding:2px 5px;">X</button>`;
+            list.appendChild(row);
+        });
+    }
+    function updateBankItem(i,v) { appData[currentEditingBank][i]=v; saveLocal(); }
+    function delBankItem(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); }
+    function addBankItem() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); }
+
+    function downloadJSON() { const blob = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click(); }
+    function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); ensureDataIntegrity(); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
+    
+    // EXPORT LOGIC
+    function downloadStudentApp() {
+        const clone = JSON.parse(JSON.stringify(appData));
+        delete clone.adminPassword;
+
+        let html = document.documentElement.outerHTML;
+        const regex = /<script id="data-script">([\s\S]*?)<\/script>/;
+        html = html.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(clone)};`);
+        const styleInjection = `<style> .admin-only, #admin-modal, #admin-btn, #reset-btn { display: none !important; } </style>`;
+        html = html.replace('</head>', `${styleInjection}\n</head>`);
+
+        const blob = new Blob([html], {type:'text/html'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'student-lesson.html'; a.click();
+    }
+    
+    function generateQR(url) { 
+        if(url.includes("github.com") && !url.includes(".io")) alert("Warning: Use the GitHub Pages link (username.github.io/...), not the repo link.");
+        document.getElementById('qr-display').innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(url)}" style="border:5px solid white">`; 
+    }
+
+    function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
+    function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
+    function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v84_zero'); location.reload(); } }
+    function saveWSOptions() {
+        appData.worksheetOptions = {
+            lvl1: document.getElementById('ws-lvl1').checked,
+            lvl2: document.getElementById('ws-lvl2').checked,
+            lvl3: document.getElementById('ws-lvl3').checked
+        };
+        saveLocal();
+    }
+
+    init();
+</script>
 </body>
 </html>
