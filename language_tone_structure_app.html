@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v77 (L1 Auto-Pilot)</title>
+    <title>Tone & Structure Architect v78 (Unlock Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -103,9 +103,10 @@
         .btn-doc { background: #2b5797; }
         
         .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
+        .admin-only { display: block; } 
         
-        /* MODALS */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center; }
+        /* MODALS - SUPER HIGH Z-INDEX FIX */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 200000; justify-content: center; align-items: center; }
         .modal-content { 
             background: var(--card); color: var(--text); width: 95%; max-width: 800px; max-height: 90vh; 
             border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; 
@@ -133,7 +134,7 @@
         .admin-tab { flex:1; padding:8px; border:1px solid #ccc; background:#eee; cursor:pointer; font-weight:bold; border-radius:4px; text-align:center; color:#333; }
         .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
 
-        #phrasing-overlay { z-index: 10000; background: rgba(0,0,0,0.9); }
+        #phrasing-overlay { z-index: 200001; background: rgba(0,0,0,0.9); }
         .phrase-option { 
             background: var(--card); color: var(--text); padding: 15px; margin-bottom: 10px; 
             border-radius: 8px; cursor: pointer; font-size: 1.1rem; border: 1px solid #ddd; 
@@ -149,10 +150,12 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v77</h1>
+        <h1>
+            <button onclick="hardReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
+            <i class="fas fa-cubes"></i> Tone & Structure v78
+        </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn admin-only" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
-            <button id="reset-btn" class="hard-reset-btn admin-only" onclick="hardReset()">Reset</button>
             <select id="level-select" onchange="changeLevel()" style="padding:4px; border-radius:4px;">
                 <option value="1">Lvl 1</option><option value="2">L2</option><option value="3">L3</option>
             </select>
@@ -367,8 +370,8 @@
             changeLevel(); 
             return;
         }
-        let local = localStorage.getItem('tsa_v77_autopilot');
-        if(!local) local = localStorage.getItem('tsa_v76_l1fix');
+        let local = localStorage.getItem('tsa_v78_unlock');
+        if(!local) local = localStorage.getItem('tsa_v77_autopilot');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
         // SELF HEALING
@@ -394,7 +397,9 @@
         grid.innerHTML = '';
         if(!appData.items) return;
         appData.items.forEach((item, i) => {
-            if(state.filter !== 'all' && item.type !== state.filter) return;
+            // L1 Filter Override: Show ALL quotes regardless of type
+            if(state.level !== 1 && state.filter !== 'all' && item.type !== state.filter) return;
+            
             const div = document.createElement('div');
             div.className = `card card-${item.type || 'tone'}`;
             div.innerHTML = `<strong>"${item.original}"</strong><br><small>${item.custom_q || 'Analyze'}</small>`;
@@ -417,7 +422,7 @@
         const filterBar = document.getElementById('main-filter-bar');
         if (state.level === 1) {
             filterBar.style.display = 'none';
-            state.filter = 'all'; // Force ALL
+            state.filter = 'all'; 
         } else {
             filterBar.style.display = 'flex';
         }
@@ -460,7 +465,7 @@
             if (l1.tone && l1.tone.correct) return loadFinalAnalysis('tone');
             if (l1.language && l1.language.correct) return loadFinalAnalysis('language');
             
-            // Fallback: Just load tone if nothing specific found, or show empty
+            // Fallback: Just load tone if nothing specific found
             return loadFinalAnalysis('tone');
         }
         // ------------------------------
@@ -571,10 +576,10 @@
     function undoLast() { sentenceSlots.analysis = ""; rebuildSentence(); }
     function clearEssay() { if(confirm("Clear?")) document.getElementById('answer-area').value=""; }
 
-    // ADMIN
+    // ADMIN - FORCED DISPLAY FIX
     function openAdmin() { 
+        document.getElementById('admin-modal').style.display='flex'; // Force Open First
         try {
-            document.getElementById('admin-modal').style.display='flex'; 
             document.getElementById('edit-title').value = appData.textTitle || "";
             document.getElementById('edit-question').value = appData.question || "";
             initAdminConfig();
@@ -589,19 +594,19 @@
             }
         } catch(e) {
             console.error(e);
-            alert("Error opening settings. Please click 'Factory Reset' if this persists.");
+            alert("Partial Load Error. Use Factory Reset if needed.");
         }
     }
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function requestAdminAccess() { if(prompt("Password:") === appData.adminPassword) openAdmin(); }
     function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v77_autopilot', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v78_unlock', JSON.stringify(appData)); }
     function updateUI() { 
         document.getElementById('student-title').innerText = appData.textTitle || "Loading..."; 
         document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
         document.getElementById('q-display').innerText = appData.question || "...";
-        // Do not force loadStageSelect here as it might reset user progress mid-flow if called by updateGlobal
+        // Do not force loadStageSelect here as it might reset user progress
     }
 
     // RENDER FUNCTIONS FOR ADMIN
@@ -699,14 +704,18 @@
     function downloadJSON() { const blob = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click(); }
     function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
     
-    // EXPORT LOGIC FOR STUDENT APP
+    // EXPORT LOGIC
     function downloadStudentApp() {
         const clone = JSON.parse(JSON.stringify(appData));
         delete clone.adminPassword;
 
         let html = document.documentElement.outerHTML;
+        
+        // 1. Inject Data: Find the data-script ID and replace it
         const regex = /<script id="data-script">([\s\S]*?)<\/script>/;
         html = html.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(clone)};`);
+
+        // 2. Inject CSS Lock to hide Admin UI immediately
         const styleInjection = `<style> .admin-only, #admin-modal, #admin-btn, #reset-btn { display: none !important; } </style>`;
         html = html.replace('</head>', `${styleInjection}\n</head>`);
 
@@ -722,7 +731,7 @@
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v77_autopilot'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v78_unlock'); location.reload(); } }
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
