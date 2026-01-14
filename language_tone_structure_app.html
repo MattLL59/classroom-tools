@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v70 (Restored)</title>
+    <title>Tone & Structure Architect v71 (Worksheet Controls Restored)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -28,7 +28,7 @@
             margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
         }
 
-        /* FIXED HEADER */
+        /* HEADER */
         header { 
             display: flex; justify-content: space-between; align-items: center; 
             padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1);
@@ -140,7 +140,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v70</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v71</h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
             <button id="reset-btn" class="hard-reset-btn" onclick="hardReset()">Reset</button>
@@ -250,6 +250,13 @@
                 </div>
 
                 <div class="editor-section">
+                    <h3>Analysis Points</h3>
+                    <p style="font-size:0.85rem; color:#666;">Check "WS" to print in worksheet. Check "PB" for page break.</p>
+                    <div id="items-container"></div>
+                    <button class="btn btn-add" style="background:#2ecc71; margin-top:10px;" onclick="addNewItem()">+ Add Analysis Point</button>
+                </div>
+                
+                <div class="editor-section">
                     <h3>Structure & Banks</h3>
                     <div style="display:flex; gap:5px; flex-wrap:wrap;">
                         <button class="btn btn-doc" onclick="editBank('markers')">Markers</button>
@@ -263,12 +270,6 @@
                         <div id="bank-list" class="list-container"></div>
                         <button class="btn btn-add" style="background:#2ecc71;" onclick="addBankItem()">+ Add Item</button>
                     </div>
-                </div>
-
-                <div class="editor-section">
-                    <h3>Analysis Points</h3>
-                    <div id="items-container"></div>
-                    <button class="btn btn-add" style="background:#2ecc71; margin-top:10px;" onclick="addNewItem()">+ Add Analysis Point</button>
                 </div>
             </div>
         </div>
@@ -329,13 +330,14 @@
             renderBuilderDropdowns();
             return;
         }
-        let local = localStorage.getItem('tsa_v70_restored');
-        if(!local) local = localStorage.getItem('tsa_v69_crashproof');
+        let local = localStorage.getItem('tsa_v71_controls');
+        if(!local) local = localStorage.getItem('tsa_v70_restored');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
         // SELF HEALING
         ['markers','starters','methods','points','links'].forEach(k => { if(!appData[k]) appData[k] = []; });
         if(!appData.worksheetOptions) appData.worksheetOptions = defaultData.worksheetOptions;
+        if(appData.items) appData.items.forEach(i => { if(i.includeInWS===undefined) i.includeInWS=true; if(i.pageBreak===undefined) i.pageBreak=false; });
 
         loadStageSelect();
         renderBuilderDropdowns();
@@ -484,21 +486,25 @@
 
     // ADMIN
     function openAdmin() { 
-        document.getElementById('admin-modal').style.display='flex'; 
-        document.getElementById('edit-title').value = appData.textTitle || "";
-        document.getElementById('edit-question').value = appData.question || "";
-        renderItems();
-        if(appData.worksheetOptions) {
-            document.getElementById('ws-lvl1').checked = appData.worksheetOptions.lvl1;
-            document.getElementById('ws-lvl2').checked = appData.worksheetOptions.lvl2;
-            document.getElementById('ws-lvl3').checked = appData.worksheetOptions.lvl3;
+        try {
+            document.getElementById('admin-modal').style.display='flex'; 
+            document.getElementById('edit-title').value = appData.textTitle || "";
+            document.getElementById('edit-question').value = appData.question || "";
+            renderItems();
+            if(appData.worksheetOptions) {
+                document.getElementById('ws-lvl1').checked = appData.worksheetOptions.lvl1;
+                document.getElementById('ws-lvl2').checked = appData.worksheetOptions.lvl2;
+                document.getElementById('ws-lvl3').checked = appData.worksheetOptions.lvl3;
+            }
+        } catch(e) {
+            alert("Error opening settings. Please click 'Factory Reset' if this persists.");
         }
     }
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function requestAdminAccess() { if(prompt("Password:") === appData.adminPassword) openAdmin(); }
     function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v70_restored', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v71_controls', JSON.stringify(appData)); }
     function updateUI() { document.getElementById('student-title').innerText = appData.textTitle; loadStageSelect(); }
 
     function renderItems() {
@@ -507,12 +513,17 @@
         appData.items.forEach((item, i) => {
             const div = document.createElement('div'); div.className = 'editor-section';
             div.innerHTML = `
-                <div style="display:flex; justify-content:space-between;"><strong>#${i+1}</strong> <button class="btn btn-warning" onclick="toggleDetails(${i})" style="padding:5px;">Edit</button></div>
+                <div style="display:flex; justify-content:space-between;"><strong>#${i+1}</strong> 
+                <div>
+                    <label><input type="checkbox" class="ws-checkbox" ${item.includeInWS?'checked':''} onchange="updateItemBool(${i}, 'includeInWS', this.checked)">🖨️ WS</label>
+                    <label style="margin-left:5px;"><input type="checkbox" class="ws-checkbox" ${item.pageBreak?'checked':''} onchange="updateItemBool(${i}, 'pageBreak', this.checked)">✂️ PB</label>
+                    <button class="btn btn-warning" onclick="toggleDetails(${i})" style="padding:5px;">Edit</button>
+                </div></div>
                 <input class="admin-input" value="${item.original}" onchange="updateItem(${i},'original',this.value)">
                 <div id="details-${i}" class="analysis-details">
                     <label>Quote:</label><input class="admin-input" value="${item.original}" onchange="updateItem(${i},'original',this.value)">
                     <label>Translation:</label><input class="admin-input" value="${item.translation}" onchange="updateItem(${i},'translation',this.value)">
-                    <label>Distractors:</label><input class="admin-input" value="${item.distractors.join(',')}" onchange="updateItem(${i},'distractors',this.value.split(','))">
+                    <label>Distractors (comma sep):</label><input class="admin-input" value="${item.distractors.join(',')}" onchange="updateItem(${i},'distractors',this.value.split(','))">
                     <hr>
                     <div class="level-block"><span class="level-header">Level 1 Tone</span>
                     Prompt: <input class="admin-input" value="${item.level1?.tone?.prompt||''}" onchange="updateDeep(${i},'level1','tone','prompt',this.value)">
@@ -527,9 +538,10 @@
     }
     function toggleDetails(i) { const el=document.getElementById('details-'+i); el.style.display = el.style.display==='block'?'none':'block'; }
     function updateItem(i,k,v) { appData.items[i][k]=v; saveLocal(); }
+    function updateItemBool(i,k,v) { appData.items[i][k]=v; saveLocal(); }
     function updateDeep(i,l,t,k,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t][k]=v; saveLocal(); }
     function updateDeepOpts(i,l,t,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t].options=v.split(','); saveLocal(); }
-    function addNewItem() { appData.items.push({type:"quote", original:"New", translation:"", distractors:[""], level1:{tone:{}}}); renderItems(); saveLocal(); }
+    function addNewItem() { appData.items.push({type:"quote", original:"New", translation:"", distractors:[""], level1:{tone:{}}, includeInWS:true}); renderItems(); saveLocal(); }
     function delItem(i) { appData.items.splice(i,1); renderItems(); saveLocal(); }
 
     function editBank(type) { currentEditingBank=type; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=type.toUpperCase(); renderBankList(); }
@@ -591,7 +603,7 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = 'Worksheet.doc'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v70_restored'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v71_controls'); location.reload(); } }
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
