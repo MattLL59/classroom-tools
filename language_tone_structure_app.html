@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v74 (Distribution Fix)</title>
+    <title>Tone & Structure Architect v75 (Question Display Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -28,7 +28,7 @@
             margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
         }
 
-        /* HEADER */
+        /* FIXED HEADER */
         header { 
             display: flex; justify-content: space-between; align-items: center; 
             padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1);
@@ -36,7 +36,7 @@
         }
         h1 { margin: 0; font-size: 1.1rem; color: var(--primary); display:flex; align-items:center; gap:5px; }
 
-        /* BANNER */
+        /* STUDENT BANNER */
         #student-banner {
             display: none; width: 100%; background: var(--accent); color: white; 
             padding: 5px; text-align: center; font-weight: bold; font-size: 0.85rem; flex-shrink:0;
@@ -59,10 +59,12 @@
         .nav-item i { font-size: 1.3rem; margin-bottom: 3px; }
         .nav-item.active { color: var(--primary); font-weight: bold; }
 
+        /* HUBS */
         .hub { display: none; }
         .hub.active { display: block; animation: fadeIn 0.3s; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+        /* CARDS */
         .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
         @media(min-width: 600px) { .grid { grid-template-columns: 1fr 1fr; } }
 
@@ -103,9 +105,9 @@
         .btn-warning { background: var(--accent); }
         .btn-doc { background: #2b5797; }
         
+        /* ADMIN & MODALS */
         .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
         
-        /* MODALS */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center; }
         .modal-content { 
             background: var(--card); color: var(--text); width: 95%; max-width: 800px; max-height: 90vh; 
@@ -125,14 +127,14 @@
         .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .theme-opt { padding: 15px; text-align: center; border: 2px solid #ddd; border-radius: 8px; cursor: pointer; font-weight: bold; color:#333; }
 
+        .list-container { margin-bottom:10px; }
+        .list-item { display: flex; align-items:center; margin-bottom:5px; gap:5px; }
+        .list-input { flex-grow:1; padding:5px; border:1px solid #ccc; border-radius:4px; }
+
         /* TABS */
         .admin-tab-bar { display: flex; gap:5px; margin-bottom:10px; }
         .admin-tab { flex:1; padding:8px; border:1px solid #ccc; background:#eee; cursor:pointer; font-weight:bold; border-radius:4px; text-align:center; color:#333; }
         .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
-
-        .list-container { margin-bottom:10px; }
-        .list-item { display: flex; align-items:center; margin-bottom:5px; gap:5px; }
-        .list-input { flex-grow:1; padding:5px; border:1px solid #ccc; border-radius:4px; }
 
         #phrasing-overlay { z-index: 10000; background: rgba(0,0,0,0.9); }
         .phrase-option { 
@@ -150,7 +152,7 @@
 <body>
 
     <header>
-        <h1><i class="fas fa-cubes"></i> Tone & Structure v74</h1>
+        <h1><i class="fas fa-cubes"></i> Tone & Structure v75</h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn admin-only" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
             <button id="reset-btn" class="hard-reset-btn admin-only" onclick="hardReset()">Reset</button>
@@ -167,6 +169,11 @@
 
     <div class="main-viewport">
         <div id="hub-lab" class="hub active">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:0.9rem;">
+                <span><strong>Text:</strong> <span id="text-display">Loading...</span></span>
+                <span><strong>Q:</strong> <span id="q-display">Loading...</span></span>
+            </div>
+            
             <div id="lab-content">
                 <div class="instruction">Step 1: Choose Evidence</div>
                 <div class="filter-bar">
@@ -356,15 +363,15 @@
     function init() {
         if (teacherConfig && typeof teacherConfig === 'object') {
             appData = teacherConfig;
-            // Student Mode Logic handles the UI hiding via injected CSS
             document.getElementById('student-banner').style.display='block';
             document.getElementById('student-title').innerText = appData.textTitle;
+            updateUI(); // Ensures text/question are pushed
             loadStageSelect();
             renderBuilderDropdowns();
             return;
         }
-        let local = localStorage.getItem('tsa_v74_fixed');
-        if(!local) local = localStorage.getItem('tsa_v72_full');
+        let local = localStorage.getItem('tsa_v75_qfix');
+        if(!local) local = localStorage.getItem('tsa_v74_fixed');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
         // SELF HEALING
@@ -376,9 +383,7 @@
 
         loadStageSelect();
         renderBuilderDropdowns();
-        // Update displays immediately
-        document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
-        document.getElementById('q-display').innerText = appData.question || "...";
+        updateUI();
     }
 
     function switchHub(hubId) {
@@ -562,11 +567,11 @@
     function requestAdminAccess() { if(prompt("Password:") === appData.adminPassword) openAdmin(); }
     function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v74_fixed', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v75_qfix', JSON.stringify(appData)); }
     function updateUI() { 
-        document.getElementById('student-title').innerText = appData.textTitle; 
-        document.getElementById('text-display').innerText = appData.textTitle;
-        document.getElementById('q-display').innerText = appData.question;
+        document.getElementById('student-title').innerText = appData.textTitle || "Loading..."; 
+        document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
+        document.getElementById('q-display').innerText = appData.question || "...";
         loadStageSelect(); 
     }
 
@@ -668,8 +673,6 @@
     // EXPORT LOGIC FOR STUDENT APP
     function downloadStudentApp() {
         const clone = JSON.parse(JSON.stringify(appData));
-        
-        // Remove Admin Password for Security
         delete clone.adminPassword;
 
         let html = document.documentElement.outerHTML;
@@ -677,8 +680,6 @@
         // 1. Inject Data: Find the data-script ID and replace it
         // We use regex to safely find the script tag content
         const regex = /<script id="data-script">([\s\S]*?)<\/script>/;
-        const newScriptContent = `<script id="data-script">\n    /* DATA_START */ const teacherConfig = ${JSON.stringify(clone)}; /* DATA_END */\n    \n    // ... (rest of logic follows) \n`;
-        
         // Simpler replacement strategy: Target the const definition directly
         html = html.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(clone)};`);
 
@@ -698,35 +699,15 @@
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    function downloadWorksheetDoc() {
-        const mode = document.getElementById('ws-print-mode').value;
-        let evidenceList = []; let meaningList = [];
-        const printItems = appData.items.filter(i => i.includeInWS);
-        if(printItems.length === 0) { alert("No items selected for worksheet. Check 'WS' in settings."); return; }
-        printItems.forEach(i => { evidenceList.push(i.type==='structure' ? '🏗️ '+i.label : '"'+i.original+'"'); meaningList.push(i.type==='structure' ? i.detail : i.translation); });
-        meaningList.sort(() => Math.random() - 0.5);
-        let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:'Calibri',sans-serif;} table{width:100%;border-collapse:collapse;margin-bottom:20px;} td,th{border:1px solid #999;padding:8px;text-align:left;} th{background-color:#eee;} .box-row{height:30px;}</style></head><body><h1>Worksheet: ${appData.textTitle}</h1><p><strong>Question:</strong> ${appData.question}</p><hr><h2>Task 1: Evidence Match-Up</h2><table><tr><th>Evidence</th><th>Meaning (Jumbled)</th></tr>${evidenceList.map((ev, i) => `<tr><td>${ev}</td><td>${meaningList[i]}</td></tr>`).join('')}</table><br><h2>Task 2: Analysis</h2>`;
-        printItems.forEach((i, idx) => {
-            let levelHtml = "";
-            const showL1 = (mode === 'all' && appData.worksheetOptions?.lvl1) || mode === '1';
-            const showL2 = (mode === 'all' && appData.worksheetOptions?.lvl2) || mode === '2';
-            const showL3 = (mode === 'all' && appData.worksheetOptions?.lvl3) || mode === '3';
-            
-            const p1 = (i.level1 && i.level1.tone && i.level1.tone.prompt) ? i.level1.tone.prompt : "Tone?";
-            const p2 = (i.level2 && i.level2.tone && i.level2.tone.prompt) ? i.level2.tone.prompt : "Implication?";
-            const p3 = (i.level3 && i.level3.tone && i.level3.tone.prompt) ? i.level3.tone.prompt : "Effect?";
-
-            if(showL1 && i.level1) levelHtml += `<p>Level 1: ${p1}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-            if(showL2 && i.level2) levelHtml += `<p>Level 2: ${p2}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-            if(showL3 && i.level3) levelHtml += `<p>Level 3: ${p3}</p><table style="width:100%;border:1px solid #000;"><tr><td class="box-row">&nbsp;</td></tr><tr><td class="box-row">&nbsp;</td></tr></table>`;
-            if(levelHtml) { html += `<div style="border:1px solid #333;padding:10px;margin-bottom:15px;"><p><strong>${idx+1}. ${i.type==='structure'?i.label:'"'+i.original+'"'}</strong></p>${levelHtml}</div>`; if(i.pageBreak) html += `<br style="page-break-after:always;">`; }
-        });
-        html += "</body></html>";
-        const blob = new Blob([html], {type:'application/msword'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'Worksheet.doc'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v75_qfix'); location.reload(); } }
+    function saveWSOptions() {
+        appData.worksheetOptions = {
+            lvl1: document.getElementById('ws-lvl1').checked,
+            lvl2: document.getElementById('ws-lvl2').checked,
+            lvl3: document.getElementById('ws-lvl3').checked
+        };
+        saveLocal();
     }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v74_fixed'); location.reload(); } }
 
     init();
 </script>
