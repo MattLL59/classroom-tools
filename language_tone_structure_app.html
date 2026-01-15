@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v104 (Stable)</title>
+    <title>Tone & Structure Architect v105 (Bulletproof Reset)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -168,14 +168,14 @@
 
     <div id="rescue-screen">
         <h1>⚠️ App Crash Detected</h1>
-        <p>Your saved data is corrupted. Click below to fix it.</p>
-        <button onclick="nuclearReset()">CLICK TO FIX APP</button>
+        <p>Your saved data is corrupted.</p>
+        <button onclick="localStorage.clear(); location.reload();">CLICK TO FIX APP</button>
     </div>
 
     <header>
         <h1>
-            <button onclick="nuclearReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v104
+            <button onclick="localStorage.clear(); location.reload();" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
+            <i class="fas fa-cubes"></i> Tone & Structure v105
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -238,7 +238,7 @@
                 </div>
             </div>
             <div class="modal-body">
-                <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="nuclearReset()">⚠️ Factory Reset (Fixes Crashes)</button>
+                <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="localStorage.clear(); location.reload();">⚠️ Factory Reset (Use if corrupted)</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
                     <h3 style="color:#4a148c;">🤖 AI Lesson Generator</h3>
@@ -250,6 +250,7 @@
                     <textarea id="ai-question-input" class="admin-input" style="height:50px; border-color:#9c27b0;"></textarea>
                     <button class="btn" style="background:#7b1fa2; width:100%; margin:15px 0 5px 0;" onclick="generateAndShowPrompt()">✨ Generate Prompt</button>
                     <div id="prompt-display-container" style="display:none; margin-bottom:15px;">
+                        <label style="font-size:0.8rem; color:#4a148c; font-weight:bold;">Copy this into AI:</label>
                         <textarea id="ai-generated-prompt" class="admin-input" style="height:100px; background:#e1bee7; color:#000;" readonly></textarea>
                     </div>
                     <p style="font-size:0.85rem; margin-bottom:5px; border-top:1px solid #ccc; padding-top:10px;"><strong>Step 3:</strong> Paste AI Response (JSON):</p>
@@ -264,7 +265,7 @@
                 </div>
 
                 <div class="editor-section">
-                    <h3>Analysis Points (Editor Overhaul)</h3>
+                    <h3>Analysis Points</h3>
                     <p style="font-size:0.8rem; color:#666;">Set the Type, then edit L1/L2/L3 points using the tabs.</p>
                     <div id="items-container"></div>
                     <button class="btn btn-add" style="background:#2ecc71; margin-top:10px; padding:15px;" onclick="addNewItem()">+ Add Analysis Point</button>
@@ -332,6 +333,7 @@
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
 
     function init() {
+        // SUPER SAFE BOOT
         try {
             if (teacherConfig && typeof teacherConfig === 'object') {
                 appData = teacherConfig;
@@ -341,7 +343,7 @@
             }
             
             // CLEAN START - NO LEGACY FALLBACKS
-            let local = localStorage.getItem('tsa_v104_stable');
+            let local = localStorage.getItem('tsa_v105_stable');
             
             if(local) {
                 try {
@@ -363,25 +365,17 @@
         }
     }
     
-    function nuclearReset() {
-        localStorage.clear(); 
-        location.reload();
-    }
-    
     function ensureDataIntegrity() {
-        // Repair missing structure
         if(!appData.sentenceConfigs) appData.sentenceConfigs = defaultData.sentenceConfigs;
         if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
         ['markers', 'starters', 'methods', 'points', 'links'].forEach(k => { if(!appData[k]) appData[k] = defaultData[k]; });
         
-        // Remove broken items
         if(appData.items && Array.isArray(appData.items)) {
             appData.items = appData.items.filter(i => i && i.original);
         } else {
             appData.items = JSON.parse(JSON.stringify(defaultData.items));
         }
         
-        // Ensure levels exist
         appData.items.forEach(i => {
             if(!i.level1) i.level1 = {}; if(!i.level2) i.level2 = {}; if(!i.level3) i.level3 = {};
             if(i.includeInWS === undefined) i.includeInWS = true;
@@ -481,7 +475,6 @@
         const item = appData.items[state.currentIdx];
         const lvlData = item[`level${state.level}`];
         
-        // Auto-create if missing to prevent crash
         if (!lvlData[lens]) lvlData[lens] = { prompt: "Analyze...", correct: "Correct", options: ["Correct", "Wrong"] };
 
         const data = lvlData[lens];
@@ -685,13 +678,10 @@
     }
 
     function switchItemTab(itemIdx, lvl) {
-        // Hide all levels for this item
         document.querySelectorAll(`#details-${itemIdx} .level-content`).forEach(el => el.classList.remove('active'));
         document.querySelectorAll(`#details-${itemIdx} .item-tab`).forEach(el => el.classList.remove('active'));
         
-        // Show selected
         document.getElementById(`item-${itemIdx}-lvl-${lvl}`).classList.add('active');
-        // Update tab style (requires index math or selecting by text, doing robustly via class logic above)
         const tabs = document.querySelectorAll(`#details-${itemIdx} .item-tab`);
         tabs[lvl-1].classList.add('active');
     }
@@ -767,6 +757,7 @@ FORMAT:
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
+    
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
@@ -776,7 +767,7 @@ FORMAT:
         saveLocal();
     }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v104_stable', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v105_stable', JSON.stringify(appData)); }
 
     init();
 </script>
