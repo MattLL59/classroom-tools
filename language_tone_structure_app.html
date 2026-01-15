@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v97 (Smart AI Prompt)</title>
+    <title>Tone & Structure Architect v98 (AI Question Box)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -234,14 +234,17 @@
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
                     <h3 style="color:#4a148c;">🤖 AI Lesson Generator</h3>
-                    <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 1:</strong> Paste your Source Text here:</p>
+                    
+                    <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 1:</strong> Paste your Source Text:</p>
                     <textarea id="ai-source-text" class="admin-input" style="height:100px; border-color:#9c27b0;" placeholder="Paste poem or extract here..."></textarea>
                     
-                    <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 2:</strong> Generate Prompt & Use AI</p>
-                    <button class="btn" style="background:#7b1fa2; width:100%; margin-bottom:10px;" onclick="copyAIPrompt()">📋 Copy Smart Prompt</button>
+                    <p style="font-size:0.85rem; margin-bottom:5px; margin-top:10px;"><strong>Step 2:</strong> Paste Essay Question:</p>
+                    <textarea id="ai-question-input" class="admin-input" style="height:60px; border-color:#9c27b0;" placeholder="e.g. How does the writer present danger?"></textarea>
                     
-                    <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 3:</strong> Paste JSON result here & Load</p>
-                    <textarea id="ai-paste-area" class="admin-input" style="height:80px;" placeholder="Paste the JSON code here..."></textarea>
+                    <button class="btn" style="background:#7b1fa2; width:100%; margin:10px 0;" onclick="copyAIPrompt()">📋 Step 3: Copy Smart Prompt</button>
+                    
+                    <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 4:</strong> Paste AI Response (JSON):</p>
+                    <textarea id="ai-paste-area" class="admin-input" style="height:80px;" placeholder="Paste the code from ChatGPT here..."></textarea>
                     <button class="btn" style="background:#4a148c; width:100%;" onclick="loadDataFromText()">📥 Load from AI</button>
                 </div>
 
@@ -302,6 +305,9 @@
                     <h3>Data & Student App</h3>
                     <div style="padding:10px; border:2px dashed var(--primary); border-radius:5px; background:#e3f2fd; text-align:left;">
                         <button class="btn btn-primary" style="width:100%; margin-top:5px; padding:15px; font-size:1.1rem;" onclick="downloadStudentApp()">📦 Download Student App (HTML)</button>
+                        <div id="download-fallback" style="margin-top:10px; display:none; font-size:0.9rem;">
+                            <a id="download-link-fallback" href="#" download="student-lesson.html">Click here if download didn't start</a>
+                        </div>
                     </div>
                     <div style="display:flex; gap:5px; margin-top:10px;">
                         <button class="btn btn-doc" onclick="downloadJSON()">Save JSON</button>
@@ -657,10 +663,10 @@
         }
     }
 
-    // ADMIN - AI SMART PROMPT
+    // ADMIN - AI MODULE
     function copyAIPrompt() {
-        const source = document.getElementById('ai-source-text').value || "[INSERT SOURCE TEXT HERE]";
-        const q = appData.question || "[INSERT ESSAY QUESTION]";
+        const source = document.getElementById('ai-source-text').value || "[INSERT SOURCE TEXT]";
+        const q = document.getElementById('ai-question-input').value || appData.question || "[INSERT QUESTION]";
         
         const promptText = `Act as an expert English teacher. I need a JSON lesson for "Tone & Structure Architect".
         
@@ -716,6 +722,9 @@ Output ONLY raw JSON.`;
             document.getElementById('edit-title').value = appData.textTitle || "";
             document.getElementById('edit-question').value = appData.question || "";
             document.getElementById('auto-login-check').checked = (localStorage.getItem('tsa_auto_login') === 'true');
+            // SYNC QUESTION TO AI BOX
+            document.getElementById('ai-question-input').value = appData.question || "";
+            
             initAdminConfig();
             renderTemplateList('tone','list-tmpl-tone'); 
             renderTemplateList('structure','list-tmpl-structure'); 
@@ -759,6 +768,9 @@ Output ONLY raw JSON.`;
         document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
         document.getElementById('q-display').innerText = appData.question || "...";
     }
+
+    // [Standard Render Functions & Export Logic omitted for brevity as they are identical to v96/97 base]
+    // ... (All previous render/export logic included in full file below) ...
 
     function renderTemplateList(type, divId) {
         const div = document.getElementById(divId); div.innerHTML = '';
@@ -887,47 +899,73 @@ Output ONLY raw JSON.`;
     }
 
     function openPrintView() {
+        const mode = document.getElementById('ws-print-mode').value;
         const w = window.open('', '_blank');
-        let html = `<html><head><title>Worksheet</title><style>body{font-family:sans-serif; padding:20px;} .box{border:1px solid #333; padding:15px; margin-bottom:20px;} td,th{border:1px solid #999; padding:8px;} table{width:100%; border-collapse:collapse; margin-bottom:20px;}</style></head><body>`;
-        html += `<h2>${appData.textTitle}</h2>`;
         
-        let evidence = [], meanings = [];
-        appData.items.filter(i => i.includeInWS).forEach(i => { evidence.push(i.original); meanings.push(i.translation); });
-        meanings.sort(() => Math.random() - 0.5);
-
-        if(evidence.length > 0) {
-            html += `<h3>Task 1: Match Up</h3><table><tr><th>Evidence</th><th>Meaning</th></tr>`;
-            evidence.forEach((ev, i) => html += `<tr><td>${ev}</td><td>${meanings[i]}</td></tr>`);
-            html += `</table>`;
-        }
-        
-        html += `<h3>Task 2: Analysis</h3>`;
-        appData.items.forEach((item, i) => {
-            if(!item.includeInWS) return;
-            html += `<div class="box"><strong>${i+1}. ${item.original}</strong><br><br><br><br></div>`;
-            if(item.pageBreak) html += `<div style="page-break-after:always;"></div>`;
+        let evidenceList = []; let meaningList = [];
+        const printItems = appData.items.filter(i => i.includeInWS);
+        printItems.forEach(i => {
+            evidenceList.push(i.original);
+            meaningList.push(i.translation);
         });
-        
-        html += `<script>window.print()<\/script></body></html>`;
+        const shuffledMeanings = [...meaningList].sort(() => Math.random() - 0.5);
+
+        let html = `<html><head><title>Worksheet</title><style>body{font-family:sans-serif; padding:20px;} .box{border:1px solid #333; padding:15px; margin-bottom:20px; page-break-inside:avoid;} .header{display:flex; justify-content:space-between; border-bottom:2px solid #333; margin-bottom:20px; padding-bottom:10px;} .q-box{height:100px; border:1px dashed #ccc; margin-top:10px;} table{width:100%; border-collapse:collapse; margin-bottom:20px;} td,th{border:1px solid #999; padding:8px; text-align:left;} th{background:#eee;}</style></head><body>`;
+        html += `<div class="header"><div><strong>Name:</strong> _________________</div><div><strong>Date:</strong> ________</div></div>`;
+        html += `<h2>${appData.textTitle}</h2><p><strong>Focus:</strong> ${appData.question}</p><hr>`;
+
+        if (evidenceList.length > 0) {
+            html += `<h3>Task 1: Match Up</h3><table><tr><th>Evidence</th><th>Meaning (Mixed)</th></tr>`;
+            evidence.forEach((ev, i) => {
+                html += `<tr><td>${ev}</td><td>${shuffledMeanings[i]}</td></tr>`;
+            });
+            html += `</table><hr><h3>Task 2: Analysis</h3>`;
+        }
+
+        appData.items.forEach((item, i) => {
+            if (!item.includeInWS) return;
+            
+            let content = "";
+            const showL1 = (mode === 'all' || mode === '1') && appData.worksheetOptions?.lvl1;
+            const showL2 = (mode === 'all' || mode === '2') && appData.worksheetOptions?.lvl2;
+            const showL3 = (mode === 'all' || mode === '3') && appData.worksheetOptions?.lvl3;
+
+            if (showL1) content += `<p><strong>L1:</strong> ${item.level1?.tone?.prompt || 'Analyze'}</p><div class="q-box"></div>`;
+            if (showL2) content += `<p><strong>L2:</strong> ${item.level2?.tone?.prompt || 'Deep Analysis'}</p><div class="q-box"></div>`;
+            if (showL3) content += `<p><strong>L3:</strong> ${item.level3?.tone?.prompt || 'Effect?'}</p><div class="q-box"></div>`;
+
+            if (content) {
+                html += `<div class="box"><h3>${i+1}. "${item.original}"</h3>${content}</div>`;
+                if(item.pageBreak) html += `<div style="page-break-after:always;"></div>`;
+            }
+        });
+
+        html += `<script>window.print();<\/script></body></html>`;
         w.document.write(html);
         w.document.close();
     }
 
     function exportWordDoc() {
         try {
+            const mode = document.getElementById('ws-print-mode').value;
+            let evidenceList = []; let meaningList = [];
+            const printItems = appData.items.filter(i => i.includeInWS);
+            printItems.forEach(i => {
+                evidenceList.push(i.original);
+                meaningList.push(i.translation);
+            });
+            const shuffledMeanings = [...meaningList].sort(() => Math.random() - 0.5);
+
             let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>Worksheet</title></head><body><h1>${appData.textTitle}</h1>`;
             
-            let evidence = [], meanings = [];
-            appData.items.filter(i => i.includeInWS).forEach(i => { evidence.push(i.original); meanings.push(i.translation); });
-            meanings.sort(() => Math.random() - 0.5);
-
-            if(evidence.length > 0) {
-                html += `<h2>Task 1: Match Up</h2><table border="1"><tr><th>Evidence</th><th>Meaning</th></tr>`;
-                evidence.forEach((ev, i) => html += `<tr><td>${ev}</td><td>${meanings[i]}</td></tr>`);
-                html += `</table><br>`;
+            if(evidenceList.length > 0) {
+                html += `<h2>Task 1: Match Up</h2><table border="1" style="width:100%;border-collapse:collapse;"><tr><th>Evidence</th><th>Meaning</th></tr>`;
+                evidence.forEach((ev, i) => {
+                    html += `<tr><td>${ev}</td><td>${shuffledMeanings[i]}</td></tr>`;
+                });
+                html += `</table><br><hr><h2>Task 2: Analysis</h2>`;
             }
 
-            html += `<h2>Task 2: Analysis</h2>`;
             appData.items.forEach((item, i) => {
                 if(!item.includeInWS) return;
                 html += `<p><strong>${i+1}. ${item.original}</strong></p><br><br>`;
@@ -938,7 +976,9 @@ Output ONLY raw JSON.`;
             const blob = new Blob([html], {type:'application/msword'});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a'); a.href = url; a.download = 'Worksheet.doc'; a.click();
-        } catch(e) { alert("Error exporting doc."); }
+        } catch(e) {
+            alert("Error creating Word Doc. Please use the 'View/Print' button instead.");
+        }
     }
 
     init();
