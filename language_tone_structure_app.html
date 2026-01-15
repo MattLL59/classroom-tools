@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v110 (Complete)</title>
+    <title>Tone & Structure Architect v111 (Admin Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -113,7 +113,7 @@
         .btn-add { background-color: #2e7d32; color: white; padding: 10px; width: 100%; border-radius: 6px; margin-top: 8px; cursor: pointer; font-weight: bold; text-transform: uppercase; border:none; }
         .btn-edit-item { background: #ff9800; color: white; padding: 8px 15px; border-radius: 4px; font-weight: bold; border:none; cursor: pointer; font-size: 0.9rem; }
         
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999999; justify-content: center; align-items: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000000; justify-content: center; align-items: center; }
         .modal-content { 
             background: var(--card); color: var(--text); width: 95%; max-width: 800px; max-height: 90vh; 
             border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; 
@@ -168,7 +168,7 @@
 
     <div id="rescue-screen">
         <h1>⚠️ App Crash Detected</h1>
-        <p>Your data or browser settings caused a crash.</p>
+        <p>Data corruption prevented startup.</p>
         <p id="error-msg" style="background:rgba(0,0,0,0.2); padding:10px; font-family:monospace; margin-bottom:20px;"></p>
         <button onclick="emergencyWipe()">CLICK TO FIX APP</button>
     </div>
@@ -176,7 +176,7 @@
     <header>
         <h1>
             <button onclick="emergencyWipe()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v110
+            <i class="fas fa-cubes"></i> Tone & Structure v111
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -366,7 +366,7 @@
             updateUI(); changeLevel(); return;
         }
         
-        let local = SafeStorage.getItem('tsa_v110_complete');
+        let local = SafeStorage.getItem('tsa_v111_adminfix');
         if(local) {
             try {
                 let parsed = JSON.parse(local);
@@ -413,7 +413,6 @@
         });
     }
 
-    // --- RESTORED MISSING FUNCTIONS FROM V109 ---
     function updateUI() {
         document.getElementById('student-title').innerText = appData.textTitle || "Loading...";
         document.getElementById('text-display').innerText = appData.textTitle || "Loading...";
@@ -789,8 +788,16 @@ FORMAT:
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
+    function saveWSOptions() {
+        appData.worksheetOptions = {
+            lvl1: document.getElementById('ws-lvl1').checked,
+            lvl2: document.getElementById('ws-lvl2').checked,
+            lvl3: document.getElementById('ws-lvl3').checked
+        };
+        saveLocal();
+    }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { SafeStorage.setItem('tsa_v110_complete', JSON.stringify(appData)); }
+    function saveLocal() { SafeStorage.setItem('tsa_v111_adminfix', JSON.stringify(appData)); }
 
     // ADMIN CONFIG HELPERS
     function switchAdminConfigLevel(lvl) {
@@ -816,6 +823,51 @@ FORMAT:
         saveLocal(); 
         updateUI(); 
     }
+    
+    // SAFE ADMIN ACCESS (v111 Fix)
+    function requestAdminAccess() {
+        let autoLogin = false;
+        try {
+            autoLogin = localStorage.getItem('tsa_auto_login') === 'true';
+        } catch(e) {
+            console.log("Storage check skipped (Privacy Mode)");
+        }
+
+        const sessionLogin = sessionStorage.getItem('tsa_session_login') === 'true';
+        
+        if (autoLogin || sessionLogin) {
+            openAdmin();
+        } else {
+            // If storage is totally blocked, just open the admin panel to prevent lockout
+            if (SafeStorage.getItem('tsa_test') === null && typeof localStorage !== 'undefined') {
+                 // Try/catch one write to see if blocked
+                 try { localStorage.setItem('tsa_test', '1'); localStorage.removeItem('tsa_test'); } 
+                 catch(e) { openAdmin(); return; } 
+            }
+
+            const p = prompt("Password:");
+            if (p === appData.adminPassword) {
+                sessionStorage.setItem('tsa_session_login', 'true');
+                openAdmin();
+            } else {
+                alert("Incorrect");
+            }
+        }
+    }
+    
+    function toggleAutoLogin(checked) {
+        if(checked) SafeStorage.setItem('tsa_auto_login', 'true');
+        else SafeStorage.removeItem('tsa_auto_login');
+    }
+
+    function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
+    function changePassword() { const p = prompt("New Password:"); if(p) { appData.adminPassword=p; saveLocal(); } }
+    
+    function editBank(type) { currentEditingBank=type; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=type.toUpperCase(); renderBankList(); }
+    function addBankItem() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); }
+    function downloadJSON() { const blob = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click(); }
+
+    init();
 </script>
 </body>
 </html>
