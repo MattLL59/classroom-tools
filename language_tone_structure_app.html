@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v113 (Smart Extractor)</title>
+    <title>Tone & Structure Architect v114 (Admin Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -153,7 +153,7 @@
     <header>
         <h1>
             <button onclick="nuclearReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v113
+            <i class="fas fa-cubes"></i> Tone & Structure v114
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -243,7 +243,7 @@
                 </div>
 
                 <div class="editor-section">
-                    <h3>Analysis Points</h3>
+                    <h3>Analysis Points (Editor Overhaul)</h3>
                     <p style="font-size:0.8rem; color:#666;">Set the Type, then edit L1/L2/L3 points using the tabs.</p>
                     <div id="items-container"></div>
                     <button class="btn btn-add" style="background:#2ecc71; margin-top:10px; padding:15px;" onclick="addNewItem()">+ Add Analysis Point</button>
@@ -326,13 +326,8 @@
         }
     };
 
-    // BOOT LOGIC - Delayed to ensure DOM ready
     document.addEventListener('DOMContentLoaded', () => {
-        try {
-            initApp();
-        } catch(e) {
-            console.error("Boot Error", e);
-        }
+        try { initApp(); } catch(e) { console.error("Boot Error", e); }
     });
 
     function initApp() {
@@ -343,12 +338,11 @@
             updateUI(); changeLevel(); return;
         }
         
-        let local = SafeStorage.getItem('tsa_v113_smartload');
+        let local = SafeStorage.getItem('tsa_v114_adminfix');
         if(local) {
             try {
                 let parsed = JSON.parse(local);
                 appData = { ...defaultData, ...parsed };
-                // Ensure arrays are arrays
                 if(!Array.isArray(appData.items)) appData.items = defaultData.items;
             } catch(e) {
                 console.warn("Corrupt data found, using defaults.");
@@ -371,7 +365,6 @@
         if(!appData.analysisTemplates) appData.analysisTemplates = defaultData.analysisTemplates;
         ['markers', 'starters', 'methods', 'points', 'links'].forEach(k => { if(!Array.isArray(appData[k])) appData[k] = defaultData[k] || []; });
         
-        // Remove broken items
         if(appData.items && Array.isArray(appData.items)) {
             appData.items = appData.items.filter(i => i && i.original);
         } else {
@@ -533,6 +526,8 @@
         currentConfig.forEach(type => {
             if (['quote', 'analysis', 'none'].includes(type)) return;
             let options = appData[type+'s'] || [];
+            
+            // CONTEXT FILTER
             if (type === 'link' && state.level > 1 && state.currentLens) {
                 options = options.filter(opt => {
                     const lower = opt.toLowerCase();
@@ -541,6 +536,7 @@
                     return true; 
                 });
             }
+
             const div = document.createElement('div');
             div.className = 'bank-row';
             div.innerHTML = `<span class="bank-label">${type}</span>
@@ -583,11 +579,9 @@
     function undoLast() { sentenceSlots.analysis = ""; rebuildSentence(); }
     function clearEssay() { if(confirm("Clear?")) { document.getElementById('answer-area').value=""; state.completed = []; resetToGrid(); } }
 
-    /* --- NEW OVERLAY PRINT SYSTEM --- */
     function triggerOverlayPrint() {
         const mode = document.getElementById('ws-print-mode').value;
         const overlay = document.getElementById('print-overlay');
-        
         let evidenceList = [], meaningList = [];
         const printItems = appData.items.filter(i => i.includeInWS);
         printItems.forEach(i => { evidenceList.push(i.original); meaningList.push(i.translation); });
@@ -631,7 +625,6 @@
         window.print();
     }
 
-    /* --- ADMIN EDITOR RENDERER --- */
     function renderItems() {
         const con = document.getElementById('items-container'); con.innerHTML = '';
         if(!appData.items) return;
@@ -743,19 +736,16 @@ FORMAT:
     function loadDataFromText() {
         const text = document.getElementById('ai-paste-area').value;
         try {
-            // FIND AND EXTRACT JSON ONLY
-            const firstBrace = text.indexOf('{');
-            const lastBrace = text.lastIndexOf('}');
+            // MARKDOWN CLEANER (FIXED)
+            let cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+            const json = JSON.parse(cleaned);
             
-            if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found");
-            
-            const cleanJSON = text.substring(firstBrace, lastBrace + 1);
-            const json = JSON.parse(cleanJSON);
+            // OPEN ADMIN: THIS RESTORES THE MISSING FUNCTION
+            openAdmin(json); // Updates the UI fields from the new JSON
             
             appData = { ...appData, ...json }; 
             ensureDataIntegrity();
             saveLocal();
-            openAdmin();
             updateUI();
             alert("Success! " + (json.items ? json.items.length : 0) + " Items Loaded.");
         } catch(e) { alert("Invalid JSON: " + e.message); }
@@ -764,7 +754,6 @@ FORMAT:
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    
     function saveWSOptions() {
         appData.worksheetOptions = {
             lvl1: document.getElementById('ws-lvl1').checked,
@@ -774,9 +763,30 @@ FORMAT:
         saveLocal();
     }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { SafeStorage.setItem('tsa_v113_smartload', JSON.stringify(appData)); }
+    function saveLocal() { SafeStorage.setItem('tsa_v114_adminfix', JSON.stringify(appData)); }
 
-    // ADMIN CONFIG HELPERS
+    // ADMIN ACCESS & POPULATION
+    function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
+    function requestAdminAccess() { 
+        openAdmin(); // Use the population function
+        document.getElementById('admin-modal').style.display='flex'; 
+    } 
+    function toggleAutoLogin(c) {} 
+
+    // RESTORED FUNCTION THAT POPULATES THE FORM
+    function openAdmin(newData) {
+        const data = newData || appData;
+        try {
+            document.getElementById('edit-title').value = data.textTitle || "";
+            document.getElementById('edit-question').value = data.question || "";
+            // Sync AI box
+            document.getElementById('ai-question-input').value = data.question || "";
+            
+            initAdminConfig();
+            renderItems(); // Re-render the list with new data
+        } catch(e) { console.error("Admin Pop Error", e); }
+    }
+
     function switchAdminConfigLevel(lvl) {
         document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
         document.getElementById(`cfg-tab-${lvl}`).classList.add('active');
@@ -800,15 +810,10 @@ FORMAT:
         saveLocal(); 
         updateUI(); 
     }
-    function editBank(type) { /* Abbreviated for space */ }
+    function editBank(type) { /* Abbreviated */ }
     function addBankItem() { /* Abbreviated */ }
     function downloadJSON() { const blob = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click(); }
-    function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); ensureDataIntegrity(); saveLocal(); openAdmin(); updateUI(); }; fr.readAsText(input.files[0]); }
-    
-    // ADMIN ACCESS
-    function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
-    function requestAdminAccess() { document.getElementById('admin-modal').style.display='flex'; } 
-    function toggleAutoLogin(c) {} // Disabled
+    function uploadJSON(input) { const fr = new FileReader(); fr.onload = (e) => { appData = JSON.parse(e.target.result); ensureDataIntegrity(); saveLocal(); requestAdminAccess(); updateUI(); }; fr.readAsText(input.files[0]); }
 
     init();
 </script>
