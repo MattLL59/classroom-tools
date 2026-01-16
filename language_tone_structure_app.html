@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v114 (Admin Fix)</title>
+    <title>Tone & Structure Architect v115 (Load & Refresh)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -113,7 +113,7 @@
         .btn-add { background-color: #2e7d32; color: white; padding: 10px; width: 100%; border-radius: 6px; margin-top: 8px; cursor: pointer; font-weight: bold; text-transform: uppercase; border:none; }
         .btn-edit-item { background: #ff9800; color: white; padding: 8px 15px; border-radius: 4px; font-weight: bold; border:none; cursor: pointer; font-size: 0.9rem; }
         
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999999; justify-content: center; align-items: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2147483647; justify-content: center; align-items: center; }
         .modal-content { 
             background: var(--card); color: var(--text); width: 95%; max-width: 800px; max-height: 90vh; 
             border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; 
@@ -153,7 +153,7 @@
     <header>
         <h1>
             <button onclick="nuclearReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v114
+            <i class="fas fa-cubes"></i> Tone & Structure v115
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -243,7 +243,7 @@
                 </div>
 
                 <div class="editor-section">
-                    <h3>Analysis Points (Editor Overhaul)</h3>
+                    <h3>Analysis Points</h3>
                     <p style="font-size:0.8rem; color:#666;">Set the Type, then edit L1/L2/L3 points using the tabs.</p>
                     <div id="items-container"></div>
                     <button class="btn btn-add" style="background:#2ecc71; margin-top:10px; padding:15px;" onclick="addNewItem()">+ Add Analysis Point</button>
@@ -338,7 +338,7 @@
             updateUI(); changeLevel(); return;
         }
         
-        let local = SafeStorage.getItem('tsa_v114_adminfix');
+        let local = SafeStorage.getItem('tsa_v115_autofix'); // NEW KEY
         if(local) {
             try {
                 let parsed = JSON.parse(local);
@@ -418,7 +418,7 @@
         grid.innerHTML = '';
         let visibleCount = 0;
         appData.items.forEach((item, i) => {
-            if(state.completed.includes(i)) return; 
+            if(state.completed.includes(i)) return; // Prevents "Ghost Data"
             if(state.level !== 1 && state.filter !== 'all' && item.type !== state.filter) return;
             visibleCount++;
             const div = document.createElement('div');
@@ -526,8 +526,6 @@
         currentConfig.forEach(type => {
             if (['quote', 'analysis', 'none'].includes(type)) return;
             let options = appData[type+'s'] || [];
-            
-            // CONTEXT FILTER
             if (type === 'link' && state.level > 1 && state.currentLens) {
                 options = options.filter(opt => {
                     const lower = opt.toLowerCase();
@@ -536,7 +534,6 @@
                     return true; 
                 });
             }
-
             const div = document.createElement('div');
             div.className = 'bank-row';
             div.innerHTML = `<span class="bank-label">${type}</span>
@@ -579,9 +576,11 @@
     function undoLast() { sentenceSlots.analysis = ""; rebuildSentence(); }
     function clearEssay() { if(confirm("Clear?")) { document.getElementById('answer-area').value=""; state.completed = []; resetToGrid(); } }
 
+    /* --- NEW OVERLAY PRINT SYSTEM --- */
     function triggerOverlayPrint() {
         const mode = document.getElementById('ws-print-mode').value;
         const overlay = document.getElementById('print-overlay');
+        
         let evidenceList = [], meaningList = [];
         const printItems = appData.items.filter(i => i.includeInWS);
         printItems.forEach(i => { evidenceList.push(i.original); meaningList.push(i.translation); });
@@ -625,6 +624,7 @@
         window.print();
     }
 
+    /* --- ADMIN EDITOR RENDERER --- */
     function renderItems() {
         const con = document.getElementById('items-container'); con.innerHTML = '';
         if(!appData.items) return;
@@ -741,12 +741,17 @@ FORMAT:
             const json = JSON.parse(cleaned);
             
             // OPEN ADMIN: THIS RESTORES THE MISSING FUNCTION
-            openAdmin(json); // Updates the UI fields from the new JSON
+            openAdmin(json); 
             
             appData = { ...appData, ...json }; 
+            // CRITICAL: CLEAR PROGRESS SO NEW ITEMS SHOW
+            state.completed = [];
+            
             ensureDataIntegrity();
             saveLocal();
             updateUI();
+            resetToGrid();
+            closeAdmin();
             alert("Success! " + (json.items ? json.items.length : 0) + " Items Loaded.");
         } catch(e) { alert("Invalid JSON: " + e.message); }
     }
@@ -763,27 +768,24 @@ FORMAT:
         saveLocal();
     }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { SafeStorage.setItem('tsa_v114_adminfix', JSON.stringify(appData)); }
+    function saveLocal() { SafeStorage.setItem('tsa_v115_autofix', JSON.stringify(appData)); }
 
     // ADMIN ACCESS & POPULATION
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function requestAdminAccess() { 
-        openAdmin(); // Use the population function
+        openAdmin(); 
         document.getElementById('admin-modal').style.display='flex'; 
     } 
     function toggleAutoLogin(c) {} 
 
-    // RESTORED FUNCTION THAT POPULATES THE FORM
     function openAdmin(newData) {
         const data = newData || appData;
         try {
             document.getElementById('edit-title').value = data.textTitle || "";
             document.getElementById('edit-question').value = data.question || "";
-            // Sync AI box
             document.getElementById('ai-question-input').value = data.question || "";
-            
             initAdminConfig();
-            renderItems(); // Re-render the list with new data
+            renderItems();
         } catch(e) { console.error("Admin Pop Error", e); }
     }
 
