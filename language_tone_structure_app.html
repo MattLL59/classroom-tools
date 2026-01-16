@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v121 (L1 Simplicity)</title>
+    <title>Tone & Structure Architect v122 (Bank Control)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -134,6 +134,8 @@
         .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
 
         #save-status { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; opacity: 0; transition: opacity 0.5s; z-index: 10000; }
+        
+        .bank-edit-btn { background:#607d8b; color:white; padding:5px 10px; border-radius:4px; border:none; margin:2px; font-size:0.85rem; cursor:pointer; }
     </style>
 </head>
 <body>
@@ -141,7 +143,7 @@
     <header>
         <h1>
             <button onclick="hardReset()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="Emergency Factory Reset">⚠️</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v121
+            <i class="fas fa-cubes"></i> Tone & Structure v122
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -205,7 +207,7 @@
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="hardReset()">⚠️ Factory Reset (Use if corrupted)</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v121)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v122)</h3>
                     <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 1:</strong> Author Name (Optional):</p>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     
@@ -223,6 +225,12 @@
                     
                     <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 4:</strong> Paste JSON Response:</p>
                     <textarea id="ai-paste-area" class="admin-input" style="height:80px;" placeholder="Paste JSON here..."></textarea>
+                    
+                    <label style="display:flex; align-items:center; background:#fff; padding:10px; border:1px solid #ccc; border-radius:5px; margin-bottom:10px;">
+                        <input type="checkbox" id="ai-keep-banks" style="transform:scale(1.5); margin-right:10px;"> 
+                        <strong>🛡️ Keep my existing Sentence Banks</strong> &nbsp;<small>(Ignore AI banks)</small>
+                    </label>
+
                     <button class="btn" style="background:#4a148c; width:100%;" onclick="loadDataFromText()">📥 Load Data</button>
                 </div>
 
@@ -246,6 +254,25 @@
                         <select class="admin-input" id="cfg-slot4" onchange="saveStructureConfig()" style="width:auto;"></select>
                         <select class="admin-input" id="cfg-slot5" onchange="saveStructureConfig()" style="width:auto;"></select>
                         <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()" style="width:auto;"></select>
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <h3>Sentence Banks (Edit)</h3>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        <button class="bank-edit-btn" onclick="editBank('markers')">Markers</button>
+                        <button class="bank-edit-btn" onclick="editBank('starters')">Starters</button>
+                        <button class="bank-edit-btn" onclick="editBank('methods')">Methods</button>
+                        <button class="bank-edit-btn" onclick="editBank('points')">Points</button>
+                        <button class="bank-edit-btn" onclick="editBank('links')">Links</button>
+                    </div>
+                    <div id="bank-editor-area" style="margin-top:10px; padding:10px; border:1px solid #ccc; display:none; background:#fafafa;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <h4 id="bank-editor-title" style="margin:0;">Editing...</h4>
+                            <button onclick="document.getElementById('bank-editor-area').style.display='none'" style="border:none;background:none;">❌</button>
+                        </div>
+                        <div id="bank-list" class="list-container" style="max-height:200px; overflow-y:auto; margin-top:10px;"></div>
+                        <button class="btn btn-add" style="background:#2ecc71;" onclick="addBankItem()">+ Add Item</button>
                     </div>
                 </div>
 
@@ -299,6 +326,7 @@
     let appData = JSON.parse(JSON.stringify(defaultData));
     let state = { level: 1, currentIdx: -1, filter: 'all', completed: [], currentLens: '' };
     let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
+    let currentEditingBank = '';
     let adminConfigLevel = 1;
 
     function init() {
@@ -312,11 +340,16 @@
             if(savedCompleted) state.completed = JSON.parse(savedCompleted);
             updateUI(); changeLevel(); return;
         }
-        let local = localStorage.getItem('tsa_v121_l1fix');
-        if(!local) local = localStorage.getItem('tsa_v120_fullai');
+        let local = localStorage.getItem('tsa_v122_banks');
+        if(!local) local = localStorage.getItem('tsa_v121_l1fix');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         ensureDataIntegrity();
         updateUI(); changeLevel(); 
+        
+        const savedEssay = localStorage.getItem('tsa_student_essay');
+        if(savedEssay) document.getElementById('answer-area').value = savedEssay;
+        const savedCompleted = localStorage.getItem('tsa_student_completed');
+        if(savedCompleted) state.completed = JSON.parse(savedCompleted);
     }
     
     function autoSaveProgress() {
@@ -455,14 +488,17 @@
         currentConfig.forEach(type => {
             if (['quote', 'analysis', 'none'].includes(type)) return;
             let options = appData[type+'s'] || [];
+            
+            // CONTEXT FILTERING
             if (type === 'link' && state.level > 1 && state.currentLens) {
                 options = options.filter(opt => {
                     const lower = opt.toLowerCase();
                     if (lower.includes(`(${state.currentLens})`)) return true; 
-                    if (lower.includes('(tone)') || lower.includes('(structure)') || lower.includes('(lang)')) return false; 
+                    if (lower.includes('(tone)') || lower.includes('(structure)') || lower.includes('(lang)') || lower.includes('(language)')) return false; 
                     return true; 
                 });
             }
+            
             const div = document.createElement('div');
             div.className = 'bank-row';
             div.innerHTML = `<span class="bank-label">${type}</span>
@@ -552,10 +588,28 @@ Output ONLY raw JSON.`;
 
     function loadDataFromText() {
         const text = document.getElementById('ai-paste-area').value;
+        const keepBanks = document.getElementById('ai-keep-banks').checked;
         try {
             const json = JSON.parse(text);
-            appData = { ...appData, ...json }; 
-            ensureDataIntegrity(); saveLocal(); openAdmin(); updateUI(); alert("Data Loaded!");
+            
+            // PARTIAL UPDATE IF KEEPING BANKS
+            if(keepBanks) {
+                // Remove bank keys from incoming JSON so they don't overwrite
+                delete json.markers;
+                delete json.starters;
+                delete json.methods;
+                delete json.points;
+                delete json.links;
+                // Merge remainder (items, title, question)
+                appData = { ...appData, ...json };
+                alert("Data Loaded! (Your existing banks were preserved)");
+            } else {
+                // Full overwrite
+                appData = { ...appData, ...json };
+                alert("Data Loaded! (Banks updated from AI)");
+            }
+            
+            ensureDataIntegrity(); saveLocal(); openAdmin(); updateUI();
         } catch(e) { alert("Invalid JSON."); }
     }
 
@@ -577,7 +631,7 @@ Output ONLY raw JSON.`;
     function toggleAutoLogin(checked) { if(checked) localStorage.setItem('tsa_auto_login', 'true'); else localStorage.removeItem('tsa_auto_login'); }
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v121_l1fix', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v122_banks', JSON.stringify(appData)); }
     function updateUI() { 
         document.getElementById('student-title').innerText = appData.textTitle || "..."; 
         document.getElementById('text-display').innerText = appData.textTitle || "...";
@@ -654,7 +708,7 @@ Output ONLY raw JSON.`;
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v121_l1fix'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v122_banks'); location.reload(); } }
 
     init();
 </script>
