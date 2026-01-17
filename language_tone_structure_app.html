@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v147 (UI Enforcement)</title>
+    <title>Tone & Structure Architect v148 (Loop Breaker)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -48,7 +48,7 @@
         .bank-row { text-align: left; width: 100%; margin-bottom: 5px; }
         .bank-label { font-size: 0.75rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-left: 5px; margin-bottom: 3px; display: block;}
         
-        /* === DROPDOWN ENFORCEMENT === */
+        /* DROPDOWN ENFORCEMENT */
         select.bank-select { 
             width: 100% !important; 
             display: block !important;
@@ -71,6 +71,7 @@
         .btn { padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; }
         .btn-primary { background: var(--primary); width: 100%; }
         .btn-warning { background: var(--accent); }
+        .btn-danger { background: #e74c3c; }
         .btn-doc { background: #2b5797; }
         .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
         
@@ -96,7 +97,8 @@
         #feedback-icon { font-size: 5rem; margin-bottom: 20px; }
         #save-status { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; opacity: 0; transition: 0.5s; z-index: 10000; }
         
-        #crash-curtain { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:9999999; justify-content:center; align-items:center; flex-direction:column; text-align:center; }
+        /* CRASH CURTAIN - HIGH PRIORITY */
+        #crash-curtain { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:999999999; justify-content:center; align-items:center; flex-direction:column; text-align:center; padding: 20px; box-sizing: border-box; }
         
         @media print { .no-print { display: none; } }
     </style>
@@ -104,15 +106,18 @@
 <body>
 
     <div id="crash-curtain">
-        <h2>⚠️ Safe Mode Active</h2>
-        <p>The app recovered from a data error. Check Settings.</p>
-        <button class="btn btn-primary" id="curtain-settings-btn">Open Settings</button>
+        <h2 style="color:#f44336; font-size: 2rem;">⚠️ Safe Mode Active</h2>
+        <p>The saved data was corrupt or incomplete.</p>
+        <div style="display:flex; gap:10px; flex-direction:column; width: 100%; max-width: 300px;">
+            <button class="btn btn-danger" onclick="hardReset()">🔥 FACTORY RESET (CLICK ME)</button>
+            <button class="btn btn-primary" onclick="openAdmin(); this.parentElement.parentElement.style.display='none';">Open Settings Only</button>
+        </div>
     </div>
 
     <header>
         <h1>
             <button id="reset-session-btn" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v147
+            <i class="fas fa-cubes"></i> Tone & Structure v148
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -179,7 +184,7 @@
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="hardReset()">⚠️ Factory Reset</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v147)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v148)</h3>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     <input id="ai-quote-count" type="number" class="admin-input" value="6" min="1" max="15">
                     <textarea id="ai-source-text" class="admin-input" style="height:80px; border-color:#9c27b0;" placeholder="Paste extract here..."></textarea>
@@ -316,17 +321,16 @@
                 return;
             }
             
-            let local = localStorage.getItem('tsa_v147_forceui');
-            if(!local) local = localStorage.getItem('tsa_v146_stable') || localStorage.getItem('tsa_v145_safe');
+            let local = localStorage.getItem('tsa_v148_loopfix');
+            // Try Legacy
+            if(!local) local = localStorage.getItem('tsa_v147_forceui') || localStorage.getItem('tsa_v146_stable');
             
             if(local) { 
                 try { 
                     const parsed = JSON.parse(local);
                     appData = validateAndRepair(parsed);
                 } catch(e) { 
-                    console.error("Data Corrupt", e);
-                    appData = defaultData; 
-                    setTimeout(() => openAdmin(), 500); 
+                    throw new Error("Local Data Corrupt");
                 } 
             }
             
@@ -354,14 +358,14 @@
         document.getElementById('level-select').addEventListener('change', changeLevel);
     }
 
-    // --- ROBUST VALIDATION (The "Square Fixer") ---
+    // --- AGGRESSIVE VALIDATION ---
     function validateAndRepair(data) {
         if (!data) return JSON.parse(JSON.stringify(defaultData));
         
-        // Ensure arrays exist and are not empty defaults for critical banks
+        // REPAIR EMPTY BANKS (The "Square Box" Fix)
         ['markers','starters','methods','points','simpleLinks','complexLinks','items'].forEach(key => {
             if (!Array.isArray(data[key])) data[key] = defaultData[key] || [];
-            if (data[key].length === 0) data[key] = ["(Empty Bank)"]; 
+            if (data[key].length === 0) data[key] = defaultData[key] || ["(No items)"]; 
         });
 
         if (!data.sentenceConfigs) data.sentenceConfigs = defaultData.sentenceConfigs;
@@ -395,85 +399,6 @@
         if(appData.simpleLinks) appData.simpleLinks = appData.simpleLinks.map(s => s.replace(/\s+that\s*$/i, "").trim());
     }
     
-    // --- BUILDER RENDERER (REBUILT FOR STABILITY) ---
-    function renderBuilderDropdowns() {
-        const container = document.getElementById('dynamic-builder-controls');
-        container.innerHTML = '';
-        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
-        
-        const dataMap = { 'marker': 'markers', 'starter': 'starters', 'method': 'methods', 'point': 'points' };
-
-        currentConfig.forEach(type => {
-            if (['quote', 'analysis', 'none'].includes(type)) return;
-            
-            let options = [];
-            
-            // SMART LINK FILTERING
-            if(type === 'link') {
-                if(state.level === 1) {
-                    options = appData['simpleLinks']; 
-                } else {
-                    options = appData['complexLinks']; 
-                    if (state.currentLens) {
-                        options = options.filter(opt => {
-                            const lower = opt.toLowerCase();
-                            return lower.includes(`(${state.currentLens})`) || (!lower.includes('(tone)') && !lower.includes('(structure)') && !lower.includes('(lang)') && !lower.includes('(language)'));
-                        });
-                    }
-                }
-            } else {
-                const key = dataMap[type] || type + 's';
-                options = appData[key];
-            }
-
-            // Fallback for null/empty
-            if (!options || options.length === 0) {
-                options = defaultData[dataMap[type] || type + 's'] || ["(No options)"];
-            }
-
-            const div = document.createElement('div');
-            div.className = 'bank-row';
-            
-            let optionsHtml = `<option value="">Choose ${type}...</option>`;
-            options.forEach(opt => {
-                let display = opt;
-                if(type === 'link') display = display.replace(/\s+that\s*$/i, ""); 
-                optionsHtml += `<option value="${display}">${display}</option>`;
-            });
-
-            div.innerHTML = `
-                <span class="bank-label">${type.toUpperCase()}</span>
-                <select class="bank-select" onchange="updateSlot('${type}', this.value)">
-                    ${optionsHtml}
-                </select>
-            `;
-            container.appendChild(div);
-        });
-    }
-
-    // Helper for select onchange
-    window.updateSlot = function(type, value) {
-        sentenceSlots[type] = value;
-        rebuildSentence();
-    };
-
-    function rebuildSentence() {
-        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
-        let parts = [];
-        currentConfig.forEach(type => { 
-            let val = sentenceSlots[type];
-            if(val) {
-                if(type === 'link') val = val.replace(/\s+that\s*$/i, "");
-                val = val.replace(/\s*\((Tone|Structure|Lang|Language)\)/gi, '').trim();
-                parts.push(val);
-            }
-        });
-        let str = parts.join(" ");
-        if(str) { str = str.charAt(0).toUpperCase() + str.slice(1); if(!str.endsWith('.')) str += "."; }
-        document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
-    }
-
-    // --- CORE APP LOGIC ---
     function autoSaveProgress() {
         localStorage.setItem('tsa_student_essay', document.getElementById('answer-area').value);
         localStorage.setItem('tsa_student_score', state.score);
@@ -609,7 +534,7 @@
         state.currentLens = lens; 
         const item = appData.items[state.currentIdx];
         const lvlData = item[`level${state.level}`];
-        // FAILSAFE: If analysis is missing, create dummy data to prevent crash
+        // FAILSAFE
         if (!lvlData || !lvlData[lens]) { 
             console.warn("Missing Analysis Data");
             showPhrasingChoices(lens, "generic");
@@ -655,6 +580,83 @@
             };
             container.appendChild(div);
         });
+    }
+
+    function renderBuilderDropdowns() {
+        const container = document.getElementById('dynamic-builder-controls');
+        container.innerHTML = '';
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        
+        const dataMap = { 'marker': 'markers', 'starter': 'starters', 'method': 'methods', 'point': 'points' };
+
+        currentConfig.forEach(type => {
+            if (['quote', 'analysis', 'none'].includes(type)) return;
+            
+            let options = [];
+            
+            // SMART LINK FILTERING
+            if(type === 'link') {
+                if(state.level === 1) {
+                    options = appData['simpleLinks']; 
+                } else {
+                    options = appData['complexLinks']; 
+                    if (state.currentLens) {
+                        options = options.filter(opt => {
+                            const lower = opt.toLowerCase();
+                            return lower.includes(`(${state.currentLens})`) || (!lower.includes('(tone)') && !lower.includes('(structure)') && !lower.includes('(lang)') && !lower.includes('(language)'));
+                        });
+                    }
+                }
+            } else {
+                const key = dataMap[type] || type + 's';
+                options = appData[key];
+            }
+
+            // Fallback for null/empty
+            if (!options || options.length === 0) {
+                options = defaultData[dataMap[type] || type + 's'] || ["(No options)"];
+            }
+
+            const div = document.createElement('div');
+            div.className = 'bank-row';
+            
+            let optionsHtml = `<option value="">Choose ${type}...</option>`;
+            options.forEach(opt => {
+                let display = opt;
+                if(type === 'link') display = display.replace(/\s+that\s*$/i, ""); 
+                optionsHtml += `<option value="${display}">${display}</option>`;
+            });
+
+            div.innerHTML = `
+                <span class="bank-label">${type.toUpperCase()}</span>
+                <select class="bank-select" onchange="updateSlot('${type}', this.value)">
+                    ${optionsHtml}
+                </select>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    // Helper for select onchange
+    window.updateSlot = function(type, value) {
+        sentenceSlots[type] = value;
+        rebuildSentence();
+    };
+
+    function rebuildSentence() {
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        let parts = [];
+        currentConfig.forEach(type => { 
+            let val = sentenceSlots[type];
+            if(val) {
+                if(type === 'link') val = val.replace(/\s+that\s*$/i, "");
+                val = val.replace(/\s*\((Tone|Structure|Lang|Language)\)/gi, '').trim();
+                parts.push(val);
+            }
+        });
+        let str = parts.join(" ");
+        if(str) { str = str.charAt(0).toUpperCase() + str.slice(1); if(!str.endsWith('.')) str += "."; }
+        document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
     }
 
     function commitSentence() {
@@ -711,7 +713,7 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
     }
 
-    // ADMIN FUNCTIONS
+    // GLOBAL UTILS
     window.generateAndShowPrompt = function() { const c = document.getElementById('ai-quote-count').value; const t = document.getElementById('ai-source-text').value; const q = document.getElementById('ai-question-input').value; const a = document.getElementById('ai-author-name').value; document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.\nSOURCE: "${t}"\nQ: "${q}"\nAUTHOR: "${a}"\n\nREQUIRED JSON FORMAT:\n{ "textTitle": "Title", "question": "${q}", "items": [ { "id":"q1", "type":"structure", "original":"quote", "translation":"meaning", "distractors":["wrong1"], "level1":{}, "level2":{}, "level3":{} } ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) }`; document.getElementById('prompt-display-container').style.display='block'; };
     
     window.loadDataFromText = function() { 
@@ -729,7 +731,7 @@
         } 
     };
     
-    window.saveLocal = function() { localStorage.setItem('tsa_v147_forceui', JSON.stringify(appData)); };
+    window.saveLocal = function() { localStorage.setItem('tsa_v148_loopfix', JSON.stringify(appData)); };
     window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
     
     window.openAdmin = function() { 
@@ -746,7 +748,7 @@
     window.requestAdminAccess = function() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); };
     window.toggleAutoLogin = function(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); };
     window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
-    window.hardReset = function() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v147_forceui'); location.reload(); } };
+    window.hardReset = function() { if(confirm("This will erase ALL custom data. Continue?")) { localStorage.removeItem('tsa_v148_loopfix'); location.reload(); } };
     window.downloadJSON = function() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); };
     window.downloadStudentApp = function() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); };
     window.editBank = function(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); };
