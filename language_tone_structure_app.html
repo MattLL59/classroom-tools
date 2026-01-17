@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v158 (Secure Editor)</title>
+    <title>Tone & Structure Architect v159 (Reactive Core)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -39,6 +39,13 @@
         .card-struct { border-left: 10px solid var(--struct-col); text-align: left; }
         .card-lang { border-left: 10px solid var(--lang-col); }
 
+        /* ANIMATIONS */
+        @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-5px); } 100% { transform: translateX(0); } }
+        .shake { animation: shake 0.4s ease-in-out; border-color: var(--error) !important; background: #ffebee !important; }
+        
+        @keyframes flashSuccess { 0% { background: var(--card); } 50% { background: #dcedc8; } 100% { background: var(--card); } }
+        .flash { animation: flashSuccess 0.5s ease-in-out; }
+
         /* BUILDER - FORCED SIZING */
         .bank-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: rgba(0,0,0,0.02); padding: 10px; border-radius: 8px; width: 100%; box-sizing: border-box; }
         .bank-row { text-align: left; width: 100%; margin-bottom: 10px; display: block; }
@@ -58,7 +65,7 @@
             min-width: 100px;
         } 
         
-        #sentence-stage { width: 100%; padding: 15px; background: var(--card); border: 2px dashed var(--primary); border-radius: 10px; margin: 15px 0; font-size: 1.1rem; min-height: 60px; line-height: 1.4; }
+        #sentence-stage { width: 100%; padding: 15px; background: var(--card); border: 2px dashed var(--primary); border-radius: 10px; margin: 15px 0; font-size: 1.1rem; min-height: 60px; line-height: 1.4; transition: background 0.3s; }
         #answer-area { width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; background: var(--card); font-family: inherit; margin-bottom: 10px; font-size: 1rem; }
         #quote-reference { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 10px; margin-bottom: 15px; border-radius: 4px; font-style: italic; color: #444; display: none; }
 
@@ -116,7 +123,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v158
+            <i class="fas fa-cubes"></i> Tone & Structure v159
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -183,7 +190,7 @@
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="nuclearReset()">⚠️ Factory Reset</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v158)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v159)</h3>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     <input id="ai-quote-count" type="number" class="admin-input" value="6" min="1" max="15">
                     <textarea id="ai-source-text" class="admin-input" style="height:80px; border-color:#9c27b0;" placeholder="Paste extract here..."></textarea>
@@ -324,8 +331,8 @@
                 return;
             }
             
-            let local = localStorage.getItem('tsa_v158_secure');
-            if(!local) local = localStorage.getItem('tsa_v157_logicfix');
+            let local = localStorage.getItem('tsa_v159_reactive');
+            if(!local) local = localStorage.getItem('tsa_v158_secure'); // Safe migration
             
             if(local) { 
                 try { 
@@ -413,8 +420,7 @@
     
     window.nuclearReset = function() {
         if(confirm("Confirm Factory Reset?")) {
-            localStorage.removeItem('tsa_v158_secure');
-            localStorage.removeItem('tsa_v157_logicfix');
+            localStorage.removeItem('tsa_v159_reactive');
             localStorage.removeItem('tsa_student_essay');
             localStorage.removeItem('tsa_student_completed');
             localStorage.removeItem('tsa_student_score');
@@ -664,7 +670,53 @@
         document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
     }
 
-    // GLOBAL UTILS
+    function commitSentence() {
+        const stage = document.getElementById('sentence-stage');
+        const text = stage.innerText.trim();
+        
+        // BETTER GUARD: Only stop if empty or exactly the placeholder
+        if (!text || text === "Start picking words in the Lab...") {
+            alert("Please construct a sentence first.");
+            return;
+        }
+        
+        const area = document.getElementById('answer-area');
+        area.value += (area.value ? "\n\n" : "") + text;
+        
+        if(state.currentIdx !== -1 && !state.completed.includes(state.currentIdx)) {
+            state.completed.push(state.currentIdx);
+        }
+        localStorage.setItem('tsa_student_completed', JSON.stringify(state.completed)); 
+        autoSaveProgress();
+        
+        // RESET SLOTS
+        sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"" };
+        document.getElementById('quote-reference').style.display = 'none';
+        rebuildSentence();
+        
+        // VISUAL FEEDBACK
+        stage.classList.add('flash');
+        setTimeout(() => stage.classList.remove('flash'), 500);
+        
+        const total = appData.items.length;
+        if(state.completed.length === total) {
+            triggerCelebration();
+        }
+        
+        renderBuilderDropdowns();
+        resetToGrid(); 
+        switchHub('lab');
+    }
+    
+    function toggleAutoProgress(c) { if(c) localStorage.setItem('tsa_auto_progress', 'true'); else localStorage.removeItem('tsa_auto_progress'); }
+
+    function downloadDoc() { 
+        const BOM = "\ufeff";
+        const html = `<html><head><meta charset="utf-8"><title>Essay</title></head><body>${document.getElementById('answer-area').value.replace(/\n/g,'<br>')}</body></html>`;
+        const blob = new Blob([BOM + html], {type:'application/msword;charset=utf-8'}); 
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
+    }
+
     window.generateAndShowPrompt = function() { const c = document.getElementById('ai-quote-count').value; const t = document.getElementById('ai-source-text').value; const q = document.getElementById('ai-question-input').value; const a = document.getElementById('ai-author-name').value; document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.\nSOURCE: "${t}"\nQ: "${q}"\nAUTHOR: "${a}"\n\nREQUIRED JSON FORMAT:\n{ "textTitle": "Title", "question": "${q}", "items": [ { "id":"q1", "type":"structure", "original":"quote", "translation":"meaning", "distractors":["wrong1"], "level1":{}, "level2":{}, "level3":{} } ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) }`; document.getElementById('prompt-display-container').style.display='block'; };
     
     window.loadDataFromText = function() { 
@@ -682,7 +734,7 @@
         } 
     };
     
-    window.saveLocal = function() { localStorage.setItem('tsa_v158_secure', JSON.stringify(appData)); };
+    window.saveLocal = function() { localStorage.setItem('tsa_v159_reactive', JSON.stringify(appData)); };
     window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
     
     window.openAdmin = function() { 
@@ -703,17 +755,15 @@
     window.downloadJSON = function() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); };
     window.downloadStudentApp = function() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); };
     window.editBank = function(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); };
-    window.updateBankItem = function(i,v) { appData[currentEditingBank][i]=v; saveLocal(); };
-    window.delBankItem = function(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); };
-    window.addBankItem = function() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); };
+    window.updateBankItem = function(i,v) { appData[currentEditingBank][i]=v; saveLocal(); renderBuilderDropdowns(); }; // REACTIVE UPDATE
+    window.delBankItem = function(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; // REACTIVE UPDATE
+    window.addBankItem = function() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; // REACTIVE UPDATE
     
-    // ESCAPE HTML FOR SAFETY
     window.escapeHtml = function(text) {
         if(!text) return "";
         return text.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     }
 
-    // UPDATED RENDERER WITH SAFETY
     window.renderItems = function() { 
         const c=document.getElementById('items-container'); 
         c.innerHTML=''; 
@@ -757,7 +807,7 @@
     window.updateDeep = function(i,l,t,k,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t][k]=v; saveLocal(); };
     window.delItem = function(i) { appData.items.splice(i,1); renderItems(); saveLocal(); };
     window.addNewItem = function() { appData.items.push({type:"tone", original:"New", translation:"", distractors:[], includeInWS:true}); renderItems(); saveLocal(); };
-    window.saveStructureConfig = function() { const order=[]; for(let i=0;i<6;i++) order.push(document.getElementById(`cfg-slot${i+1}`).value); appData.sentenceConfigs[adminConfigLevel]=order; saveLocal(); };
+    window.saveStructureConfig = function() { const order=[]; for(let i=0;i<6;i++) order.push(document.getElementById(`cfg-slot${i+1}`).value); appData.sentenceConfigs[adminConfigLevel]=order; saveLocal(); renderBuilderDropdowns(); };
     
     window.openPrintView = function() {
         const mode = document.getElementById('ws-print-mode').value;
@@ -799,4 +849,4 @@
     document.addEventListener("DOMContentLoaded", init);
 </script>
 </body>
-</html> 
+</html>
