@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v132</title>
+    <title>Tone & Structure Architect v133</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -87,7 +87,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v132
+            <i class="fas fa-cubes"></i> Tone & Structure v133
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
@@ -137,7 +137,7 @@
             <textarea id="answer-area" placeholder="Your full answer will appear here..." oninput="autoSaveProgress()"></textarea>
             <div style="display:flex; gap:5px;">
                 <button class="btn btn-doc" style="flex:1" onclick="downloadDoc()">Download .doc</button>
-                <button class="btn btn-warning" style="flex:0 0 auto; background:#e74c3c;" onclick="clearEssay()">Reset Progress</button>
+                <button class="btn btn-warning" style="flex:0 0 auto; background:#e74c3c;" onclick="clearEssay()">Reset Essay</button>
             </div>
         </div>
     </div>
@@ -162,7 +162,7 @@
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="hardReset()">⚠️ Factory Reset</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v132)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v133)</h3>
                     <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 1:</strong> Author Name:</p>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     
@@ -204,6 +204,7 @@
                     <h3>📝 Edit Evidence & Analysis</h3>
                     <div id="items-container"></div>
                     <button class="btn btn-add" style="background:#2ecc71; margin-top:10px;" onclick="addNewItem()">+ Add New Quote</button>
+                    <button class="btn btn-warning" style="width:100%; margin-top:5px;" onclick="resetUsedQuotes()">♻️ Reset Used Quotes (Show All)</button>
                 </div>
 
                 <div class="editor-section" style="border-left: 5px solid #2196f3;">
@@ -247,9 +248,10 @@
                     <h3>🖨️ Worksheet & Data</h3>
                     <div style="display:flex; align-items:center; gap:5px; margin-bottom:10px;">
                         <select id="ws-print-mode" class="admin-input" style="width:auto; flex-grow:1;">
-                            <option value="1">Level 1 (Scaffold)</option>
-                            <option value="2">Level 2 (Deep)</option>
-                            <option value="3">Level 3 (Full)</option>
+                            <option value="all">Merged Levels</option>
+                            <option value="1">Level 1 Only</option>
+                            <option value="2">Level 2 Only</option>
+                            <option value="3">Level 3 Only</option>
                         </select>
                         <button class="btn btn-accent" onclick="openPrintView()">📄 View/Print</button>
                     </div>
@@ -326,9 +328,8 @@
             changeLevel(); 
             return;
         }
-        let local = localStorage.getItem('tsa_v132_worksheet');
-        if(!local) local = localStorage.getItem('tsa_v131_distractors');
-        if(!local) local = localStorage.getItem('tsa_v130_smartfilter');
+        let local = localStorage.getItem('tsa_v133_done');
+        if(!local) local = localStorage.getItem('tsa_v132_worksheet');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         ensureDataIntegrity();
         
@@ -340,6 +341,8 @@
         if(localStorage.getItem('tsa_auto_login') === 'true') document.getElementById('auto-login-check').checked = true;
         const savedEssay = localStorage.getItem('tsa_student_essay');
         if(savedEssay) document.getElementById('answer-area').value = savedEssay;
+        const savedCompleted = localStorage.getItem('tsa_student_completed');
+        if(savedCompleted) state.completed = JSON.parse(savedCompleted);
     }
     
     function autoSaveProgress() {
@@ -352,6 +355,15 @@
             localStorage.removeItem('tsa_student_essay');
             localStorage.removeItem('tsa_student_completed');
             location.reload();
+        }
+    }
+    
+    function resetUsedQuotes() {
+        if(confirm("Restore all completed quotes to the grid?")) {
+            state.completed = [];
+            localStorage.removeItem('tsa_student_completed');
+            resetToGrid();
+            alert("All quotes restored!");
         }
     }
 
@@ -389,7 +401,9 @@
         if(!grid) return; grid.innerHTML = '';
         let count = 0;
         appData.items.forEach((item, i) => {
+            // HIDE COMPLETED ITEMS
             if(state.completed.includes(i)) return; 
+            
             if(state.level !== 1 && state.filter !== 'all' && item.type !== state.filter) return;
             count++;
             const div = document.createElement('div');
@@ -398,7 +412,13 @@
             div.onclick = () => startAnalysis(i);
             grid.appendChild(div);
         });
-        if(count === 0) grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px;"><h3>🎉 All Evidence Analyzed!</h3></div>';
+        if(count === 0) {
+            if(appData.items.length > 0 && state.completed.length === appData.items.length) {
+                grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px;"><h3>🎉 All Quotes Analyzed!</h3><p>Check your essay or reset used quotes in settings.</p></div>';
+            } else {
+                grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px;"><h3>No Evidence Found</h3></div>';
+            }
+        }
     }
     
     function filterGrid(type) { state.filter = type; resetToGrid(); }
@@ -515,7 +535,10 @@
             if(val) parts.push(val);
         });
         let str = parts.join(" ");
-        if(str) str = str.charAt(0).toUpperCase() + str.slice(1);
+        if(str) {
+            str = str.charAt(0).toUpperCase() + str.slice(1);
+            if(!str.endsWith('.')) str += "."; // AUTO PUNCTUATION
+        }
         document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
     }
 
@@ -524,9 +547,14 @@
         if (text.includes("Start picking")) return;
         const area = document.getElementById('answer-area');
         area.value += (area.value ? "\n\n" : "") + text;
-        if(state.currentIdx !== -1) state.completed.push(state.currentIdx);
+        
+        // MARK AS COMPLETED
+        if(state.currentIdx !== -1 && !state.completed.includes(state.currentIdx)) {
+            state.completed.push(state.currentIdx);
+        }
         localStorage.setItem('tsa_student_completed', JSON.stringify(state.completed)); 
         autoSaveProgress();
+        
         sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"" };
         document.getElementById('quote-reference').style.display = 'none';
         rebuildSentence(); renderBuilderDropdowns(); resetToGrid(); switchHub('lab');
@@ -545,7 +573,7 @@ SOURCE: "${source}"
 ESSAY QUESTION: "${q}"
 AUTHOR NAME: "${author}"
 TASK: Generate a valid JSON object.
-1. "items": Exactly ${count} items.
+1. "items": Exactly ${count} items. For STRUCTURE, focus on sentence types, flow, or paragraphing.
 2. "markers": 5 discourse markers.
 3. "starters": 5 sentence starters. LEVEL 1 RULE: Start with "${author}" or "The author".
 4. "methods": 5 relevant single-word methods.
@@ -576,7 +604,18 @@ FORMAT: { "textTitle": "Title", "question": "${q}", "markers": [], "starters": [
             } else {
                 appData = { ...appData, ...json };
             }
-            ensureDataIntegrity(); saveLocal(); location.reload(); 
+            ensureDataIntegrity(); 
+            
+            // CLEAN WIPE AND RELOAD STATE
+            state.completed = [];
+            document.getElementById('answer-area').value = "";
+            saveLocal(); 
+            
+            // SOFT RELOAD (FORCE RENDER)
+            updateUI();
+            changeLevel();
+            alert("Loaded Successfully!");
+            closeAdmin();
         } catch(e) { alert("Invalid JSON."); }
     }
 
@@ -585,7 +624,7 @@ FORMAT: { "textTitle": "Title", "question": "${q}", "markers": [], "starters": [
     function requestAdminAccess() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); else alert("Incorrect"); }
     function toggleAutoLogin(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function saveLocal() { localStorage.setItem('tsa_v132_worksheet', JSON.stringify(appData)); }
+    function saveLocal() { localStorage.setItem('tsa_v133_done', JSON.stringify(appData)); }
     function updateUI() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question; }
 
     function switchAdminConfigLevel(lvl) {
@@ -641,15 +680,13 @@ FORMAT: { "textTitle": "Title", "question": "${q}", "markers": [], "starters": [
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
     function downloadDoc() { const blob = new Blob(['<html><body>'+document.getElementById('answer-area').value.replace(/\n/g,'<br>')+'</body></html>'], {type:'application/msword'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v132_worksheet'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v133_done'); location.reload(); } }
     function saveWSOptions() { appData.worksheetOptions = { lvl1: true, lvl2: true, lvl3: true }; saveLocal(); }
     
     function openPrintView() {
         const mode = document.getElementById('ws-print-mode').value;
         const w = window.open('', '_blank');
         let html = `<html><head><title>Worksheet</title><style>body{font-family:sans-serif; padding:20px;} table{width:100%; border-collapse:collapse; margin-bottom:20px;} td,th{border:1px solid #999; padding:8px;} .box{border:1px solid #333; padding:15px; margin-bottom:10px; min-height:50px;}</style></head><body><h2>${appData.textTitle}</h2>`;
-        
-        // LEVEL 1 SPECIFIC LAYOUT
         if (mode === '1') {
             let evidence = [], meanings = [];
             appData.items.filter(i => i.includeInWS).forEach(i => { evidence.push(i.original); meanings.push(i.translation); });
@@ -661,9 +698,7 @@ FORMAT: { "textTitle": "Title", "question": "${q}", "markers": [], "starters": [
                 if(!item.includeInWS) return;
                 html += `<div class="box"><strong>${i+1}. "${item.original}"</strong><br><br><hr><br></div>`;
             });
-        } 
-        // LEVEL 2 & 3 LAYOUT
-        else {
+        } else {
             html += `<h3>Analysis Questions</h3>`;
             appData.items.forEach((item,i) => {
                 if(!item.includeInWS) return;
