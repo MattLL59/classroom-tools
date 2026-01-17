@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v139 (Full Settings Restore)</title>
+    <title>Tone & Structure Architect v140 (Structure Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -47,7 +47,7 @@
         .bank-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: rgba(0,0,0,0.02); padding: 10px; border-radius: 8px; }
         .bank-row { text-align: left; width: 100%; }
         .bank-label { font-size: 0.75rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-left: 5px; margin-bottom: 3px; display: block;}
-        select.bank-select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #bbb; background: var(--card); color: var(--text); font-size: 1.1rem; }
+        select.bank-select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #bbb; background: var(--card); color: var(--text); font-size: 1.1rem; min-height: 45px; } /* Forced height for fix */
         #sentence-stage { width: 100%; padding: 15px; background: var(--card); border: 2px dashed var(--primary); border-radius: 10px; margin: 15px 0; font-size: 1.1rem; min-height: 60px; box-sizing: border-box; line-height: 1.4; }
         #answer-area { width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; background: var(--card); font-family: inherit; margin-bottom: 10px; box-sizing: border-box; font-size: 1rem; }
         #quote-reference { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 10px; margin-bottom: 15px; border-radius: 4px; font-style: italic; color: #444; display: none; }
@@ -88,7 +88,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v139
+            <i class="fas fa-cubes"></i> Tone & Structure v140
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -163,7 +163,7 @@
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="hardReset()">⚠️ Factory Reset</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (Full)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v140)</h3>
                     <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 1:</strong> Author Name:</p>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     <p style="font-size:0.85rem; margin-bottom:5px;"><strong>Step 2:</strong> Quote Count:</p>
@@ -200,7 +200,7 @@
                 </div>
 
                 <div class="editor-section" style="border-left: 5px solid #2196f3;">
-                    <h3>⚙️ Sentence Structure</h3>
+                    <h3>⚙️ Sentence Structure (Admin)</h3>
                     <div class="admin-tab-bar">
                         <div id="cfg-tab-1" class="admin-tab active" onclick="switchAdminConfigLevel(1)">Lvl 1</div>
                         <div id="cfg-tab-2" class="admin-tab" onclick="switchAdminConfigLevel(2)">Lvl 2</div>
@@ -300,8 +300,8 @@
             return;
         }
         
-        let local = localStorage.getItem('tsa_v139_fullrestore');
-        if(!local) local = localStorage.getItem('tsa_v138_final') || localStorage.getItem('tsa_v137_headerfix');
+        let local = localStorage.getItem('tsa_v140_fix');
+        if(!local) local = localStorage.getItem('tsa_v139_fullrestore');
         if(local) { try { appData = { ...defaultData, ...JSON.parse(local) }; } catch(e) { appData = defaultData; } }
         
         sanitizeLinks();
@@ -405,7 +405,12 @@
     }
     
     function filterGrid(type) { state.filter = type; resetToGrid(); }
-    function changeLevel() { state.level = parseInt(document.getElementById('level-select').value); resetToGrid(); renderBuilderDropdowns(); }
+    
+    function changeLevel() { 
+        state.level = parseInt(document.getElementById('level-select').value); 
+        resetToGrid(); 
+        renderBuilderDropdowns(); 
+    }
 
     function startAnalysis(idx) {
         state.currentIdx = idx;
@@ -519,7 +524,10 @@
         
         currentConfig.forEach(type => {
             if (['quote', 'analysis', 'none'].includes(type)) return;
+            
             let options = [];
+            
+            // SMART LINK FILTERING
             if(type === 'link') {
                 if(state.level === 1) {
                     options = appData['simpleLinks'] || []; 
@@ -538,6 +546,8 @@
                 options = appData[type+'s'] || [];
             }
             
+            if (!options || options.length === 0) return; // Prevent empty square bug
+
             const div = document.createElement('div');
             div.className = 'bank-row';
             div.innerHTML = `<span class="bank-label">${type}</span><select class="bank-select" onchange="sentenceSlots['${type}']=this.value; rebuildSentence();"><option value="">Choose...</option>${options.map(opt => {
@@ -624,14 +634,16 @@
     // ADMIN FUNCTIONS
     function generateAndShowPrompt() { const c = document.getElementById('ai-quote-count').value; const t = document.getElementById('ai-source-text').value; const q = document.getElementById('ai-question-input').value; const a = document.getElementById('ai-author-name').value; document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.\nSOURCE: "${t}"\nQ: "${q}"\nAUTHOR: "${a}"\n\nREQUIRED JSON FORMAT:\n{ "textTitle": "Title", "question": "${q}", "items": [ { "id":"q1", "type":"structure", "original":"quote", "translation":"meaning", "distractors":["wrong1"], "level1":{}, "level2":{}, "level3":{} } ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) }`; document.getElementById('prompt-display-container').style.display='block'; }
     function loadDataFromText() { try { appData = {...appData, ...JSON.parse(document.getElementById('ai-paste-area').value)}; sanitizeLinks(); ensureDataIntegrity(); state.completed=[]; saveLocal(); location.reload(); } catch(e){ alert("Invalid JSON"); } }
-    function saveLocal() { localStorage.setItem('tsa_v139_fullrestore', JSON.stringify(appData)); }
-    function updateUI() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; }
-    function openAdmin() { document.getElementById('admin-modal').style.display='flex'; try{ renderItems(); }catch(e){} }
+    function saveLocal() { localStorage.setItem('tsa_v140_fix', JSON.stringify(appData)); }
+    function updateUI() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
+    
+    // ADMIN UTILS
+    function openAdmin() { document.getElementById('admin-modal').style.display='flex'; try{ initAdminConfig(); renderItems(); }catch(e){} }
     function closeAdmin() { document.getElementById('admin-modal').style.display='none'; }
     function requestAdminAccess() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); }
     function toggleAutoLogin(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); }
     function updateGlobal(k, v) { appData[k]=v; saveLocal(); updateUI(); }
-    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v139_fullrestore'); location.reload(); } }
+    function hardReset() { if(confirm("Reset?")) { localStorage.removeItem('tsa_v140_fix'); location.reload(); } }
     function downloadJSON() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); }
     function downloadStudentApp() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); }
     function editBank(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); }
@@ -645,6 +657,8 @@
     function delItem(i) { appData.items.splice(i,1); renderItems(); saveLocal(); }
     function addNewItem() { appData.items.push({type:"quote", original:"New", translation:"", distractors:[]}); renderItems(); saveLocal(); }
     function saveStructureConfig() { const order=[]; for(let i=0;i<6;i++) order.push(document.getElementById(`cfg-slot${i+1}`).value); appData.sentenceConfigs[adminConfigLevel]=order; saveLocal(); }
+    
+    // RESTORED WORKSHEET
     function openPrintView() {
         const mode = document.getElementById('ws-print-mode').value;
         const w = window.open('', '_blank');
@@ -663,8 +677,11 @@
         }
         w.document.write(html); w.document.close();
     }
+    function exportWordDoc() { alert("Use View/Print > Save as PDF for best results."); openPrintView(); }
     function openThemeModal() { document.getElementById('theme-modal').style.display='flex'; }
     function setTheme(t) { document.body.className = t==='default' ? '' : 'theme-'+t; document.getElementById('theme-modal').style.display='none'; }
+    function switchAdminConfigLevel(l) { adminConfigLevel=l; document.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('active')); document.getElementById(`cfg-tab-${l}`).classList.add('active'); initAdminConfig(); }
+    function initAdminConfig() { const o=['marker','starter','point','method','quote','analysis','link','none']; const c=appData.sentenceConfigs[adminConfigLevel]; for(let i=0;i<6;i++){ const s=document.getElementById(`cfg-slot${i+1}`); s.innerHTML=''; o.forEach(opt=>s.add(new Option(opt,opt))); s.value=c[i]; } }
 
     init();
 </script>
