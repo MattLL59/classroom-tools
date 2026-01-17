@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v156 (Safe Bind)</title>
+    <title>Tone & Structure Architect v157 (Logic Repair)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -116,7 +116,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v156
+            <i class="fas fa-cubes"></i> Tone & Structure v157
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -183,7 +183,7 @@
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="nuclearReset()">⚠️ Factory Reset</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v156)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v157)</h3>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     <input id="ai-quote-count" type="number" class="admin-input" value="6" min="1" max="15">
                     <textarea id="ai-source-text" class="admin-input" style="height:80px; border-color:#9c27b0;" placeholder="Paste extract here..."></textarea>
@@ -265,7 +265,11 @@
                     </div>
                     <button class="btn btn-doc" style="width:100%; margin-bottom:10px; padding:15px; font-size:1.1rem; background:#1976d2;" onclick="downloadJSON()">💾 Save Lesson File</button>
                     <button class="btn btn-primary" style="width:100%;" onclick="downloadStudentApp()">📦 Download Student App</button>
-                    <label style="margin-top:10px; display:block;"><input type="checkbox" id="auto-progress-check" onchange="toggleAutoProgress(this.checked)"> Auto-Progress Levels</label>
+                    
+                    <div style="margin-top:10px; display:flex; gap:15px;">
+                        <label><input type="checkbox" id="auto-progress-check" onchange="toggleAutoProgress(this.checked)"> Auto-Progress</label>
+                        <label><input type="checkbox" id="auto-login-check" onchange="toggleAutoLogin(this.checked)"> Keep Unlocked</label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -309,7 +313,6 @@
 
     function init() {
         try {
-            // SAFETY BIND
             bindEvents();
 
             if (teacherConfig && typeof teacherConfig === 'object') {
@@ -320,10 +323,9 @@
                 return;
             }
             
-            // NEW KEY FOR SAFETY
-            let local = localStorage.getItem('tsa_v156_safebind');
+            let local = localStorage.getItem('tsa_v157_logicfix');
             // Try legacy migration
-            if(!local) local = localStorage.getItem('tsa_v155_filtered');
+            if(!local) local = localStorage.getItem('tsa_v156_safebind');
             
             if(local) { 
                 try { 
@@ -338,8 +340,12 @@
             sanitizeLinks();
             loadState();
             
-            if(localStorage.getItem('tsa_auto_login') === 'true') document.getElementById('auto-login-check').checked = true;
-            if(localStorage.getItem('tsa_auto_progress') === 'true') document.getElementById('auto-progress-check').checked = true;
+            // PROTECTED CHECKBOX LOADING
+            const autoLogin = document.getElementById('auto-login-check');
+            if(autoLogin && localStorage.getItem('tsa_auto_login') === 'true') autoLogin.checked = true;
+            
+            const autoProg = document.getElementById('auto-progress-check');
+            if(autoProg && localStorage.getItem('tsa_auto_progress') === 'true') autoProg.checked = true;
 
         } catch (fatal) {
             console.error("Fatal Init Error", fatal);
@@ -409,8 +415,8 @@
     
     window.nuclearReset = function() {
         if(confirm("Confirm Factory Reset?")) {
+            localStorage.removeItem('tsa_v157_logicfix');
             localStorage.removeItem('tsa_v156_safebind');
-            localStorage.removeItem('tsa_v155_filtered');
             localStorage.removeItem('tsa_student_essay');
             localStorage.removeItem('tsa_student_completed');
             localStorage.removeItem('tsa_student_score');
@@ -589,8 +595,12 @@
         const container = document.getElementById('dynamic-builder-controls');
         container.innerHTML = '';
         
-        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        // FAILSAFE: If configs are missing, force rebuild default
+        if (!appData.sentenceConfigs || !appData.sentenceConfigs[state.level]) {
+            appData.sentenceConfigs = defaultData.sentenceConfigs;
+        }
         
+        const currentConfig = appData.sentenceConfigs[state.level];
         const dataMap = { 'marker': 'markers', 'starter': 'starters', 'method': 'methods', 'point': 'points' };
 
         currentConfig.forEach(type => {
@@ -598,6 +608,7 @@
             
             let options = [];
             
+            // SMART LINK FILTERING
             if(type === 'link') {
                 if(state.level === 1) {
                     options = appData['simpleLinks']; 
@@ -615,6 +626,7 @@
                 options = appData[key];
             }
 
+            // Fallback for null/empty
             if (!options || options.length === 0) {
                 options = ["(No items available)"];
             }
@@ -660,38 +672,7 @@
         document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
     }
 
-    function commitSentence() {
-        const text = document.getElementById('sentence-stage').innerText;
-        if (text.includes("Start picking")) return;
-        const area = document.getElementById('answer-area');
-        area.value += (area.value ? "\n\n" : "") + text;
-        
-        if(state.currentIdx !== -1 && !state.completed.includes(state.currentIdx)) {
-            state.completed.push(state.currentIdx);
-        }
-        localStorage.setItem('tsa_student_completed', JSON.stringify(state.completed)); 
-        autoSaveProgress();
-        
-        sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"" };
-        document.getElementById('quote-reference').style.display = 'none';
-        
-        const total = appData.items.length;
-        if(state.completed.length === total) {
-            triggerCelebration();
-        }
-        
-        rebuildSentence(); renderBuilderDropdowns(); resetToGrid(); switchHub('lab');
-    }
-    
-    function toggleAutoProgress(c) { if(c) localStorage.setItem('tsa_auto_progress', 'true'); else localStorage.removeItem('tsa_auto_progress'); }
-
-    function downloadDoc() { 
-        const BOM = "\ufeff";
-        const html = `<html><head><meta charset="utf-8"><title>Essay</title></head><body>${document.getElementById('answer-area').value.replace(/\n/g,'<br>')}</body></html>`;
-        const blob = new Blob([BOM + html], {type:'application/msword;charset=utf-8'}); 
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
-    }
-
+    // GLOBAL UTILS
     window.generateAndShowPrompt = function() { const c = document.getElementById('ai-quote-count').value; const t = document.getElementById('ai-source-text').value; const q = document.getElementById('ai-question-input').value; const a = document.getElementById('ai-author-name').value; document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.\nSOURCE: "${t}"\nQ: "${q}"\nAUTHOR: "${a}"\n\nREQUIRED JSON FORMAT:\n{ "textTitle": "Title", "question": "${q}", "items": [ { "id":"q1", "type":"structure", "original":"quote", "translation":"meaning", "distractors":["wrong1"], "level1":{}, "level2":{}, "level3":{} } ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) }`; document.getElementById('prompt-display-container').style.display='block'; };
     
     window.loadDataFromText = function() { 
@@ -709,12 +690,13 @@
         } 
     };
     
-    window.saveLocal = function() { localStorage.setItem('tsa_v156_safebind', JSON.stringify(appData)); };
+    window.saveLocal = function() { localStorage.setItem('tsa_v157_logicfix', JSON.stringify(appData)); };
     window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
     
     window.openAdmin = function() { 
         try {
             document.getElementById('admin-modal').style.display='flex'; 
+            initAdminConfig(); // Ensure boxes are filled
             renderItems();
         } catch(e) {
             console.error("Admin Render Error:", e);
