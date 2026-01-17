@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v150 (Clean Slate)</title>
+    <title>Tone & Structure Architect v151 (UI Enforced)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -43,12 +43,12 @@
         @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-5px); } 100% { transform: translateX(0); } }
         .shake { animation: shake 0.4s ease-in-out; border-color: var(--error) !important; background: #ffebee !important; }
 
-        /* BUILDER */
-        .bank-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: rgba(0,0,0,0.02); padding: 10px; border-radius: 8px; }
-        .bank-row { text-align: left; width: 100%; margin-bottom: 5px; }
-        .bank-label { font-size: 0.75rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-left: 5px; margin-bottom: 3px; display: block;}
+        /* BUILDER STYLES */
+        .bank-list { display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px; background: rgba(0,0,0,0.02); padding: 15px; border-radius: 8px; width: 100%; box-sizing: border-box; }
+        .bank-row { text-align: left; width: 100%; display: block; }
+        .bank-label { font-size: 0.8rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-left: 2px; margin-bottom: 5px; display: block;}
         
-        /* DROPDOWN ENFORCEMENT */
+        /* FALLBACK CSS FOR DROPDOWNS */
         select.bank-select { 
             width: 100% !important; 
             display: block !important;
@@ -59,8 +59,7 @@
             color: var(--text); 
             font-size: 1.1rem; 
             min-height: 50px !important; 
-            opacity: 1 !important;
-            visibility: visible !important;
+            box-sizing: border-box;
         } 
         
         #sentence-stage { width: 100%; padding: 15px; background: var(--card); border: 2px dashed var(--primary); border-radius: 10px; margin: 15px 0; font-size: 1.1rem; min-height: 60px; box-sizing: border-box; line-height: 1.4; }
@@ -105,15 +104,15 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v150
+            <i class="fas fa-cubes"></i> Tone & Structure v151
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
             <button class="admin-btn" title="Change Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
-            <select id="level-select" onchange="changeLevel()" style="padding:4px; border-radius:4px;">
+            <select id="level-select" style="padding:4px; border-radius:4px;">
                 <option value="1">Lvl 1</option><option value="2">L2</option><option value="3">L3</option>
             </select>
-            <button class="admin-btn" onclick="document.getElementById('admin-modal').style.display='flex'; renderItems();"><i class="fas fa-cog"></i></button>
+            <button id="main-settings-btn" class="admin-btn"><i class="fas fa-cog"></i></button>
         </div>
     </header>
 
@@ -167,12 +166,12 @@
 
     <div id="admin-modal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Settings <button onclick="document.getElementById('admin-modal').style.display='none'">X</button></div>
+            <div class="modal-header">Settings <button onclick="closeAdmin()">X</button></div>
             <div class="modal-body">
                 <button class="btn btn-danger" style="width:100%; margin-bottom:15px; background:#e74c3c; color:white; padding:15px;" onclick="clearSession()">⚠️ Factory Reset</button>
 
                 <div class="editor-section" style="border: 2px solid #673ab7; background: #f3e5f5;">
-                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v150)</h3>
+                    <h3 style="color:#4a148c;">🤖 AI Lesson Generator (v151)</h3>
                     <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
                     <input id="ai-quote-count" type="number" class="admin-input" value="6" min="1" max="15">
                     <textarea id="ai-source-text" class="admin-input" style="height:80px; border-color:#9c27b0;" placeholder="Paste extract here..."></textarea>
@@ -296,9 +295,10 @@
     let adminConfigLevel = 1;
     const wordMorphology = { "admiring":{adj:"admiring",noun:"admiration"}, "angry":{adj:"angry",noun:"anger"}, "chaotic":{adj:"chaotic",noun:"chaos"} };
 
-    // --- CRITICAL INIT ---
     function init() {
         try {
+            bindEvents();
+
             if (teacherConfig && typeof teacherConfig === 'object') {
                 appData = validateAndRepair(teacherConfig);
                 document.getElementById('student-banner').style.display='block';
@@ -307,8 +307,8 @@
                 return;
             }
             
-            // CLEAN SLATE: WE USE A NEW KEY TO IGNORE OLD CORRUPTION
-            let local = localStorage.getItem('tsav2_v150_clean'); 
+            let local = localStorage.getItem('tsav2_v151_enforced');
+            if(!local) local = localStorage.getItem('tsav2_v150_clean');
             
             if(local) { 
                 try { 
@@ -333,13 +333,19 @@
         }
     }
 
+    function bindEvents() {
+        document.getElementById('main-settings-btn').addEventListener('click', openAdmin);
+        document.getElementById('theme-btn').addEventListener('click', openThemeModal);
+        document.getElementById('level-select').addEventListener('change', changeLevel);
+    }
+
     // --- AGGRESSIVE VALIDATION ---
     function validateAndRepair(data) {
         if (!data) return JSON.parse(JSON.stringify(defaultData));
         
         ['markers','starters','methods','points','simpleLinks','complexLinks','items'].forEach(key => {
             if (!Array.isArray(data[key])) data[key] = defaultData[key] || [];
-            if (data[key].length === 0) data[key] = ["(Empty Bank)"]; 
+            if (data[key].length === 0) data[key] = ["(No items available)"]; 
         });
 
         if (!data.sentenceConfigs) data.sentenceConfigs = defaultData.sentenceConfigs;
@@ -381,6 +387,7 @@
     
     function clearSession() {
         if(confirm("Factory Reset: This deletes all data and reloads. Continue?")) {
+            localStorage.removeItem('tsav2_v151_enforced');
             localStorage.removeItem('tsav2_v150_clean');
             localStorage.removeItem('tsa_student_essay');
             localStorage.removeItem('tsa_student_completed');
@@ -588,7 +595,7 @@
 
             // Fallback for null/empty
             if (!options || options.length === 0) {
-                options = ["Default 1", "Default 2"]; // Hard Fallback
+                options = ["(No items available)"];
             }
 
             const div = document.createElement('div');
@@ -603,7 +610,7 @@
 
             div.innerHTML = `
                 <span class="bank-label">${type.toUpperCase()}</span>
-                <select class="bank-select" onchange="updateSlot('${type}', this.value)">
+                <select class="bank-select" onchange="updateSlot('${type}', this.value)" style="width:100%; display:block; height:50px;">
                     ${optionsHtml}
                 </select>
             `;
@@ -705,7 +712,7 @@
         } 
     };
     
-    window.saveLocal = function() { localStorage.setItem('tsav2_v150_clean', JSON.stringify(appData)); };
+    window.saveLocal = function() { localStorage.setItem('tsav2_v151_enforced', JSON.stringify(appData)); };
     window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
     
     window.openAdmin = function() { 
@@ -722,16 +729,26 @@
     window.requestAdminAccess = function() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); };
     window.toggleAutoLogin = function(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); };
     window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
-    window.hardReset = function() { if(confirm("This will erase ALL custom data. Continue?")) { localStorage.removeItem('tsa_v149_nuclear'); location.reload(); } };
+    window.hardReset = function() { if(confirm("This will erase ALL custom data. Continue?")) { localStorage.removeItem('tsav2_v151_enforced'); location.reload(); } };
     window.downloadJSON = function() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); };
     window.downloadStudentApp = function() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); };
     window.editBank = function(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); };
     window.updateBankItem = function(i,v) { appData[currentEditingBank][i]=v; saveLocal(); };
     window.delBankItem = function(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); };
     window.addBankItem = function() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); };
-    window.renderItems = function() { const c=document.getElementById('items-container'); c.innerHTML=''; appData.items.forEach((item,i)=>{ c.innerHTML+=`<div class="editor-section"><strong>#${i+1}</strong> <input class="admin-input" value="${item.original}" onchange="updateItem(${i},'original',this.value)"> <button class="btn-edit-item" onclick="toggleDetails(${i})">Edit</button> <div id="details-${i}" class="analysis-details" style="display:none;"><label>Translation:</label><input class="admin-input" value="${item.translation}" onchange="updateItem(${i},'translation',this.value)"><button class="btn btn-warning" onclick="delItem(${i})">Delete</button></div></div>`; }); };
+    window.renderItems = function() { const c=document.getElementById('items-container'); c.innerHTML=''; appData.items.forEach((item,i)=>{ c.innerHTML+=`<div class="editor-section"><strong>#${i+1}</strong> <input class="admin-input" value="${item.original}" onchange="updateItem(${i},'original',this.value)"> <button class="btn-edit-item" onclick="toggleDetails(${i})">Edit</button> <div id="details-${i}" class="analysis-details" style="display:none;"><label>Translation:</label><input class="admin-input" value="${item.translation}" onchange="updateItem(${i},'translation',this.value)"><label>Distractors:</label><input class="admin-input" value="${item.distractors.join(',')}" onchange="updateItem(${i},'distractors',this.value.split(','))"><div class="level-block"><strong>Level 1 (Simple):</strong><br> Prompt: <input class="admin-input" value="${item.level1?.[item.type]?.prompt || ''}" onchange="updateDeep(${i},'level1','${item.type}','prompt',this.value)"> Correct: <input class="admin-input" value="${item.level1?.[item.type]?.correct || ''}" onchange="updateDeep(${i},'level1','${item.type}','correct',this.value)"></div><div class="level-block"><strong>Level 2 (Analysis):</strong><br> Prompt: <input class="admin-input" value="${item.level2?.[item.type]?.prompt || ''}" onchange="updateDeep(${i},'level2','${item.type}','prompt',this.value)"></div><button class="btn btn-warning" onclick="delItem(${i})">Delete</button></div>`; }); };
     window.toggleDetails = function(i) { const el=document.getElementById('details-'+i); el.style.display = el.style.display==='block'?'none':'block'; };
-    window.updateItem = function(i,k,v) { appData.items[i][k]=v; saveLocal(); };
+    window.updateItem = function(i,k,v) { 
+        if(k==='distractors') appData.items[i][k]=v; // array is handled in input call
+        else appData.items[i][k]=v; 
+        saveLocal(); 
+    };
+    window.updateDeep = function(i,l,t,k,v) { 
+        if(!appData.items[i][l]) appData.items[i][l]={}; 
+        if(!appData.items[i][l][t]) appData.items[i][l][t]={}; 
+        appData.items[i][l][t][k]=v; 
+        saveLocal(); 
+    };
     window.delItem = function(i) { appData.items.splice(i,1); renderItems(); saveLocal(); };
     window.addNewItem = function() { appData.items.push({type:"quote", original:"New", translation:"", distractors:[]}); renderItems(); saveLocal(); };
     window.saveStructureConfig = function() { const order=[]; for(let i=0;i<6;i++) order.push(document.getElementById(`cfg-slot${i+1}`).value); appData.sentenceConfigs[adminConfigLevel]=order; saveLocal(); };
