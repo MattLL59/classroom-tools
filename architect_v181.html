@@ -1,0 +1,2590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tone & Structure Architect v181 (Smart Merge)</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* --- CSS VARIABLES --- */
+        :root {
+            --primary: #009688; 
+            --accent: #ff9800; 
+            --bg: #f0f2f5;
+            --card: #ffffff; 
+            --text: #37474f; 
+            --tone-col: #9c27b0;
+            --struct-col: #2196f3; 
+            --lang-col: #4caf50; 
+            --nav-bg: #ffffff;
+            --success: #4caf50; 
+            --error: #f44336;
+            --high-vis: #29b6f6;
+        }
+        
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
+        
+        /* HEADER */
+        header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 100; flex-shrink: 0; }
+        h1 { margin: 0; font-size: 1.1rem; color: var(--primary); display:flex; align-items:center; gap:5px; }
+        .score-badge { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.9rem; margin-left: 10px; font-weight: bold; }
+
+        /* LOADING / RESET TEXT */
+        .loading-text { cursor: pointer; color: var(--error); font-weight: bold; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* LAYOUT */
+        .main-viewport { flex-grow: 1; overflow-y: auto; padding: 15px; padding-bottom: 90px; }
+        nav.bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; height: 65px; background: var(--nav-bg); display: flex; justify-content: space-around; align-items: center; border-top: 1px solid #ddd; z-index: 900; }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; color: #888; font-size: 0.75rem; border: none; background: none; cursor: pointer; }
+        .nav-item.active { color: var(--primary); font-weight: bold; }
+        
+        /* HUBS */
+        .hub { display: none; } .hub.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* GRID SECTIONS */
+        .section-header {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            color: #888;
+            margin: 15px 0 5px 0;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 2px;
+        }
+
+        .grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px; }
+        @media(min-width: 600px) { .grid { grid-template-columns: 1fr 1fr; } }
+        
+        #structure-container { margin-top: 5px; }
+
+        .card { background: var(--card); padding: 20px; border-radius: 12px; border: 2px solid #ddd; text-align: center; font-size: 1.1rem; cursor: pointer; transition: transform 0.1s; position: relative; overflow: visible; }
+        .card:hover { transform: scale(1.02); border-color: var(--primary); }
+        .card-tone { border-left: 10px solid var(--tone-col); }
+        .card-struct { border-left: 10px solid var(--struct-col); text-align: left; }
+        .card-lang { border-left: 10px solid var(--lang-col); }
+        .card-global { border-left: 10px solid #607d8b; background: var(--card); width: 100%; box-sizing: border-box; text-align: left; display: flex; align-items: center; justify-content: space-between; }
+
+        /* ANIMATIONS */
+        @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-5px); } 100% { transform: translateX(0); } }
+        .shake { animation: shake 0.4s ease-in-out; border-color: var(--error) !important; background: #ffebee !important; }
+
+        /* BUILDER */
+        .bank-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: rgba(0,0,0,0.02); padding: 10px; border-radius: 8px; width: 100%; box-sizing: border-box; }
+        .bank-row { text-align: left; width: 100%; margin-bottom: 10px; display: block; }
+        .bank-label { font-size: 0.8rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-bottom: 5px; display: block;}
+        
+        select { 
+            width: 100%; 
+            height: 45px; 
+            padding: 8px; 
+            border-radius: 6px; 
+            border: 1px solid #bbb; 
+            background: var(--card); 
+            color: var(--text);
+            font-size: 1rem; 
+            display: block;
+            margin-bottom: 5px;
+        } 
+        
+        #sentence-stage { 
+            width: 100%; 
+            padding: 15px; 
+            background: var(--card); 
+            border: 2px dashed var(--primary); 
+            border-radius: 10px; 
+            margin: 15px 0; 
+            font-size: 1.1rem; 
+            min-height: 60px; 
+            line-height: 1.4; 
+            cursor: text;
+            color: var(--text);
+        }
+        #sentence-stage:focus { outline: 2px solid var(--accent); }
+
+        #answer-area { width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; background: var(--card); color: var(--text); font-family: inherit; margin-bottom: 10px; font-size: 1rem; }
+        #quote-reference { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 10px; margin-bottom: 15px; border-radius: 4px; font-style: italic; color: #444; display: none; }
+
+        /* ADMIN & EDITORS */
+        .btn { padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; font-size: 1rem;}
+        .btn-primary { background: var(--primary); width: 100%; }
+        .btn-warning { background: var(--accent); }
+        .btn-danger { background: #e74c3c; }
+        .btn-doc { background: #1976d2; }
+        .btn-high-vis { background: var(--high-vis); color: #000; font-size: 1.1rem; border: 2px solid #000; }
+        .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999999; justify-content: center; align-items: center; }
+        
+        .modal-content { 
+            background: var(--card); 
+            color: var(--text); 
+            width: 95%; 
+            max-width: 1200px; 
+            max-height: 95vh; 
+            border-radius: 8px; 
+            display: flex; 
+            flex-direction: column; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
+            overflow: visible !important; 
+        }
+        
+        .modal-header { padding: 15px; background: rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+        .modal-body { padding: 20px; overflow-y: auto; text-align: left; padding-bottom: 400px; } 
+        
+        .editor-section { 
+            border: 2px solid #ddd; 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            border-radius: 5px; 
+            background: rgba(0,0,0,0.02); 
+            overflow: visible !important; 
+        }
+        
+        .admin-input { width: 100%; padding: 10px; border: 1px solid #aaa; border-radius: 4px; box-sizing: border-box; margin-bottom: 5px; font-size: 1rem; background: var(--card); color: var(--text); }
+        .admin-tab-bar { display: flex; gap:5px; margin-bottom:10px; }
+        .admin-tab { flex:1; padding:10px; border:2px solid #ccc; background:#eee; cursor:pointer; font-weight:bold; border-radius:4px; text-align:center; color:#333; }
+        .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
+        .bank-edit-btn { background:#607d8b; color:white; padding:5px 10px; border-radius:4px; border:none; margin:2px; font-size:0.85rem; cursor:pointer; }
+        
+        .item-editor-card { 
+            border: 1px solid #ccc; 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            background: var(--card); 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
+            overflow: visible !important; 
+            position: relative; 
+            z-index: 1;
+        }
+        
+        .item-header-row {
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 10px;
+            flex-wrap: wrap; 
+            gap: 15px;
+        }
+        
+        .item-header-row select {
+            width: auto !important;
+            min-width: 150px;
+            height: 40px !important;
+            position: relative;
+            z-index: 99999; 
+        }
+        
+        .level-block { margin-top: 10px; padding: 10px; border: 1px solid #eee; background: rgba(0,0,0,0.03); border-radius: 4px; }
+        .level-label { font-weight: bold; display: block; margin-bottom: 5px; color: var(--text); font-size: 0.9rem; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { font-size: 0.85rem; font-weight: bold; color: var(--text); display:block; margin-bottom:5px;}
+
+        /* LENS TOGGLES IN EDITOR */
+        .lens-toggles { display: flex; gap: 15px; margin-bottom: 10px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: 4px; align-items:center;}
+        .lens-toggles label { font-size: 0.9rem; display: flex; align-items: center; gap: 5px; cursor: pointer; font-weight:bold; }
+
+        /* THEME PICKER */
+        .theme-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 10px; border-bottom: 1px solid #eee; }
+        .color-picker { width: 50px; height: 30px; border: none; cursor: pointer; }
+
+        /* HELP MANUAL STYLE */
+        .help-section { margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        .help-title { font-size: 1.1rem; color: var(--primary); font-weight: bold; margin-bottom: 5px; }
+        .help-list { padding-left: 20px; line-height: 1.6; }
+
+        /* CELEBRATION */
+        #celebration-modal { text-align: center; }
+        .firework-icon { font-size: 4rem; color: #ff9800; animation: spin 2s infinite linear; margin-bottom: 10px; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        #feedback-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:20000; display:none; flex-direction:column; justify-content:center; align-items:center; color:white; text-align:center; }
+        #feedback-icon { font-size: 5rem; margin-bottom: 20px; }
+        #save-status { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; opacity: 0; transition: 0.5s; z-index: 10000; }
+        
+        @media print { 
+            .no-print { display: none; } 
+            .page-break { page-break-before: always; display: block; height: 1px; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>
+            <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
+            <i class="fas fa-cubes"></i> Tone & Structure v181
+            <span class="score-badge" id="score-display">0 XP</span>
+        </h1>
+        <div style="display:flex; gap:10px;">
+            <button class="admin-btn" title="User Guide" onclick="openHelp()"><i class="fas fa-question-circle"></i></button>
+            <button class="admin-btn" title="Customize Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
+            <select id="level-select" style="padding:4px; border-radius:4px;">
+                <option value="1">Lvl 1</option><option value="2">L2</option><option value="3">L3</option>
+            </select>
+            <button id="main-settings-btn" class="admin-btn"><i class="fas fa-cog"></i></button>
+        </div>
+    </header>
+
+    <div id="student-banner" style="display:none; width:100%; background:var(--accent); color:white; padding:5px; text-align:center; font-weight:bold;">
+        🎓 Student Mode: <span id="student-title"></span>
+    </div>
+    
+    <div id="save-status">💾 Progress Saved</div>
+
+    <div class="main-viewport">
+        <div id="hub-lab" class="hub active">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:0.9rem;">
+                <span style="flex:1;"><strong><span id="header-label">Topic</span>:</strong> <span id="text-display">Loading...</span></span>
+                <span style="flex:1; text-align:right;"><strong>Q:</strong> <span id="q-display">Loading...</span></span>
+            </div>
+            <div id="lab-content">
+                <div class="instruction">Step 1: Choose Evidence</div>
+                <div class="filter-bar" id="main-filter-bar" style="display:flex; gap:5px; justify-content:center; margin-bottom:10px;">
+                    <button class="btn" onclick="filterGrid('all')">All</button>
+                    <button class="btn" onclick="filterGrid('language')">Lang</button>
+                    <button class="btn" onclick="filterGrid('structure')">Struct</button>
+                </div>
+                <div id="dynamic-question-display" class="dynamic-question">Select Evidence</div>
+                
+                <div class="section-header">Evidence (Quotes)</div>
+                <div class="grid" id="grid-main"></div>
+                
+                <div class="section-header">Global Analysis</div>
+                <div id="structure-container"></div>
+            </div>
+        </div>
+
+        <div id="hub-writing" class="hub">
+            <div id="quote-reference"></div>
+            <div class="instruction">Sentence Construction</div>
+            <div class="bank-list" id="dynamic-builder-controls"></div>
+            <div class="instruction">Current Construction (Editable):</div>
+            <div id="sentence-stage" contenteditable="true" oninput="manualEdit()">Start picking words in the Lab...</div>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <button class="btn btn-warning" style="flex:1" onclick="undoLast()">Undo</button>
+                <button class="btn btn-primary" style="flex:2" onclick="commitSentence()">Add to Answer</button>
+            </div>
+            <hr style="opacity:0.2;">
+            <textarea id="answer-area" placeholder="Your full answer will appear here..." oninput="autoSaveProgress()"></textarea>
+            <div style="display:flex; gap:5px;">
+                <button class="btn btn-doc" style="flex:1" onclick="downloadDoc()">Download .doc</button>
+                <button class="btn btn-warning" style="flex:0 0 auto; background:#e74c3c;" onclick="clearEssay()">Reset Essay</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="bottom-nav">
+        <button id="nav-lab" class="nav-item active" onclick="switchHub('lab')"><i class="fas fa-vial"></i><span>Evidence Lab</span></button>
+        <button id="nav-writing" class="nav-item" onclick="switchHub('writing')"><i class="fas fa-pen-fancy"></i><span>Writing Desk</span></button>
+    </nav>
+
+    <div id="help-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">📖 User Guide <button onclick="document.getElementById('help-modal').style.display='none'">X</button></div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <div class="help-title">1. The Evidence Lab (Student Mode)</div>
+                    <ul class="help-list">
+                        <li><strong>Step 1:</strong> Select a colored quote card from the "Evidence" grid.</li>
+                        <li><strong>Step 2 (Match):</strong> Choose the correct meaning of the quote.</li>
+                        <li><strong>Step 3 (Analyze):</strong> Choose a Lens (Tone, Structure, or Language). <em>Note: Teachers can hide specific lenses if they are empty or irrelevant for a quote.</em></li>
+                        <li><strong>Whole Text:</strong> The gray card at the bottom covers general structure questions.</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <div class="help-title">2. The Writing Desk</div>
+                    <ul class="help-list">
+                        <li><strong>Build:</strong> Use the dropdown menus to construct a high-level analytical sentence.</li>
+                        <li><strong>Edit:</strong> You can type directly into the "Current Construction" box to tweak your sentence.</li>
+                        <li><strong>Save:</strong> Click "Add to Answer" to move your sentence into the main essay box.</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <div class="help-title">3. Teacher Tools (Settings)</div>
+                    <ul class="help-list">
+                        <li><strong>AI Generator:</strong> Paste a text/question, generate a prompt, and load the JSON response. Use "Append" to add to existing lessons.</li>
+                        <li><strong>Edit Evidence:</strong> Use the checkboxes (Tone/Structure/Language) to <strong>hide specific buttons</strong> for a quote if the AI did not generate a good question for it.</li>
+                        <li><strong>Worksheet:</strong> Click "Download Worksheet" for a printable Word doc. This includes a page break between matching and analysis.</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <div class="help-title">4. Exporting & Hosting</div>
+                    <ul class="help-list">
+                        <li><strong>Download Student App:</strong> In Settings, click the big blue "Download Student App" button. This creates a single `.html` file containing your entire lesson.</li>
+                        <li><strong>How to Host:</strong>
+                            <ul>
+                                <li><strong>Google Classroom / Teams:</strong> Upload the HTML file as an "Assignment Material". Students simply click to download and open it in their browser.</li>
+                                <li><strong>Moodle / Canvas:</strong> Upload as a "File Resource".</li>
+                                <li><strong>Network Drive:</strong> Save it to a shared folder. Students double-click to run.</li>
+                            </ul>
+                        </li>
+                        <li><strong>No Internet Needed:</strong> The student file works entirely offline once downloaded.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="admin-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Settings <button id="close-admin-btn">X</button></div>
+            <div class="modal-body">
+                
+                <div class="editor-section" style="border: 2px solid var(--primary); background: #e0f2f1;">
+                    <h3 style="color:var(--primary); margin-top:0;"><i class="fas fa-robot"></i> Lesson Generator & File Manager</h3>
+                    
+                    <div style="background:white; padding:10px; border-radius:5px; margin-bottom:15px; border:1px solid #ccc; display:flex; align-items:center; justify-content:space-between;">
+                        <span style="font-weight:bold;">Load Mode:</span>
+                        <select id="ai-bank-mode" class="admin-input" style="width:70%; margin:0; font-weight:bold;">
+                            <option value="replace">Replace Everything</option>
+                            <option value="append_quotes">Append Quotes (Keep existing)</option>
+                            <option value="merge_banks">Merge Banks Only (Keep Quotes)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Author Name:</label>
+                        <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
+                    </div>
+                    <div class="input-group">
+                        <label>Number of Quotes:</label>
+                        <input id="ai-quote-count" type="number" class="admin-input" value="6" min="1" max="15">
+                    </div>
+
+                    <textarea id="ai-source-text" class="admin-input" style="height:60px;" placeholder="Paste Source Text..."></textarea>
+                    <textarea id="ai-question-input" class="admin-input" style="height:40px;" placeholder="Lesson Question..."></textarea>
+                    
+                    <button class="btn" style="background:#7b1fa2; width:100%; margin:5px 0;" onclick="generateAndShowPrompt()">1. Generate AI Prompt</button>
+                    
+                    <div id="prompt-display-container" style="display:none; margin-bottom:5px;">
+                        <textarea id="ai-generated-prompt" class="admin-input" style="height:80px; background:#e1bee7;" readonly></textarea>
+                    </div>
+                    <textarea id="ai-paste-area" class="admin-input" style="height:60px;" placeholder="2. Paste AI JSON Here..."></textarea>
+                    <button class="btn" style="background:var(--primary); width:100%; margin-bottom:15px;" onclick="loadDataFromText()">📥 Load AI Data</button>
+
+                    <hr>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+                        <button class="btn btn-doc" onclick="downloadJSON()"><i class="fas fa-save"></i> Save File</button>
+                        <label class="btn btn-primary" style="text-align:center; cursor:pointer;">
+                            <i class="fas fa-folder-open"></i> Upload File
+                            <input type="file" id="file-upload" onchange="uploadJSON(this)" style="display:none;">
+                        </label>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+                        <button class="btn btn-high-vis" style="font-size:0.9rem;" onclick="downloadWorksheetDoc()">📄 Worksheet</button>
+                        <button class="btn btn-primary" style="background:#34495e; font-size:0.9rem;" onclick="downloadStudentApp()">📦 Student App</button>
+                    </div>
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid var(--accent);">
+                    <h3>📝 Edit Evidence & Analysis</h3>
+                    <p style="font-size:0.9rem;">Uncheck Tone/Struct/Lang to hide empty questions from students.</p>
+                    <div id="items-container"></div>
+                    <button class="btn btn-add" style="background:#2ecc71; margin-top:10px;" onclick="addNewItem()">+ Add New Quote</button>
+                    <button class="btn btn-warning" style="width:100%; margin-top:5px;" onclick="resetUsedQuotes()">♻️ Reset Used Quotes</button>
+                </div>
+                
+                <div class="editor-section" style="border-left: 5px solid #2196f3;">
+                    <h3>🏗️ Whole Text Structure</h3>
+                    <p style="font-size:0.8rem;">General questions about flow, openings, and endings.</p>
+                    <textarea class="admin-input" id="global-structure-q" placeholder="e.g. How does the opening paragraph engage the reader?" onchange="updateGlobal('globalStructure', this.value)"></textarea>
+                </div>
+
+                <div class="editor-section">
+                    <h3>Basic Info</h3>
+                    <label>Title:</label><input id="edit-title" class="admin-input" oninput="updateGlobal('textTitle', this.value)">
+                    <label>Question:</label><input id="edit-question" class="admin-input" oninput="updateGlobal('question', this.value)">
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid #2196f3;">
+                    <h3>⚙️ Sentence Structure (Admin)</h3>
+                    <div class="admin-tab-bar">
+                        <div id="cfg-tab-1" class="admin-tab active" onclick="switchAdminConfigLevel(1)">Lvl 1</div>
+                        <div id="cfg-tab-2" class="admin-tab" onclick="switchAdminConfigLevel(2)">Lvl 2</div>
+                        <div id="cfg-tab-3" class="admin-tab" onclick="switchAdminConfigLevel(3)">Lvl 3</div>
+                    </div>
+                    <div style="display:flex; gap:5px; margin-bottom:10px; flex-wrap:wrap;">
+                        <select class="admin-input" id="cfg-slot1" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot2" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot3" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot4" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot5" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()"></select>
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <h3>✍️ Analysis Banks (Edit)</h3>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        <button class="bank-edit-btn" onclick="editBank('markers')">Markers</button>
+                        <button class="bank-edit-btn" onclick="editBank('starters')">Starters</button>
+                        <button class="bank-edit-btn" onclick="editBank('methods')">Methods</button>
+                        <button class="bank-edit-btn" onclick="editBank('simpleLinks')">Links (L1)</button>
+                        <button class="bank-edit-btn" onclick="editBank('complexLinks')">Links (L2/3)</button>
+                        <button class="bank-edit-btn" onclick="editBank('points')">Points</button>
+                    </div>
+                    <div id="bank-editor-area" style="margin-top:10px; padding:10px; border:1px solid #ccc; display:none; background:#fafafa;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <h4 id="bank-editor-title" style="margin:0;">Editing...</h4>
+                            <button onclick="document.getElementById('bank-editor-area').style.display='none'" style="border:none;background:none;">❌</button>
+                        </div>
+                        <div id="bank-list" class="list-container" style="max-height:200px; overflow-y:auto; margin-top:10px;"></div>
+                        <button class="btn btn-add" style="background:#2ecc71;" onclick="addBankItem()">+ Add Item</button>
+                    </div>
+                </div>
+                
+                <div style="margin-top:10px; display:flex; gap:15px;">
+                    <label><input type="checkbox" id="auto-progress-check" onchange="toggleAutoProgress(this.checked)"> Auto-Progress</label>
+                    <label><input type="checkbox" id="auto-login-check" onchange="toggleAutoLogin(this.checked)"> Keep Unlocked</label>
+                </div>
+
+                <button class="btn btn-danger" style="width:100%; margin-top:30px; background:#e74c3c; color:white; padding:15px;" onclick="nuclearReset()">⚠️ Factory Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="feedback-overlay" onclick="this.style.display='none'">
+        <div id="feedback-icon"><i class="fas fa-check-circle"></i></div>
+        <h2 id="feedback-text">Correct!</h2>
+    </div>
+
+    <div id="celebration-modal" class="modal">
+        <div class="modal-content" style="max-width:400px; text-align:center; padding:40px;">
+            <i class="fas fa-star firework-icon"></i>
+            <h2>Level Complete!</h2>
+            <div id="progression-btn-container"></div>
+            <button class="btn btn-primary" onclick="document.getElementById('celebration-modal').style.display='none'">Close</button>
+        </div>
+    </div>
+
+    <div id="theme-modal" class="modal">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">Customize Colors <button onclick="document.getElementById('theme-modal').style.display='none'">X</button></div>
+            <div class="modal-body" style="padding-bottom:20px;">
+                <div class="theme-row">
+                    <span>Background Color:</span>
+                    <input type="color" class="color-picker" id="bg-picker" onchange="updateThemeColor('--bg', this.value)">
+                </div>
+                <div class="theme-row">
+                    <span>Card/Panel Color:</span>
+                    <input type="color" class="color-picker" id="card-picker" onchange="updateThemeColor('--card', this.value)">
+                </div>
+                <div class="theme-row">
+                    <span>Text Color:</span>
+                    <input type="color" class="color-picker" id="text-picker" onchange="updateThemeColor('--text', this.value)">
+                </div>
+                <button class="btn btn-warning" style="width:100%; margin-top:15px;" onclick="resetTheme()">Reset to Default</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="phrasing-overlay" class="modal"><div class="modal-content"><div class="modal-header">Select Phrasing</div><div class="modal-body" id="phrase-options"></div></div></div>
+
+<script id="data-script">
+    /* DATA_START */ const teacherConfig = null; /* DATA_END */
+
+    const defaultData = {
+        textTitle: "New Lesson", question: "Enter Question", adminPassword: "1234", globalStructure: "",
+        sentenceConfigs: { 1: ['starter', 'quote', 'link', 'point', 'none', 'none'], 2: ['starter', 'quote', 'method', 'analysis', 'none', 'none'], 3: ['marker', 'starter', 'quote', 'method', 'point', 'analysis'] },
+        worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
+        analysisTemplates: { tone: ["creates a {adj} tone", "evokes {noun}"], structure: ["highlights {noun}"], language: ["suggests {noun}"] },
+        markers: ["Furthermore,", "However,"], starters: ["The writer implies", "The author suggests"], methods: ["Metaphor", "Simile"], points: ["a sense of tension"], simpleLinks: ["This shows", "This suggests", "It is clear"], complexLinks: ["This reinforces the tone (Tone)", "This structural shift implies (Structure)"],
+        items: []
+    };
+
+    let appData = JSON.parse(JSON.stringify(defaultData));
+    let state = { level: 1, currentIdx: -1, filter: 'all', completed: [], currentLens: '', score: 0 };
+    let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
+    let currentEditingBank = '';
+    let adminConfigLevel = 1;
+    const wordMorphology = { "admiring":{adj:"admiring",noun:"admiration"}, "angry":{adj:"angry",noun:"anger"}, "chaotic":{adj:"chaotic",noun:"chaos"} };
+
+    // EMERGENCY ERROR HANDLER
+    window.onerror = function() {
+        // Silent Fail
+    };
+
+    function init() {
+        try {
+            bindEvents();
+            initTheme(); 
+
+            if (teacherConfig && typeof teacherConfig === 'object') {
+                appData = validateAndRepair(teacherConfig);
+                document.getElementById('student-banner').style.display='block';
+                document.getElementById('student-title').innerText = appData.textTitle;
+                loadState();
+                return;
+            }
+            
+            // CLEAN SLATE KEY
+            let local = localStorage.getItem('tsa_v181_merge');
+            if(!local) local = localStorage.getItem('tsa_v180_labels'); 
+            
+            if(local) { 
+                try { 
+                    const parsed = JSON.parse(local);
+                    appData = validateAndRepair(parsed);
+                } catch(e) { 
+                    appData = defaultData; 
+                } 
+            }
+            
+            sanitizeLinks();
+            loadState();
+            
+            const autoLogin = document.getElementById('auto-login-check');
+            if(autoLogin && localStorage.getItem('tsa_auto_login') === 'true') autoLogin.checked = true;
+            
+            const autoProg = document.getElementById('auto-progress-check');
+            if(autoProg && localStorage.getItem('tsa_auto_progress') === 'true') autoProg.checked = true;
+
+        } catch (fatal) {
+            console.error("Fatal Init Error", fatal);
+        }
+    }
+
+    function safeBind(id, event, func) {
+        const el = document.getElementById(id);
+        if(el) {
+            el.addEventListener(event, func);
+        }
+    }
+
+    function bindEvents() {
+        safeBind('main-settings-btn', 'click', openAdmin);
+        safeBind('level-select', 'change', changeLevel);
+        safeBind('close-admin-btn', 'click', closeAdmin);
+    }
+
+    window.openHelp = function() {
+        document.getElementById('help-modal').style.display = 'flex';
+    }
+
+    // THEME LOGIC
+    function initTheme() {
+        ['--bg', '--card', '--text'].forEach(v => {
+            const saved = localStorage.getItem('tsa_theme_' + v);
+            if(saved) document.documentElement.style.setProperty(v, saved);
+        });
+    }
+
+    window.updateThemeColor = function(v, val) {
+        document.documentElement.style.setProperty(v, val);
+        localStorage.setItem('tsa_theme_' + v, val);
+    }
+
+    window.openThemeModal = function() {
+        document.getElementById('theme-modal').style.display = 'flex';
+        const styles = getComputedStyle(document.documentElement);
+        document.getElementById('bg-picker').value = styles.getPropertyValue('--bg').trim();
+        document.getElementById('card-picker').value = styles.getPropertyValue('--card').trim();
+        document.getElementById('text-picker').value = styles.getPropertyValue('--text').trim();
+    }
+
+    window.resetTheme = function() {
+        ['--bg', '--card', '--text'].forEach(v => localStorage.removeItem('tsa_theme_' + v));
+        location.reload();
+    }
+
+    function validateAndRepair(data) {
+        if (!data) return JSON.parse(JSON.stringify(defaultData));
+        ['markers','starters','methods','points','simpleLinks','complexLinks','items'].forEach(key => {
+            if (!Array.isArray(data[key])) data[key] = defaultData[key] || [];
+            if (data[key].length === 0) data[key] = ["(No items available)"]; 
+        });
+        if (!data.sentenceConfigs || !data.sentenceConfigs[1]) data.sentenceConfigs = defaultData.sentenceConfigs;
+        if(data.items) {
+            data.items.forEach(item => {
+                // Ensure enabled flags exist
+                if(item.enableTone === undefined) item.enableTone = true;
+                if(item.enableStructure === undefined) item.enableStructure = true;
+                if(item.enableLanguage === undefined) item.enableLanguage = true;
+
+                // AUTO-FILL MISSING LENSES
+                ['tone', 'structure', 'language'].forEach(lens => {
+                    if(!item.level1) item.level1 = {};
+                    if(!item.level1[lens]) item.level1[lens] = {
+                        prompt: `Identify the ${lens} used here:`,
+                        correct: lens === item.type ? "Correct" : "See translation",
+                        distractors: ["Option A", "Option B"]
+                    };
+                    
+                    if(!item.level2) item.level2 = {};
+                    if(!item.level2[lens]) item.level2[lens] = {
+                        prompt: `What does this ${lens} suggest?`,
+                        correct: "Effect on meaning",
+                        distractors: ["Alternative idea", "Opposite meaning"]
+                    };
+                    
+                    if(!item.level3) item.level3 = {};
+                    if(!item.level3[lens]) item.level3[lens] = {
+                        prompt: `Evaluate the effect of this ${lens}:`,
+                        correct: "Creates strong impact",
+                        distractors: ["Weakens the text", "Confuses the reader"]
+                    };
+                });
+                
+                if (!item.distractors || !Array.isArray(item.distractors)) item.distractors = ["Wrong 1", "Wrong 2"];
+            });
+        }
+        return data;
+    }
+    
+    function loadState() {
+        const savedEssay = localStorage.getItem('tsa_student_essay');
+        if(savedEssay) document.getElementById('answer-area').value = savedEssay;
+        const savedCompleted = localStorage.getItem('tsa_student_completed');
+        if(savedCompleted) state.completed = JSON.parse(savedCompleted);
+        const savedScore = localStorage.getItem('tsa_student_score');
+        if(savedScore) state.score = parseInt(savedScore);
+        if(appData.globalStructure) document.getElementById('global-structure-q').value = appData.globalStructure;
+        
+        document.getElementById('level-select').value = "1";
+        state.level = 1;
+        updateUI(); 
+        changeLevel();
+    }
+    
+    function sanitizeLinks() {
+        if(appData.simpleLinks) appData.simpleLinks = appData.simpleLinks.map(s => s.replace(/\s+that\s*$/i, "").trim());
+    }
+    
+    function autoSaveProgress() {
+        localStorage.setItem('tsa_student_essay', document.getElementById('answer-area').value);
+        localStorage.setItem('tsa_student_score', state.score);
+        const ind = document.getElementById('save-status'); ind.style.opacity = 1; setTimeout(() => ind.style.opacity = 0, 1500);
+    }
+    
+    window.emergencyReset = function() {
+        if(confirm("Emergency Reset: This will wipe all data to fix the crash. Continue?")) {
+            nuclearReset();
+        }
+    }
+
+    window.nuclearReset = function() {
+        if(confirm("Confirm Factory Reset?")) {
+            localStorage.removeItem('tsa_v181_merge');
+            localStorage.removeItem('tsa_v180_labels');
+            localStorage.removeItem('tsa_student_essay');
+            localStorage.removeItem('tsa_student_completed');
+            localStorage.removeItem('tsa_student_score');
+            ['--bg', '--card', '--text'].forEach(v => localStorage.removeItem('tsa_theme_' + v));
+            location.reload();
+        }
+    };
+    
+    function resetUsedQuotes() {
+        if(confirm("Restore all completed quotes?")) {
+            state.completed = [];
+            localStorage.removeItem('tsa_student_completed');
+            resetToGrid();
+            alert("Restored!");
+        }
+    }
+
+    function switchHub(hubId) {
+        document.querySelectorAll('.hub').forEach(h => h.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById('hub-' + hubId).classList.add('active');
+        document.getElementById('nav-' + hubId).classList.add('active');
+        if(hubId === 'lab') resetToGrid();
+    }
+
+    function resetToGrid() {
+        state.currentIdx = -1;
+        document.getElementById('header-label').innerText = "Topic";
+        document.getElementById('text-display').innerText = appData.textTitle;
+        const lab = document.getElementById('lab-content');
+        
+        // Ensure Grid Exists
+        if(!document.getElementById('grid-main')) {
+             lab.innerHTML = `<div class="instruction">Step 1: Choose Evidence</div><div class="filter-bar" id="main-filter-bar" style="display:flex; gap:5px; justify-content:center; margin-bottom:10px;"><button class="btn" onclick="filterGrid('all')">All</button><button class="btn" onclick="filterGrid('language')">Lang</button><button class="btn" onclick="filterGrid('structure')">Struct</button></div><div id="dynamic-question-display" class="dynamic-question">Select Evidence</div>
+             <div class="section-header">Evidence (Quotes)</div><div class="grid" id="grid-main"></div>
+             <div class="section-header">Global Analysis</div><div id="structure-container"></div>`;
+        }
+        
+        if(state.level === 1) { 
+            const fb = document.getElementById('main-filter-bar');
+            if(fb) fb.style.display = 'none'; 
+            state.filter = 'all'; 
+        }
+        loadStageSelect();
+    }
+
+    function loadStageSelect() {
+        const grid = document.getElementById('grid-main');
+        const structContainer = document.getElementById('structure-container');
+        if(!grid || !structContainer) return; 
+        
+        grid.innerHTML = '';
+        structContainer.innerHTML = '';
+        
+        let count = 0;
+        appData.items.forEach((item, i) => {
+            if(state.completed.includes(i)) return; 
+            if(state.level !== 1 && state.filter !== 'all' && item.type !== state.filter) return;
+            count++;
+            const div = document.createElement('div');
+            div.className = `card card-${item.type || 'tone'}`;
+            div.innerHTML = `<strong>"${item.original}"</strong><br><small>${item.type}</small>`;
+            div.onclick = () => startAnalysis(i);
+            grid.appendChild(div);
+        });
+
+        // Structure Card at BOTTOM (Separate Container)
+        const stCard = document.createElement('div');
+        stCard.className = 'card card-global';
+        stCard.innerHTML = `<div><strong>🏗️ Whole Text Structure</strong><br><small>Global Analysis</small></div><i class="fas fa-chevron-right"></i>`;
+        stCard.onclick = () => {
+            const lab = document.getElementById('lab-content');
+            lab.innerHTML = `<div class="instruction">Whole Text Structure</div><div style="padding:20px; background:var(--card); border-radius:8px; border:2px solid #607d8b;"><h3>${appData.globalStructure || "No global question set."}</h3><p>Consider: Openings, Endings, Shifts in focus, Narrative perspective.</p></div><button class="btn btn-warning" onclick="resetToGrid()" style="margin-top:10px;">⬅ Back</button>`;
+        };
+        structContainer.appendChild(stCard);
+    }
+    
+    function filterGrid(type) { state.filter = type; resetToGrid(); }
+    
+    function changeLevel() { 
+        state.level = parseInt(document.getElementById('level-select').value); 
+        resetToGrid(); 
+        renderBuilderDropdowns(); 
+    }
+
+    function startAnalysis(idx) {
+        state.currentIdx = idx;
+        const item = appData.items[idx];
+        document.getElementById('header-label').innerText = "Quote";
+        document.getElementById('text-display').innerText = item.original.length > 50 ? item.original.substring(0,50)+"..." : item.original;
+
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">Step 2: Match Meaning</div><div class="grid" id="grid-decoder"></div><button class="btn btn-warning" onclick="resetToGrid()" style="margin-top:10px;">⬅ Back</button>`;
+        
+        let dists = (Array.isArray(item.distractors) && item.distractors.length > 0) ? item.distractors : ["Wrong Answer 1", "Wrong Answer 2"];
+        let opts = [{txt: item.translation, correct: true}, ...dists.map(d => ({txt:d, correct:false}))];
+        shuffleArray(opts);
+        
+        opts.forEach(o => {
+            const btn = document.createElement('div');
+            btn.className = 'card'; btn.innerText = o.txt;
+            btn.onclick = (e) => checkMatch(e, o.correct, item.original, item.type);
+            document.getElementById('grid-decoder').appendChild(btn);
+        });
+    }
+
+    function checkMatch(e, isCorrect, original, type) {
+        if(isCorrect) {
+            showFeedback(true);
+            state.score += 10;
+            updateUI();
+            sentenceSlots.quote=`"${original}"`; 
+            document.getElementById('quote-reference').innerHTML = `<strong>Current Quote:</strong> "${original}"`;
+            document.getElementById('quote-reference').style.display = 'block';
+            if (state.level === 1) {
+                state.currentLens = type || 'tone';
+                switchHub('writing'); rebuildSentence(); renderBuilderDropdowns(); return; 
+            }
+            loadLensChoice(); 
+        } else {
+            showFeedback(false);
+            e.target.classList.add('shake');
+            setTimeout(() => e.target.classList.remove('shake'), 500);
+        }
+    }
+
+    function showFeedback(correct) {
+        const overlay = document.getElementById('feedback-overlay');
+        const icon = document.getElementById('feedback-icon');
+        const text = document.getElementById('feedback-text');
+        overlay.style.display = 'flex';
+        if(correct) {
+            icon.innerHTML = '<i class="fas fa-check-circle" style="color:#4caf50;"></i>';
+            text.innerText = "Correct! (+10 XP)";
+            setTimeout(() => overlay.style.display = 'none', 1000);
+        } else {
+            icon.innerHTML = '<i class="fas fa-times-circle" style="color:#f44336;"></i>';
+            text.innerText = "Try Again";
+            setTimeout(() => overlay.style.display = 'none', 1000);
+        }
+    }
+
+    function loadLensChoice() {
+        const lab = document.getElementById('lab-content');
+        
+        // CHECK ENABLED FLAGS
+        const item = appData.items[state.currentIdx];
+        let buttons = '';
+        if(item.enableTone !== false) buttons += `<div class="card card-tone" onclick="loadFinalAnalysis('tone')">🎭 Tone</div>`;
+        if(item.enableStructure !== false) buttons += `<div class="card card-struct" onclick="loadFinalAnalysis('structure')">🏗️ Structure</div>`;
+        if(item.enableLanguage !== false) buttons += `<div class="card card-lang" onclick="loadFinalAnalysis('language')">📖 Language</div>`;
+
+        lab.innerHTML = `<div class="instruction">Step 3: Choose Lens</div><div class="grid">${buttons}</div><button class="btn btn-warning" onclick="resetToGrid()" style="margin-top:10px;">⬅ Back</button>`;
+    }
+
+    function loadFinalAnalysis(lens) {
+        state.currentLens = lens; 
+        const item = appData.items[state.currentIdx];
+        
+        const lvlKey = `level${state.level}`;
+        const lvlData = item[lvlKey] && item[lvlKey][lens] ? item[lvlKey][lens] : null;
+        
+        const prompt = lvlData ? lvlData.prompt : "Analyze this technique:";
+        const correct = lvlData ? lvlData.correct : "Effect created.";
+        
+        let distractors = [];
+        if (lvlData && Array.isArray(lvlData.distractors) && lvlData.distractors.length > 0) {
+            distractors = lvlData.distractors;
+        } else {
+            distractors = ["Alternative interpretation", "Unrelated effect"];
+        }
+
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">${prompt}</div><div class="grid" id="grid-analysis"></div><button class="btn btn-warning" onclick="loadLensChoice()" style="margin-top:10px;">⬅ Back</button>`;
+        
+        let allOpts = [{txt: correct, correct: true}, ...distractors.map(d => ({txt:d, correct:false}))];
+        shuffleArray(allOpts);
+
+        allOpts.forEach(o => {
+            const btn = document.createElement('div');
+            btn.className = `card card-${lens}`; btn.innerText = o.txt;
+            btn.onclick = (e) => { 
+                if(o.correct) {
+                    showFeedback(true);
+                    state.score += 20;
+                    showPhrasingChoices(lens, o.txt); 
+                } else {
+                    showFeedback(false);
+                    e.target.classList.add('shake');
+                    setTimeout(()=>e.target.classList.remove('shake'), 500);
+                }
+            };
+            document.getElementById('grid-analysis').appendChild(btn);
+        });
+    }
+
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+    }
+
+    function showPhrasingChoices(lens, word) {
+        const modal = document.getElementById('phrasing-overlay');
+        const container = document.getElementById('phrase-options');
+        modal.style.display = 'flex'; container.innerHTML = '';
+        let templates = appData.analysisTemplates[lens] || ["creates a {adj} tone"];
+        templates.forEach(tmpl => {
+            let adj = wordMorphology[word.toLowerCase()]?.adj || word;
+            let noun = wordMorphology[word.toLowerCase()]?.noun || word;
+            let text = tmpl.replace("{adj}", adj).replace("{noun}", noun).replace("{word}", word);
+            const div = document.createElement('div');
+            div.className = 'phrase-option'; div.innerText = text;
+            div.onclick = () => {
+                sentenceSlots.analysis = text; modal.style.display = 'none';
+                rebuildSentence(); switchHub('writing'); renderBuilderDropdowns(); resetToGrid(); 
+            };
+            container.appendChild(div);
+        });
+    }
+
+    function renderBuilderDropdowns() {
+        const container = document.getElementById('dynamic-builder-controls');
+        container.innerHTML = '';
+        
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        const dataMap = { 'marker': 'markers', 'starter': 'starters', 'method': 'methods', 'point': 'points' };
+
+        currentConfig.forEach(type => {
+            if (['quote', 'analysis', 'none'].includes(type)) return;
+            
+            let options = [];
+            
+            if(type === 'link') {
+                if(state.level === 1) {
+                    options = appData['simpleLinks']; 
+                } else {
+                    options = appData['complexLinks']; 
+                    if (state.currentLens) {
+                        options = options.filter(opt => {
+                            const lower = opt.toLowerCase();
+                            return lower.includes(`(${state.currentLens})`) || (!lower.includes('(tone)') && !lower.includes('(structure)') && !lower.includes('(lang)') && !lower.includes('(language)'));
+                        });
+                    }
+                }
+            } else {
+                const key = dataMap[type] || type + 's';
+                options = appData[key];
+            }
+
+            if (!options || options.length === 0) {
+                options = ["(No items available)"];
+            }
+
+            const div = document.createElement('div');
+            div.className = 'bank-row';
+            
+            let optionsHtml = `<option value="">Choose ${type}...</option>`;
+            options.forEach(opt => {
+                let display = opt;
+                if(type === 'link') display = display.replace(/\s+that\s*$/i, ""); 
+                optionsHtml += `<option value="${display}">${display}</option>`;
+            });
+
+            div.innerHTML = `
+                <span class="bank-label">${type.toUpperCase()}</span>
+                <select class="bank-select" onchange="updateSlot('${type}', this.value)">
+                    ${optionsHtml}
+                </select>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    window.updateSlot = function(type, value) {
+        sentenceSlots[type] = value;
+        rebuildSentence();
+    };
+
+    window.manualEdit = function() {
+        // Allows manual typing in stage, does not update slots but updates displayed text
+    }
+
+    function rebuildSentence() {
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        let parts = [];
+        currentConfig.forEach(type => { 
+            let val = sentenceSlots[type];
+            if(val) {
+                if(type === 'link') val = val.replace(/\s+that\s*$/i, "");
+                val = val.replace(/\s*\((Tone|Structure|Lang|Language)\)/gi, '').trim();
+                parts.push(val);
+            }
+        });
+        let str = parts.join(" ");
+        if(str) { str = str.charAt(0).toUpperCase() + str.slice(1); if(!str.endsWith('.')) str += "."; }
+        
+        document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
+    }
+
+    function commitSentence() {
+        const stage = document.getElementById('sentence-stage');
+        const text = stage.innerText.trim();
+        
+        if (!text || text === "Start picking words in the Lab...") {
+            alert("Please construct a sentence first.");
+            return;
+        }
+        
+        const area = document.getElementById('answer-area');
+        area.value += (area.value ? "\n\n" : "") + text;
+        
+        if(state.currentIdx !== -1 && !state.completed.includes(state.currentIdx)) {
+            state.completed.push(state.currentIdx);
+        }
+        localStorage.setItem('tsa_student_completed', JSON.stringify(state.completed)); 
+        autoSaveProgress();
+        
+        sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"" };
+        document.getElementById('quote-reference').style.display = 'none';
+        rebuildSentence();
+        
+        stage.classList.add('flash');
+        setTimeout(() => stage.classList.remove('flash'), 500);
+        
+        const total = appData.items.length;
+        if(state.completed.length === total) {
+            triggerCelebration();
+        }
+        
+        renderBuilderDropdowns();
+        resetToGrid(); 
+        switchHub('lab');
+    }
+    
+    function toggleAutoProgress(c) { if(c) localStorage.setItem('tsa_auto_progress', 'true'); else localStorage.removeItem('tsa_auto_progress'); }
+
+    function downloadDoc() { 
+        const BOM = "\ufeff";
+        const html = `<html><head><meta charset="utf-8"><title>Essay</title></head><body>${document.getElementById('answer-area').value.replace(/\n/g,'<br>')}</body></html>`;
+        const blob = new Blob([BOM + html], {type:'application/msword;charset=utf-8'}); 
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
+    }
+
+    // ADMIN FUNCTIONS
+    window.generateAndShowPrompt = function() { 
+        const c = document.getElementById('ai-quote-count').value; 
+        const t = document.getElementById('ai-source-text').value; 
+        const q = document.getElementById('ai-question-input').value; 
+        const a = document.getElementById('ai-author-name').value; 
+        
+        document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.
+SOURCE: "${t}"
+Q: "${q}"
+AUTHOR: "${a}"
+
+CRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.
+
+REQUIRED JSON FORMAT:
+{ 
+  "textTitle": "Title", 
+  "question": "${q}", 
+  "globalStructure": "A question about the whole text flow", 
+  "items": [ 
+    { 
+      "id":"q1", 
+      "type":"language", 
+      "original":"quote", 
+      "translation":"meaning", 
+      "distractors":["wrong1","wrong2"], 
+      "level1":{ 
+        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
+      }, 
+      "level2":{ 
+        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
+      }, 
+      "level3":{ 
+        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
+      } 
+    } 
+  ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) 
+}`; 
+        document.getElementById('prompt-display-container').style.display='block'; 
+    };
+    
+    window.loadDataFromText = function() { 
+        let text = document.getElementById('ai-paste-area').value;
+        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        try { 
+            const json = JSON.parse(text);
+            
+            const mode = document.getElementById('ai-bank-mode').value;
+            
+            if (mode === 'append_quotes') {
+                if (json.items) appData.items = appData.items.concat(json.items);
+                if (json.textTitle) appData.textTitle = json.textTitle;
+            } else if (mode === 'merge_banks') {
+                ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
+                    if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
+                });
+                alert("Banks Merged Successfully!");
+            } else {
+                appData = validateAndRepair({...appData, ...json}); 
+                state.completed=[]; 
+            }
+
+            sanitizeLinks(); 
+            saveLocal(); 
+            location.reload(); 
+        } catch(e){ 
+            alert("Invalid JSON Error: " + e.message); 
+        } 
+    };
+    
+    window.uploadJSON = function(input) {
+        const file = input.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                
+                const mode = document.getElementById('ai-bank-mode').value;
+                if (mode === 'append_quotes') {
+                    if (json.items) appData.items = appData.items.concat(json.items);
+                    if (json.textTitle) appData.textTitle = json.textTitle;
+                } else if (mode === 'merge_banks') {
+                    ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
+                        if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
+                    });
+                    alert("Banks Merged Successfully!");
+                } else {
+                    appData = validateAndRepair({...appData, ...json});
+                    state.completed=[];
+                }
+                
+                sanitizeLinks();
+                saveLocal();
+                location.reload();
+            } catch(err) {
+                alert("Error reading file: " + err.message);
+            }
+        };
+        reader.readAsText(file);
+    };
+    
+    window.saveLocal = function() { localStorage.setItem('tsa_v181_merge', JSON.stringify(appData)); };
+    window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
+    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
+
+    window.openAdmin = function() { 
+        try {
+            document.getElementById('admin-modal').style.display='flex'; 
+            initAdminConfig(); 
+            renderItems();
+        } catch(e) {
+            console.error("Admin Render Error:", e);
+            alert("Warning: Some admin items could not load. Reset Recommended.");
+        }
+    };
+    
+    window.closeAdmin = function() { document.getElementById('admin-modal').style.display='none'; };
+    window.requestAdminAccess = function() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); };
+    window.toggleAutoLogin = function(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); };
+    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
+    window.downloadJSON = function() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); };
+    window.downloadStudentApp = function() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); };
+    window.editBank = function(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); };
+    window.updateBankItem = function(i,v) { appData[currentEditingBank][i]=v; saveLocal(); renderBuilderDropdowns(); }; 
+    window.delBankItem = function(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; 
+    window.addBankItem = function() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; 
+    
+    window.escapeHtml = function(text) {
+        if(!text) return "";
+        return text.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    window.renderItems = function() { 
+        const c=document.getElementById('items-container'); 
+        c.innerHTML=''; 
+        if(!appData.items) return;
+        
+        appData.items.forEach((item,i)=>{ 
+            const l1 = item.level1?.[item.type] || {};
+            const l2 = item.level2?.[item.type] || {};
+            const l3 = item.level3?.[item.type] || {};
+            const distractors = item.distractors ? item.distractors.join(", ") : "";
+            const d1 = l1.distractors ? l1.distractors.join(", ") : "";
+            const d2 = l2.distractors ? l2.distractors.join(", ") : "";
+            const d3 = l3.distractors ? l3.distractors.join(", ") : "";
+            
+            c.innerHTML+=`
+            <div class="item-editor-card">
+                <div class="item-header-row">
+                    <strong>#${i+1}</strong>
+                    <select onchange="updateItem(${i},'type',this.value)">
+                        <option value="tone" ${item.type==='tone'?'selected':''}>Tone</option>
+                        <option value="structure" ${item.type==='structure'?'selected':''}>Structure</option>
+                        <option value="language" ${item.type==='language'?'selected':''}>Language</option>
+                    </select>
+                    <div>
+                        <label title="Include in Worksheet"><input type="checkbox" ${item.includeInWS?'checked':''} onchange="updateItemBool(${i},'includeInWS',this.checked)"> WS</label>
+                    </div>
+                </div>
+                
+                <div class="lens-toggles">
+                    <strong>Enable Lenses:</strong>
+                    <label><input type="checkbox" ${item.enableTone !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableTone',this.checked)"> Tone</label>
+                    <label><input type="checkbox" ${item.enableStructure !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableStructure',this.checked)"> Structure</label>
+                    <label><input type="checkbox" ${item.enableLanguage !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableLanguage',this.checked)"> Language</label>
+                </div>
+
+                <div class="input-group"><label>Quote:</label><input class="admin-input" value="${escapeHtml(item.original)}" onchange="updateItem(${i},'original',this.value)"></div>
+                <div class="input-group"><label>Translation:</label><input class="admin-input" value="${escapeHtml(item.translation)}" onchange="updateItem(${i},'translation',this.value)"></div>
+                <div class="input-group"><label>Match Distractors (CSV):</label><input class="admin-input" value="${escapeHtml(distractors)}" onchange="updateDistractors(${i},'base',this.value)"></div>
+                
+                <div class="level-block level-1">
+                    <span class="level-label">Level 1 (Identify)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l1.prompt||'')}" onchange="updateDeep(${i},'level1','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l1.correct||'')}" onchange="updateDeep(${i},'level1','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d1)}" onchange="updateDistractors(${i},'level1',this.value)"></div>
+                </div>
+                
+                <div class="level-block level-2">
+                    <span class="level-label">Level 2 (Analyze)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l2.prompt||'')}" onchange="updateDeep(${i},'level2','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l2.correct||'')}" onchange="updateDeep(${i},'level2','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d2)}" onchange="updateDistractors(${i},'level2',this.value)"></div>
+                </div>
+                
+                <div class="level-block level-3">
+                    <span class="level-label">Level 3 (Evaluate Effect)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l3.prompt||'')}" onchange="updateDeep(${i},'level3','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l3.correct||'')}" onchange="updateDeep(${i},'level3','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d3)}" onchange="updateDistractors(${i},'level3',this.value)"></div>
+                </div>
+                
+                <button class="btn btn-warning" style="margin-top:10px;" onclick="delItem(${i})">Delete Item</button>
+            </div>`; 
+        }); 
+    };
+    
+    window.toggleDetails = function(i) { /* Legacy stub */ };
+    window.updateItem = function(i,k,v) { appData.items[i][k]=v; saveLocal(); renderItems(); };
+    window.updateDistractors = function(i, level, v) { 
+        const arr = v.split(',').map(s => s.trim());
+        if(level === 'base') {
+            appData.items[i].distractors = arr;
+        } else {
+            const type = appData.items[i].type;
+            if(!appData.items[i][level]) appData.items[i][level] = {};
+            if(!appData.items[i][level][type]) appData.items[i][level][type] = {};
+            appData.items[i][level][type].distractors = arr;
+        }
+        saveLocal(); 
+    };
+    window.updateItemBool = function(i,k,v) { appData.items[i][k]=v; saveLocal(); };
+    window.updateDeep = function(i,l,t,k,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t][k]=v; saveLocal(); };
+    window.delItem = function(i) { appData.items.splice(i,1); renderItems(); saveLocal(); };
+    window.addNewItem = function() { appData.items.push({type:"tone", original:"New", translation:"", distractors:[], includeInWS:true}); renderItems(); saveLocal(); };
+    window.saveStructureConfig = function() { const order=[]; for(let i=0;i<6;i++) order.push(document.getElementById(`cfg-slot${i+1}`).value); appData.sentenceConfigs[adminConfigLevel]=order; saveLocal(); renderBuilderDropdowns(); };
+    
+    window.downloadWorksheetDoc = function() {
+        let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:Arial, sans-serif;} table{width:100%; border-collapse:collapse; margin-bottom:20px;} td,th{border:1px solid #000; padding:10px;} .box{border:1px solid #000; padding:15px; margin-bottom:15px;} .struct-box{background:#f0f0f0; padding:15px; border:1px solid #000; margin-top:20px;} .page-break { page-break-before: always; }</style></head><body>`;
+        
+        html += `<h1>Worksheet: ${appData.textTitle}</h1>`;
+        html += `<p><strong>Question:</strong> ${appData.question}</p><hr>`;
+
+        let evidence = [], meanings = [];
+        appData.items.forEach(i => { 
+            if(i.includeInWS !== false) { 
+                evidence.push(i.original); 
+                meanings.push(i.translation); 
+            }
+        });
+        
+        if(evidence.length > 0) {
+            let shuffledMeanings = [...meanings];
+            shuffleArray(shuffledMeanings);
+            html += `<h3>Part 1: Match the Evidence</h3><p>Draw a line to match the quote to its meaning.</p><table><tr><th>Evidence from Text</th><th>Meaning / Translation</th></tr>`;
+            evidence.forEach((ev, i) => html += `<tr><td>"${ev}"</td><td>${shuffledMeanings[i]}</td></tr>`);
+            html += `</table>`;
+        }
+
+        html += `<br clear=all style='mso-special-character:line-break;page-break-before:always'>`;
+
+        html += `<h3>Part 2: Deep Analysis</h3>`;
+        appData.items.forEach((item,i) => { 
+            if(item.includeInWS === false) return; 
+            
+            const l1Prompt = item.level1?.[item.type]?.prompt || "Identify the technique:";
+            const l2Prompt = item.level2?.[item.type]?.prompt || "What does this suggest?";
+            const l3Prompt = item.level3?.[item.type]?.prompt || "Evaluate the effect on the reader:";
+
+            html += `<div class="box">
+                <p><strong>${i+1}. "${item.original}"</strong> (${item.type})</p>
+                <p>1. ${l1Prompt}</p><br>
+                <p>2. ${l2Prompt}</p><br>
+                <p>3. ${l3Prompt}</p><br>
+            </div>`; 
+        });
+
+        if(appData.globalStructure) {
+            html += `<div class="struct-box"><h3>Part 3: Whole Text Structure</h3><p><strong>Question:</strong> ${appData.globalStructure}</p><br><br><br><br></div>`;
+        }
+
+        html += `</body></html>`;
+        
+        const blob = new Blob(['\ufeff', html], {
+            type: 'application/msword'
+        });
+        
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'Worksheet.doc';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+    
+    window.exportWordDoc = function() { alert("Use View/Print > Save as PDF for best results."); openPrintView(); };
+    window.switchAdminConfigLevel = function(l) { adminConfigLevel=l; document.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('active')); document.getElementById(`cfg-tab-${l}`).classList.add('active'); initAdminConfig(); };
+    window.initAdminConfig = function() { 
+        if(!appData.sentenceConfigs || !appData.sentenceConfigs[adminConfigLevel]) {
+            appData.sentenceConfigs = defaultData.sentenceConfigs;
+        }
+        const o=['marker','starter','point','method','quote','analysis','link','none']; 
+        const c=appData.sentenceConfigs[adminConfigLevel]; 
+        for(let i=0;i<6;i++){ 
+            const s=document.getElementById(`cfg-slot${i+1}`); 
+            s.innerHTML=''; 
+            o.forEach(opt=>s.add(new Option(opt,opt))); 
+            s.value=c[i] || 'none'; 
+        } 
+    };
+    window.renderBankList = function() { const l=document.getElementById('bank-list'); l.innerHTML=''; (appData[currentEditingBank]||[]).forEach((item,i)=>{ l.innerHTML+=`<div><input class="admin-input" value="${item}" onchange="updateBankItem(${i},this.value)"> <button onclick="delBankItem(${i})" class="btn-edit-item" style="background:red;">X</button></div>`; }); };
+
+    document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tone & Structure Architect v180 (Clear Labels)</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* --- CSS VARIABLES --- */
+        :root {
+            --primary: #009688; 
+            --accent: #ff9800; 
+            --bg: #f0f2f5;
+            --card: #ffffff; 
+            --text: #37474f; 
+            --tone-col: #9c27b0;
+            --struct-col: #2196f3; 
+            --lang-col: #4caf50; 
+            --nav-bg: #ffffff;
+            --success: #4caf50; 
+            --error: #f44336;
+            --high-vis: #29b6f6;
+        }
+        
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
+        
+        /* HEADER */
+        header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 100; flex-shrink: 0; }
+        h1 { margin: 0; font-size: 1.1rem; color: var(--primary); display:flex; align-items:center; gap:5px; }
+        .score-badge { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.9rem; margin-left: 10px; font-weight: bold; }
+
+        /* LOADING / RESET TEXT */
+        .loading-text { cursor: pointer; color: var(--error); font-weight: bold; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* LAYOUT */
+        .main-viewport { flex-grow: 1; overflow-y: auto; padding: 15px; padding-bottom: 90px; }
+        nav.bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; height: 65px; background: var(--nav-bg); display: flex; justify-content: space-around; align-items: center; border-top: 1px solid #ddd; z-index: 900; }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; color: #888; font-size: 0.75rem; border: none; background: none; cursor: pointer; }
+        .nav-item.active { color: var(--primary); font-weight: bold; }
+        
+        /* HUBS */
+        .hub { display: none; } .hub.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* GRID SECTIONS */
+        .section-header {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            color: #888;
+            margin: 15px 0 5px 0;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 2px;
+        }
+
+        .grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px; }
+        @media(min-width: 600px) { .grid { grid-template-columns: 1fr 1fr; } }
+        
+        #structure-container { margin-top: 5px; }
+
+        .card { background: var(--card); padding: 20px; border-radius: 12px; border: 2px solid #ddd; text-align: center; font-size: 1.1rem; cursor: pointer; transition: transform 0.1s; position: relative; overflow: visible; }
+        .card:hover { transform: scale(1.02); border-color: var(--primary); }
+        .card-tone { border-left: 10px solid var(--tone-col); }
+        .card-struct { border-left: 10px solid var(--struct-col); text-align: left; }
+        .card-lang { border-left: 10px solid var(--lang-col); }
+        .card-global { border-left: 10px solid #607d8b; background: var(--card); width: 100%; box-sizing: border-box; text-align: left; display: flex; align-items: center; justify-content: space-between; }
+
+        /* ANIMATIONS */
+        @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-5px); } 100% { transform: translateX(0); } }
+        .shake { animation: shake 0.4s ease-in-out; border-color: var(--error) !important; background: #ffebee !important; }
+
+        /* BUILDER */
+        .bank-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: rgba(0,0,0,0.02); padding: 10px; border-radius: 8px; width: 100%; box-sizing: border-box; }
+        .bank-row { text-align: left; width: 100%; margin-bottom: 10px; display: block; }
+        .bank-label { font-size: 0.8rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-bottom: 5px; display: block;}
+        
+        select { 
+            width: 100%; 
+            height: 45px; 
+            padding: 8px; 
+            border-radius: 6px; 
+            border: 1px solid #bbb; 
+            background: var(--card); 
+            color: var(--text);
+            font-size: 1rem; 
+            display: block;
+            margin-bottom: 5px;
+        } 
+        
+        #sentence-stage { 
+            width: 100%; 
+            padding: 15px; 
+            background: var(--card); 
+            border: 2px dashed var(--primary); 
+            border-radius: 10px; 
+            margin: 15px 0; 
+            font-size: 1.1rem; 
+            min-height: 60px; 
+            line-height: 1.4; 
+            cursor: text;
+            color: var(--text);
+        }
+        #sentence-stage:focus { outline: 2px solid var(--accent); }
+
+        #answer-area { width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; background: var(--card); color: var(--text); font-family: inherit; margin-bottom: 10px; font-size: 1rem; }
+        #quote-reference { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 10px; margin-bottom: 15px; border-radius: 4px; font-style: italic; color: #444; display: none; }
+
+        /* ADMIN & EDITORS */
+        .btn { padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; font-size: 1rem;}
+        .btn-primary { background: var(--primary); width: 100%; }
+        .btn-warning { background: var(--accent); }
+        .btn-danger { background: #e74c3c; }
+        .btn-doc { background: #1976d2; }
+        .btn-high-vis { background: var(--high-vis); color: #000; font-size: 1.1rem; border: 2px solid #000; }
+        .admin-btn { background:none; border:none; color:var(--text); font-size:1.2rem; cursor:pointer; }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999999; justify-content: center; align-items: center; }
+        
+        .modal-content { 
+            background: var(--card); 
+            color: var(--text); 
+            width: 95%; 
+            max-width: 1200px; 
+            max-height: 95vh; 
+            border-radius: 8px; 
+            display: flex; 
+            flex-direction: column; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
+            overflow: visible !important; 
+        }
+        
+        .modal-header { padding: 15px; background: rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+        .modal-body { padding: 20px; overflow-y: auto; text-align: left; padding-bottom: 400px; } 
+        
+        .editor-section { 
+            border: 2px solid #ddd; 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            border-radius: 5px; 
+            background: rgba(0,0,0,0.02); 
+            overflow: visible !important; 
+        }
+        
+        .admin-input { width: 100%; padding: 10px; border: 1px solid #aaa; border-radius: 4px; box-sizing: border-box; margin-bottom: 5px; font-size: 1rem; background: var(--card); color: var(--text); }
+        .admin-tab-bar { display: flex; gap:5px; margin-bottom:10px; }
+        .admin-tab { flex:1; padding:10px; border:2px solid #ccc; background:#eee; cursor:pointer; font-weight:bold; border-radius:4px; text-align:center; color:#333; }
+        .admin-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
+        .bank-edit-btn { background:#607d8b; color:white; padding:5px 10px; border-radius:4px; border:none; margin:2px; font-size:0.85rem; cursor:pointer; }
+        
+        .item-editor-card { 
+            border: 1px solid #ccc; 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            background: var(--card); 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
+            overflow: visible !important; 
+            position: relative; 
+            z-index: 1;
+        }
+        
+        .item-header-row {
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 10px;
+            flex-wrap: wrap; 
+            gap: 15px;
+        }
+        
+        .item-header-row select {
+            width: auto !important;
+            min-width: 150px;
+            height: 40px !important;
+            position: relative;
+            z-index: 99999; 
+        }
+        
+        .level-block { margin-top: 10px; padding: 10px; border: 1px solid #eee; background: rgba(0,0,0,0.03); border-radius: 4px; }
+        .level-label { font-weight: bold; display: block; margin-bottom: 5px; color: var(--text); font-size: 0.9rem; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { font-size: 0.85rem; font-weight: bold; color: var(--text); display:block; margin-bottom:5px;}
+
+        /* LENS TOGGLES IN EDITOR */
+        .lens-toggles { display: flex; gap: 15px; margin-bottom: 10px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: 4px; align-items:center;}
+        .lens-toggles label { font-size: 0.9rem; display: flex; align-items: center; gap: 5px; cursor: pointer; font-weight:bold; }
+
+        /* THEME PICKER */
+        .theme-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 10px; border-bottom: 1px solid #eee; }
+        .color-picker { width: 50px; height: 30px; border: none; cursor: pointer; }
+
+        /* HELP MANUAL STYLE */
+        .help-section { margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        .help-title { font-size: 1.1rem; color: var(--primary); font-weight: bold; margin-bottom: 5px; }
+        .help-list { padding-left: 20px; line-height: 1.6; }
+
+        /* CELEBRATION */
+        #celebration-modal { text-align: center; }
+        .firework-icon { font-size: 4rem; color: #ff9800; animation: spin 2s infinite linear; margin-bottom: 10px; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        #feedback-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:20000; display:none; flex-direction:column; justify-content:center; align-items:center; color:white; text-align:center; }
+        #feedback-icon { font-size: 5rem; margin-bottom: 20px; }
+        #save-status { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; opacity: 0; transition: 0.5s; z-index: 10000; }
+        
+        @media print { 
+            .no-print { display: none; } 
+            .page-break { page-break-before: always; display: block; height: 1px; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>
+            <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
+            <i class="fas fa-cubes"></i> Tone & Structure v180
+            <span class="score-badge" id="score-display">0 XP</span>
+        </h1>
+        <div style="display:flex; gap:10px;">
+            <button class="admin-btn" title="User Guide" onclick="openHelp()"><i class="fas fa-question-circle"></i></button>
+            <button class="admin-btn" title="Customize Theme" onclick="openThemeModal()"><i class="fas fa-palette"></i></button>
+            <select id="level-select" style="padding:4px; border-radius:4px;">
+                <option value="1">Lvl 1</option><option value="2">L2</option><option value="3">L3</option>
+            </select>
+            <button id="main-settings-btn" class="admin-btn"><i class="fas fa-cog"></i></button>
+        </div>
+    </header>
+
+    <div id="student-banner" style="display:none; width:100%; background:var(--accent); color:white; padding:5px; text-align:center; font-weight:bold;">
+        🎓 Student Mode: <span id="student-title"></span>
+    </div>
+    
+    <div id="save-status">💾 Progress Saved</div>
+
+    <div class="main-viewport">
+        <div id="hub-lab" class="hub active">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:0.9rem;">
+                <span style="flex:1;"><strong><span id="header-label">Topic</span>:</strong> <span id="text-display">Loading...</span></span>
+                <span style="flex:1; text-align:right;"><strong>Q:</strong> <span id="q-display">Loading...</span></span>
+            </div>
+            <div id="lab-content">
+                <div class="instruction">Step 1: Choose Evidence</div>
+                <div class="filter-bar" id="main-filter-bar" style="display:flex; gap:5px; justify-content:center; margin-bottom:10px;">
+                    <button class="btn" onclick="filterGrid('all')">All</button>
+                    <button class="btn" onclick="filterGrid('language')">Lang</button>
+                    <button class="btn" onclick="filterGrid('structure')">Struct</button>
+                </div>
+                <div id="dynamic-question-display" class="dynamic-question">Select Evidence</div>
+                
+                <div class="section-header">Evidence (Quotes)</div>
+                <div class="grid" id="grid-main"></div>
+                
+                <div class="section-header">Global Analysis</div>
+                <div id="structure-container"></div>
+            </div>
+        </div>
+
+        <div id="hub-writing" class="hub">
+            <div id="quote-reference"></div>
+            <div class="instruction">Sentence Construction</div>
+            <div class="bank-list" id="dynamic-builder-controls"></div>
+            <div class="instruction">Current Construction (Editable):</div>
+            <div id="sentence-stage" contenteditable="true" oninput="manualEdit()">Start picking words in the Lab...</div>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <button class="btn btn-warning" style="flex:1" onclick="undoLast()">Undo</button>
+                <button class="btn btn-primary" style="flex:2" onclick="commitSentence()">Add to Answer</button>
+            </div>
+            <hr style="opacity:0.2;">
+            <textarea id="answer-area" placeholder="Your full answer will appear here..." oninput="autoSaveProgress()"></textarea>
+            <div style="display:flex; gap:5px;">
+                <button class="btn btn-doc" style="flex:1" onclick="downloadDoc()">Download .doc</button>
+                <button class="btn btn-warning" style="flex:0 0 auto; background:#e74c3c;" onclick="clearEssay()">Reset Essay</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="bottom-nav">
+        <button id="nav-lab" class="nav-item active" onclick="switchHub('lab')"><i class="fas fa-vial"></i><span>Evidence Lab</span></button>
+        <button id="nav-writing" class="nav-item" onclick="switchHub('writing')"><i class="fas fa-pen-fancy"></i><span>Writing Desk</span></button>
+    </nav>
+
+    <div id="help-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">📖 User Guide <button onclick="document.getElementById('help-modal').style.display='none'">X</button></div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <div class="help-title">1. The Evidence Lab (Student Mode)</div>
+                    <ul class="help-list">
+                        <li><strong>Step 1:</strong> Select a colored quote card from the "Evidence" grid.</li>
+                        <li><strong>Step 2 (Match):</strong> Choose the correct meaning of the quote.</li>
+                        <li><strong>Step 3 (Analyze):</strong> Choose a Lens (Tone, Structure, or Language). <em>Note: Teachers can hide specific lenses if they are empty or irrelevant for a quote.</em></li>
+                        <li><strong>Whole Text:</strong> The gray card at the bottom covers general structure questions.</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <div class="help-title">2. The Writing Desk</div>
+                    <ul class="help-list">
+                        <li><strong>Build:</strong> Use the dropdown menus to construct a high-level analytical sentence.</li>
+                        <li><strong>Edit:</strong> You can type directly into the "Current Construction" box to tweak your sentence.</li>
+                        <li><strong>Save:</strong> Click "Add to Answer" to move your sentence into the main essay box.</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <div class="help-title">3. Teacher Tools (Settings)</div>
+                    <ul class="help-list">
+                        <li><strong>AI Generator:</strong> Paste a text/question, generate a prompt, and load the JSON response. Use "Append" to add to existing lessons.</li>
+                        <li><strong>Edit Evidence:</strong> Use the checkboxes (Tone/Structure/Language) to <strong>hide specific buttons</strong> for a quote if the AI did not generate a good question for it.</li>
+                        <li><strong>Worksheet:</strong> Click "Download Worksheet" for a printable Word doc. This includes a page break between matching and analysis.</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <div class="help-title">4. Exporting & Hosting</div>
+                    <ul class="help-list">
+                        <li><strong>Download Student App:</strong> In Settings, click the big blue "Download Student App" button. This creates a single `.html` file containing your entire lesson.</li>
+                        <li><strong>How to Host:</strong>
+                            <ul>
+                                <li><strong>Google Classroom / Teams:</strong> Upload the HTML file as an "Assignment Material". Students simply click to download and open it in their browser.</li>
+                                <li><strong>Moodle / Canvas:</strong> Upload as a "File Resource".</li>
+                                <li><strong>Network Drive:</strong> Save it to a shared folder. Students double-click to run.</li>
+                            </ul>
+                        </li>
+                        <li><strong>No Internet Needed:</strong> The student file works entirely offline once downloaded.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="admin-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Settings <button id="close-admin-btn">X</button></div>
+            <div class="modal-body">
+                
+                <div class="editor-section" style="border: 2px solid var(--primary); background: #e0f2f1;">
+                    <h3 style="color:var(--primary); margin-top:0;"><i class="fas fa-robot"></i> Lesson Generator & File Manager</h3>
+                    
+                    <div style="background:white; padding:10px; border-radius:5px; margin-bottom:15px; border:1px solid #ccc; display:flex; align-items:center; justify-content:space-between;">
+                        <span style="font-weight:bold;">Load Mode:</span>
+                        <select id="ai-bank-mode" class="admin-input" style="width:70%; margin:0; font-weight:bold;">
+                            <option value="replace">Replace Current Lesson</option>
+                            <option value="append">Append (Add to existing)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Author Name:</label>
+                        <input id="ai-author-name" class="admin-input" placeholder="e.g. Charles Dickens">
+                    </div>
+                    <div class="input-group">
+                        <label>Number of Quotes:</label>
+                        <input id="ai-quote-count" type="number" class="admin-input" value="6" min="1" max="15">
+                    </div>
+
+                    <textarea id="ai-source-text" class="admin-input" style="height:60px;" placeholder="Paste Source Text..."></textarea>
+                    <textarea id="ai-question-input" class="admin-input" style="height:40px;" placeholder="Lesson Question..."></textarea>
+                    
+                    <button class="btn" style="background:#7b1fa2; width:100%; margin:5px 0;" onclick="generateAndShowPrompt()">1. Generate AI Prompt</button>
+                    
+                    <div id="prompt-display-container" style="display:none; margin-bottom:5px;">
+                        <textarea id="ai-generated-prompt" class="admin-input" style="height:80px; background:#e1bee7;" readonly></textarea>
+                    </div>
+                    <textarea id="ai-paste-area" class="admin-input" style="height:60px;" placeholder="2. Paste AI JSON Here..."></textarea>
+                    <button class="btn" style="background:var(--primary); width:100%; margin-bottom:15px;" onclick="loadDataFromText()">📥 Load AI Data</button>
+
+                    <hr>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+                        <button class="btn btn-doc" onclick="downloadJSON()"><i class="fas fa-save"></i> Save File</button>
+                        <label class="btn btn-primary" style="text-align:center; cursor:pointer;">
+                            <i class="fas fa-folder-open"></i> Upload File
+                            <input type="file" id="file-upload" onchange="uploadJSON(this)" style="display:none;">
+                        </label>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+                        <button class="btn btn-high-vis" style="font-size:0.9rem;" onclick="downloadWorksheetDoc()">📄 Worksheet</button>
+                        <button class="btn btn-primary" style="background:#34495e; font-size:0.9rem;" onclick="downloadStudentApp()">📦 Student App</button>
+                    </div>
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid var(--accent);">
+                    <h3>📝 Edit Evidence & Analysis</h3>
+                    <p style="font-size:0.9rem;">Uncheck Tone/Struct/Lang to hide empty questions from students.</p>
+                    <div id="items-container"></div>
+                    <button class="btn btn-add" style="background:#2ecc71; margin-top:10px;" onclick="addNewItem()">+ Add New Quote</button>
+                    <button class="btn btn-warning" style="width:100%; margin-top:5px;" onclick="resetUsedQuotes()">♻️ Reset Used Quotes</button>
+                </div>
+                
+                <div class="editor-section" style="border-left: 5px solid #2196f3;">
+                    <h3>🏗️ Whole Text Structure</h3>
+                    <p style="font-size:0.8rem;">General questions about flow, openings, and endings.</p>
+                    <textarea class="admin-input" id="global-structure-q" placeholder="e.g. How does the opening paragraph engage the reader?" onchange="updateGlobal('globalStructure', this.value)"></textarea>
+                </div>
+
+                <div class="editor-section">
+                    <h3>Basic Info</h3>
+                    <label>Title:</label><input id="edit-title" class="admin-input" oninput="updateGlobal('textTitle', this.value)">
+                    <label>Question:</label><input id="edit-question" class="admin-input" oninput="updateGlobal('question', this.value)">
+                </div>
+
+                <div class="editor-section" style="border-left: 5px solid #2196f3;">
+                    <h3>⚙️ Sentence Structure (Admin)</h3>
+                    <div class="admin-tab-bar">
+                        <div id="cfg-tab-1" class="admin-tab active" onclick="switchAdminConfigLevel(1)">Lvl 1</div>
+                        <div id="cfg-tab-2" class="admin-tab" onclick="switchAdminConfigLevel(2)">Lvl 2</div>
+                        <div id="cfg-tab-3" class="admin-tab" onclick="switchAdminConfigLevel(3)">Lvl 3</div>
+                    </div>
+                    <div style="display:flex; gap:5px; margin-bottom:10px; flex-wrap:wrap;">
+                        <select class="admin-input" id="cfg-slot1" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot2" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot3" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot4" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot5" onchange="saveStructureConfig()"></select>
+                        <select class="admin-input" id="cfg-slot6" onchange="saveStructureConfig()"></select>
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <h3>✍️ Analysis Banks (Edit)</h3>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        <button class="bank-edit-btn" onclick="editBank('markers')">Markers</button>
+                        <button class="bank-edit-btn" onclick="editBank('starters')">Starters</button>
+                        <button class="bank-edit-btn" onclick="editBank('methods')">Methods</button>
+                        <button class="bank-edit-btn" onclick="editBank('simpleLinks')">Links (L1)</button>
+                        <button class="bank-edit-btn" onclick="editBank('complexLinks')">Links (L2/3)</button>
+                        <button class="bank-edit-btn" onclick="editBank('points')">Points</button>
+                    </div>
+                    <div id="bank-editor-area" style="margin-top:10px; padding:10px; border:1px solid #ccc; display:none; background:#fafafa;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <h4 id="bank-editor-title" style="margin:0;">Editing...</h4>
+                            <button onclick="document.getElementById('bank-editor-area').style.display='none'" style="border:none;background:none;">❌</button>
+                        </div>
+                        <div id="bank-list" class="list-container" style="max-height:200px; overflow-y:auto; margin-top:10px;"></div>
+                        <button class="btn btn-add" style="background:#2ecc71;" onclick="addBankItem()">+ Add Item</button>
+                    </div>
+                </div>
+                
+                <div style="margin-top:10px; display:flex; gap:15px;">
+                    <label><input type="checkbox" id="auto-progress-check" onchange="toggleAutoProgress(this.checked)"> Auto-Progress</label>
+                    <label><input type="checkbox" id="auto-login-check" onchange="toggleAutoLogin(this.checked)"> Keep Unlocked</label>
+                </div>
+
+                <button class="btn btn-danger" style="width:100%; margin-top:30px; background:#e74c3c; color:white; padding:15px;" onclick="nuclearReset()">⚠️ Factory Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="feedback-overlay" onclick="this.style.display='none'">
+        <div id="feedback-icon"><i class="fas fa-check-circle"></i></div>
+        <h2 id="feedback-text">Correct!</h2>
+    </div>
+
+    <div id="celebration-modal" class="modal">
+        <div class="modal-content" style="max-width:400px; text-align:center; padding:40px;">
+            <i class="fas fa-star firework-icon"></i>
+            <h2>Level Complete!</h2>
+            <div id="progression-btn-container"></div>
+            <button class="btn btn-primary" onclick="document.getElementById('celebration-modal').style.display='none'">Close</button>
+        </div>
+    </div>
+
+    <div id="theme-modal" class="modal">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">Customize Colors <button onclick="document.getElementById('theme-modal').style.display='none'">X</button></div>
+            <div class="modal-body" style="padding-bottom:20px;">
+                <div class="theme-row">
+                    <span>Background Color:</span>
+                    <input type="color" class="color-picker" id="bg-picker" onchange="updateThemeColor('--bg', this.value)">
+                </div>
+                <div class="theme-row">
+                    <span>Card/Panel Color:</span>
+                    <input type="color" class="color-picker" id="card-picker" onchange="updateThemeColor('--card', this.value)">
+                </div>
+                <div class="theme-row">
+                    <span>Text Color:</span>
+                    <input type="color" class="color-picker" id="text-picker" onchange="updateThemeColor('--text', this.value)">
+                </div>
+                <button class="btn btn-warning" style="width:100%; margin-top:15px;" onclick="resetTheme()">Reset to Default</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="phrasing-overlay" class="modal"><div class="modal-content"><div class="modal-header">Select Phrasing</div><div class="modal-body" id="phrase-options"></div></div></div>
+
+<script id="data-script">
+    /* DATA_START */ const teacherConfig = null; /* DATA_END */
+
+    const defaultData = {
+        textTitle: "New Lesson", question: "Enter Question", adminPassword: "1234", globalStructure: "",
+        sentenceConfigs: { 1: ['starter', 'quote', 'link', 'point', 'none', 'none'], 2: ['starter', 'quote', 'method', 'analysis', 'none', 'none'], 3: ['marker', 'starter', 'quote', 'method', 'point', 'analysis'] },
+        worksheetOptions: { lvl1: true, lvl2: true, lvl3: true },
+        analysisTemplates: { tone: ["creates a {adj} tone", "evokes {noun}"], structure: ["highlights {noun}"], language: ["suggests {noun}"] },
+        markers: ["Furthermore,", "However,"], starters: ["The writer implies", "The author suggests"], methods: ["Metaphor", "Simile"], points: ["a sense of tension"], simpleLinks: ["This shows", "This suggests", "It is clear"], complexLinks: ["This reinforces the tone (Tone)", "This structural shift implies (Structure)"],
+        items: []
+    };
+
+    let appData = JSON.parse(JSON.stringify(defaultData));
+    let state = { level: 1, currentIdx: -1, filter: 'all', completed: [], currentLens: '', score: 0 };
+    let sentenceSlots = { marker:"", starter:"", point:"", method:"", quote:"", link:"", analysis:"" };
+    let currentEditingBank = '';
+    let adminConfigLevel = 1;
+    const wordMorphology = { "admiring":{adj:"admiring",noun:"admiration"}, "angry":{adj:"angry",noun:"anger"}, "chaotic":{adj:"chaotic",noun:"chaos"} };
+
+    // EMERGENCY ERROR HANDLER
+    window.onerror = function() {
+        // Silent Fail
+    };
+
+    function init() {
+        try {
+            bindEvents();
+            initTheme(); 
+
+            if (teacherConfig && typeof teacherConfig === 'object') {
+                appData = validateAndRepair(teacherConfig);
+                document.getElementById('student-banner').style.display='block';
+                document.getElementById('student-title').innerText = appData.textTitle;
+                loadState();
+                return;
+            }
+            
+            // CLEAN SLATE KEY
+            let local = localStorage.getItem('tsa_v180_labels');
+            if(!local) local = localStorage.getItem('tsa_v179_unified'); 
+            
+            if(local) { 
+                try { 
+                    const parsed = JSON.parse(local);
+                    appData = validateAndRepair(parsed);
+                } catch(e) { 
+                    appData = defaultData; 
+                } 
+            }
+            
+            sanitizeLinks();
+            loadState();
+            
+            const autoLogin = document.getElementById('auto-login-check');
+            if(autoLogin && localStorage.getItem('tsa_auto_login') === 'true') autoLogin.checked = true;
+            
+            const autoProg = document.getElementById('auto-progress-check');
+            if(autoProg && localStorage.getItem('tsa_auto_progress') === 'true') autoProg.checked = true;
+
+        } catch (fatal) {
+            console.error("Fatal Init Error", fatal);
+        }
+    }
+
+    function safeBind(id, event, func) {
+        const el = document.getElementById(id);
+        if(el) {
+            el.addEventListener(event, func);
+        }
+    }
+
+    function bindEvents() {
+        safeBind('main-settings-btn', 'click', openAdmin);
+        safeBind('level-select', 'change', changeLevel);
+        safeBind('close-admin-btn', 'click', closeAdmin);
+    }
+
+    window.openHelp = function() {
+        document.getElementById('help-modal').style.display = 'flex';
+    }
+
+    // THEME LOGIC
+    function initTheme() {
+        ['--bg', '--card', '--text'].forEach(v => {
+            const saved = localStorage.getItem('tsa_theme_' + v);
+            if(saved) document.documentElement.style.setProperty(v, saved);
+        });
+    }
+
+    window.updateThemeColor = function(v, val) {
+        document.documentElement.style.setProperty(v, val);
+        localStorage.setItem('tsa_theme_' + v, val);
+    }
+
+    window.openThemeModal = function() {
+        document.getElementById('theme-modal').style.display = 'flex';
+        const styles = getComputedStyle(document.documentElement);
+        document.getElementById('bg-picker').value = styles.getPropertyValue('--bg').trim();
+        document.getElementById('card-picker').value = styles.getPropertyValue('--card').trim();
+        document.getElementById('text-picker').value = styles.getPropertyValue('--text').trim();
+    }
+
+    window.resetTheme = function() {
+        ['--bg', '--card', '--text'].forEach(v => localStorage.removeItem('tsa_theme_' + v));
+        location.reload();
+    }
+
+    function validateAndRepair(data) {
+        if (!data) return JSON.parse(JSON.stringify(defaultData));
+        ['markers','starters','methods','points','simpleLinks','complexLinks','items'].forEach(key => {
+            if (!Array.isArray(data[key])) data[key] = defaultData[key] || [];
+            if (data[key].length === 0) data[key] = ["(No items available)"]; 
+        });
+        if (!data.sentenceConfigs || !data.sentenceConfigs[1]) data.sentenceConfigs = defaultData.sentenceConfigs;
+        if(data.items) {
+            data.items.forEach(item => {
+                // Ensure enabled flags exist
+                if(item.enableTone === undefined) item.enableTone = true;
+                if(item.enableStructure === undefined) item.enableStructure = true;
+                if(item.enableLanguage === undefined) item.enableLanguage = true;
+
+                // AUTO-FILL MISSING LENSES
+                ['tone', 'structure', 'language'].forEach(lens => {
+                    // Init Level 1
+                    if(!item.level1) item.level1 = {};
+                    if(!item.level1[lens]) item.level1[lens] = {
+                        prompt: `Identify the ${lens} used here:`,
+                        correct: lens === item.type ? "Correct" : "See translation",
+                        distractors: ["Option A", "Option B"]
+                    };
+                    
+                    // Init Level 2
+                    if(!item.level2) item.level2 = {};
+                    if(!item.level2[lens]) item.level2[lens] = {
+                        prompt: `What does this ${lens} suggest?`,
+                        correct: "Effect on meaning",
+                        distractors: ["Alternative idea", "Opposite meaning"]
+                    };
+                    
+                    // Init Level 3
+                    if(!item.level3) item.level3 = {};
+                    if(!item.level3[lens]) item.level3[lens] = {
+                        prompt: `Evaluate the effect of this ${lens}:`,
+                        correct: "Creates strong impact",
+                        distractors: ["Weakens the text", "Confuses the reader"]
+                    };
+                });
+                
+                if (!item.distractors || !Array.isArray(item.distractors)) item.distractors = ["Wrong 1", "Wrong 2"];
+            });
+        }
+        return data;
+    }
+    
+    function loadState() {
+        const savedEssay = localStorage.getItem('tsa_student_essay');
+        if(savedEssay) document.getElementById('answer-area').value = savedEssay;
+        const savedCompleted = localStorage.getItem('tsa_student_completed');
+        if(savedCompleted) state.completed = JSON.parse(savedCompleted);
+        const savedScore = localStorage.getItem('tsa_student_score');
+        if(savedScore) state.score = parseInt(savedScore);
+        if(appData.globalStructure) document.getElementById('global-structure-q').value = appData.globalStructure;
+        
+        document.getElementById('level-select').value = "1";
+        state.level = 1;
+        updateUI(); 
+        changeLevel();
+    }
+    
+    function sanitizeLinks() {
+        if(appData.simpleLinks) appData.simpleLinks = appData.simpleLinks.map(s => s.replace(/\s+that\s*$/i, "").trim());
+    }
+    
+    function autoSaveProgress() {
+        localStorage.setItem('tsa_student_essay', document.getElementById('answer-area').value);
+        localStorage.setItem('tsa_student_score', state.score);
+        const ind = document.getElementById('save-status'); ind.style.opacity = 1; setTimeout(() => ind.style.opacity = 0, 1500);
+    }
+    
+    window.emergencyReset = function() {
+        if(confirm("Emergency Reset: This will wipe all data to fix the crash. Continue?")) {
+            nuclearReset();
+        }
+    }
+
+    window.nuclearReset = function() {
+        if(confirm("Confirm Factory Reset?")) {
+            localStorage.removeItem('tsa_v180_labels');
+            localStorage.removeItem('tsa_v179_unified');
+            localStorage.removeItem('tsa_student_essay');
+            localStorage.removeItem('tsa_student_completed');
+            localStorage.removeItem('tsa_student_score');
+            ['--bg', '--card', '--text'].forEach(v => localStorage.removeItem('tsa_theme_' + v));
+            location.reload();
+        }
+    };
+    
+    function resetUsedQuotes() {
+        if(confirm("Restore all completed quotes?")) {
+            state.completed = [];
+            localStorage.removeItem('tsa_student_completed');
+            resetToGrid();
+            alert("Restored!");
+        }
+    }
+
+    function switchHub(hubId) {
+        document.querySelectorAll('.hub').forEach(h => h.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById('hub-' + hubId).classList.add('active');
+        document.getElementById('nav-' + hubId).classList.add('active');
+        if(hubId === 'lab') resetToGrid();
+    }
+
+    function resetToGrid() {
+        state.currentIdx = -1;
+        document.getElementById('header-label').innerText = "Topic";
+        document.getElementById('text-display').innerText = appData.textTitle;
+        const lab = document.getElementById('lab-content');
+        
+        // Ensure Grid Exists
+        if(!document.getElementById('grid-main')) {
+             lab.innerHTML = `<div class="instruction">Step 1: Choose Evidence</div><div class="filter-bar" id="main-filter-bar" style="display:flex; gap:5px; justify-content:center; margin-bottom:10px;"><button class="btn" onclick="filterGrid('all')">All</button><button class="btn" onclick="filterGrid('language')">Lang</button><button class="btn" onclick="filterGrid('structure')">Struct</button></div><div id="dynamic-question-display" class="dynamic-question">Select Evidence</div>
+             <div class="section-header">Evidence (Quotes)</div><div class="grid" id="grid-main"></div>
+             <div class="section-header">Global Analysis</div><div id="structure-container"></div>`;
+        }
+        
+        if(state.level === 1) { 
+            const fb = document.getElementById('main-filter-bar');
+            if(fb) fb.style.display = 'none'; 
+            state.filter = 'all'; 
+        }
+        loadStageSelect();
+    }
+
+    function loadStageSelect() {
+        const grid = document.getElementById('grid-main');
+        const structContainer = document.getElementById('structure-container');
+        if(!grid || !structContainer) return; 
+        
+        grid.innerHTML = '';
+        structContainer.innerHTML = '';
+        
+        let count = 0;
+        appData.items.forEach((item, i) => {
+            if(state.completed.includes(i)) return; 
+            if(state.level !== 1 && state.filter !== 'all' && item.type !== state.filter) return;
+            count++;
+            const div = document.createElement('div');
+            div.className = `card card-${item.type || 'tone'}`;
+            div.innerHTML = `<strong>"${item.original}"</strong><br><small>${item.type}</small>`;
+            div.onclick = () => startAnalysis(i);
+            grid.appendChild(div);
+        });
+
+        // Structure Card at BOTTOM (Separate Container)
+        const stCard = document.createElement('div');
+        stCard.className = 'card card-global';
+        stCard.innerHTML = `<div><strong>🏗️ Whole Text Structure</strong><br><small>Global Analysis</small></div><i class="fas fa-chevron-right"></i>`;
+        stCard.onclick = () => {
+            const lab = document.getElementById('lab-content');
+            lab.innerHTML = `<div class="instruction">Whole Text Structure</div><div style="padding:20px; background:var(--card); border-radius:8px; border:2px solid #607d8b;"><h3>${appData.globalStructure || "No global question set."}</h3><p>Consider: Openings, Endings, Shifts in focus, Narrative perspective.</p></div><button class="btn btn-warning" onclick="resetToGrid()" style="margin-top:10px;">⬅ Back</button>`;
+        };
+        structContainer.appendChild(stCard);
+    }
+    
+    function filterGrid(type) { state.filter = type; resetToGrid(); }
+    
+    function changeLevel() { 
+        state.level = parseInt(document.getElementById('level-select').value); 
+        resetToGrid(); 
+        renderBuilderDropdowns(); 
+    }
+
+    function startAnalysis(idx) {
+        state.currentIdx = idx;
+        const item = appData.items[idx];
+        document.getElementById('header-label').innerText = "Quote";
+        document.getElementById('text-display').innerText = item.original.length > 50 ? item.original.substring(0,50)+"..." : item.original;
+
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">Step 2: Match Meaning</div><div class="grid" id="grid-decoder"></div><button class="btn btn-warning" onclick="resetToGrid()" style="margin-top:10px;">⬅ Back</button>`;
+        
+        let dists = (Array.isArray(item.distractors) && item.distractors.length > 0) ? item.distractors : ["Wrong Answer 1", "Wrong Answer 2"];
+        let opts = [{txt: item.translation, correct: true}, ...dists.map(d => ({txt:d, correct:false}))];
+        shuffleArray(opts);
+        
+        opts.forEach(o => {
+            const btn = document.createElement('div');
+            btn.className = 'card'; btn.innerText = o.txt;
+            btn.onclick = (e) => checkMatch(e, o.correct, item.original, item.type);
+            document.getElementById('grid-decoder').appendChild(btn);
+        });
+    }
+
+    function checkMatch(e, isCorrect, original, type) {
+        if(isCorrect) {
+            showFeedback(true);
+            state.score += 10;
+            updateUI();
+            sentenceSlots.quote=`"${original}"`; 
+            document.getElementById('quote-reference').innerHTML = `<strong>Current Quote:</strong> "${original}"`;
+            document.getElementById('quote-reference').style.display = 'block';
+            if (state.level === 1) {
+                state.currentLens = type || 'tone';
+                switchHub('writing'); rebuildSentence(); renderBuilderDropdowns(); return; 
+            }
+            loadLensChoice(); 
+        } else {
+            showFeedback(false);
+            e.target.classList.add('shake');
+            setTimeout(() => e.target.classList.remove('shake'), 500);
+        }
+    }
+
+    function showFeedback(correct) {
+        const overlay = document.getElementById('feedback-overlay');
+        const icon = document.getElementById('feedback-icon');
+        const text = document.getElementById('feedback-text');
+        overlay.style.display = 'flex';
+        if(correct) {
+            icon.innerHTML = '<i class="fas fa-check-circle" style="color:#4caf50;"></i>';
+            text.innerText = "Correct! (+10 XP)";
+            setTimeout(() => overlay.style.display = 'none', 1000);
+        } else {
+            icon.innerHTML = '<i class="fas fa-times-circle" style="color:#f44336;"></i>';
+            text.innerText = "Try Again";
+            setTimeout(() => overlay.style.display = 'none', 1000);
+        }
+    }
+
+    function loadLensChoice() {
+        const lab = document.getElementById('lab-content');
+        
+        // CHECK ENABLED FLAGS
+        const item = appData.items[state.currentIdx];
+        let buttons = '';
+        if(item.enableTone !== false) buttons += `<div class="card card-tone" onclick="loadFinalAnalysis('tone')">🎭 Tone</div>`;
+        if(item.enableStructure !== false) buttons += `<div class="card card-struct" onclick="loadFinalAnalysis('structure')">🏗️ Structure</div>`;
+        if(item.enableLanguage !== false) buttons += `<div class="card card-lang" onclick="loadFinalAnalysis('language')">📖 Language</div>`;
+
+        lab.innerHTML = `<div class="instruction">Step 3: Choose Lens</div><div class="grid">${buttons}</div><button class="btn btn-warning" onclick="resetToGrid()" style="margin-top:10px;">⬅ Back</button>`;
+    }
+
+    function loadFinalAnalysis(lens) {
+        state.currentLens = lens; 
+        const item = appData.items[state.currentIdx];
+        
+        const lvlKey = `level${state.level}`;
+        const lvlData = item[lvlKey] && item[lvlKey][lens] ? item[lvlKey][lens] : null;
+        
+        const prompt = lvlData ? lvlData.prompt : "Analyze this technique:";
+        const correct = lvlData ? lvlData.correct : "Effect created.";
+        
+        let distractors = [];
+        if (lvlData && Array.isArray(lvlData.distractors) && lvlData.distractors.length > 0) {
+            distractors = lvlData.distractors;
+        } else {
+            distractors = ["Alternative interpretation", "Unrelated effect"];
+        }
+
+        const lab = document.getElementById('lab-content');
+        lab.innerHTML = `<div class="instruction">${prompt}</div><div class="grid" id="grid-analysis"></div><button class="btn btn-warning" onclick="loadLensChoice()" style="margin-top:10px;">⬅ Back</button>`;
+        
+        let allOpts = [{txt: correct, correct: true}, ...distractors.map(d => ({txt:d, correct:false}))];
+        shuffleArray(allOpts);
+
+        allOpts.forEach(o => {
+            const btn = document.createElement('div');
+            btn.className = `card card-${lens}`; btn.innerText = o.txt;
+            btn.onclick = (e) => { 
+                if(o.correct) {
+                    showFeedback(true);
+                    state.score += 20;
+                    showPhrasingChoices(lens, o.txt); 
+                } else {
+                    showFeedback(false);
+                    e.target.classList.add('shake');
+                    setTimeout(()=>e.target.classList.remove('shake'), 500);
+                }
+            };
+            document.getElementById('grid-analysis').appendChild(btn);
+        });
+    }
+
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+    }
+
+    function showPhrasingChoices(lens, word) {
+        const modal = document.getElementById('phrasing-overlay');
+        const container = document.getElementById('phrase-options');
+        modal.style.display = 'flex'; container.innerHTML = '';
+        let templates = appData.analysisTemplates[lens] || ["creates a {adj} tone"];
+        templates.forEach(tmpl => {
+            let adj = wordMorphology[word.toLowerCase()]?.adj || word;
+            let noun = wordMorphology[word.toLowerCase()]?.noun || word;
+            let text = tmpl.replace("{adj}", adj).replace("{noun}", noun).replace("{word}", word);
+            const div = document.createElement('div');
+            div.className = 'phrase-option'; div.innerText = text;
+            div.onclick = () => {
+                sentenceSlots.analysis = text; modal.style.display = 'none';
+                rebuildSentence(); switchHub('writing'); renderBuilderDropdowns(); resetToGrid(); 
+            };
+            container.appendChild(div);
+        });
+    }
+
+    function renderBuilderDropdowns() {
+        const container = document.getElementById('dynamic-builder-controls');
+        container.innerHTML = '';
+        
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        const dataMap = { 'marker': 'markers', 'starter': 'starters', 'method': 'methods', 'point': 'points' };
+
+        currentConfig.forEach(type => {
+            if (['quote', 'analysis', 'none'].includes(type)) return;
+            
+            let options = [];
+            
+            if(type === 'link') {
+                if(state.level === 1) {
+                    options = appData['simpleLinks']; 
+                } else {
+                    options = appData['complexLinks']; 
+                    if (state.currentLens) {
+                        options = options.filter(opt => {
+                            const lower = opt.toLowerCase();
+                            return lower.includes(`(${state.currentLens})`) || (!lower.includes('(tone)') && !lower.includes('(structure)') && !lower.includes('(lang)') && !lower.includes('(language)'));
+                        });
+                    }
+                }
+            } else {
+                const key = dataMap[type] || type + 's';
+                options = appData[key];
+            }
+
+            if (!options || options.length === 0) {
+                options = ["(No items available)"];
+            }
+
+            const div = document.createElement('div');
+            div.className = 'bank-row';
+            
+            let optionsHtml = `<option value="">Choose ${type}...</option>`;
+            options.forEach(opt => {
+                let display = opt;
+                if(type === 'link') display = display.replace(/\s+that\s*$/i, ""); 
+                optionsHtml += `<option value="${display}">${display}</option>`;
+            });
+
+            div.innerHTML = `
+                <span class="bank-label">${type.toUpperCase()}</span>
+                <select class="bank-select" onchange="updateSlot('${type}', this.value)">
+                    ${optionsHtml}
+                </select>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    window.updateSlot = function(type, value) {
+        sentenceSlots[type] = value;
+        rebuildSentence();
+    };
+
+    window.manualEdit = function() {
+        // Allows manual typing in stage, does not update slots but updates displayed text
+    }
+
+    function rebuildSentence() {
+        const currentConfig = appData.sentenceConfigs[state.level] || defaultData.sentenceConfigs[1];
+        let parts = [];
+        currentConfig.forEach(type => { 
+            let val = sentenceSlots[type];
+            if(val) {
+                if(type === 'link') val = val.replace(/\s+that\s*$/i, "");
+                val = val.replace(/\s*\((Tone|Structure|Lang|Language)\)/gi, '').trim();
+                parts.push(val);
+            }
+        });
+        let str = parts.join(" ");
+        if(str) { str = str.charAt(0).toUpperCase() + str.slice(1); if(!str.endsWith('.')) str += "."; }
+        
+        document.getElementById('sentence-stage').innerText = str || "Start picking words in the Lab...";
+    }
+
+    function commitSentence() {
+        const stage = document.getElementById('sentence-stage');
+        const text = stage.innerText.trim();
+        
+        if (!text || text === "Start picking words in the Lab...") {
+            alert("Please construct a sentence first.");
+            return;
+        }
+        
+        const area = document.getElementById('answer-area');
+        area.value += (area.value ? "\n\n" : "") + text;
+        
+        if(state.currentIdx !== -1 && !state.completed.includes(state.currentIdx)) {
+            state.completed.push(state.currentIdx);
+        }
+        localStorage.setItem('tsa_student_completed', JSON.stringify(state.completed)); 
+        autoSaveProgress();
+        
+        sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"" };
+        document.getElementById('quote-reference').style.display = 'none';
+        rebuildSentence();
+        
+        stage.classList.add('flash');
+        setTimeout(() => stage.classList.remove('flash'), 500);
+        
+        const total = appData.items.length;
+        if(state.completed.length === total) {
+            triggerCelebration();
+        }
+        
+        renderBuilderDropdowns();
+        resetToGrid(); 
+        switchHub('lab');
+    }
+    
+    function toggleAutoProgress(c) { if(c) localStorage.setItem('tsa_auto_progress', 'true'); else localStorage.removeItem('tsa_auto_progress'); }
+
+    function downloadDoc() { 
+        const BOM = "\ufeff";
+        const html = `<html><head><meta charset="utf-8"><title>Essay</title></head><body>${document.getElementById('answer-area').value.replace(/\n/g,'<br>')}</body></html>`;
+        const blob = new Blob([BOM + html], {type:'application/msword;charset=utf-8'}); 
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
+    }
+
+    // ADMIN FUNCTIONS
+    window.generateAndShowPrompt = function() { const c = document.getElementById('ai-quote-count').value; const t = document.getElementById('ai-source-text').value; const q = document.getElementById('ai-question-input').value; const a = document.getElementById('ai-author-name').value; document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.\nSOURCE: "${t}"\nQ: "${q}"\nAUTHOR: "${a}"\n\nCRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.\n\nREQUIRED JSON FORMAT:\n{ "textTitle": "Title", "question": "${q}", "globalStructure": "A question about the whole text flow", "items": [ { "id":"q1", "type":"structure", "original":"quote", "translation":"meaning", "distractors":["wrong1","wrong2"], "level1":{ "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] } }, "level2":{ "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] } }, "level3":{ "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] } } } ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) }`; document.getElementById('prompt-display-container').style.display='block'; };
+    
+    window.loadDataFromText = function() { 
+        let text = document.getElementById('ai-paste-area').value;
+        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        try { 
+            const json = JSON.parse(text);
+            
+            const mode = document.getElementById('ai-bank-mode').value;
+            
+            if (mode === 'append') {
+                if (json.items) appData.items = appData.items.concat(json.items);
+                if (json.textTitle) appData.textTitle = json.textTitle;
+                if (json.question) appData.question = json.question;
+            } else {
+                appData = validateAndRepair({...appData, ...json}); 
+                state.completed=[]; 
+            }
+
+            sanitizeLinks(); 
+            saveLocal(); 
+            location.reload(); 
+        } catch(e){ 
+            alert("Invalid JSON Error: " + e.message); 
+        } 
+    };
+    
+    window.uploadJSON = function(input) {
+        const file = input.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                
+                // NEW: CHECK APPEND/REPLACE TOGGLE
+                const mode = document.getElementById('ai-bank-mode').value;
+                if (mode === 'append') {
+                    if (json.items) appData.items = appData.items.concat(json.items);
+                    if (json.textTitle) appData.textTitle = json.textTitle;
+                } else {
+                    appData = validateAndRepair({...appData, ...json});
+                    state.completed=[];
+                }
+                
+                sanitizeLinks();
+                saveLocal();
+                location.reload();
+            } catch(err) {
+                alert("Error reading file: " + err.message);
+            }
+        };
+        reader.readAsText(file);
+    };
+    
+    window.saveLocal = function() { localStorage.setItem('tsa_v180_labels', JSON.stringify(appData)); };
+    window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
+    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
+
+    window.openAdmin = function() { 
+        try {
+            document.getElementById('admin-modal').style.display='flex'; 
+            initAdminConfig(); 
+            renderItems();
+        } catch(e) {
+            console.error("Admin Render Error:", e);
+            alert("Warning: Some admin items could not load. Reset Recommended.");
+        }
+    };
+    
+    window.closeAdmin = function() { document.getElementById('admin-modal').style.display='none'; };
+    window.requestAdminAccess = function() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); };
+    window.toggleAutoLogin = function(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); };
+    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
+    window.downloadJSON = function() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); };
+    window.downloadStudentApp = function() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); };
+    window.editBank = function(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); };
+    window.updateBankItem = function(i,v) { appData[currentEditingBank][i]=v; saveLocal(); renderBuilderDropdowns(); }; 
+    window.delBankItem = function(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; 
+    window.addBankItem = function() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; 
+    
+    window.escapeHtml = function(text) {
+        if(!text) return "";
+        return text.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    window.renderItems = function() { 
+        const c=document.getElementById('items-container'); 
+        c.innerHTML=''; 
+        if(!appData.items) return;
+        
+        appData.items.forEach((item,i)=>{ 
+            const l1 = item.level1?.[item.type] || {};
+            const l2 = item.level2?.[item.type] || {};
+            const l3 = item.level3?.[item.type] || {};
+            const distractors = item.distractors ? item.distractors.join(", ") : "";
+            
+            const d1 = l1.distractors ? l1.distractors.join(", ") : "";
+            const d2 = l2.distractors ? l2.distractors.join(", ") : "";
+            const d3 = l3.distractors ? l3.distractors.join(", ") : "";
+            
+            c.innerHTML+=`
+            <div class="item-editor-card">
+                <div class="item-header-row">
+                    <strong>#${i+1}</strong>
+                    <select onchange="updateItem(${i},'type',this.value)">
+                        <option value="tone" ${item.type==='tone'?'selected':''}>Tone</option>
+                        <option value="structure" ${item.type==='structure'?'selected':''}>Structure</option>
+                        <option value="language" ${item.type==='language'?'selected':''}>Language</option>
+                    </select>
+                    <div>
+                        <label><input type="checkbox" ${item.includeInWS?'checked':''} onchange="updateItemBool(${i},'includeInWS',this.checked)"> WS</label>
+                    </div>
+                </div>
+                
+                <div class="lens-toggles">
+                    <strong>Enable Lenses:</strong>
+                    <label><input type="checkbox" ${item.enableTone !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableTone',this.checked)"> Tone</label>
+                    <label><input type="checkbox" ${item.enableStructure !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableStructure',this.checked)"> Structure</label>
+                    <label><input type="checkbox" ${item.enableLanguage !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableLanguage',this.checked)"> Language</label>
+                </div>
+
+                <div class="input-group"><label>Quote:</label><input class="admin-input" value="${escapeHtml(item.original)}" onchange="updateItem(${i},'original',this.value)"></div>
+                <div class="input-group"><label>Translation:</label><input class="admin-input" value="${escapeHtml(item.translation)}" onchange="updateItem(${i},'translation',this.value)"></div>
+                <div class="input-group"><label>Match Distractors (CSV):</label><input class="admin-input" value="${escapeHtml(distractors)}" onchange="updateDistractors(${i},'base',this.value)"></div>
+                
+                <div class="level-block level-1">
+                    <span class="level-label">Level 1 (Identify)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l1.prompt||'')}" onchange="updateDeep(${i},'level1','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l1.correct||'')}" onchange="updateDeep(${i},'level1','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d1)}" onchange="updateDistractors(${i},'level1',this.value)"></div>
+                </div>
+                
+                <div class="level-block level-2">
+                    <span class="level-label">Level 2 (Analyze)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l2.prompt||'')}" onchange="updateDeep(${i},'level2','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l2.correct||'')}" onchange="updateDeep(${i},'level2','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d2)}" onchange="updateDistractors(${i},'level2',this.value)"></div>
+                </div>
+                
+                <div class="level-block level-3">
+                    <span class="level-label">Level 3 (Evaluate Effect)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l3.prompt||'')}" onchange="updateDeep(${i},'level3','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l3.correct||'')}" onchange="updateDeep(${i},'level3','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d3)}" onchange="updateDistractors(${i},'level3',this.value)"></div>
+                </div>
+                
+                <button class="btn btn-warning" style="margin-top:10px;" onclick="delItem(${i})">Delete Item</button>
+            </div>`; 
+        }); 
+    };
+    
+    window.toggleDetails = function(i) { /* Legacy stub */ };
+    window.updateItem = function(i,k,v) { appData.items[i][k]=v; saveLocal(); renderItems(); };
+    window.updateDistractors = function(i, level, v) { 
+        const arr = v.split(',').map(s => s.trim());
+        if(level === 'base') {
+            appData.items[i].distractors = arr;
+        } else {
+            const type = appData.items[i].type;
+            if(!appData.items[i][level]) appData.items[i][level] = {};
+            if(!appData.items[i][level][type]) appData.items[i][level][type] = {};
+            appData.items[i][level][type].distractors = arr;
+        }
+        saveLocal(); 
+    };
+    window.updateItemBool = function(i,k,v) { appData.items[i][k]=v; saveLocal(); };
+    window.updateDeep = function(i,l,t,k,v) { if(!appData.items[i][l]) appData.items[i][l]={}; if(!appData.items[i][l][t]) appData.items[i][l][t]={}; appData.items[i][l][t][k]=v; saveLocal(); };
+    window.delItem = function(i) { appData.items.splice(i,1); renderItems(); saveLocal(); };
+    window.addNewItem = function() { appData.items.push({type:"tone", original:"New", translation:"", distractors:[], includeInWS:true}); renderItems(); saveLocal(); };
+    window.saveStructureConfig = function() { const order=[]; for(let i=0;i<6;i++) order.push(document.getElementById(`cfg-slot${i+1}`).value); appData.sentenceConfigs[adminConfigLevel]=order; saveLocal(); renderBuilderDropdowns(); };
+    
+    window.downloadWorksheetDoc = function() {
+        let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Worksheet</title><style>body{font-family:Arial, sans-serif;} table{width:100%; border-collapse:collapse; margin-bottom:20px;} td,th{border:1px solid #000; padding:10px;} .box{border:1px solid #000; padding:15px; margin-bottom:15px;} .struct-box{background:#f0f0f0; padding:15px; border:1px solid #000; margin-top:20px;} .page-break { page-break-before: always; }</style></head><body>`;
+        
+        html += `<h1>Worksheet: ${appData.textTitle}</h1>`;
+        html += `<p><strong>Question:</strong> ${appData.question}</p><hr>`;
+
+        let evidence = [], meanings = [];
+        appData.items.forEach(i => { 
+            if(i.includeInWS !== false) { 
+                evidence.push(i.original); 
+                meanings.push(i.translation); 
+            }
+        });
+        
+        if(evidence.length > 0) {
+            let shuffledMeanings = [...meanings];
+            shuffleArray(shuffledMeanings);
+            html += `<h3>Part 1: Match the Evidence</h3><p>Draw a line to match the quote to its meaning.</p><table><tr><th>Evidence from Text</th><th>Meaning / Translation</th></tr>`;
+            evidence.forEach((ev, i) => html += `<tr><td>"${ev}"</td><td>${shuffledMeanings[i]}</td></tr>`);
+            html += `</table>`;
+        }
+
+        html += `<br clear=all style='mso-special-character:line-break;page-break-before:always'>`;
+
+        html += `<h3>Part 2: Deep Analysis</h3>`;
+        appData.items.forEach((item,i) => { 
+            if(item.includeInWS === false) return; 
+            
+            const l1Prompt = item.level1?.[item.type]?.prompt || "Identify the technique:";
+            const l2Prompt = item.level2?.[item.type]?.prompt || "What does this suggest?";
+            const l3Prompt = item.level3?.[item.type]?.prompt || "Evaluate the effect on the reader:";
+
+            html += `<div class="box">
+                <p><strong>${i+1}. "${item.original}"</strong> (${item.type})</p>
+                <p>1. ${l1Prompt}</p><br>
+                <p>2. ${l2Prompt}</p><br>
+                <p>3. ${l3Prompt}</p><br>
+            </div>`; 
+        });
+
+        if(appData.globalStructure) {
+            html += `<div class="struct-box"><h3>Part 3: Whole Text Structure</h3><p><strong>Question:</strong> ${appData.globalStructure}</p><br><br><br><br></div>`;
+        }
+
+        html += `</body></html>`;
+        
+        const blob = new Blob(['\ufeff', html], {
+            type: 'application/msword'
+        });
+        
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'Worksheet.doc';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+    
+    window.exportWordDoc = function() { alert("Use View/Print > Save as PDF for best results."); openPrintView(); };
+    window.switchAdminConfigLevel = function(l) { adminConfigLevel=l; document.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('active')); document.getElementById(`cfg-tab-${l}`).classList.add('active'); initAdminConfig(); };
+    window.initAdminConfig = function() { 
+        if(!appData.sentenceConfigs || !appData.sentenceConfigs[adminConfigLevel]) {
+            appData.sentenceConfigs = defaultData.sentenceConfigs;
+        }
+        const o=['marker','starter','point','method','quote','analysis','link','none']; 
+        const c=appData.sentenceConfigs[adminConfigLevel]; 
+        for(let i=0;i<6;i++){ 
+            const s=document.getElementById(`cfg-slot${i+1}`); 
+            s.innerHTML=''; 
+            o.forEach(opt=>s.add(new Option(opt,opt))); 
+            s.value=c[i] || 'none'; 
+        } 
+    };
+    window.renderBankList = function() { const l=document.getElementById('bank-list'); l.innerHTML=''; (appData[currentEditingBank]||[]).forEach((item,i)=>{ l.innerHTML+=`<div><input class="admin-input" value="${item}" onchange="updateBankItem(${i},this.value)"> <button onclick="delBankItem(${i})" class="btn-edit-item" style="background:red;">X</button></div>`; }); };
+
+    document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
