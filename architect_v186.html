@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v185 (Manual Input)</title>
+    <title>Tone & Structure Architect v186 (Pure Load)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -74,7 +74,6 @@
         .bank-row { text-align: left; width: 100%; margin-bottom: 10px; display: block; }
         .bank-label { font-size: 0.8rem; font-weight: bold; text-transform: uppercase; color: var(--primary); margin-bottom: 5px; display: block;}
         
-        /* Dropdowns */
         select { 
             width: 100%; 
             height: 45px; 
@@ -88,7 +87,6 @@
             margin-bottom: 5px;
         } 
 
-        /* Manual Input in Builder */
         .manual-text-input {
             width: 100%;
             padding: 10px;
@@ -227,7 +225,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v185
+            <i class="fas fa-cubes"></i> Tone & Structure v186
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -317,7 +315,7 @@
                     <div class="help-title">3. Teacher Tools</div>
                     <ul class="help-list">
                         <li><strong>Load Mode:</strong> "Replace" wipes everything. "Append" adds new quotes. "Merge Banks" adds only new vocabulary.</li>
-                        <li><strong>Manual Slots:</strong> In "Sentence Structure", set a slot to "manual" to let students type freely (e.g. for their own analysis).</li>
+                        <li><strong>Manual Slots:</strong> In "Sentence Structure", set a slot to "manual" to let students type freely.</li>
                         <li><strong>Worksheet:</strong> "Manual" slots appear as blank lines on the printed worksheet.</li>
                     </ul>
                 </div>
@@ -444,7 +442,10 @@
                     <button class="btn btn-warning" style="width:100%; margin-top:5px;" onclick="resetUsedQuotes()">♻️ Reset Used Quotes</button>
                 </div>
 
-                <button class="btn btn-danger" style="width:100%; margin-top:30px; background:#e74c3c; color:white; padding:15px;" onclick="nuclearReset()">⚠️ FACTORY RESET (WIPE ALL)</button>
+                <div style="display:flex; gap:10px; margin-top:30px;">
+                    <button class="btn btn-danger" style="flex:1; background:#e74c3c; color:white; padding:15px;" onclick="clearToBlank()">🗑️ Clear All (Blank Slate)</button>
+                    <button class="btn btn-warning" style="flex:1; background:#f39c12; color:white; padding:15px;" onclick="nuclearReset()">⚠️ Factory Reset (Reload)</button>
+                </div>
             </div>
         </div>
     </div>
@@ -537,11 +538,11 @@
                 return;
             }
             
-            // CLEAN SLATE KEY - Version 185
-            let local = localStorage.getItem('tsa_v185_manual');
+            // CLEAN SLATE KEY - Version 186
+            let local = localStorage.getItem('tsa_v186_pure');
             
             if(!local) {
-                // If this is the first load of v185, we start FRESH from defaults.
+                // First load ever for this version -> Force Default
                 appData = JSON.parse(JSON.stringify(defaultData));
                 saveLocal();
             } else {
@@ -658,7 +659,6 @@
         const savedScore = localStorage.getItem('tsa_student_score');
         if(savedScore) state.score = parseInt(savedScore);
         
-        // Load Global Structure Editor
         if(appData.globalStructure) {
             document.getElementById('global-q-input').value = appData.globalStructure.question || "";
             document.getElementById('global-correct-input').value = appData.globalStructure.correct || "";
@@ -688,11 +688,31 @@
         }
     }
 
+    // UPDATED: Factory Reset wipes ALL storage and reloads (Going back to Default Demo)
     window.nuclearReset = function() {
-        if(confirm("Confirm Factory Reset? ALL DATA WILL BE DELETED.")) {
-            // Delete ALL local storage for this domain to be safe
+        if(confirm("Confirm Factory Reset? This will wipe all data and reload the default demo.")) {
             localStorage.clear();
             location.reload();
+        }
+    };
+
+    // NEW: Clear to Blank (Does NOT reload, just empties the array)
+    window.clearToBlank = function() {
+        if(confirm("This will remove ALL quotes and leave an empty lesson. Are you sure?")) {
+            appData.items = [];
+            appData.textTitle = "Blank Lesson";
+            appData.question = "Enter your question...";
+            
+            // Clear progress
+            state.completed = [];
+            state.score = 0;
+            localStorage.removeItem('tsa_student_completed');
+            localStorage.removeItem('tsa_student_score');
+            
+            saveLocal();
+            resetToGrid();
+            updateUI();
+            alert("Lesson cleared. You can now paste your new JSON.");
         }
     };
     
@@ -742,6 +762,11 @@
         grid.innerHTML = '';
         structContainer.innerHTML = '';
         
+        if (!appData.items || appData.items.length === 0) {
+            grid.innerHTML = `<div style="text-align:center; padding:20px; color:#888;">No quotes loaded. Use Settings to load data.</div>`;
+            return;
+        }
+
         let count = 0;
         appData.items.forEach((item, i) => {
             if(state.completed.includes(i)) return; 
@@ -754,7 +779,6 @@
             grid.appendChild(div);
         });
 
-        // Structure Card at BOTTOM (Separate Container)
         if(appData.globalStructure && appData.globalStructure.enabled !== false) {
             const stCard = document.createElement('div');
             stCard.className = 'card card-global';
@@ -778,7 +802,6 @@
         const correct = appData.globalStructure.correct || "Correct Answer";
         let distractors = appData.globalStructure.distractors || ["Distractor 1", "Distractor 2"];
         
-        // Shuffle Options
         let opts = [{txt: correct, correct: true}, ...distractors.map(d => ({txt:d, correct:false}))];
         shuffleArray(opts);
 
@@ -797,7 +820,6 @@
         if(isCorrect) {
             showFeedback(true);
             state.score += 20;
-            // Add to essay
             sentenceSlots.analysis = text;
             rebuildSentence(); 
             switchHub('writing'); 
@@ -881,19 +903,12 @@
     function loadFinalAnalysis(lens) {
         state.currentLens = lens; 
         const item = appData.items[state.currentIdx];
-        
         const lvlKey = `level${state.level}`;
         const lvlData = item[lvlKey] && item[lvlKey][lens] ? item[lvlKey][lens] : null;
         
         const prompt = lvlData ? lvlData.prompt : "Analyze this technique:";
         const correct = lvlData ? lvlData.correct : "Effect created.";
-        
-        let distractors = [];
-        if (lvlData && Array.isArray(lvlData.distractors) && lvlData.distractors.length > 0) {
-            distractors = lvlData.distractors;
-        } else {
-            distractors = ["Alternative interpretation", "Unrelated effect"];
-        }
+        let distractors = lvlData && lvlData.distractors ? lvlData.distractors : ["Alternative interpretation", "Unrelated effect"];
 
         const lab = document.getElementById('lab-content');
         lab.innerHTML = `<div class="instruction">${prompt}</div><div class="grid" id="grid-analysis"></div><button class="btn btn-warning" onclick="loadLensChoice()" style="margin-top:10px;">⬅ Back</button>`;
@@ -955,7 +970,6 @@
         currentConfig.forEach(type => {
             if (['quote', 'analysis', 'none'].includes(type)) return;
             
-            // MANUAL ENTRY RENDER
             if (type === 'manual') {
                 const div = document.createElement('div');
                 div.className = 'bank-row';
@@ -968,7 +982,6 @@
             }
             
             let options = [];
-            
             if(type === 'link') {
                 if(state.level === 1) {
                     options = appData['simpleLinks']; 
@@ -1016,7 +1029,7 @@
     };
 
     window.manualEdit = function() {
-        // Allows manual typing in stage, does not update slots but updates displayed text
+        // Allows manual typing in stage
     }
 
     function rebuildSentence() {
@@ -1024,61 +1037,48 @@
         let parts = [];
         currentConfig.forEach(type => { 
             let val = sentenceSlots[type];
-            
-            // Handle Manual Input Visuals
             if(type === 'manual') {
                 if(val) parts.push(val);
                 else parts.push(`<span class="placeholder-text">[Type Here...]</span>`);
                 return;
             }
-
             if(val) {
                 if(type === 'link') val = val.replace(/\s+that\s*$/i, "");
                 val = val.replace(/\s*\((Tone|Structure|Lang|Language)\)/gi, '').trim();
                 parts.push(val);
             }
         });
-        
         let str = parts.join(" ");
-        // Auto-Capitalize
         if(str && !str.startsWith('<span')) { 
             str = str.charAt(0).toUpperCase() + str.slice(1); 
             if(!str.endsWith('.') && !str.endsWith(']')) str += "."; 
         }
-        
         document.getElementById('sentence-stage').innerHTML = str || "Start picking words in the Lab...";
     }
 
     function commitSentence() {
         const stage = document.getElementById('sentence-stage');
         const text = stage.innerText.trim();
-        
         if (!text || text === "Start picking words in the Lab...") {
             alert("Please construct a sentence first.");
             return;
         }
-        
         const area = document.getElementById('answer-area');
         area.value += (area.value ? "\n\n" : "") + text;
-        
         if(state.currentIdx !== -1 && !state.completed.includes(state.currentIdx)) {
             state.completed.push(state.currentIdx);
         }
         localStorage.setItem('tsa_student_completed', JSON.stringify(state.completed)); 
         autoSaveProgress();
-        
         sentenceSlots = { starter:"", point:"", method:"", quote:"", analysis:"", marker:"", link:"", manual:"" };
         document.getElementById('quote-reference').style.display = 'none';
         rebuildSentence();
-        
         stage.classList.add('flash');
         setTimeout(() => stage.classList.remove('flash'), 500);
-        
         const total = appData.items.length;
         if(state.completed.length === total) {
             triggerCelebration();
         }
-        
         renderBuilderDropdowns();
         resetToGrid(); 
         switchHub('lab');
@@ -1093,46 +1093,7 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
     }
 
-    // ADMIN FUNCTIONS
-    window.generateAndShowPrompt = function() { 
-        const c = document.getElementById('ai-quote-count').value; 
-        const t = document.getElementById('ai-source-text').value; 
-        const q = document.getElementById('ai-question-input').value; 
-        const a = document.getElementById('ai-author-name').value; 
-        
-        document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.
-SOURCE: "${t}"
-Q: "${q}"
-AUTHOR: "${a}"
-
-CRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.
-CRITICAL: You MUST include a "globalStructure" object with question, correct, and distractors.
-
-REQUIRED JSON FORMAT:
-{ 
-  "textTitle": "Title", 
-  "question": "${q}", 
-  "globalStructure": { "enabled": true, "question": "Question about whole text flow?", "correct": "Correct Answer", "distractors": ["Wrong 1", "Wrong 2"] }, 
-  "items": [ 
-    { 
-      "id":"q1", 
-      "type":"language", 
-      "original":"quote", 
-      "translation":"meaning", 
-      "distractors":["wrong1","wrong2"], 
-      "level1":{ 
-        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
-        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
-        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
-      }, 
-      "level2":{ ...same structure }, 
-      "level3":{ ...same structure } 
-    } 
-  ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) 
-}`; 
-        document.getElementById('prompt-display-container').style.display='block'; 
-    };
-    
+    // UPDATED: Replace Mode now strictly clears old items
     window.loadDataFromText = function() { 
         let text = document.getElementById('ai-paste-area').value;
         text = text.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -1141,17 +1102,19 @@ REQUIRED JSON FORMAT:
             const mode = document.getElementById('ai-bank-mode').value;
             
             if (mode === 'replace') {
-                // FORCE RESET DATA
+                // Wipe Completed Data
                 localStorage.removeItem('tsa_student_completed');
                 localStorage.removeItem('tsa_student_essay');
                 localStorage.removeItem('tsa_student_score');
                 state.completed = [];
                 state.score = 0;
                 
-                // Clear existing items before loading new ones
-                appData = JSON.parse(JSON.stringify(defaultData)); 
-                appData.items = []; // Ensure empty before adding
-                appData = validateAndRepair({...appData, ...json});
+                // Pure Replacement: Do not merge with existing items
+                // We create a clean object structure, then validate it
+                let freshData = JSON.parse(JSON.stringify(defaultData));
+                freshData.items = []; // Force empty
+                
+                appData = validateAndRepair({...freshData, ...json});
             } else if (mode === 'append_quotes') {
                 if (json.items) appData.items = appData.items.concat(json.items);
                 if (json.textTitle) appData.textTitle = json.textTitle;
@@ -1195,9 +1158,9 @@ REQUIRED JSON FORMAT:
                     localStorage.removeItem('tsa_student_score');
                     state.completed = [];
                     state.score = 0;
-                    appData = JSON.parse(JSON.stringify(defaultData));
-                    appData.items = []; 
-                    appData = validateAndRepair({...appData, ...json});
+                    let freshData = JSON.parse(JSON.stringify(defaultData));
+                    freshData.items = [];
+                    appData = validateAndRepair({...freshData, ...json});
                 } else if (mode === 'append_quotes') {
                     if (json.items) appData.items = appData.items.concat(json.items);
                     if (json.textTitle) appData.textTitle = json.textTitle;
@@ -1218,7 +1181,7 @@ REQUIRED JSON FORMAT:
         reader.readAsText(file);
     };
     
-    window.saveLocal = function() { localStorage.setItem('tsa_v185_manual', JSON.stringify(appData)); };
+    window.saveLocal = function() { localStorage.setItem('tsa_v186_pure', JSON.stringify(appData)); };
     window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
     window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
 
@@ -1259,6 +1222,7 @@ REQUIRED JSON FORMAT:
             const l2 = item.level2?.[item.type] || {};
             const l3 = item.level3?.[item.type] || {};
             const distractors = item.distractors ? item.distractors.join(", ") : "";
+            
             const d1 = l1.distractors ? l1.distractors.join(", ") : "";
             const d2 = l2.distractors ? l2.distractors.join(", ") : "";
             const d3 = l3.distractors ? l3.distractors.join(", ") : "";
@@ -1360,7 +1324,6 @@ REQUIRED JSON FORMAT:
 
         html += `<h3>Part 2: Deep Analysis</h3>`;
         
-        // Use current level config to determine blanks
         const currentConfig = appData.sentenceConfigs[adminConfigLevel];
         const manualSlots = currentConfig.filter(s => s === 'manual').length > 0;
 
