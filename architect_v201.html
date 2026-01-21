@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v200 (Bulletproof)</title>
+    <title>Tone & Structure Architect v201 (Level Logic Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -209,6 +209,7 @@
         
         .level-assign-row {
             display:flex; gap:10px; align-items:center; background:#e8eaf6; padding:5px; border-radius:4px; margin-bottom:5px;
+            border: 1px solid #c5cae9;
         }
 
         /* THEME PICKER */
@@ -248,7 +249,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v200
+            <i class="fas fa-cubes"></i> Tone & Structure v201
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -579,8 +580,8 @@
                 return;
             }
             
-            // CLEAN SLATE KEY - Version 200 (Bulletproof)
-            let local = localStorage.getItem('tsa_v200_bulletproof');
+            // CLEAN SLATE KEY - Version 201
+            let local = localStorage.getItem('tsa_v201_levels_fixed');
             
             if(!local) {
                 appData = JSON.parse(JSON.stringify(defaultData));
@@ -631,30 +632,6 @@
         document.getElementById('source-modal').style.display = 'flex';
     }
 
-    window.openAdmin = function() { 
-        try {
-            document.getElementById('admin-modal').style.display='flex'; 
-            initAdminConfig(); 
-            renderItems();
-        } catch(e) {
-            console.error("Admin Render Error:", e);
-            appData = validateAndRepair(appData);
-            saveLocal(); 
-            try {
-                initAdminConfig();
-                renderItems();
-            } catch(e2) {
-                alert("Critical error in Settings. Data has been reset to defaults.");
-                appData = JSON.parse(JSON.stringify(defaultData));
-                saveLocal();
-                initAdminConfig();
-                renderItems();
-            }
-        }
-    };
-    
-    window.closeAdmin = function() { document.getElementById('admin-modal').style.display='none'; };
-
     // THEME LOGIC
     function initTheme() {
         ['--bg', '--card', '--text'].forEach(v => {
@@ -684,10 +661,6 @@
     function validateAndRepair(data) {
         if (!data) return JSON.parse(JSON.stringify(defaultData));
         
-        if (!data.sentenceConfigs || !data.sentenceConfigs[1]) {
-            data.sentenceConfigs = JSON.parse(JSON.stringify(defaultData.sentenceConfigs));
-        }
-
         if (!data.sourceText) data.sourceText = defaultData.sourceText;
 
         if (typeof data.globalStructure === 'string') {
@@ -704,12 +677,14 @@
             if (!Array.isArray(data[key])) data[key] = defaultData[key] || [];
             if (data[key].length === 0) data[key] = ["(No items available)"]; 
         });
-        
+        if (!data.sentenceConfigs || !data.sentenceConfigs[1]) data.sentenceConfigs = defaultData.sentenceConfigs;
         if(data.items) {
             data.items.forEach(item => {
                 if(item.enableTone === undefined) item.enableTone = true;
                 if(item.enableStructure === undefined) item.enableStructure = true;
                 if(item.enableLanguage === undefined) item.enableLanguage = true;
+                
+                // CRITICAL FIX: Ensure levels exist
                 if(!item.levels || !Array.isArray(item.levels)) item.levels = [1, 2, 3];
 
                 ['tone', 'structure', 'language'].forEach(lens => {
@@ -1236,81 +1211,188 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
     }
 
-    // UPDATED: Safe AI Generation with strict try/catch and logging
-    window.generateAndShowPrompt = function() { 
-        console.log("Generate Prompt Clicked");
+    window.openAdmin = function() { 
         try {
-            if (!appData) {
-                console.error("appData is undefined");
-                alert("Critical Error: App Data not loaded. Please reset the app.");
-                return;
-            }
-
-            const c = document.getElementById('ai-quote-count').value; 
-            const t = document.getElementById('ai-source-text').value; 
-            const q = document.getElementById('ai-question-input').value; 
-            const a = document.getElementById('ai-author-name').value; 
-            
-            // SAVE SOURCE TEXT TO DATA
-            appData.sourceText = t;
-            saveLocal();
-
-            // SAFE STRINGIFY
-            const safeSource = JSON.stringify(t).slice(1, -1);
-            const safeQ = JSON.stringify(q).slice(1, -1);
-            const safeA = JSON.stringify(a).slice(1, -1);
-
-            const btn = document.getElementById('ai-gen-btn');
-            if (btn) {
-                btn.innerText = "⏳ Generating...";
-                setTimeout(() => { btn.innerText = "1. Generate AI Prompt"; }, 1500);
-            }
-
-            let prompt = `Act as expert English teacher. Create JSON lesson.
-SOURCE: "${safeSource}"
-Q: "${safeQ}"
-AUTHOR: "${safeA}"
-
-CRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.
-CRITICAL: You MUST include a "globalStructure" object with question, correct, and distractors.
-
-REQUIRED JSON FORMAT:
-{ 
-  "textTitle": "Title", 
-  "question": "${safeQ}", 
-  "sourceText": "${safeSource}", 
-  "globalStructure": { "enabled": true, "question": "Question about whole text flow?", "correct": "Correct Answer", "distractors": ["Wrong 1", "Wrong 2"] }, 
-  "items": [ 
-    { 
-      "id":"q1", 
-      "type":"language", 
-      "original":"quote", 
-      "translation":"meaning", 
-      "distractors":["wrong1","wrong2"], 
-      "levels": [1, 2, 3],
-      "level1":{ 
-        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
-        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
-        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
-      }, 
-      "level2":{ ...same structure }, 
-      "level3":{ ...same structure } 
-    } 
-  ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) 
-}`; 
-            
-            const promptArea = document.getElementById('ai-generated-prompt');
-            if (promptArea) {
-                promptArea.value = prompt;
-                document.getElementById('prompt-display-container').style.display='block';
-            } else {
-                alert("Error: Prompt text area not found.");
-            }
-
+            document.getElementById('admin-modal').style.display='flex'; 
+            initAdminConfig(); 
+            renderItems();
         } catch(e) {
-            console.error(e);
-            alert("Error generating prompt: " + e.message);
+            console.error("Admin Render Error:", e);
+            alert("Error opening settings. Attempting repair...");
+            appData = validateAndRepair(appData);
+            renderItems();
         }
+    };
+    
+    window.closeAdmin = function() { document.getElementById('admin-modal').style.display='none'; };
+
+    // THIS FUNCTION WAS CAUSING THE BLANK BOX GLITCH - FIXED IN V199+
+    window.switchAdminConfigLevel = function(l) { 
+        adminConfigLevel = l; 
+        document.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('active')); 
+        document.getElementById(`cfg-tab-${l}`).classList.add('active'); 
+        initAdminConfig(); 
+    };
+
+    window.initAdminConfig = function() { 
+        if(!appData.sentenceConfigs || !appData.sentenceConfigs[adminConfigLevel]) {
+            appData.sentenceConfigs = defaultData.sentenceConfigs;
+        }
+        
+        // HARDCODED OPTIONS to prevent blank dropdowns
+        const o=['marker','starter','point','method','quote','analysis','link','manual_starter','manual_point','manual_method','manual_analysis','manual_link','manual_general','none']; 
+        
+        const c=appData.sentenceConfigs[adminConfigLevel]; 
+        
+        for(let i=0;i<6;i++){ 
+            const s=document.getElementById(`cfg-slot${i+1}`); 
+            s.innerHTML=''; 
+            o.forEach(opt => {
+                const op = new Option(opt, opt);
+                if(c[i] === opt) op.selected = true;
+                s.add(op);
+            });
+            s.value = c[i] || 'none';
+        } 
+    };
+
+    window.updateLevelAssignment = function(idx, level, isChecked) {
+        const item = appData.items[idx];
+        if(isChecked) {
+            if(!item.levels.includes(level)) item.levels.push(level);
+        } else {
+            item.levels = item.levels.filter(l => l !== level);
+        }
+        saveLocal();
+    };
+
+    window.renderItems = function() { 
+        const c=document.getElementById('items-container'); 
+        c.innerHTML=''; 
+        if(!appData.items) return;
+        
+        appData.items.forEach((item,i)=>{ 
+            // Fallback for missing levels array
+            const levels = Array.isArray(item.levels) ? item.levels : [1,2,3];
+
+            const l1 = item.level1?.[item.type] || {};
+            const l2 = item.level2?.[item.type] || {};
+            const l3 = item.level3?.[item.type] || {};
+            const distractors = item.distractors ? item.distractors.join(", ") : "";
+            const d1 = l1.distractors ? l1.distractors.join(", ") : "";
+            const d2 = l2.distractors ? l2.distractors.join(", ") : "";
+            const d3 = l3.distractors ? l3.distractors.join(", ") : "";
+            
+            c.innerHTML+=`
+            <div class="item-editor-card">
+                <div class="item-header-row">
+                    <strong>#${i+1}</strong>
+                    <select onchange="updateItem(${i},'type',this.value)">
+                        <option value="tone" ${item.type==='tone'?'selected':''}>Tone</option>
+                        <option value="structure" ${item.type==='structure'?'selected':''}>Structure</option>
+                        <option value="language" ${item.type==='language'?'selected':''}>Language</option>
+                    </select>
+                    <div>
+                        <label title="Include in Worksheet"><input type="checkbox" ${item.includeInWS?'checked':''} onchange="updateItemBool(${i},'includeInWS',this.checked)"> WS</label>
+                    </div>
+                </div>
+                
+                <div class="level-assign-row">
+                    <strong>Assign Levels:</strong>
+                    <label><input type="checkbox" ${levels.includes(1)?'checked':''} onchange="updateLevelAssignment(${i}, 1, this.checked)"> L1</label>
+                    <label><input type="checkbox" ${levels.includes(2)?'checked':''} onchange="updateLevelAssignment(${i}, 2, this.checked)"> L2</label>
+                    <label><input type="checkbox" ${levels.includes(3)?'checked':''} onchange="updateLevelAssignment(${i}, 3, this.checked)"> L3</label>
+                </div>
+
+                <div class="lens-toggles">
+                    <strong>Enable Lenses:</strong>
+                    <label><input type="checkbox" ${item.enableTone !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableTone',this.checked)"> Tone</label>
+                    <label><input type="checkbox" ${item.enableStructure !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableStructure',this.checked)"> Structure</label>
+                    <label><input type="checkbox" ${item.enableLanguage !== false ? 'checked' : ''} onchange="updateItemBool(${i},'enableLanguage',this.checked)"> Language</label>
+                </div>
+
+                <div class="input-group"><label>Quote:</label><input class="admin-input" value="${escapeHtml(item.original)}" onchange="updateItem(${i},'original',this.value)"></div>
+                <div class="input-group"><label>Translation:</label><input class="admin-input" value="${escapeHtml(item.translation)}" onchange="updateItem(${i},'translation',this.value)"></div>
+                <div class="input-group"><label>Match Distractors (CSV):</label><input class="admin-input" value="${escapeHtml(distractors)}" onchange="updateDistractors(${i},'base',this.value)"></div>
+                
+                <div class="level-block level-1">
+                    <span class="level-label">Level 1 (Identify)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l1.prompt||'')}" onchange="updateDeep(${i},'level1','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l1.correct||'')}" onchange="updateDeep(${i},'level1','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d1)}" onchange="updateDistractors(${i},'level1',this.value)"></div>
+                </div>
+                
+                <div class="level-block level-2">
+                    <span class="level-label">Level 2 (Analyze)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l2.prompt||'')}" onchange="updateDeep(${i},'level2','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l2.correct||'')}" onchange="updateDeep(${i},'level2','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d2)}" onchange="updateDistractors(${i},'level2',this.value)"></div>
+                </div>
+                
+                <div class="level-block level-3">
+                    <span class="level-label">Level 3 (Evaluate Effect)</span>
+                    <div class="input-group"><label>Question:</label><input class="admin-input" value="${escapeHtml(l3.prompt||'')}" onchange="updateDeep(${i},'level3','${item.type}','prompt',this.value)"></div>
+                    <div class="input-group"><label>Correct Answer:</label><input class="admin-input" value="${escapeHtml(l3.correct||'')}" onchange="updateDeep(${i},'level3','${item.type}','correct',this.value)"></div>
+                    <div class="input-group"><label>Wrong Answers (CSV):</label><input class="admin-input" value="${escapeHtml(d3)}" onchange="updateDistractors(${i},'level3',this.value)"></div>
+                </div>
+                
+                <button class="btn btn-warning" style="margin-top:10px;" onclick="delItem(${i})">Delete Item</button>
+            </div>`; 
+        }); 
+    };
+
+    window.renderBankList = function() { const l=document.getElementById('bank-list'); l.innerHTML=''; (appData[currentEditingBank]||[]).forEach((item,i)=>{ l.innerHTML+=`<div><input class="admin-input" value="${item}" onchange="updateBankItem(${i},this.value)"> <button onclick="delBankItem(${i})" class="btn-edit-item" style="background:red;">X</button></div>`; }); };
+
+    // UPDATED: Safe AI Generation
+    window.generateAndShowPrompt = function() { 
+        const c = document.getElementById('ai-quote-count').value; 
+        const t = document.getElementById('ai-source-text').value; 
+        const q = document.getElementById('ai-question-input').value; 
+        const a = document.getElementById('ai-author-name').value; 
+        
+        // SAVE SOURCE TEXT TO DATA
+        appData.sourceText = t;
+        saveLocal();
+
+        // Safe String Concatenation instead of Template Literal
+        let prompt = "Act as expert English teacher. Create JSON lesson.\n";
+        prompt += "SOURCE: \"" + t.replace(/"/g, '\\"') + "\"\n";
+        prompt += "Q: \"" + q.replace(/"/g, '\\"') + "\"\n";
+        prompt += "AUTHOR: \"" + a.replace(/"/g, '\\"') + "\"\n\n";
+
+        prompt += "CRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.\n";
+        prompt += "CRITICAL: You MUST include a \"globalStructure\" object with question, correct, and distractors.\n\n";
+        prompt += "REQUIRED JSON FORMAT:\n";
+        prompt += "{ \n";
+        prompt += "  \"textTitle\": \"Title\", \n";
+        prompt += "  \"question\": \"" + q.replace(/"/g, '\\"') + "\", \n";
+        prompt += "  \"sourceText\": \"" + t.replace(/"/g, '\\"').replace(/\n/g, '\\n') + "\", \n";
+        prompt += "  \"globalStructure\": { \"enabled\": true, \"question\": \"Question about whole text flow?\", \"correct\": \"Correct Answer\", \"distractors\": [\"Wrong 1\", \"Wrong 2\"] }, \n";
+        prompt += "  \"items\": [ \n";
+        prompt += "    { \n";
+        prompt += "      \"id\":\"q1\", \n";
+        prompt += "      \"type\":\"language\", \n";
+        prompt += "      \"original\":\"quote\", \n";
+        prompt += "      \"translation\":\"meaning\", \n";
+        prompt += "      \"distractors\":[\"wrong1\",\"wrong2\"], \n";
+        prompt += "      \"levels\": [1, 2, 3],\n";
+        prompt += "      \"level1\":{ \n";
+        prompt += "        \"tone\": { \"prompt\":\"Q\", \"correct\":\"Ans\", \"distractors\":[\"W1\",\"W2\"] },\n";
+        prompt += "        \"structure\": { \"prompt\":\"Q\", \"correct\":\"Ans\", \"distractors\":[\"W1\",\"W2\"] },\n";
+        prompt += "        \"language\": { \"prompt\":\"Q\", \"correct\":\"Ans\", \"distractors\":[\"W1\",\"W2\"] }\n";
+        prompt += "      }, \n";
+        prompt += "      \"level2\":{ ...same structure }, \n";
+        prompt += "      \"level3\":{ ...same structure } \n";
+        prompt += "    } \n";
+        prompt += "  ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) \n";
+        prompt += "}"; 
+
+        const btn = document.getElementById('ai-gen-btn');
+        btn.innerText = "⏳ Generating...";
+        setTimeout(() => { btn.innerText = "1. Generate AI Prompt"; }, 1500);
+
+        document.getElementById('ai-generated-prompt').value = prompt;
+        document.getElementById('prompt-display-container').style.display='block';
     };
     
     window.loadDataFromText = function() { 
@@ -1346,82 +1428,6 @@ REQUIRED JSON FORMAT:
             alert("Invalid JSON Error: " + e.message); 
         } 
     };
-    
-    window.updateGlobalDeep = function(key, val) {
-        if(!appData.globalStructure) appData.globalStructure = { enabled: true, question:"", correct:"", distractors:[] };
-        if(key === 'distractors') {
-            appData.globalStructure[key] = val.split(',').map(s => s.trim());
-        } else {
-            appData.globalStructure[key] = val;
-        }
-        saveLocal();
-    };
-
-    window.uploadJSON = function(input) {
-        const file = input.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const json = JSON.parse(e.target.result);
-                const mode = document.getElementById('ai-bank-mode').value;
-                
-                if (mode === 'replace') {
-                    localStorage.removeItem('tsa_student_completed');
-                    localStorage.removeItem('tsa_student_essay');
-                    localStorage.removeItem('tsa_student_score');
-                    state.completed = [];
-                    state.score = 0;
-                    let freshData = JSON.parse(JSON.stringify(defaultData));
-                    freshData.items = [];
-                    appData = validateAndRepair({...freshData, ...json});
-                } else if (mode === 'append_quotes') {
-                    if (json.items) appData.items = appData.items.concat(json.items);
-                    if (json.textTitle) appData.textTitle = json.textTitle;
-                } else if (mode === 'merge_banks') {
-                    ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
-                        if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
-                    });
-                    alert("Banks Merged Successfully!");
-                }
-                
-                sanitizeLinks();
-                saveLocal();
-                location.reload();
-            } catch(err) {
-                alert("Error reading file: " + err.message);
-            }
-        };
-        reader.readAsText(file);
-    };
-    
-    window.saveLocal = function() { localStorage.setItem('tsa_v200_bulletproof', JSON.stringify(appData)); };
-    window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
-    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
-
-    window.initAdminConfig = function() { 
-        if(!appData.sentenceConfigs || !appData.sentenceConfigs[adminConfigLevel]) {
-            appData.sentenceConfigs = defaultData.sentenceConfigs;
-        }
-        
-        // HARDCODED OPTIONS to prevent blank dropdowns
-        const o=['marker','starter','point','method','quote','analysis','link','manual_starter','manual_point','manual_method','manual_analysis','manual_link','manual_general','none']; 
-        
-        const c=appData.sentenceConfigs[adminConfigLevel]; 
-        
-        for(let i=0;i<6;i++){ 
-            const s=document.getElementById(`cfg-slot${i+1}`); 
-            s.innerHTML=''; 
-            o.forEach(opt => {
-                const op = new Option(opt, opt);
-                if(c[i] === opt) op.selected = true;
-                s.add(op);
-            });
-            s.value = c[i] || 'none';
-        } 
-    };
-
-    window.renderBankList = function() { const l=document.getElementById('bank-list'); l.innerHTML=''; (appData[currentEditingBank]||[]).forEach((item,i)=>{ l.innerHTML+=`<div><input class="admin-input" value="${item}" onchange="updateBankItem(${i},this.value)"> <button onclick="delBankItem(${i})" class="btn-edit-item" style="background:red;">X</button></div>`; }); };
 
     document.addEventListener("DOMContentLoaded", init);
 </script>
