@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v199 (Menu Fix)</title>
+    <title>Tone & Structure Architect v200 (Bulletproof)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -248,7 +248,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v199
+            <i class="fas fa-cubes"></i> Tone & Structure v200
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -579,8 +579,8 @@
                 return;
             }
             
-            // CLEAN SLATE KEY - Version 199
-            let local = localStorage.getItem('tsa_v199_fix');
+            // CLEAN SLATE KEY - Version 200 (Bulletproof)
+            let local = localStorage.getItem('tsa_v200_bulletproof');
             
             if(!local) {
                 appData = JSON.parse(JSON.stringify(defaultData));
@@ -638,10 +638,8 @@
             renderItems();
         } catch(e) {
             console.error("Admin Render Error:", e);
-            // SILENT AUTO REPAIR
             appData = validateAndRepair(appData);
-            saveLocal();
-            
+            saveLocal(); 
             try {
                 initAdminConfig();
                 renderItems();
@@ -686,7 +684,6 @@
     function validateAndRepair(data) {
         if (!data) return JSON.parse(JSON.stringify(defaultData));
         
-        // Ensure sentenceConfigs exists
         if (!data.sentenceConfigs || !data.sentenceConfigs[1]) {
             data.sentenceConfigs = JSON.parse(JSON.stringify(defaultData.sentenceConfigs));
         }
@@ -1239,7 +1236,169 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
     }
 
-    // THIS FUNCTION WAS CAUSING THE BLANK BOX GLITCH - FIXED IN V199
+    // UPDATED: Safe AI Generation with strict try/catch and logging
+    window.generateAndShowPrompt = function() { 
+        console.log("Generate Prompt Clicked");
+        try {
+            if (!appData) {
+                console.error("appData is undefined");
+                alert("Critical Error: App Data not loaded. Please reset the app.");
+                return;
+            }
+
+            const c = document.getElementById('ai-quote-count').value; 
+            const t = document.getElementById('ai-source-text').value; 
+            const q = document.getElementById('ai-question-input').value; 
+            const a = document.getElementById('ai-author-name').value; 
+            
+            // SAVE SOURCE TEXT TO DATA
+            appData.sourceText = t;
+            saveLocal();
+
+            // SAFE STRINGIFY
+            const safeSource = JSON.stringify(t).slice(1, -1);
+            const safeQ = JSON.stringify(q).slice(1, -1);
+            const safeA = JSON.stringify(a).slice(1, -1);
+
+            const btn = document.getElementById('ai-gen-btn');
+            if (btn) {
+                btn.innerText = "⏳ Generating...";
+                setTimeout(() => { btn.innerText = "1. Generate AI Prompt"; }, 1500);
+            }
+
+            let prompt = `Act as expert English teacher. Create JSON lesson.
+SOURCE: "${safeSource}"
+Q: "${safeQ}"
+AUTHOR: "${safeA}"
+
+CRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.
+CRITICAL: You MUST include a "globalStructure" object with question, correct, and distractors.
+
+REQUIRED JSON FORMAT:
+{ 
+  "textTitle": "Title", 
+  "question": "${safeQ}", 
+  "sourceText": "${safeSource}", 
+  "globalStructure": { "enabled": true, "question": "Question about whole text flow?", "correct": "Correct Answer", "distractors": ["Wrong 1", "Wrong 2"] }, 
+  "items": [ 
+    { 
+      "id":"q1", 
+      "type":"language", 
+      "original":"quote", 
+      "translation":"meaning", 
+      "distractors":["wrong1","wrong2"], 
+      "levels": [1, 2, 3],
+      "level1":{ 
+        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
+        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
+      }, 
+      "level2":{ ...same structure }, 
+      "level3":{ ...same structure } 
+    } 
+  ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) 
+}`; 
+            
+            const promptArea = document.getElementById('ai-generated-prompt');
+            if (promptArea) {
+                promptArea.value = prompt;
+                document.getElementById('prompt-display-container').style.display='block';
+            } else {
+                alert("Error: Prompt text area not found.");
+            }
+
+        } catch(e) {
+            console.error(e);
+            alert("Error generating prompt: " + e.message);
+        }
+    };
+    
+    window.loadDataFromText = function() { 
+        let text = document.getElementById('ai-paste-area').value;
+        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        try { 
+            const json = JSON.parse(text);
+            const mode = document.getElementById('ai-bank-mode').value;
+            
+            if (mode === 'replace') {
+                localStorage.removeItem('tsa_student_completed');
+                localStorage.removeItem('tsa_student_essay');
+                localStorage.removeItem('tsa_student_score');
+                state.completed = [];
+                state.score = 0;
+                let freshData = JSON.parse(JSON.stringify(defaultData));
+                freshData.items = []; 
+                appData = validateAndRepair({...freshData, ...json});
+            } else if (mode === 'append_quotes') {
+                if (json.items) appData.items = appData.items.concat(json.items);
+                if (json.textTitle) appData.textTitle = json.textTitle;
+            } else if (mode === 'merge_banks') {
+                ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
+                    if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
+                });
+                alert("Banks Merged Successfully!");
+            }
+
+            sanitizeLinks(); 
+            saveLocal(); 
+            location.reload(); 
+        } catch(e){ 
+            alert("Invalid JSON Error: " + e.message); 
+        } 
+    };
+    
+    window.updateGlobalDeep = function(key, val) {
+        if(!appData.globalStructure) appData.globalStructure = { enabled: true, question:"", correct:"", distractors:[] };
+        if(key === 'distractors') {
+            appData.globalStructure[key] = val.split(',').map(s => s.trim());
+        } else {
+            appData.globalStructure[key] = val;
+        }
+        saveLocal();
+    };
+
+    window.uploadJSON = function(input) {
+        const file = input.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                const mode = document.getElementById('ai-bank-mode').value;
+                
+                if (mode === 'replace') {
+                    localStorage.removeItem('tsa_student_completed');
+                    localStorage.removeItem('tsa_student_essay');
+                    localStorage.removeItem('tsa_student_score');
+                    state.completed = [];
+                    state.score = 0;
+                    let freshData = JSON.parse(JSON.stringify(defaultData));
+                    freshData.items = [];
+                    appData = validateAndRepair({...freshData, ...json});
+                } else if (mode === 'append_quotes') {
+                    if (json.items) appData.items = appData.items.concat(json.items);
+                    if (json.textTitle) appData.textTitle = json.textTitle;
+                } else if (mode === 'merge_banks') {
+                    ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
+                        if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
+                    });
+                    alert("Banks Merged Successfully!");
+                }
+                
+                sanitizeLinks();
+                saveLocal();
+                location.reload();
+            } catch(err) {
+                alert("Error reading file: " + err.message);
+            }
+        };
+        reader.readAsText(file);
+    };
+    
+    window.saveLocal = function() { localStorage.setItem('tsa_v200_bulletproof', JSON.stringify(appData)); };
+    window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
+    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
+
     window.initAdminConfig = function() { 
         if(!appData.sentenceConfigs || !appData.sentenceConfigs[adminConfigLevel]) {
             appData.sentenceConfigs = defaultData.sentenceConfigs;
@@ -1255,11 +1414,10 @@
             s.innerHTML=''; 
             o.forEach(opt => {
                 const op = new Option(opt, opt);
-                // Highlight current selection
                 if(c[i] === opt) op.selected = true;
                 s.add(op);
             });
-            s.value = c[i] || 'none'; // Safety fallback
+            s.value = c[i] || 'none';
         } 
     };
 
