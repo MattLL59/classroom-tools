@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tone & Structure Architect v196 (Stable Release)</title>
+    <title>Tone & Structure Architect v197 (Settings Repair Fix)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         /* --- CSS VARIABLES --- */
@@ -248,7 +248,7 @@
     <header>
         <h1>
             <button onclick="clearSession()" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; font-weight:bold; cursor:pointer; font-size:0.8rem; margin-right:5px;" title="New Session">✨</button>
-            <i class="fas fa-cubes"></i> Tone & Structure v196
+            <i class="fas fa-cubes"></i> Tone & Structure v197
             <span class="score-badge" id="score-display">0 XP</span>
         </h1>
         <div style="display:flex; gap:10px;">
@@ -579,8 +579,8 @@
                 return;
             }
             
-            // CLEAN SLATE KEY - Version 196
-            let local = localStorage.getItem('tsa_v196_clean');
+            // CLEAN SLATE KEY - Version 197
+            let local = localStorage.getItem('tsa_v197_repair');
             
             if(!local) {
                 appData = JSON.parse(JSON.stringify(defaultData));
@@ -638,12 +638,21 @@
             renderItems();
         } catch(e) {
             console.error("Admin Render Error:", e);
-            // AUTO REPAIR ON CRASH
-            appData.sentenceConfigs = JSON.parse(JSON.stringify(defaultData.sentenceConfigs));
-            saveLocal();
-            alert("Settings were corrupted. They have been reset to default.");
-            initAdminConfig();
-            renderItems();
+            // SILENT AUTO REPAIR
+            appData = validateAndRepair(appData);
+            saveLocal(); // <-- KEY FIX: Save the repair immediately
+            
+            // Try rendering again
+            try {
+                initAdminConfig();
+                renderItems();
+            } catch(e2) {
+                alert("Critical error in Settings. Data has been reset to defaults.");
+                appData = JSON.parse(JSON.stringify(defaultData));
+                saveLocal();
+                initAdminConfig();
+                renderItems();
+            }
         }
     };
     
@@ -1231,176 +1240,15 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Answer.doc'; a.click(); 
     }
 
-    // UPDATED: Safe AI Generation
-    window.generateAndShowPrompt = function() { 
-        const c = document.getElementById('ai-quote-count').value; 
-        const t = document.getElementById('ai-source-text').value; 
-        const q = document.getElementById('ai-question-input').value; 
-        const a = document.getElementById('ai-author-name').value; 
-        
-        // SAVE SOURCE TEXT TO DATA
-        appData.sourceText = t;
-        saveLocal();
-
-        const safeSource = JSON.stringify(t).slice(1, -1);
-
-        const btn = document.getElementById('ai-gen-btn');
-        btn.innerText = "⏳ Generating...";
-        setTimeout(() => { btn.innerText = "1. Generate AI Prompt"; }, 1500);
-        
-        try {
-            document.getElementById('ai-generated-prompt').value = `Act as expert English teacher. Create JSON lesson.
-SOURCE: "${safeSource}"
-Q: "${q}"
-AUTHOR: "${a}"
-
-CRITICAL: For each quote, you MUST attempt to fill inside 'level1', 'level2', and 'level3' for ALL THREE lenses (Tone, Structure, Language). Do not leave them empty.
-CRITICAL: You MUST include a "globalStructure" object with question, correct, and distractors.
-
-REQUIRED JSON FORMAT:
-{ 
-  "textTitle": "Title", 
-  "question": "${q}", 
-  "sourceText": "${safeSource}", 
-  "globalStructure": { "enabled": true, "question": "Question about whole text flow?", "correct": "Correct Answer", "distractors": ["Wrong 1", "Wrong 2"] }, 
-  "items": [ 
-    { 
-      "id":"q1", 
-      "type":"language", 
-      "original":"quote", 
-      "translation":"meaning", 
-      "distractors":["wrong1","wrong2"], 
-      "levels": [1, 2, 3],
-      "level1":{ 
-        "tone": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
-        "structure": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] },
-        "language": { "prompt":"Q", "correct":"Ans", "distractors":["W1","W2"] }
-      }, 
-      "level2":{ ...same structure }, 
-      "level3":{ ...same structure } 
-    } 
-  ]... (include markers, starters, methods, points, simpleLinks (no 'that'), complexLinks) 
-}`; 
-            document.getElementById('prompt-display-container').style.display='block';
-        } catch(e) {
-            alert("Error generating prompt. Check your source text for invalid characters.");
-        }
-    };
-    
-    window.loadDataFromText = function() { 
-        let text = document.getElementById('ai-paste-area').value;
-        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-        try { 
-            const json = JSON.parse(text);
-            const mode = document.getElementById('ai-bank-mode').value;
-            
-            if (mode === 'replace') {
-                localStorage.removeItem('tsa_student_completed');
-                localStorage.removeItem('tsa_student_essay');
-                localStorage.removeItem('tsa_student_score');
-                state.completed = [];
-                state.score = 0;
-                let freshData = JSON.parse(JSON.stringify(defaultData));
-                freshData.items = []; 
-                appData = validateAndRepair({...freshData, ...json});
-            } else if (mode === 'append_quotes') {
-                if (json.items) appData.items = appData.items.concat(json.items);
-                if (json.textTitle) appData.textTitle = json.textTitle;
-            } else if (mode === 'merge_banks') {
-                ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
-                    if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
-                });
-                alert("Banks Merged Successfully!");
-            }
-
-            sanitizeLinks(); 
-            saveLocal(); 
-            location.reload(); 
-        } catch(e){ 
-            alert("Invalid JSON Error: " + e.message); 
-        } 
-    };
-    
-    window.updateGlobalDeep = function(key, val) {
-        if(!appData.globalStructure) appData.globalStructure = { enabled: true, question:"", correct:"", distractors:[] };
-        if(key === 'distractors') {
-            appData.globalStructure[key] = val.split(',').map(s => s.trim());
+    window.updateLevelAssignment = function(idx, level, isChecked) {
+        const item = appData.items[idx];
+        if(isChecked) {
+            if(!item.levels.includes(level)) item.levels.push(level);
         } else {
-            appData.globalStructure[key] = val;
+            item.levels = item.levels.filter(l => l !== level);
         }
         saveLocal();
     };
-
-    window.uploadJSON = function(input) {
-        const file = input.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const json = JSON.parse(e.target.result);
-                const mode = document.getElementById('ai-bank-mode').value;
-                
-                if (mode === 'replace') {
-                    localStorage.removeItem('tsa_student_completed');
-                    localStorage.removeItem('tsa_student_essay');
-                    localStorage.removeItem('tsa_student_score');
-                    state.completed = [];
-                    state.score = 0;
-                    let freshData = JSON.parse(JSON.stringify(defaultData));
-                    freshData.items = [];
-                    appData = validateAndRepair({...freshData, ...json});
-                } else if (mode === 'append_quotes') {
-                    if (json.items) appData.items = appData.items.concat(json.items);
-                    if (json.textTitle) appData.textTitle = json.textTitle;
-                } else if (mode === 'merge_banks') {
-                    ['markers','starters','methods','points','simpleLinks','complexLinks'].forEach(key => {
-                        if(json[key]) appData[key] = [...new Set([...appData[key], ...json[key]])];
-                    });
-                    alert("Banks Merged Successfully!");
-                }
-                
-                sanitizeLinks();
-                saveLocal();
-                location.reload();
-            } catch(err) {
-                alert("Error reading file: " + err.message);
-            }
-        };
-        reader.readAsText(file);
-    };
-    
-    window.saveLocal = function() { localStorage.setItem('tsa_v196_clean', JSON.stringify(appData)); };
-    window.updateUI = function() { document.getElementById('student-title').innerText = appData.textTitle; document.getElementById('text-display').innerText = appData.textTitle; document.getElementById('q-display').innerText = appData.question; document.getElementById('score-display').innerText = state.score + " XP"; document.getElementById('edit-title').value = appData.textTitle; document.getElementById('edit-question').value = appData.question;}
-    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
-
-    window.openAdmin = function() { 
-        try {
-            document.getElementById('admin-modal').style.display='flex'; 
-            initAdminConfig(); 
-            renderItems();
-        } catch(e) {
-            console.error("Admin Render Error:", e);
-            alert("Error opening settings. Attempting repair...");
-            appData = validateAndRepair(appData);
-            renderItems();
-        }
-    };
-    
-    window.closeAdmin = function() { document.getElementById('admin-modal').style.display='none'; };
-    window.requestAdminAccess = function() { if(localStorage.getItem('tsa_auto_login')==='true') openAdmin(); else if(prompt("Password:")===appData.adminPassword) openAdmin(); };
-    window.toggleAutoLogin = function(c) { if(c) localStorage.setItem('tsa_auto_login','true'); else localStorage.removeItem('tsa_auto_login'); };
-    window.updateGlobal = function(k, v) { appData[k]=v; saveLocal(); updateUI(); };
-    window.downloadJSON = function() { const b = new Blob([JSON.stringify(appData)], {type: "text/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'data.json'; a.click(); };
-    window.downloadStudentApp = function() { const c = JSON.parse(JSON.stringify(appData)); delete c.adminPassword; let h = document.documentElement.outerHTML.replace(/const teacherConfig = null;/, `const teacherConfig = ${JSON.stringify(c)};`); const b = new Blob([h], {type:'text/html'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'student-lesson.html'; a.click(); };
-    window.editBank = function(t) { currentEditingBank=t; document.getElementById('bank-editor-area').style.display='block'; document.getElementById('bank-editor-title').innerText=t.toUpperCase(); renderBankList(); };
-    window.updateBankItem = function(i,v) { appData[currentEditingBank][i]=v; saveLocal(); renderBuilderDropdowns(); }; 
-    window.delBankItem = function(i) { appData[currentEditingBank].splice(i,1); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; 
-    window.addBankItem = function() { if(!appData[currentEditingBank]) appData[currentEditingBank]=[]; appData[currentEditingBank].push("New"); renderBankList(); saveLocal(); renderBuilderDropdowns(); }; 
-    
-    window.escapeHtml = function(text) {
-        if(!text) return "";
-        return text.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-    }
 
     window.renderItems = function() { 
         const c=document.getElementById('items-container'); 
@@ -1415,7 +1263,6 @@ REQUIRED JSON FORMAT:
             const l2 = item.level2?.[item.type] || {};
             const l3 = item.level3?.[item.type] || {};
             const distractors = item.distractors ? item.distractors.join(", ") : "";
-            
             const d1 = l1.distractors ? l1.distractors.join(", ") : "";
             const d2 = l2.distractors ? l2.distractors.join(", ") : "";
             const d3 = l3.distractors ? l3.distractors.join(", ") : "";
