@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Tone & Structure Architect v4.5 (Fanfare Edition)</title>
+<title>Tone & Structure Architect v4.6 (Student Lock)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
     :root {
@@ -378,81 +378,668 @@
     </div>
 
 <script>
-/** ARCHITECT v4.5 (Fanfare Edition) **/
+/** ARCHITECT v4.6 (Student Lock) **/
 
 /* --- DEFAULT DATA --- */
-/*__DEFAULT_DATA_START__*/
 const defaultData = {
-    meta: { title: "Demo Lesson", author: "System", version: "4.5" },
+    meta: { title: "Demo Lesson", author: "System", version: "4.6" },
     sourceText: "The sky was a bruised purple...",
     question: "How is language used?",
+    settings: { autoProgress: false },
+    globalStructure: {
+        enabled: true,
+        items: [
+            { id: "g1", question: "How does the text shift?", correct: "Outside to Inside", distractors: ["Inside to Outside", "No shift"] }
+        ]
+    },
+    banks: {
+        markers: ["Furthermore,", "However,"],
+        starters: ["The writer implies", "The text suggests"],
+        methods: ["Metaphor", "Simile"],
+        points: ["a sense of fear", "tension"],
+        links: { l1: ["This shows"], l2: ["This reinforces"], l3: ["This highlights"] }
+    },
+    sentenceConfig: {
+        1: ["starter", "quote", "link_l1", "manual_point"],
+        2: ["marker", "starter", "quote", "method", "link_l2", "manual_analysis"],
+        3: ["marker", "starter", "quote", "method", "manual_deep_analysis", "link_l3"]
+    },
+    items: [
         { id: "q1", original: "bruised purple", translation: "Dark color", translationDistractors: ["Bright"], type: "language", effect: "gloomy mood", effectDistractors: ["happy"], levels: [1,2,3], includeInWorksheet: true }
     ],
-    isStandalone: false // Default to false
+    isStandalone: false 
 };
-/*__DEFAULT_DATA_END__*/
 
 let appData = null;
 let userState = { score: 0, level: 1, essay: "", completed: [], completedLevels: [], filter: "all", showDone: false };
 let currentBankKey = null;
 let saveTimeout = null;
-const isStandaloneMode = () => !!(appData && appData.isStandalone);
 
 /* --- APP LOGIC --- */
 const app = {
     init: function() {
         window.onerror = function() { document.getElementById('emergency-reset').style.display = 'block'; };
 
-        // 1. Determine if we are in STANDALONE mode
+        // STANDALONE MODE CHECK
         if(typeof defaultData !== 'undefined' && defaultData.isStandalone) {
-        const standalone = typeof defaultData !== 'undefined' && defaultData.isStandalone;
-        if(standalone) {
-            // FORCE load defaultData (ignore any old local storage lesson data)
+            // FORCE load defaultData (ignore localStorage lesson data)
             appData = app.repair(defaultData);
-            // Hide admin button
+            
+            // Remove the Admin Button entirely
             const btn = document.getElementById('btn-admin');
-            if(btn) btn.style.display = 'none';
-            const adminModal = document.getElementById('modal-admin');
-            if(adminModal) adminModal.classList.add('hidden');
+            if(btn) btn.remove();
+
+            // Load UserState (progress) from LS, but reset essay/completed if it seems like a new session?
+            // For now, let's keep progress (score/essay) active so they can refresh without losing work.
+            const s = localStorage.getItem('tsa_v4_6_state');
+            if(s) {
+                try { userState = JSON.parse(s); } catch(e) { }
+            }
         } else {
-            // Normal mode: check local storage
-            const d = localStorage.getItem('tsa_v4_5_data');
+            // NORMAL TEACHER MODE
+            const d = localStorage.getItem('tsa_v4_6_data');
             if(d) {
+                try { appData = app.repair(JSON.parse(d)); } 
+                catch(e) { appData = app.repair(defaultData); }
+            } else if (typeof teacherConfig !== "undefined") {
+                appData = app.repair(teacherConfig);
+            } else {
+                appData = app.repair(defaultData);
+            }
+
+            const s = localStorage.getItem('tsa_v4_6_state');
+            if(s) {
+                try { userState = JSON.parse(s); } catch(e) { userState = { score: 0, level: 1, essay: "", completed: [], completedLevels: [], filter: "all", showDone: false }; }
+            }
+        }
+
+        try { ui.init(); } catch(e) { document.getElementById('emergency-reset').style.display = 'block'; }
+    },
+
+    repair: function(d) {
+        if(!d || typeof d !== 'object') return JSON.parse(JSON.stringify(defaultData));
+        if(!d.banks) d.banks = JSON.parse(JSON.stringify(defaultData.banks));
+        if(!d.banks.links) d.banks.links = JSON.parse(JSON.stringify(defaultData.banks.links));
+        if(!d.banks.points) d.banks.points = [];
+        if(!d.sentenceConfig) d.sentenceConfig = JSON.parse(JSON.stringify(defaultData.sentenceConfig));
+        if(!d.globalStructure) d.globalStructure = { enabled: true, items: [] };
+        if(d.globalStructure.question && !d.globalStructure.items) { 
+            d.globalStructure.items = [{ id:"g_old", question: d.globalStructure.question, correct: d.globalStructure.correct, distractors: d.globalStructure.distractors }];
+        }
+        if(!d.settings) d.settings = { autoProgress: false };
+        if(!Array.isArray(d.items)) d.items = [];
+        d.items.forEach(i => { if(i.includeInWorksheet === undefined) i.includeInWorksheet = true; });
+        return d;
+    },
+
+    save: function() {
+        // Only save Lesson Data if NOT standalone (don't overwrite teacher's potential work with student view)
+        if(!appData.isStandalone) {
+            localStorage.setItem('tsa_v4_6_data', JSON.stringify(appData));
+        }
+        // Always save user progress
+        localStorage.setItem('tsa_v4_6_state', JSON.stringify(userState));
+        document.getElementById('save-status').style.opacity = 1;
+        setTimeout(()=>document.getElementById('save-status').style.opacity=0, 800);
+        ui.renderLab();
+    },
+
+    updateEssay: function(text) {
+        userState.essay = text;
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => { app.save(); }, 1000);
+    },
+
+    resetSession: function() {
+        if(confirm("Reset progress?")) {
+            userState = { score: 0, level: 1, essay: "", completed: [], completedLevels: [], filter: "all", showDone: false };
+            app.save(); location.reload();
+        }
+    },
+
+    factoryReset: function() {
+        if(confirm("Delete ALL data?")) { localStorage.clear(); location.reload(); }
+    },
+
+    setLevel: function(l) {
+        userState.level = parseInt(l);
+        app.save();
+        document.getElementById("sentence-builder").innerHTML = '<div style="text-align:center; opacity:0.6; padding:20px;">Level Changed. Select quote.</div>';
+    },
+
+    setFilter: function(f) { userState.filter = f; ui.renderLab(); },
+    toggleDone: function() { userState.showDone = !userState.showDone; document.getElementById('btn-show-done').classList.toggle('active', userState.showDone); ui.renderLab(); },
+
+    selectQuote: function(id) {
+        const item = appData.items.find(i=>i.id===id);
+        if(item) ui.startWizard(item);
+    },
+
+    commitSentence: function() {
+        const txt = document.getElementById("preview-box").innerText.trim();
+        if(!txt) return alert("Empty sentence.");
+        
+        document.getElementById("essay-area").value += (document.getElementById("essay-area").value ? "\n\n" : "") + txt;
+        userState.essay = document.getElementById("essay-area").value;
+
+        if(ui.activeQuoteId && !userState.completed.includes(ui.activeQuoteId)) {
+            userState.completed.push(ui.activeQuoteId);
+        }
+        
+        app.save();
+        app.checkLevelCompletion();
+        ui.switchView('lab'); 
+        ui.renderLab(); 
+    },
+
+    checkLevelCompletion: function() {
+        const levelItems = appData.items.filter(i => i.levels.includes(userState.level));
+        if(levelItems.length === 0) return;
+
+        const allDone = levelItems.every(i => userState.completed.includes(i.id));
+
+        if(allDone) {
+            if(userState.level < 3 && appData.settings && appData.settings.autoProgress) {
+                ui.showCelebration(true);
+            } else if (userState.level === 3) {
+                ui.showCelebration(false, true); 
+            }
+        }
+    },
+
+    undo: function() {
+        let v = document.getElementById("essay-area").value;
+        let p = v.split("\n\n"); p.pop();
+        let newVal = p.join("\n\n");
+        document.getElementById("essay-area").value = newVal;
+        userState.essay = newVal;
+        app.save();
+    },
+
+    clearEssay: function() { 
+        if(confirm("Clear essay?")) { 
+            document.getElementById("essay-area").value = ""; 
+            userState.essay = "";
+            app.save(); 
+        } 
+    },
+    
+    exportDoc: function() {
+        const b = new Blob(['\ufeff'+document.getElementById("essay-area").value], {type:'application/msword'});
+        const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download="Essay.doc"; a.click();
+    },
+
+    playSound: function(type) {
+        if(window.AudioContext) {
+            const ctx = new window.AudioContext();
+            const now = ctx.currentTime;
+            
+            if (type === 'celebrate') {
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain); gain.connect(ctx.destination);
+                    osc.frequency.value = freq;
+                    osc.type = 'triangle';
+                    const start = now + (i * 0.15);
+                    const dur = i === 3 ? 0.8 : 0.1; 
+                    gain.gain.setValueAtTime(0.1, start);
+                    gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+                    osc.start(start);
+                    osc.stop(start + dur);
+                });
+            } else {
+                const osc = ctx.createOscillator();
+                const g = ctx.createGain();
+                osc.connect(g); g.connect(ctx.destination);
+                osc.frequency.value = 600;
+                g.gain.value = 0.1;
+                osc.start(); osc.stop(now + 0.1);
+            }
+        }
+    }
+};
+
+/* --- UI --- */
+const ui = {
+    activeQuoteId: null,
+
+    init: function() {
+        document.getElementById("lbl-title").innerText = appData.meta.title;
+        document.getElementById("source-content").innerText = appData.sourceText;
+        document.getElementById("score-display").innerText = userState.score + " XP";
+        document.getElementById("essay-area").value = userState.essay;
+        document.getElementById("level-selector").value = userState.level;
+        ui.loadTheme();
+        ui.switchView('lab'); // FORCE LAB VIEW ON LOAD
+        ui.renderLab();
+        if(!appData.isStandalone) admin.syncUI();
+    },
+
+    // THEME
+    setTheme: function(key, val) { document.documentElement.style.setProperty('--'+key, val); localStorage.setItem('tsa_theme_'+key, val); },
+    loadTheme: function() {
+        const bg = localStorage.getItem('tsa_theme_bg');
+        const text = localStorage.getItem('tsa_theme_text');
+        const card = localStorage.getItem('tsa_theme_card');
+        if(bg) document.documentElement.style.setProperty('--bg', bg);
+        if(text) document.documentElement.style.setProperty('--text', text);
+        if(card) document.documentElement.style.setProperty('--card', card);
+    },
+    resetTheme: function() { 
+        localStorage.removeItem('tsa_theme_bg'); 
+        localStorage.removeItem('tsa_theme_text'); 
+        localStorage.removeItem('tsa_theme_card'); 
+        location.reload(); 
+    },
+
+    renderLab: function() {
+        const g = document.getElementById("quote-grid"); g.innerHTML = "";
+        
+        const items = appData.items.filter(i => {
+            const isLevel = i.levels.includes(userState.level);
+            const isType = (userState.filter==="all" || i.type===userState.filter);
+            const isDone = userState.completed.includes(i.id);
+            if(isDone && !userState.showDone) return false;
+            return isLevel && isType;
+        });
+        
+        items.forEach(i => {
+            const div = document.createElement("div");
+            div.className = `card card-${i.type}`;
+            if(userState.completed.includes(i.id)) div.style.opacity = "0.5";
+            div.innerHTML = `<span class="quote-text">"${i.original}"</span><div class="card-meta"><span>${i.type}</span><span>${userState.completed.includes(i.id)?'✅':''}</span></div>`;
+            div.onclick = () => app.selectQuote(i.id);
+            g.appendChild(div);
+        });
+
+        const gs = document.getElementById("global-card-container");
+        if(appData.globalStructure.enabled && appData.globalStructure.items.length > 0) {
+            gs.innerHTML = "";
+            appData.globalStructure.items.forEach(q => {
+                const div = document.createElement("div");
+                div.className = "card card-global";
+                div.innerHTML = `<strong>🏗️ Structure</strong><br><small>${q.question}</small>`;
+                div.onclick = () => ui.runGlobal(q);
+                gs.appendChild(div);
+            });
+        } else { gs.innerHTML = ""; }
+        
+        document.querySelectorAll(".filter-btn").forEach(b => b.classList.toggle("active", b.dataset.filter === userState.filter));
+    },
+
+    switchView: function(v) {
+        document.querySelectorAll(".hub").forEach(e=>e.classList.remove("active"));
+        document.querySelectorAll(".nav-item").forEach(e=>e.classList.remove("active"));
         document.getElementById("view-"+v).classList.add("active");
         document.getElementById("nav-"+v).classList.add("active");
     },
 
     openModal: (id) => document.getElementById(id).classList.add("open"),
-    openModal: (id) => {
-        if(id === 'modal-admin' && isStandaloneMode()) return;
-        const modal = document.getElementById(id);
-        if(modal) modal.classList.add("open");
-    },
     closeModal: (id) => {
         document.getElementById(id).classList.remove("open");
-        const modal = document.getElementById(id);
-        if(!modal) return;
-        modal.classList.remove("open");
         if(id === 'modal-admin') {
             ui.renderLab();
             if(ui.activeQuoteId) {
                 const item = appData.items.find(i=>i.id===ui.activeQuoteId);
+                if(item) ui.runBuilder(item); 
+            }
         }
     },
     
     openAdmin: () => {
-        if(isStandaloneMode()) return;
         admin.renderAll(); 
         if(localStorage.getItem('tsa_unlocked')==='true') { ui.openModal("modal-admin"); }
         else if(prompt("Password (1234)")==="1234") { ui.openModal("modal-admin"); }
     },
+    openSourceText: () => ui.openModal("modal-source"),
+
+    startWizard: function(item) {
+        const opts = [item.translation, ...item.translationDistractors||[]].sort(()=>Math.random()-0.5);
+        ui.openModal("modal-wizard");
+        document.getElementById("wizard-title").innerText = "Phase 1: Meaning";
+        document.getElementById("wizard-prompt").innerHTML = `<p class="quote-text">"${item.original}"</p><p>What does this mean?</p>`;
+        const grid = document.getElementById("wizard-options"); grid.innerHTML = "";
+        opts.forEach(o => {
+            const b = document.createElement("button"); b.className = "btn btn-outline"; b.textContent = o;
+            b.onclick = () => {
+                if(o === item.translation) {
+                    b.style.background = "var(--success)"; b.style.color="white"; app.playSound('correct');
+                    setTimeout(() => {
+                        ui.closeModal("modal-wizard");
+                        ui.runBuilder(item);
+                    }, 500);
+                } else { b.classList.add('shake'); b.style.background = "var(--error)"; b.style.color="white"; }
+            };
+            grid.appendChild(b);
+        });
+    },
+
+    runBuilder: function(item) {
+        ui.activeQuoteId = item.id;
+        ui.switchView("desk");
+        const cont = document.getElementById("sentence-builder"); cont.innerHTML = "";
+        const cfg = appData.sentenceConfig[userState.level] || [];
+        
+        cfg.forEach(slot => {
+            const row = document.createElement("div"); row.className = "slot-row";
+            if(slot === "quote") {
+                row.innerHTML = `<span class="slot-label">EVIDENCE</span><div class="slot-static" data-v='"${item.original}"'>"${item.original}"</div>`;
+            } else if(slot.startsWith("manual")) {
+                row.innerHTML = `<span class="slot-label">${slot.split('_')[1].toUpperCase()} (Idea)</span><input class="slot-input" oninput="ui.updPrev()">`;
+            } else {
+                let key = slot.includes("link") ? (slot.split('_')[1]||'l1') : slot+"s";
+                if(slot==='point') key='points';
+                
+                let list = slot.includes("link") ? appData.banks.links[key] : appData.banks[key];
+                if(list) {
+                    row.innerHTML = `<span class="slot-label">${slot.toUpperCase()}</span><select class="slot-select" onchange="ui.updPrev()"><option value="">Select...</option>${list.map(o=>`<option>${o}</option>`).join('')}</select>`;
+                }
+            }
+            cont.appendChild(row);
+        });
+        ui.updPrev();
+        
+        if(!userState.completed.includes(item.id)) { 
+            userState.score+=10; document.getElementById("score-display").innerText = userState.score + " XP";
+        }
+    },
+
+    updPrev: function() {
+        let txt = [];
+        document.querySelectorAll("#sentence-builder select, #sentence-builder input, #sentence-builder .slot-static").forEach(el => {
+            let v = el.tagName==="DIV"? el.dataset.v : el.value;
+            if(v && v.trim()) txt.push(v);
+        });
+        document.getElementById("preview-box").innerText = txt.join(" ") + ".";
+    },
+
+    runGlobal: function(q) {
+        ui.openModal("modal-wizard");
+        document.getElementById("wizard-title").innerText = "Structure Analysis";
+        document.getElementById("wizard-prompt").innerHTML = `<p>${q.question}</p>`;
+        const opts = [q.correct, ...q.distractors].sort(()=>Math.random()-0.5);
+        const grid = document.getElementById("wizard-options"); grid.innerHTML = "";
+        opts.forEach(o => {
+            const b = document.createElement("button"); b.className = "btn btn-outline"; b.textContent = o;
+            b.onclick = () => {
+                if(o === q.correct) {
+                    b.style.background = "var(--success)"; b.style.color="white"; userState.score+=20; app.save(); ui.init(); app.playSound('correct');
+                    setTimeout(()=>ui.closeModal("modal-wizard"), 800);
+                } else { b.classList.add('shake'); b.style.background = "var(--error)"; b.style.color="white"; }
+            };
+            grid.appendChild(b);
+        });
+    },
+
+    showCelebration: function(autoAdvance, isFinal) {
+        const overlay = document.getElementById('celebration-overlay');
+        const title = document.getElementById('celebration-title');
+        const sub = document.getElementById('celebration-sub');
+        const btn = document.getElementById('celebration-btn');
+
+        overlay.classList.remove('hidden');
+        app.playSound('celebrate');
+
+        if (isFinal) {
+            title.innerText = "Course Complete! 🏆";
+            sub.innerText = "Well done! Check your answer and print, save or send to your teacher.";
+            btn.innerText = "Review Work";
+            btn.style.display = 'block';
+            btn.onclick = ui.closeCelebration;
+        } else {
+            title.innerText = `Level ${userState.level} Complete! 🎉`;
+            sub.innerText = "Great work! Moving up...";
+            if (autoAdvance) {
+                btn.style.display = 'none';
+                setTimeout(() => {
+                    ui.closeCelebration();
+                    app.setLevel(userState.level + 1);
+                }, 3000);
+            } else {
+                btn.innerText = "Continue";
+                btn.style.display = 'block';
+                btn.onclick = ui.closeCelebration;
+            }
+        }
+    },
+
+    closeCelebration: function() {
+        document.getElementById("celebration-overlay").classList.add("hidden");
+    }
+};
+
+/* --- ADMIN --- */
+const admin = {
+    renderAll: function() {
+        admin.syncUI();
+        admin.renderQuoteList();
+        admin.renderGlobalList();
+    },
+    syncUI: function() {
+        document.getElementById("keep-unlocked").checked = localStorage.getItem("tsa_unlocked") === "true";
+        document.getElementById("auto-progress").checked = appData.settings.autoProgress;
+        document.getElementById("gs-enabled").checked = appData.globalStructure.enabled;
+    },
+    setUnlocked: (c) => localStorage.setItem("tsa_unlocked", c),
+    setAutoProgress: (c) => { 
+        if(!appData.settings) appData.settings = {};
+        appData.settings.autoProgress = c; 
+        app.save(); 
+    },
+    toggleGlobal: (c) => { appData.globalStructure.enabled = c; app.save(); ui.renderLab(); },
+
+    // QUOTE LIST
+    renderQuoteList: function() {
+        const c = document.getElementById("quote-editor-list"); c.innerHTML = "";
+        appData.items.forEach((item, idx) => {
+            const div = document.createElement("div"); div.className = "quote-editor";
+            div.innerHTML = `
+                <div class="editor-header">#${idx+1} <button class="btn btn-danger btn-small" onclick="admin.delQuote(${idx})">Del</button></div>
+                <div class="input-group"><label>Quote</label><input value="${item.original}" onchange="admin.updQuote(${idx},'original',this.value)"></div>
+                <div class="input-group"><label>Translation</label><input value="${item.translation}" onchange="admin.updQuote(${idx},'translation',this.value)"></div>
+                <div class="level-checks">
+                    <label>Worksheet: <input type="checkbox" ${item.includeInWorksheet?'checked':''} onchange="admin.updQuote(${idx},'includeInWorksheet',this.checked)"></label>
+                    | Lvl: 
+                    <label>1<input type="checkbox" ${item.levels.includes(1)?'checked':''} onchange="admin.togLvl(${idx},1)"></label>
+                    <label>2<input type="checkbox" ${item.levels.includes(2)?'checked':''} onchange="admin.togLvl(${idx},2)"></label>
+                    <label>3<input type="checkbox" ${item.levels.includes(3)?'checked':''} onchange="admin.togLvl(${idx},3)"></label>
+                </div>
+            `;
+            c.appendChild(div);
+        });
+    },
+    updQuote: (idx, k, v) => { appData.items[idx][k] = v; app.save(); },
+    togLvl: (idx, l) => { 
+        const i = appData.items[idx]; 
+        if(i.levels.includes(l)) i.levels = i.levels.filter(x=>x!==l); else i.levels.push(l);
+        app.save();
+    },
+    delQuote: (idx) => { appData.items.splice(idx, 1); app.save(); admin.renderQuoteList(); },
+    addQuote: () => { 
+        appData.items.push({ id:"q"+Date.now(), original:"New Quote", translation:"Meaning", type:"tone", levels:[1,2,3], includeInWorksheet:true, translationDistractors:["Wrong"] }); 
+        app.save(); admin.renderQuoteList();
+    },
+
+    // GLOBAL STRUCTURE LIST
+    renderGlobalList: function() {
+        const c = document.getElementById("global-editor-list"); c.innerHTML = "";
+        appData.globalStructure.items.forEach((item, idx) => {
+            const div = document.createElement("div"); div.className = "struct-editor";
+            div.innerHTML = `
+                <div class="editor-header">Q${idx+1} <button class="btn btn-danger btn-small" onclick="admin.delGlobal(${idx})">Del</button></div>
+                <div class="input-group"><label>Question</label><input value="${item.question}" onchange="admin.updGlobal(${idx},'question',this.value)"></div>
+                <div class="input-group"><label>Correct</label><input value="${item.correct}" onchange="admin.updGlobal(${idx},'correct',this.value)"></div>
+                <div class="input-group"><label>Distractors (CSV)</label><input value="${(item.distractors||[]).join(',')}" onchange="admin.updGlobal(${idx},'distractors',this.value.split(','))"></div>
+            `;
+            c.appendChild(div);
+        });
+    },
+    updGlobal: (idx, k, v) => { appData.globalStructure.items[idx][k] = v; app.save(); },
+    delGlobal: (idx) => { appData.globalStructure.items.splice(idx, 1); app.save(); admin.renderGlobalList(); },
+    addGlobalQuestion: () => {
+        appData.globalStructure.items.push({ id:"g"+Date.now(), question:"New Question?", correct:"Answer", distractors:["Wrong"] });
+        app.save(); admin.renderGlobalList();
+    },
+
+    // AI
+    generatePrompt: () => {
+        const c = document.getElementById("ai-count").value;
+        const txt = document.getElementById("ai-input").value;
+        const q = document.getElementById("ai-question").value || "How does the writer use language?";
+        if(!txt) return alert("Paste text.");
+        
+        const pointCount = Math.max(5, parseInt(c));
+
+        document.getElementById("ai-prompt-out").value = `Role: Expert English Teacher. 
+Task: Create a JSON lesson for students.
+Source Text: "${txt.substring(0,800)}..."
+Focus Question: "${q}"
+
+Requirements:
+1. Create ${c} items. Each item object must have: { id, original (quote from text), translation (simple meaning), translationDistractors (2 wrong meanings), type (tone/structure/language), effect (analysis sentence), effectDistractors (2 wrong analysis sentences), levels:[1,2,3], includeInWorksheet:true }.
+2. Populate 'globalStructure': { enabled:true, items:[ {question, correct, distractors:[2]} ] } (Create 2 distinct questions about the whole text structure, relevant to the Focus Question).
+3. Populate 'banks': markers (5), starters (5), methods (5), points (${pointCount} analysis phrases relevant to Focus Question), links:{l1:[3 simple],l2:[3 medium],l3:[3 advanced]}.
+
+Output ONLY valid JSON.`;
+        document.getElementById("ai-step2").classList.remove("hidden");
+    },
+    loadJson: () => {
+        try {
+            let j = JSON.parse(document.getElementById("ai-json-in").value.replace(/```json|```/g, ''));
+            const mode = document.getElementById("ai-mode").value;
+            const safe = app.repair(j);
+            
+            if(mode === "replace") {
+                appData = safe;
+            } else if (mode === "append") {
+                appData.items = [...(appData.items||[]), ...(safe.items||[])];
+            }
+            
+            app.save(); location.reload();
+        } catch(e) { alert("Invalid JSON or corrupted file."); }
+    },
+
+    // BANK EDITOR
+    editBank: (key) => {
+        currentBankKey = key;
+        document.getElementById('bank-editor-ui').classList.remove('hidden');
+        document.getElementById('bank-name-display').innerText = "Editing: " + key.toUpperCase();
+        
+        let list = [];
+        if(key.includes('link')) {
+            const l = key.split('_')[1];
+            list = appData.banks.links[l] || [];
+        } else {
+            list = appData.banks[key] || [];
+        }
+
+        const cont = document.getElementById('bank-list-container');
+        cont.innerHTML = list.map((val, i) => 
+            `<span class="bank-tag">${val}<button onclick="admin.removeBankItem(${i})">x</button></span>`
+        ).join('');
+    },
+
+    addBankItem: () => {
+        const val = document.getElementById('bank-add-input').value;
+        if(!val || !currentBankKey) return;
+        
+        if(currentBankKey.includes('link')) {
+            const l = currentBankKey.split('_')[1];
+            if(!appData.banks.links[l]) appData.banks.links[l] = [];
+            appData.banks.links[l].push(val);
+        } else {
+            if(!appData.banks[currentBankKey]) appData.banks[currentBankKey] = [];
+            appData.banks[currentBankKey].push(val);
+        }
+        app.save();
+        admin.editBank(currentBankKey); 
+        document.getElementById('bank-add-input').value = '';
+    },
+
+    removeBankItem: (idx) => {
+        if(currentBankKey.includes('link')) {
+            const l = currentBankKey.split('_')[1];
+            appData.banks.links[l].splice(idx, 1);
+        } else {
+            appData.banks[currentBankKey].splice(idx, 1);
+        }
+        app.save();
+        admin.editBank(currentBankKey);
+    },
+
+    renderConfig: function(lvl) {
+        currentConfigLevel = lvl;
+        const cont = document.getElementById('config-slots'); cont.innerHTML = '';
+        const slots = appData.sentenceConfig[lvl];
+        const allOpts = ['marker', 'starter', 'quote', 'method', 'link_l1', 'link_l2', 'link_l3', 'point', 'manual_marker', 'manual_starter', 'manual_method', 'manual_point', 'manual_link', 'manual_analysis', 'manual_effect'];
+        
+        for(let i=0; i<6; i++) {
+            const sel = document.createElement('select');
+            sel.innerHTML = `<option value="none">None</option>` + allOpts.map(o => `<option value="${o}" ${slots[i]===o?'selected':''}>${o}</option>`).join('');
+            sel.onchange = () => {
+                const arr = Array.from(cont.querySelectorAll('select')).map(s=>s.value).filter(v=>v!=='none');
+                appData.sentenceConfig[lvl] = arr; app.save();
+            };
+            cont.appendChild(sel);
+        }
+    },
+
+    // EXPORTS
+    exportWorksheet: function() {
+        let content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head><meta charset='utf-8'><title>Worksheet</title>
+        <style>body{font-family:'Aptos', 'Calibri', sans-serif;} .box{border:1px solid #999; padding:10px; margin-bottom:15px;} .dotted{border-bottom:1px dotted #000; display:inline-block; width:95%; margin-top:5px;}</style>
+        </head><body>
+        <h1>${appData.meta.title}</h1>
+        <p>${appData.sourceText.replace(/\n/g, '<br>')}</p><hr>`;
+        
+        const structure = appData.sentenceConfig[2] || ["starter", "quote", "method", "manual_analysis"];
+
+        // Part A: Match
+        let meanings = appData.items.filter(i=>i.includeInWorksheet).map(i=>i.translation).sort(()=>Math.random()-0.5);
+        content += `<h3>Part A: Match Meanings</h3><p><em>Choices: ${meanings.join(' / ')}</em></p>`;
+        appData.items.forEach((item, idx) => {
+            if(!item.includeInWorksheet) return;
+            content += `<p>${idx+1}. "${item.original}" = __________________</p>`;
+        });
+
+        // Part B: Analysis
+        content += `<br><h3>Part B: Analysis</h3>`;
+        appData.items.forEach((item, idx) => {
+            if(!item.includeInWorksheet) return;
+            content += `<div class="box"><p><strong>${idx+1}. Quote: "${item.original}"</strong></p>`;
+            
+            structure.forEach(slot => {
+                let label = slot.toUpperCase();
+                let inner = "";
+                
+                if(slot === 'quote') return; 
+                else if(slot.startsWith('manual')) {
+                    inner = `<span class="dotted"></span>`;
+                    label = slot.split('_')[1].toUpperCase();
+                } else {
+                    let key = slot.includes('link') ? (slot.split('_')[1]||'l2') : slot+"s";
+                    if(slot==='point') key='points';
+                    let opts = (slot.includes('link')) ? appData.banks.links[key] : appData.banks[key];
+                    if(opts) inner = `<em>${opts.join(' / ')}</em><br><span class="dotted"></span>`;
+                }
+                content += `<p><strong>${label}:</strong> ${inner}</p>`;
+            });
+            content += `<br><p><strong>Sentence:</strong><br><span class="dotted"></span><br><span class="dotted"></span></p></div>`;
+        });
+        
+        content += `</body></html>`;
+        const b = new Blob(['\ufeff'+content], {type:'application/msword'});
+        const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download="Worksheet.doc"; a.click();
+    },
+
+    exportStandalone: () => {
         const exportData = JSON.parse(JSON.stringify(appData));
         exportData.isStandalone = true; 
 
         let h = document.documentElement.outerHTML;
         h = h.replace(/const defaultData = \{[\s\S]*?\}\};/, `const defaultData = ${JSON.stringify(exportData)};`);
-        const dataBlock = `/*__DEFAULT_DATA_START__*/\nconst defaultData = ${JSON.stringify(exportData)};\n/*__DEFAULT_DATA_END__*/`;
-        h = h.replace(/\/\*__DEFAULT_DATA_START__\*\/[\s\S]*?\/\*__DEFAULT_DATA_END__\*\//, dataBlock);
         const b = new Blob([h], {type:'text/html'});
         const a = document.createElement('a'); a.href=URL.createObjectURL(b); a.download='StudentApp.html'; a.click();
     },
