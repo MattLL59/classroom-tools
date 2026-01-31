@@ -52,7 +52,6 @@
     .preview-box { padding: 15px; background: var(--card); border: 2px dashed var(--accent); border-radius: 8px; font-size: 1.1rem; line-height: 1.5; min-height: 60px; margin-bottom: 15px; color: var(--text); }
     .hint-panel { background: rgba(255, 152, 0, 0.12); border: 1px solid var(--accent); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; margin-bottom: 10px; }
     .hint-panel.hidden { display: none; }
-    .floating-admin { position: fixed; right: 12px; bottom: 80px; z-index: 2605; border: 1px solid var(--border); background: var(--card); color: var(--text); padding: 8px 10px; border-radius: 999px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); cursor: pointer; }
     textarea.essay-area { width: 100%; height: 200px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; font-family: inherit; resize: vertical; margin-bottom: 10px; background: var(--card); color: var(--text); }
 
     /* --- 6. BUTTONS & UI --- */
@@ -118,6 +117,12 @@
     
     .theme-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: bold; }
     input[type="color"] { border: none; width: 40px; height: 40px; cursor: pointer; background: none; }
+    .reader-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+    .reader-label { font-size:0.85rem; display:flex; align-items:center; gap:6px; }
+    .reader-controls input[type="range"] { width:120px; }
+    .reader-body { position: relative; }
+    .reader-window { position: absolute; left: 10px; right: 10px; top: 72px; height: 3.2em; border: 2px solid rgba(0, 150, 136, 0.5); border-radius: 8px; background: rgba(0, 150, 136, 0.08); pointer-events: none; z-index: 2; }
+    .reader-window-line { position:absolute; left:0; right:0; top:50%; height:2px; background: rgba(0, 150, 136, 0.6); transform: translateY(-50%); }
 
     @media print { .no-print { display: none; } }
     
@@ -182,8 +187,6 @@
         <div class="pick-title">Pick a quote</div>
     </div>
 
-    <button id="floating-admin" class="floating-admin hidden" onclick="ui.openAdmin()">⚙️ Settings</button>
-
     <header class="no-print">
         <h1>
             <button class="icon-btn" onclick="app.resetSession()" style="color:red; border-color:red;" title="Reset Session">✨</button>
@@ -195,7 +198,7 @@
             <button class="icon-btn" onclick="ui.openModal('modal-help')">❓</button>
             <button class="icon-btn" onclick="ui.openModal('modal-theme')" title="Colors">🎨</button>
             <select id="level-selector" class="level-select" onchange="app.setLevel(this.value)"></select>
-            <button class="icon-btn" id="btn-admin" onclick="ui.openAdmin()">⚙️</button>
+            <button class="icon-btn" id="btn-admin" onclick="ui.openAdmin()">Data</button>
         </div>
     </header>
 
@@ -275,7 +278,19 @@
     <div id="modal-source" class="modal">
         <div class="modal-content">
             <div class="modal-header">Source Text <button class="icon-btn" onclick="ui.closeModal('modal-source')">✕</button></div>
-            <div class="modal-body"><div id="source-content" style="white-space:pre-wrap; line-height:1.6; font-size:1.1rem; font-family:'Georgia';"></div></div>
+            <div class="modal-body reader-body">
+                <div class="reader-controls">
+                    <button class="btn btn-outline btn-small" id="reader-toggle" onclick="ui.toggleReader()">Auto-Scroll</button>
+                    <label class="reader-label">Speed
+                        <input type="range" id="reader-speed" min="10" max="120" value="40">
+                    </label>
+                    <button class="btn btn-outline btn-small" onclick="ui.toggleHighlight()">Highlight</button>
+                    <button class="btn btn-outline btn-small" onclick="ui.copySourceText()">Copy Text</button>
+                    <button class="btn btn-outline btn-small" onclick="ui.resetReader()">Reset</button>
+                </div>
+                <div id="reader-window" class="reader-window hidden"><div class="reader-window-line"></div></div>
+                <div id="source-content" style="white-space:pre-wrap; line-height:1.6; font-size:1.1rem; font-family:'Georgia';"></div>
+            </div>
         </div>
     </div>
 
@@ -531,6 +546,7 @@
                     <label style="display:block; margin-bottom:5px;"><input type="checkbox" id="auto-progress" onchange="admin.setAutoProgress(this.checked)"> Auto-progress Levels</label>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="practice-mode" onchange="admin.setPracticeMode(this.checked)"> Practice Mode (lock selected level)</label>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="strict-mode" onchange="admin.setStrictMode(this.checked)"> Strict Mode (block incorrect choices)</label>
+                    <button class="btn btn-outline" onclick="admin.resetSelectionProgress()">Reset Selection Progress</button>
                     <div style="display:flex; gap:6px; align-items:center; font-size:0.85rem;">
                         <span>Practice Level:</span>
                         <select id="practice-level" onchange="admin.setPracticeLevel(this.value)" style="padding:4px;">
@@ -753,17 +769,26 @@ const app = {
             },
             items: items.map((it, idx) => {
                 const item = it && typeof it === "object" ? it : {};
-                const distractors = Array.isArray(item.distractors) ? item.distractors : [];
+                const rawDistractors = Array.isArray(item.distractors) ? item.distractors : [];
+                const reasons = Array.isArray(item.reasons)
+                    ? item.reasons.filter(v => typeof v === "string")
+                    : (typeof item.reason === "string" ? [item.reason] : []);
+                const distractors = rawDistractors.map((d, di) => {
+                    if(typeof d === "string") {
+                        return { id: `sd${idx+1}_${di+1}`, quote: d, reason: "" };
+                    }
+                    return {
+                        id: typeof d.id === "string" ? d.id : `sd${idx+1}_${di+1}`,
+                        quote: typeof d.quote === "string" ? d.quote : "",
+                        reason: typeof d.reason === "string" ? d.reason : ""
+                    };
+                });
                 return {
                     id: typeof item.id === "string" ? item.id : `s${idx+1}`,
                     quote: typeof item.quote === "string" ? item.quote : "",
                     correct: item.correct === true,
-                    reasons: Array.isArray(item.reasons) ? item.reasons.filter(v => typeof v === "string") : [],
-                    distractors: distractors.map((d, di) => ({
-                        id: typeof d.id === "string" ? d.id : `sd${idx+1}_${di+1}`,
-                        quote: typeof d.quote === "string" ? d.quote : "",
-                        reason: typeof d.reason === "string" ? d.reason : ""
-                    }))
+                    reasons,
+                    distractors
                 };
             }).filter(i => i.quote),
             modes: {
@@ -1280,6 +1305,7 @@ const app = {
 /* --- UI --- */
 const ui = {
     activeQuoteId: null,
+    _readerTimer: null,
 
     init: function() {
         const aiInputEl = document.getElementById("ai-input");
@@ -1348,13 +1374,10 @@ const ui = {
 
         const selectNav = document.getElementById("nav-select");
         if(selectNav) {
-            selectNav.classList.toggle("hidden", !appData.selection || !appData.selection.enabled || !appData.selection.items.length);
+            const hasSelection = appData.selection && appData.selection.enabled && appData.selection.items.length && !appData.isStandalone;
+            selectNav.classList.toggle("hidden", !hasSelection);
         }
-        const floating = document.getElementById("floating-admin");
-        if(floating) {
-            floating.classList.toggle("hidden", appData.isStandalone);
-        }
-        const selectionEnabled = appData.selection && appData.selection.enabled && appData.selection.items.length;
+        const selectionEnabled = appData.selection && appData.selection.enabled && appData.selection.items.length && !appData.isStandalone;
         if(selectionEnabled) {
             const key = app.getSelectionKey();
             if(key && userState.selectionKey !== key) {
@@ -1495,6 +1518,7 @@ const ui = {
     openModal: (id) => document.getElementById(id).classList.add("open"),
     closeModal: (id) => {
         document.getElementById(id).classList.remove("open");
+        if(id === 'modal-source') { ui.stopReader(); }
         if(id === 'modal-admin' && !appData.isStandalone) {
             ui._pauseSelectionGate = false;
             ui.renderLab();
@@ -1512,6 +1536,52 @@ const ui = {
         else if(prompt("Password (1234)")==="1234") { ui.openModal("modal-admin"); }
     },
     openSourceText: () => ui.openModal("modal-source"),
+    toggleReader: function() {
+        const body = document.querySelector("#modal-source .modal-body");
+        if(!body) return;
+        const btn = document.getElementById("reader-toggle");
+        if(ui._readerTimer) { ui.stopReader(); return; }
+        const speedEl = document.getElementById("reader-speed");
+        const speed = speedEl ? parseInt(speedEl.value, 10) : 40;
+        ui._readerTimer = setInterval(() => {
+            body.scrollTop += Math.max(1, speed / 10);
+            if(body.scrollTop + body.clientHeight >= body.scrollHeight - 2) {
+                ui.stopReader();
+            }
+        }, 100);
+        if(btn) btn.textContent = "Pause";
+    },
+    stopReader: function() {
+        if(ui._readerTimer) { clearInterval(ui._readerTimer); ui._readerTimer = null; }
+        const btn = document.getElementById("reader-toggle");
+        if(btn) btn.textContent = "Auto-Scroll";
+    },
+    resetReader: function() {
+        const body = document.querySelector("#modal-source .modal-body");
+        if(body) body.scrollTop = 0;
+        ui.stopReader();
+    },
+    toggleHighlight: function() {
+        const windowEl = document.getElementById("reader-window");
+        if(windowEl) windowEl.classList.toggle("hidden");
+    },
+    copySourceText: async function() {
+        const text = (appData && appData.sourceText) ? appData.sourceText : (document.getElementById("source-content")?.innerText || "");
+        try {
+            if(navigator.clipboard && text) {
+                await navigator.clipboard.writeText(text);
+            }
+        } catch(e) {}
+        const status = document.getElementById("save-status");
+        if(status) {
+            const prev = status.textContent;
+            status.textContent = "Copied";
+            status.style.opacity = 1;
+            setTimeout(() => { status.style.opacity = 0; status.textContent = prev; }, 900);
+        } else {
+            alert("Copied to clipboard.");
+        }
+    },
 
     startWizard: function(item) {
         const opts = [item.translation, ...item.translationDistractors||[]].sort(()=>Math.random()-0.5);
@@ -2044,17 +2114,9 @@ const ui = {
 
         setTimeout(() => {
             splash.classList.add("hidden");
-            if(intro) intro.classList.remove("hidden");
-        }, 3500);
-
-        setTimeout(() => {
             if(intro) intro.classList.add("hidden");
-            if(pick) pick.classList.remove("hidden");
-        }, 6500);
-
-        setTimeout(() => {
             if(pick) pick.classList.add("hidden");
-        }, 8000);
+        }, 3500);
     }
 };
 
@@ -2143,8 +2205,9 @@ const admin = {
 
         const step2 = document.getElementById("ai-step2");
         const jsonIn = document.getElementById("ai-json-in");
+        const promptOut = document.getElementById("ai-prompt-out");
         const keepOpen = localStorage.getItem("tsa_ai_step2") === "true";
-        if(step2 && (keepOpen || (jsonIn && jsonIn.value && jsonIn.value.trim()))) {
+        if(step2 && (keepOpen || (jsonIn && jsonIn.value && jsonIn.value.trim()) || (promptOut && promptOut.value && promptOut.value.trim()))) {
             step2.classList.remove("hidden");
         }
     },
@@ -2253,6 +2316,19 @@ const admin = {
     },
     markLabComplete: () => {
         userState.labCompleted = true;
+        app.save();
+        ui.init();
+    },
+    resetSelectionProgress: () => {
+        userState.completed = [];
+        userState.completedLevels = [];
+        userState.score = 0;
+        userState.showDone = false;
+        userState.selectionCompleted = false;
+        userState.selectionStage = 1;
+        userState.selectionKey = "";
+        userState.selectionProgress = {};
+        userState.labCompleted = false;
         app.save();
         ui.init();
     },
@@ -2655,6 +2731,7 @@ ${levelRules}
 
 Output ONLY valid JSON.`;
         document.getElementById("ai-step2").classList.remove("hidden");
+        localStorage.setItem("tsa_ai_step2", "true");
     },
     loadJson: (exportAfter) => {
         try {
@@ -2725,6 +2802,7 @@ Output ONLY valid JSON.`;
             admin.renderAll();
             const step2 = document.getElementById("ai-step2");
             if(step2) step2.classList.remove("hidden");
+            localStorage.setItem("tsa_ai_step2", "true");
             if(exportAfter) admin.exportStandalone();
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON or corrupted file.";
