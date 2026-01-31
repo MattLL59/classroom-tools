@@ -494,7 +494,11 @@
                         <label>Selection JSON</label>
                         <textarea id="selection-json-in" style="height:90px; width:100%;" placeholder="Paste quote-selection JSON here..."></textarea>
                     </div>
-                    <button class="btn btn-outline btn-small" onclick="admin.generateSelectionPrompt()">Generate Quote-Selection Prompt</button>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                        <button class="btn btn-outline btn-small" onclick="admin.generateSelectionPrompt()">Generate Quote-Selection Prompt</button>
+                        <button class="btn btn-outline btn-small" onclick="admin.copySelectionPrompt()">Copy Prompt</button>
+                        <button class="btn btn-outline btn-small" onclick="admin.pasteSelectionJson()">Paste JSON from Clipboard</button>
+                    </div>
                     <textarea id="selection-prompt-out" style="height:80px; width:100%; margin-top:6px;" readonly placeholder="Prompt will appear here..."></textarea>
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         <button class="btn btn-success" onclick="admin.loadSelectionJson()">Load Selection Data</button>
@@ -1305,7 +1309,7 @@ const ui = {
         const selectionEnabled = appData.selection && appData.selection.enabled && appData.selection.items.length;
         const navLab = document.getElementById("nav-lab");
         const navDesk = document.getElementById("nav-desk");
-        if(selectionEnabled && !userState.selectionCompleted) {
+        if(selectionEnabled && !userState.selectionCompleted && !ui._pauseSelectionGate) {
             if(navLab) navLab.classList.add("hidden");
             if(navDesk) navDesk.classList.add("hidden");
             ui.switchView("select");
@@ -1432,6 +1436,7 @@ const ui = {
     closeModal: (id) => {
         document.getElementById(id).classList.remove("open");
         if(id === 'modal-admin' && !appData.isStandalone) {
+            ui._pauseSelectionGate = false;
             ui.renderLab();
             if(ui.activeQuoteId) {
                 const item = appData.items.find(i=>i.id===ui.activeQuoteId);
@@ -1441,6 +1446,7 @@ const ui = {
     },
     
     openAdmin: () => {
+        ui._pauseSelectionGate = true;
         admin.renderAll(); 
         if(localStorage.getItem('tsa_unlocked')==='true') { ui.openModal("modal-admin"); }
         else if(prompt("Password (1234)")==="1234") { ui.openModal("modal-admin"); }
@@ -2377,6 +2383,28 @@ Requirements:
 Output ONLY JSON.`;
         const out = document.getElementById("selection-prompt-out");
         if(out) out.value = prompt;
+    },
+    copySelectionPrompt: async () => {
+        const out = document.getElementById("selection-prompt-out");
+        if(!out || !out.value.trim()) return alert("Generate the prompt first.");
+        try {
+            await navigator.clipboard.writeText(out.value);
+            alert("Prompt copied to clipboard.");
+        } catch(e) {
+            out.focus();
+            out.select();
+            alert("Copy failed. The prompt is selected—press Ctrl/Cmd+C.");
+        }
+    },
+    pasteSelectionJson: async () => {
+        try {
+            const txt = await navigator.clipboard.readText();
+            if(!txt || !txt.trim()) return alert("Clipboard is empty.");
+            const box = document.getElementById("selection-json-in");
+            if(box) box.value = txt.trim();
+        } catch(e) {
+            alert("Paste failed. Use Ctrl/Cmd+V in the Selection JSON box.");
+        }
     },
     clearSelectionGate: () => {
         userState.selectionCompleted = true;
