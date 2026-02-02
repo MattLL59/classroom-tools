@@ -985,6 +985,9 @@ const app = {
     normalizeKey: function(raw) {
         return String(raw || "lesson").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 60);
     },
+    quoteKey: function(text) {
+        return String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
+    },
     getStateKey: function() {
         if(appData && appData.isStandalone) {
             const id = app.normalizeKey(appData.meta && appData.meta.id ? appData.meta.id : "");
@@ -1049,12 +1052,33 @@ const app = {
         const parts = clean.split(/\n\s*\n/);
         return parts.map(p => `<p style="margin:0 0 16px 0;">${app.escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
     },
-    repairSelection: function(s) {
+    repairSelection: function(s, opts) {
         const safe = s && typeof s === "object" ? s : {};
         const text = safe.text && typeof safe.text === "object" ? safe.text : {};
         const question = safe.question && typeof safe.question === "object" ? safe.question : {};
         const items = Array.isArray(safe.items) ? safe.items : [];
         const modes = safe.modes && typeof safe.modes === "object" ? safe.modes : {};
+        const options = opts && typeof opts === "object" ? opts : {};
+        const rawLevels = Array.isArray(options.activeLevels)
+            ? options.activeLevels
+            : (appData && appData.settings && Array.isArray(appData.settings.activeLevels)
+                ? appData.settings.activeLevels
+                : [1,2,3]);
+        const activeLevels = rawLevels
+            .map(n => parseInt(n, 10))
+            .filter(n => n >= 1 && n <= 9);
+        const levelFallback = activeLevels.length ? activeLevels : [1,2,3];
+        const lessonItems = Array.isArray(options.lessonItems)
+            ? options.lessonItems
+            : (appData && Array.isArray(appData.items) ? appData.items : []);
+        const lessonLevelMap = new Map();
+        lessonItems.forEach(it => {
+            const key = it && it.original ? app.quoteKey(it.original) : "";
+            const levels = Array.isArray(it.levels)
+                ? it.levels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 9)
+                : [];
+            if(key && levels.length) lessonLevelMap.set(key, levels);
+        });
         return {
             enabled: !!safe.enabled || items.length > 0,
             text: { source: app.cleanSourceText(text.source || safe.sourceText || "") },
@@ -1081,12 +1105,27 @@ const app = {
                 const cleanedDistractors = distractors
                     .filter(d => d.quote)
                     .map(d => ({ id: d.id, quote: d.quote, reason: d.reason || "" }));
+                const rawLevels = Array.isArray(item.levels)
+                    ? item.levels
+                    : (typeof item.level === "number" || typeof item.level === "string")
+                        ? [item.level]
+                        : (typeof item.levels === "string" ? item.levels.split(",") : []);
+                let levels = Array.isArray(rawLevels)
+                    ? rawLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 9)
+                    : [];
+                if(!levels.length) {
+                    const match = lessonLevelMap.get(app.quoteKey(item.quote));
+                    if(match && match.length) levels = match.slice();
+                }
+                if(!levels.length) levels = [levelFallback[idx % levelFallback.length]];
+                levels = Array.from(new Set(levels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 9)));
                 return {
                     id: typeof item.id === "string" ? item.id : `s${idx+1}`,
                     quote: typeof item.quote === "string" ? item.quote : "",
                     correct: item.correct === true,
                     reasons: reasons,
-                    distractors: cleanedDistractors
+                    distractors: cleanedDistractors,
+                    levels: levels
                 };
             }).filter(i => i.quote),
             modes: {
@@ -1143,7 +1182,8 @@ const app = {
     getSelectionKey: function() {
         const sel = appData && appData.selection ? appData.selection : null;
         if(!sel || !sel.items || !sel.items.length) return "";
-        const base = `${sel.text && sel.text.source ? sel.text.source.slice(0,120) : ""}|${sel.question && sel.question.prompt ? sel.question.prompt : ""}|${sel.items.length}`;
+        const level = app.getEffectiveLevel();
+        const base = `${sel.text && sel.text.source ? sel.text.source.slice(0,120) : ""}|${sel.question && sel.question.prompt ? sel.question.prompt : ""}|${sel.items.length}|lvl:${level}`;
         return base;
     },
     shuffle: function(arr) {
@@ -1466,7 +1506,7 @@ const app = {
             safe.settings.quoteTarget = Array.isArray(safe.items) ? safe.items.length : defaultData.settings.quoteTarget;
         }
 
-        safe.selection = app.repairSelection(safe.selection);
+        safe.selection = app.repairSelection(safe.selection, { activeLevels: safe.settings.activeLevels, lessonItems: safe.items });
         return safe;
     },
 
@@ -1501,10 +1541,21 @@ const app = {
         const target = parseInt(l, 10);
         const levels = app.getActiveLevels();
         userState.level = levels.includes(target) ? target : levels[0];
+        if(appData.selection && appData.selection.enabled) {
+            userState.selectionCompleted = false;
+            userState.selectionStage = 1;
+            userState.selectionProgress = {};
+            userState.selectionEliminated = [];
+            userState.selectionChosen = [];
+            userState.selectionKey = app.getSelectionKey();
+            ui._selectionCorrectItem = null;
+            ui._selectionQuote = null;
+        }
         app.save();
         const levelBadge = document.getElementById("level-display");
         if(levelBadge) levelBadge.innerText = "Lvl " + userState.level;
         document.getElementById("sentence-builder").innerHTML = '<div style="text-align:center; opacity:0.6; padding:20px;">Level Changed. Select quote.</div>';
+        if(userState.view === "select") ui.renderSelection();
     },
 
     setFilter: function(f) { userState.filter = f; ui.renderLab(); },
@@ -1743,6 +1794,11 @@ const ui = {
                 userState.selectionCompleted = false;
                 userState.selectionStage = 1;
                 userState.selectionKey = key;
+                userState.selectionProgress = {};
+                userState.selectionEliminated = [];
+                userState.selectionChosen = [];
+                ui._selectionCorrectItem = null;
+                ui._selectionQuote = null;
                 userState.labCompleted = false;
                 app.save();
             }
@@ -2229,7 +2285,7 @@ const ui = {
         const cont = document.getElementById("selection-area");
         if(!cont) return;
         if(!appData.selection) {
-            appData.selection = app.repairSelection({});
+            appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
         }
         const sel = appData.selection;
         if(!sel || !sel.enabled || !sel.items.length || sel.items.length < 2) {
@@ -2243,7 +2299,8 @@ const ui = {
         const stages = sel.modes && sel.modes.stages ? sel.modes.stages : ["discriminate","align","justify"];
         const stageIndex = Math.max(1, Math.min(stages.length, userState.selectionStage || 1));
         const stageKey = stages[stageIndex - 1];
-        const levelEntry = app.getLevelBank()[app.getEffectiveLevel()] || {};
+        const level = app.getEffectiveLevel();
+        const levelEntry = app.getLevelBank()[level] || {};
         const targetCount = Math.max(
             1,
             (levelEntry.quoteTarget) ? parseInt(levelEntry.quoteTarget, 10)
@@ -2251,14 +2308,17 @@ const ui = {
                 : (sel.modes && sel.modes.quoteTarget) ? parseInt(sel.modes.quoteTarget, 10)
                 : sel.modes.quoteCount
         );
-        const correctItems = sel.items.filter(i => i.correct);
+        const correctItemsAll = sel.items.filter(i => i.correct);
+        let correctItems = correctItemsAll.filter(i => Array.isArray(i.levels) ? i.levels.includes(level) : false);
         if(correctItems.length < targetCount) {
             const promoteNeeded = targetCount - correctItems.length;
-            const promotable = sel.items.filter(i => i && !i.correct && i.quote).slice(0, promoteNeeded);
+            const promotable = sel.items
+                .filter(i => i && !i.correct && i.quote && (!Array.isArray(i.levels) || i.levels.includes(level)))
+                .slice(0, promoteNeeded);
             if(promotable.length) {
                 promotable.forEach(i => { i.correct = true; if(!Array.isArray(i.reasons) || !i.reasons.length) i.reasons = ["Strong evidence."]; });
                 app.save();
-                correctItems.push(...promotable);
+                correctItems = correctItems.concat(promotable);
             }
         }
         if(correctItems.length < targetCount) {
@@ -2270,30 +2330,33 @@ const ui = {
             return;
         }
         const primaryCorrect = correctItems[0] || sel.items[0];
-        const chosenCorrect = ui._selectionCorrectItem || primaryCorrect;
+        const validChosen = ui._selectionCorrectItem && Array.isArray(ui._selectionCorrectItem.levels)
+            ? ui._selectionCorrectItem.levels.includes(level)
+            : false;
+        const chosenCorrect = validChosen ? ui._selectionCorrectItem : primaryCorrect;
+        if(!validChosen) { ui._selectionCorrectItem = null; ui._selectionQuote = null; }
         const baseDistractors = Array.isArray(primaryCorrect.distractors) ? primaryCorrect.distractors : [];
         const distractorItems = baseDistractors.map(d => ({ quote: d.quote, reason: d.reason, correct: false })).filter(d => d.quote);
-        const incorrectItems = sel.items
-            .filter(i => !i.correct)
+        const levelIncorrect = sel.items.filter(i => !i.correct && (Array.isArray(i.levels) ? i.levels.includes(level) : true));
+        const incorrectItems = (levelIncorrect.length ? levelIncorrect : sel.items.filter(i => !i.correct))
             .map(i => ({ quote: i.quote, correct: false, item: i }))
             .filter(i => i.quote);
         const fallbackIncorrect = incorrectItems.length
             ? incorrectItems
             : distractorItems.map(d => ({ quote: d.quote, correct: false, item: { quote: d.quote, correct: false } }))
                 .filter(i => i.quote);
-        const quoteKey = (q) => String(q || "").toLowerCase().replace(/\s+/g, " ").trim();
-        const eliminatedSet = new Set((userState.selectionEliminated || []).map(q => quoteKey(q)));
+        const eliminatedSet = new Set((userState.selectionEliminated || []).map(q => app.quoteKey(q)));
         const reasonMap = new Map();
         correctItems.forEach(i => {
             const r = Array.isArray(i.reasons) ? i.reasons.find(Boolean) : "";
-            if(i.quote && r) reasonMap.set(quoteKey(i.quote), r);
+            if(i.quote && r) reasonMap.set(app.quoteKey(i.quote), r);
         });
         incorrectItems.forEach(i => {
             const r = i.item && Array.isArray(i.item.reasons) ? i.item.reasons.find(Boolean) : "";
-            if(i.quote && r) reasonMap.set(quoteKey(i.quote), r);
+            if(i.quote && r) reasonMap.set(app.quoteKey(i.quote), r);
         });
         baseDistractors.forEach(d => {
-            if(d && d.quote && d.reason) reasonMap.set(quoteKey(d.quote), d.reason);
+            if(d && d.quote && d.reason) reasonMap.set(app.quoteKey(d.quote), d.reason);
         });
         const otherCorrect = correctItems.filter(i => i !== primaryCorrect).map(i => ({ quote: i.quote, correct: true, item: i }));
         const distractorPool = distractorItems.map(d => ({ quote: d.quote, correct: false, item: { quote: d.quote, correct: false, reasons: [d.reason].filter(Boolean) } }));
@@ -2309,14 +2372,13 @@ const ui = {
         ]);
         const options = app.shuffle([{ quote: primaryCorrect.quote, correct: true, item: primaryCorrect }, ...poolCandidates])
             .filter(o => o && o.quote)
-            .filter((o, idx, arr) => arr.findIndex(x => quoteKey(x.quote) === quoteKey(o.quote)) === idx)
-            .filter(o => !eliminatedSet.has(quoteKey(o.quote)) || o.correct)
+            .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx)
+            .filter(o => !eliminatedSet.has(app.quoteKey(o.quote)) || o.correct)
             .slice(0, sel.modes.quoteCount);
         const reasons = app.shuffle([...(chosenCorrect.reasons || []), ...distractorItems.map(d => d.reason).filter(Boolean)]);
         const chosenList = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
-        const chosenSet = new Set(chosenList.map(q => quoteKey(q)));
+        const chosenSet = new Set(chosenList.map(q => app.quoteKey(q)));
         const textHtml = app.formatSourceHtml(sel.text && sel.text.source ? sel.text.source : appData.sourceText);
-        const level = app.getEffectiveLevel();
         const tier = app.getLanguageTier(level);
         const easy = tier === "low";
         const canJumpStages = !appData.isStandalone;
@@ -2420,7 +2482,7 @@ const ui = {
                 ...distractorPool
             ])
                 .filter(o => o && o.quote)
-                .filter((o, idx, arr) => arr.findIndex(x => quoteKey(x.quote) === quoteKey(o.quote)) === idx);
+                .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx);
             userState.selectionProgress.discriminate = userState.selectionProgress.discriminate || {};
             body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Choose the strong quotes.</div>
                 <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">${easy
@@ -2445,7 +2507,7 @@ const ui = {
                 const update = (choice) => {
                     const correct = o.correct ? "analysis" : "noise";
                     userState.selectionProgress.discriminate[key] = choice;
-                    const reasonRaw = reasonMap.get(quoteKey(o.quote)) || (o.correct
+                    const reasonRaw = reasonMap.get(app.quoteKey(o.quote)) || (o.correct
                         ? "Good choice: it shows the writer's words or structure."
                         : "Not strong: this is mostly what happened.");
                     const reason = app.simplifyText(reasonRaw, tier);
@@ -2532,7 +2594,7 @@ const ui = {
                 <div class="grid" id="selection-quotes"></div>`;
             const grid = body.querySelector("#selection-quotes");
             const correctOptions = options.filter(o => o.correct);
-            const alignPool = options.filter(o => !eliminatedSet.has(quoteKey(o.quote)) || o.correct);
+            const alignPool = options.filter(o => !eliminatedSet.has(app.quoteKey(o.quote)) || o.correct);
             const alignOptions = app.shuffle(alignPool.length ? alignPool : options).slice(0, sel.modes.quoteCount);
             if(!alignOptions.some(o => o.correct) && correctOptions.length) {
                 alignOptions.pop();
@@ -2542,7 +2604,7 @@ const ui = {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline";
                 btn.textContent = `"${o.quote}"`;
-                if(chosenSet.has(quoteKey(o.quote))) btn.classList.add("quote-picked");
+                if(chosenSet.has(app.quoteKey(o.quote))) btn.classList.add("quote-picked");
                 btn.onclick = () => {
                     if(o.correct) {
                         btn.style.background = "var(--success)";
@@ -2575,7 +2637,7 @@ const ui = {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline";
                 btn.textContent = `"${o.quote}"`;
-                if(chosenSet.has(quoteKey(o.quote))) btn.classList.add("quote-picked");
+                if(chosenSet.has(app.quoteKey(o.quote))) btn.classList.add("quote-picked");
                 btn.onclick = () => {
                     if(o.correct) { btn.style.background = "var(--success)"; btn.style.color = "white"; btn.classList.add("quote-picked"); }
                     else if(sel.modes.showHints) { btn.classList.add("shake"); btn.classList.add("quote-dim"); }
@@ -2600,7 +2662,7 @@ const ui = {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline";
                 btn.textContent = `"${o.quote}"`;
-                if(chosenSet.has(quoteKey(o.quote))) btn.classList.add("quote-picked");
+                if(chosenSet.has(app.quoteKey(o.quote))) btn.classList.add("quote-picked");
                 btn.onclick = () => {
                     if(o.correct) {
                         btn.style.background = "var(--success)";
@@ -2891,7 +2953,7 @@ const admin = {
     },
     ensureSelectionData: () => {
         if(!appData.selection || typeof appData.selection !== "object") {
-            appData.selection = app.repairSelection({});
+            appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
         }
         if(!appData.selection.question || typeof appData.selection.question !== "object") {
             appData.selection.question = { prompt: "", focusTags: [] };
@@ -3110,6 +3172,10 @@ const admin = {
         userState.selectionStage = 1;
         userState.selectionKey = "";
         userState.selectionProgress = {};
+        userState.selectionEliminated = [];
+        userState.selectionChosen = [];
+        ui._selectionCorrectItem = null;
+        ui._selectionQuote = null;
         userState.labCompleted = false;
         app.save();
         ui.init();
@@ -3322,7 +3388,7 @@ Output ONLY valid JSON.`;
                 appData = safe;
             }
             if(selection) {
-                appData.selection = app.repairSelection(selection);
+                appData.selection = app.repairSelection(selection, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
                 if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                     appData.selection.modes = appData.selection.modes || {};
                     appData.selection.modes.stages = appData.settings.selectionStages;
@@ -3331,6 +3397,8 @@ Output ONLY valid JSON.`;
                 userState.selectionStage = 1;
                 userState.selectionKey = "";
                 userState.selectionProgress = {};
+                userState.selectionEliminated = [];
+                userState.selectionChosen = [];
             }
             app.save();
             ui.init();
@@ -3605,7 +3673,7 @@ Output ONLY valid JSON.`;
             const mode = document.getElementById("ai-mode").value;
             const existingTemplates = admin.getTemplates();
             if(j && j.text && j.items && j.items[0] && j.items[0].quote) {
-                appData.selection = app.repairSelection(j);
+                appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
                 if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                     appData.selection.modes = appData.selection.modes || {};
                     appData.selection.modes.stages = appData.settings.selectionStages;
@@ -3720,7 +3788,7 @@ Output ONLY valid JSON.`;
             if(missing.length) {
                 return alert("Selection JSON has missing fields:\n" + missing.slice(0, 10).join("\n"));
             }
-            appData.selection = app.repairSelection(j);
+            appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
             if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                 appData.selection.modes = appData.selection.modes || {};
                 appData.selection.modes.stages = appData.settings.selectionStages;
@@ -3868,6 +3936,9 @@ Output ONLY JSON.`;
         admin.ensureSelectionData();
         const item = appData.selection.items[idx];
         if(!item) return;
+        if(!Array.isArray(item.levels) || !item.levels.length) {
+            item.levels = [app.getEffectiveLevel()];
+        }
         if(key === "quote") {
             item.quote = String(value || "");
         } else if(key === "correct") {
@@ -3891,7 +3962,8 @@ Output ONLY JSON.`;
             quote: "New quote",
             correct: false,
             reasons: ["Reason 1", "Reason 2"],
-            distractors: [{ id: "sd_new_1", quote: "Distractor quote", reason: "Weaker reason" }]
+            distractors: [{ id: "sd_new_1", quote: "Distractor quote", reason: "Weaker reason" }],
+            levels: [app.getEffectiveLevel()]
         });
         app.save();
         admin.renderSelectionEditor();
