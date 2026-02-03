@@ -165,7 +165,7 @@
     <div id="emergency-reset">
         <h2>⚠️ App Crashed</h2>
         <p>The loaded data was corrupted.</p>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="localStorage.clear(); location.reload();">Emergency Reset</button>
+        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="app.emergencyReset()">Emergency Reset</button>
     </div>
 
     <div id="celebration-overlay" class="celebration hidden">
@@ -396,17 +396,10 @@
                         <button class="btn btn-outline" onclick="admin.saveTemplate()">Save Template</button>
                         <button class="btn btn-outline" onclick="admin.loadTemplate()">Load Template</button>
                         <button class="btn btn-outline" onclick="admin.exportTemplates()">Save Templates As…</button>
+                        <button class="btn btn-outline" onclick="admin.triggerTemplateImport()">Import Templates…</button>
                         <select id="template-select" style="width:100%; padding:6px;"></select>
                     </div>
                     <div style="font-size:0.85rem; opacity:0.7;">Templates store AI level settings and sentence structures.</div>
-                </div>
-
-                <div class="admin-section">
-                    <h3 class="admin-h">🎯 Quote Selection</h3>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <button class="btn btn-outline" onclick="admin.clearSelectionGate()">Unlock Evidence Lab</button>
-                        <button class="btn btn-outline" onclick="admin.markLabComplete()">Mark Evidence Complete</button>
-                    </div>
                 </div>
 
                 <div class="admin-section">
@@ -1537,7 +1530,18 @@ const app = {
     },
 
     factoryReset: function() {
-        if(confirm("Delete ALL data?")) { localStorage.clear(); location.reload(); }
+        if(confirm("Delete ALL data?")) {
+            const templates = localStorage.getItem("tsa_templates_v1");
+            localStorage.clear();
+            if(templates) localStorage.setItem("tsa_templates_v1", templates);
+            location.reload();
+        }
+    },
+    emergencyReset: function() {
+        const templates = localStorage.getItem("tsa_templates_v1");
+        localStorage.clear();
+        if(templates) localStorage.setItem("tsa_templates_v1", templates);
+        location.reload();
     },
 
     setLevel: function(l) {
@@ -3564,8 +3568,14 @@ Output ONLY valid JSON.`;
     loadTemplate: () => {
         const sel = document.getElementById("template-select");
         const name = sel ? sel.value : "";
-        if(!name) return alert("Select a template.");
         const templates = admin.getTemplates();
+        if(!templates.length) {
+            if(confirm("No templates found. Import templates from a file?")) {
+                admin.triggerTemplateImport();
+            }
+            return;
+        }
+        if(!name) return alert("Select a template.");
         const t = templates.find(x => x.name === name);
         if(!t) return alert("Template not found.");
         admin.applyAiSettings(t.aiSettings);
@@ -4296,6 +4306,11 @@ Output ONLY JSON.`;
         const payload = { templates };
         const b = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
         const a = document.createElement('a'); a.href=URL.createObjectURL(b); a.download='templates.json'; a.click();
+    },
+    triggerTemplateImport: () => {
+        const input = document.getElementById("templates-up");
+        if(input) input.click();
+        else alert("Templates file input not found. Use Load & Import tab.");
     },
     importTemplates: (input) => {
         const f = input.files[0]; if(!f) return;
