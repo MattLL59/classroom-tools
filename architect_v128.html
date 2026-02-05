@@ -15,6 +15,7 @@
         --reader-highlight-border: rgba(0, 150, 136, 0.5);
         --reader-highlight-line: rgba(0, 150, 136, 0.6);
         --reader-highlight-line-height: 2px;
+        --reader-window-height: 3.2em;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
@@ -129,8 +130,8 @@
     .reader-label { font-size:0.85rem; display:flex; align-items:center; gap:6px; }
     .reader-controls input[type="range"] { width:120px; }
     .reader-body { position: relative; }
-    .reader-window { position: absolute; left: 10px; right: 10px; top: 72px; height: 3.2em; border: 2px solid var(--reader-highlight-border); border-radius: 8px; background: var(--reader-highlight); pointer-events: none; z-index: 2; }
-    .reader-window-line { position:absolute; left:0; right:0; top:50%; height:var(--reader-highlight-line-height); background: var(--reader-highlight-line); transform: translateY(-50%); }
+    .reader-window { position: absolute; left: 10px; right: 10px; top: 72px; height: var(--reader-window-height); border: 2px solid var(--reader-highlight-border); border-radius: 8px; background: var(--reader-highlight); pointer-events: none; z-index: 2; }
+    .reader-window-line { display:none; }
     .stage-tag { background: rgba(0,0,0,0.04); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
     .stage-tag.clickable { cursor: pointer; }
     .question-banner { background: rgba(0, 150, 136, 0.08); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 10px 0; font-size: 0.95rem; }
@@ -276,11 +277,11 @@
     </div>
 
     <nav class="bottom-nav no-print">
-        <button class="nav-item active" onclick="ui.switchView('lab')" id="nav-lab">
-            <span class="nav-icon">🧪</span><span class="nav-label">Evidence Lab</span>
-        </button>
         <button class="nav-item hidden" onclick="ui.switchView('select')" id="nav-select">
             <span class="nav-icon">🎯</span><span class="nav-label">Quote Select</span>
+        </button>
+        <button class="nav-item active" onclick="ui.switchView('lab')" id="nav-lab">
+            <span class="nav-icon">🧪</span><span class="nav-label">Evidence Lab</span>
         </button>
         <button class="nav-item" onclick="ui.switchView('desk')" id="nav-desk">
             <span class="nav-icon">✍️</span><span class="nav-label">Writing Desk</span>
@@ -298,6 +299,9 @@
                     </label>
                     <label class="reader-label">Zoom
                         <input type="range" id="reader-zoom" min="90" max="160" value="110">
+                    </label>
+                    <label class="reader-label">Window
+                        <input type="range" id="reader-height" min="2" max="8" step="0.2" value="3.2">
                     </label>
                     <button class="btn btn-outline btn-small" onclick="ui.toggleHighlight()">Highlight</button>
                     <button class="btn btn-outline btn-small" onclick="ui.copySourceText()">Copy Text</button>
@@ -362,6 +366,14 @@
                     <label style="display:block; margin-bottom:5px;"><input type="checkbox" id="keep-unlocked" onchange="admin.setUnlocked(this.checked)"> Keep Unlocked</label>
                     <label style="display:block; margin-bottom:5px;"><input type="checkbox" id="auto-progress" onchange="admin.setAutoProgress(this.checked)"> Auto-progress Levels</label>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="practice-mode" onchange="admin.setPracticeMode(this.checked)"> Practice Mode (lock selected level)</label>
+                    <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                        <label style="font-size:0.85rem;">Start in:</label>
+                        <select id="start-view" onchange="admin.setStartView(this.value)" style="padding:4px;">
+                            <option value="select">Quote Select</option>
+                            <option value="lab">Evidence Lab</option>
+                            <option value="desk">Writing Desk</option>
+                        </select>
+                    </div>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="strict-mode" onchange="admin.setStrictMode(this.checked)"> Strict Mode (block incorrect choices)</label>
                     <button class="btn btn-outline" onclick="admin.resetSelectionProgress()">Reset Selection Progress</button>
                     <div style="display:flex; gap:6px; align-items:center; font-size:0.85rem;">
@@ -471,7 +483,7 @@
                 <div class="admin-section">
                     <h3 class="admin-h">🎚️ Level Bank (1–9)</h3>
                     <div style="font-size:0.85rem; opacity:0.8; margin-bottom:4px;">Controls word limits, ellipses, and language tier used across modules.</div>
-                    <div style="font-size:0.8rem; opacity:0.7; margin-bottom:8px;">Quote targets and distractors here power Quote Selection prompts for each level.</div>
+                    <div style="font-size:0.8rem; opacity:0.7; margin-bottom:8px;">Quote targets = correct real quotes. Weak quotes = real quotes that do not answer the question.</div>
                     <div id="level-bank-editor"></div>
                 </div>
 
@@ -484,7 +496,7 @@
 
                 <div class="admin-tab" data-tab="ai">
                 
-                <details class="guide-box" open>
+                <details class="guide-box">
                     <summary>Teacher Guide (Click to collapse)</summary>
                     <div class="guide-content">
                         <h4>🤖 AI Lesson Generator (Important)</h4>
@@ -513,14 +525,17 @@
                         <label>Source Text</label>
                         <textarea id="ai-input" style="height:60px; width:100%; border:1px solid #ccc;" placeholder="Paste text here..."></textarea>
                     </div>
-                    <button class="btn btn-outline btn-small" onclick="admin.useSourceText()" style="margin-bottom:10px;">Use as Source Text</button>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                        <button class="btn btn-outline btn-small" onclick="admin.loadSavedSourceQuestion()">Use saved text + question</button>
+                        <div style="font-size:0.8rem; opacity:0.7; align-self:center;">Source text is applied automatically on paste.</div>
+                    </div>
                     <div style="display:flex; gap:10px; margin-bottom:6px;">
                         <div style="flex:1"><label style="font-size:0.8rem">Mode</label><select id="ai-mode" style="width:100%; padding:5px;"><option value="replace">Replace All</option><option value="append">Append</option></select></div>
                         <div style="width:120px"><label style="font-size:0.8rem">Quotes (lesson items)</label><input type="number" id="ai-count" value="6" min="1" max="20" style="width:100%; padding:5px;"></div>
                     </div>
                     <div style="font-size:0.75rem; opacity:0.7; margin-bottom:8px;">This count is for correct lesson quotes; distractors are generated inside each item.</div>
                     <button class="btn btn-outline btn-small" onclick="admin.toggleAiPanel()" style="margin-bottom:8px;">Show/Hide JSON Panel</button>
-                    <details class="guide-box" open>
+                    <details class="guide-box">
                         <summary>Level Rules (1–9)</summary>
                         <div class="guide-content">
                     <div class="input-group">
@@ -1245,6 +1260,34 @@ const app = {
         t = t.replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ");
         return t.trim();
     },
+    getSourceText: function() {
+        const saved = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+        const selText = appData && appData.selection && appData.selection.text && appData.selection.text.source
+            ? appData.selection.text.source
+            : "";
+        const aiText = (document.getElementById("ai-input") || {}).value || "";
+        const savedClean = app.cleanSourceText(saved);
+        const selClean = app.cleanSourceText(selText);
+        const aiClean = app.cleanSourceText(aiText);
+        const defaultClean = app.cleanSourceText(defaultData && defaultData.sourceText ? defaultData.sourceText : "");
+        const preferSelection = !savedClean || (defaultClean && savedClean === defaultClean);
+        const primary = preferSelection ? selClean : savedClean;
+        const secondary = preferSelection ? savedClean : selClean;
+        const longer = (a, b) => (a && b) ? (a.length >= b.length ? a : b) : (a || b);
+        const candidates = [
+            longer(primary, secondary),
+            longer(savedClean, selClean),
+            aiClean
+        ].filter(Boolean);
+        app._sourceWarn = !!preferSelection && !appData.isStandalone;
+        if(!candidates.length) return "";
+        const text = candidates[0];
+        if(appData && (!appData.sourceText || !appData.sourceText.trim()) && text) {
+            appData.sourceText = text;
+            app.save();
+        }
+        return text;
+    },
     quoteInSource: function(quote, sourceText) {
         const q = String(quote || "").trim();
         const s = String(sourceText || "").trim();
@@ -1413,6 +1456,9 @@ const app = {
             if(!appData.question) appData.question = fallback.question;
             if(!appData.meta || !appData.meta.title) appData.meta = fallback.meta;
         }
+        if((!appData.sourceText || !appData.sourceText.trim()) && appData.selection && appData.selection.text && appData.selection.text.source) {
+            appData.sourceText = app.cleanSourceText(appData.selection.text.source);
+        }
 
         if(!appData.settings) appData.settings = {};
         admin.syncTemplatesFromStorage();
@@ -1472,6 +1518,7 @@ const app = {
         if(typeof safe.settings.modulesActive.selection !== "boolean") safe.settings.modulesActive.selection = true;
         if(typeof safe.settings.modulesActive.lab !== "boolean") safe.settings.modulesActive.lab = true;
         if(typeof safe.settings.modulesActive.desk !== "boolean") safe.settings.modulesActive.desk = true;
+        if(typeof safe.settings.startView !== "string") safe.settings.startView = "lab";
         safe.settings.levelRules = safe.settings.levelRules && typeof safe.settings.levelRules === 'object'
             ? safe.settings.levelRules
             : JSON.parse(JSON.stringify(defaultData.settings.levelRules));
@@ -1689,8 +1736,13 @@ const app = {
         
         app.save();
         app.checkLevelCompletion();
-        ui.switchView('lab'); 
-        ui.renderLab(); 
+        if(appData.settings && appData.settings.modulesActive && appData.settings.modulesActive.selection) {
+            ui.switchView('select');
+            ui.renderSelection();
+        } else {
+            ui.switchView('lab');
+            ui.renderLab();
+        }
     },
 
     checkLevelCompletion: function() {
@@ -1844,6 +1896,10 @@ const ui = {
             ? appData.sourceText
             : (selectionText || fallbackText);
         const sourceText = app.cleanSourceText(rawSource);
+        if((!appData.sourceText || !appData.sourceText.trim()) && sourceText) {
+            appData.sourceText = sourceText;
+            app.save();
+        }
         document.getElementById("lbl-title").innerText = appData.meta.title;
         document.getElementById("source-content").innerHTML = app.formatSourceHtml(sourceText);
         const levelSelect = document.getElementById("level-selector");
@@ -1869,7 +1925,16 @@ const ui = {
         if(!activeLevels.includes(userState.level)) userState.level = activeLevels[0];
         if(levelSelect) levelSelect.value = userState.level;
         const hasSelection = appData.settings && appData.settings.modulesActive && appData.settings.modulesActive.selection && appData.selection && appData.selection.enabled;
-        if(!userState.view) {
+        const pref = appData.settings && appData.settings.startView ? appData.settings.startView : "";
+        if(appData.isStandalone) {
+            if(pref === "select" && hasSelection) userState.view = "select";
+            else if(pref === "desk" && appData.settings.modulesActive && appData.settings.modulesActive.desk) userState.view = "desk";
+            else userState.view = hasSelection ? "select" : "lab";
+        } else if(pref === "select" && hasSelection) {
+            userState.view = "select";
+        } else if(pref === "desk" && appData.settings.modulesActive && appData.settings.modulesActive.desk) {
+            userState.view = "desk";
+        } else if(!userState.view) {
             userState.view = hasSelection ? "select" : "lab";
         }
         ui.switchView(userState.view);
@@ -1882,10 +1947,6 @@ const ui = {
             const sel = document.getElementById("level-selector");
             if(sel) { sel.value = lvl; sel.disabled = true; sel.title = "Practice mode locks the selected level"; }
         }
-        
-        // --- FORCE LAB VIEW ON START ---
-        ui.switchView('lab'); 
-        
         ui.renderLab();
 
         document.querySelectorAll(".modal").forEach(modal => {
@@ -1942,6 +2003,29 @@ const ui = {
         const saved = localStorage.getItem("tsa_reader_zoom");
         if(zoom && saved) zoom.value = saved;
         ui.applyReaderZoom(zoom ? zoom.value : 110);
+        const height = document.getElementById("reader-height");
+        if(height && !height.dataset.bound) {
+            height.dataset.bound = "true";
+            height.addEventListener("input", () => ui.applyReaderHeight(height.value));
+        }
+        const savedHeight = localStorage.getItem("tsa_reader_height");
+        if(height && savedHeight) height.value = savedHeight;
+        ui.applyReaderHeight(height ? height.value : 3.2);
+        ui.positionReaderWindow();
+        if(!ui._readerPosBound) {
+            ui._readerPosBound = true;
+            window.addEventListener("resize", () => ui.positionReaderWindow());
+        }
+    },
+    positionReaderWindow: function() {
+        const win = document.getElementById("reader-window");
+        const controls = document.querySelector(".reader-controls");
+        if(!win || !controls) return;
+        const body = controls.parentElement;
+        const bodyRect = body ? body.getBoundingClientRect() : null;
+        const ctrlRect = controls.getBoundingClientRect();
+        const offset = bodyRect ? (ctrlRect.bottom - bodyRect.top + 6) : (controls.offsetHeight + 6);
+        win.style.top = `${offset}px`;
     },
     applyReaderZoom: function(value) {
         const content = document.getElementById("source-content");
@@ -1949,6 +2033,12 @@ const ui = {
         const pct = Math.max(80, Math.min(180, parseInt(value, 10) || 110));
         content.style.fontSize = (pct / 100) + "rem";
         localStorage.setItem("tsa_reader_zoom", String(pct));
+    },
+    applyReaderHeight: function(value) {
+        const v = Math.max(2, Math.min(8, parseFloat(value) || 3.2));
+        document.documentElement.style.setProperty("--reader-window-height", `${v}em`);
+        localStorage.setItem("tsa_reader_height", String(v));
+        ui.positionReaderWindow();
     },
     getKeywordMap: function(question, focusTags) {
         const map = {};
@@ -2078,6 +2168,16 @@ const ui = {
     },
 
     renderLab: function() {
+        const src = app.getSourceText();
+        const inline = document.getElementById("source-inline");
+        if(inline) {
+            const warn = app._sourceWarn
+                ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>`
+                : "";
+            inline.innerHTML = warn + app.formatSourceHtml(src);
+        }
+        const modal = document.getElementById("source-content");
+        if(modal) modal.innerHTML = app.formatSourceHtml(src);
         const g = document.getElementById("quote-grid"); g.innerHTML = "";
         ui._seenQuoteKeys = new Set();
         
@@ -2175,8 +2275,10 @@ const ui = {
         document.querySelectorAll(".nav-item").forEach(e=>e.classList.remove("active"));
         document.getElementById("view-"+v).classList.add("active");
         document.getElementById("nav-"+v).classList.add("active");
-        userState.view = v;
-        app.save();
+        if(!appData.isStandalone) {
+            userState.view = v;
+            app.save();
+        }
         if(v === "select") ui.renderSelection();
     },
 
@@ -2202,7 +2304,12 @@ const ui = {
         if(localStorage.getItem('tsa_unlocked')==='true') { ui.openModal("modal-admin"); }
         else if(prompt("Password (1234)")==="1234") { ui.openModal("modal-admin"); }
     },
-    openSourceText: () => ui.openModal("modal-source"),
+    openSourceText: () => {
+        const src = app.getSourceText();
+        const el = document.getElementById("source-content");
+        if(el) el.innerHTML = app.formatSourceHtml(src);
+        ui.openModal("modal-source");
+    },
     getReaderScroller: function() {
         const content = document.getElementById("source-content");
         if(content && content.scrollHeight > content.clientHeight) return content;
@@ -2257,6 +2364,7 @@ const ui = {
     toggleHighlight: function() {
         const windowEl = document.getElementById("reader-window");
         if(windowEl) windowEl.classList.toggle("hidden");
+        ui.positionReaderWindow();
     },
     copySourceText: async function() {
         const text = (appData && appData.sourceText) ? appData.sourceText : (document.getElementById("source-content")?.innerText || "");
@@ -2520,17 +2628,6 @@ const ui = {
         let correctItems = correctItemsAll.filter(i => Array.isArray(i.levels) ? i.levels.includes(level) : false);
         correctItems = correctItems.filter(i => isInSource(i.quote));
         if(correctItems.length < targetCount) {
-            const promoteNeeded = targetCount - correctItems.length;
-            const promotable = sel.items
-                .filter(i => i && !i.correct && i.quote && (!Array.isArray(i.levels) || i.levels.includes(level)))
-                .slice(0, promoteNeeded);
-            if(promotable.length) {
-                promotable.forEach(i => { i.correct = true; if(!Array.isArray(i.reasons) || !i.reasons.length) i.reasons = ["Strong evidence."]; });
-                app.save();
-                correctItems = correctItems.concat(promotable);
-            }
-        }
-        if(correctItems.length < targetCount) {
             cont.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Not enough correct quotes</div>
                 <div style="opacity:0.8; margin-bottom:8px;">Target: ${targetCount} correct quotes. Found: ${correctItems.length}. Add more correct quotes in the Quote Selection Editor.</div>
@@ -2730,6 +2827,12 @@ const ui = {
                 const meta = card.querySelector(".card-meta span");
                 const key = o.quote;
                 const update = (choice) => {
+                    if(!userState.selectionProgress || typeof userState.selectionProgress !== "object") {
+                        userState.selectionProgress = {};
+                    }
+                    if(!userState.selectionProgress.discriminate || typeof userState.selectionProgress.discriminate !== "object") {
+                        userState.selectionProgress.discriminate = {};
+                    }
                     const correct = o.correct ? "analysis" : "noise";
                     userState.selectionProgress.discriminate[key] = choice;
                     const reasonRaw = reasonMap.get(app.quoteKey(o.quote)) || (o.correct
@@ -2744,6 +2847,13 @@ const ui = {
                         card.classList.add("quote-dim");
                         userState.selectionEliminated = Array.from(new Set([...(userState.selectionEliminated || []), o.quote]));
                     }
+                    if(pool.length <= 2 && o.correct) {
+                        pool.forEach(p => {
+                            if(p.quote !== o.quote && !userState.selectionProgress.discriminate[p.quote]) {
+                                userState.selectionProgress.discriminate[p.quote] = "noise";
+                            }
+                        });
+                    }
                     app.save();
                     const done = pool.every(p => userState.selectionProgress.discriminate[p.quote]);
                     const allCorrect = done && pool.every(p => {
@@ -2751,8 +2861,10 @@ const ui = {
                         return (p.correct && c === "analysis") || (!p.correct && c === "noise");
                     });
                     if(continueBtn) {
-                        continueBtn.disabled = !allCorrect;
-                        continueBtn.textContent = allCorrect ? "Continue" : "Finish all choices to continue";
+                        continueBtn.disabled = !done;
+                        continueBtn.textContent = !done
+                            ? "Finish all choices to continue"
+                            : (allCorrect ? "Continue" : "Continue (some incorrect)");
                     }
                 };
                 yesBtn.onclick = () => update("analysis");
@@ -3153,15 +3265,16 @@ const ui = {
         const chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
         if(!chosen.length) return;
         chosen.forEach(q => ui.ensureQuoteItem(q));
+        userState.selectionCompleted = true;
         app.save();
         const first = ui.ensureQuoteItem(chosen[0]);
         if(!first) return;
-        if(appData.settings.modulesActive.desk) {
-            ui.switchView("desk");
-            ui.runBuilder(first);
-        } else if(appData.settings.modulesActive.lab) {
+        if(appData.settings.modulesActive.lab) {
             ui.switchView("lab");
             ui.startWizard(first);
+        } else if(appData.settings.modulesActive.desk) {
+            ui.switchView("desk");
+            ui.runBuilder(first);
         }
     },
     setSelectionStage: function(stage) {
@@ -3346,6 +3459,11 @@ const admin = {
         if(allLevels) allLevels.checked = !!appData.settings.aiPromptAllLevels;
         const strict = document.getElementById("strict-mode");
         if(strict) strict.checked = !!appData.settings.strictMode;
+        const startView = document.getElementById("start-view");
+        if(startView) {
+            const pref = appData.settings && appData.settings.startView ? appData.settings.startView : "lab";
+            startView.value = pref;
+        }
         const modulesWrap = document.getElementById("modules-active");
         if(modulesWrap) {
             const modules = ["selection","lab","desk"];
@@ -3458,6 +3576,12 @@ const admin = {
     setAiAllLevels: (c) => {
         if(!appData.settings) appData.settings = {};
         appData.settings.aiPromptAllLevels = c;
+        app.save();
+    },
+    setStartView: (v) => {
+        if(!appData.settings) appData.settings = {};
+        const valid = ["select","lab","desk"].includes(v) ? v : "lab";
+        appData.settings.startView = valid;
         app.save();
     },
     updateActiveLevels: () => {
@@ -3679,6 +3803,16 @@ const admin = {
         app.save();
         ui.init();
     },
+    loadSavedSourceQuestion: () => {
+        const aiInput = document.getElementById("ai-input");
+        const aiQuestion = document.getElementById("ai-question");
+        if(aiInput && appData && appData.sourceText) {
+            aiInput.value = appData.sourceText;
+        }
+        if(aiQuestion && appData && appData.question) {
+            aiQuestion.value = appData.question;
+        }
+    },
     generateBothPrompts: () => {
         admin.generatePrompt();
         admin.generateSelectionPrompt();
@@ -3696,18 +3830,34 @@ const admin = {
             const td = entry.distractorCount || 4;
             return `- L${lvl}: ${tq} correct quotes, ${td} distractors`;
         }).join("\\n");
+        const totalTarget = activeLevels.reduce((sum, lvl) => {
+            const entry = levelBank[lvl] || {};
+            return sum + (entry.quoteTarget || 4) + (entry.distractorCount || 4);
+        }, 0);
         const prompt = `Role: Expert English Teacher
 Task: Create ONE JSON object that includes BOTH:
 1) A lesson for Tone & Structure Architect
 2) A quote-selection training module
 
-Source Text: "${text.substring(0,800)}..."
+Source Text (FULL — do not truncate or paraphrase):
+"""${text}"""
 Focus Question: "${q}"
 
 Output JSON schema:
 {
   lesson: { ...the lesson JSON your app already uses... },
   selection: { ...the quote-selection JSON schema below... }
+}
+
+Lesson schema (use these exact keys):
+{
+  meta:{title, author, version},
+  sourceText, question,
+  settings:{autoProgress, practiceMode, practiceModeLevel, practiceForceAuto, practiceFixedTemplate, worksheetMatchMode, activeLevels[], aiPromptAllLevels, quoteTarget, strictMode, selectionStages[], modulesActive{selection,lab,desk}, levelRules{1:{maxWords,ellipsesMaxWords}...}, levelBank{1:{maxWords,ellipsesMaxWords,languageTier,quoteTarget,distractorCount}...}},
+  banks:{markers[], starters[], methods[], points[], links{l1[],l2[],l3[]}},
+  sentenceConfig:{1:[...],2:[...],3:[...],4:[...],5:[...],6:[...],7:[...],8:[...],9:[...]},
+  globalStructure:{enabled:true, items:[{id, question, correct, distractors[]}]},
+  items:[{id, original, translation, translationDistractors[], type, effect, effectDistractors[], levels:[1..9], includeInWorksheet:true}]
 }
 
 Quote-selection schema (NO empty strings):
@@ -3721,10 +3871,16 @@ Quote-selection schema (NO empty strings):
 }
 
 Lesson requirements: keep the same as the Tone & Structure lesson prompt (quotes, distractors, banks, sentenceConfig, globalStructure, settings).
+Lesson items requirements (ALL active levels):
+Create lesson.items for each level using levelBank targets.
+Total lesson.items target = ${totalTarget} items (correct + distractors). If you cannot supply that many real quotes, include as many as possible, and mark items as appropriate types.
+
 Selection requirements (ALL active levels):
 ${targetSummary}
 Each correct quote must include device (tone/language/structure) and deviceReason.
 Include structurePrompts (7–10) that guide structural discussion (e.g., paragraphing shifts, time/sequence, zoom, placement, repetition, circular structure, juxtaposition).
+Structure quotes must be about organisation/sequence (time shifts, paragraphing, zoom in/out, opening/closing, contrast/juxtaposition, cyclical structure). Do NOT label content-only or cause/effect-only lines as structure unless the wording itself signals structure (e.g., "throughout history", "over time", "at first...later", "the final paragraph").
+Ensure each active level includes at least one STRUCTURE correct quote and at least one TONE or LANGUAGE quote.
 Each correct quote must include 2 reasons and 2+ distractors with reasons (no blanks).
 If a quote cannot be justified as noise, include it as a distractor anyway with a plausible reason.
 If a quote is correct, include at least one reason (prefer 2) and never leave reasons blank.
@@ -3732,6 +3888,8 @@ Avoid reusing the same answer text across reasons or deviceReason.
 Use UK English spelling throughout (e.g., humanises, emphasises, organise).
 Match the language complexity for each item to its levelBank.languageTier (low/medium/advanced) across all levels globally.
 Do NOT use placeholders.
+Total target = ${totalTarget} quotes. If the text cannot supply that many real quotes, include as many as possible and mark each as correct:true/false accordingly.
+Make incorrect quotes plausible (near-miss): choose lines that are thematically related but do not answer the question as well as the correct quotes. Avoid obvious random lines.
 
 Output ONLY valid JSON.`;
         const out = document.getElementById("unified-prompt-out");
@@ -3777,7 +3935,11 @@ Output ONLY valid JSON.`;
         if(prevSettings.worksheetMatchMode) target.settings.worksheetMatchMode = prevSettings.worksheetMatchMode;
         if(typeof prevSettings.practiceFixedTemplate === "boolean") target.settings.practiceFixedTemplate = prevSettings.practiceFixedTemplate;
         if(typeof prevSettings.practiceForceAuto === "boolean") target.settings.practiceForceAuto = prevSettings.practiceForceAuto;
-        if(typeof prevSettings.selectionStartsFirst === "boolean") target.settings.selectionStartsFirst = prevSettings.selectionStartsFirst;
+        if(typeof prevSettings.startView === "string" && prevSettings.startView) {
+            target.settings.startView = prevSettings.startView;
+        } else if(typeof prevSettings.selectionStartsFirst === "boolean") {
+            target.settings.startView = prevSettings.selectionStartsFirst ? "select" : "lab";
+        }
         if(typeof prevSettings.strictMode === "boolean") target.settings.strictMode = prevSettings.strictMode;
     },
     loadUnifiedJson: () => {
@@ -3810,6 +3972,29 @@ Output ONLY valid JSON.`;
                 userState.selectionProgress = {};
                 userState.selectionEliminated = [];
                 userState.selectionChosen = [];
+                const lessonItems = Array.isArray(appData.items) ? appData.items : [];
+                const correctItems = appData.selection.items.filter(i => i && i.correct && i.quote);
+                if(correctItems.length && lessonItems.length < correctItems.length) {
+                    const existing = new Set(lessonItems.map(i => app.quoteKey(i && i.original)));
+                    const seeded = correctItems
+                        .filter(i => !existing.has(app.quoteKey(i.quote)))
+                        .map((i, idx) => {
+                            const r = Array.isArray(i.reasons) ? i.reasons.find(Boolean) : "";
+                            const effect = (i.deviceReason || r || "").trim();
+                            return {
+                                id: `auto_s${idx+1}`,
+                                original: i.quote,
+                                translation: r || effect,
+                                translationDistractors: [],
+                                type: i.device || "language",
+                                effect: effect,
+                                effectDistractors: [],
+                                levels: Array.isArray(i.levels) && i.levels.length ? i.levels.slice() : [1],
+                                includeInWorksheet: true
+                            };
+                        });
+                    appData.items = lessonItems.concat(seeded);
+                }
             }
             app.save();
             ui.init();
@@ -3962,7 +4147,7 @@ Output ONLY valid JSON.`;
             worksheetMatchMode: settings.worksheetMatchMode || "jumbled",
             practiceFixedTemplate: !!settings.practiceFixedTemplate,
             practiceForceAuto: !!settings.practiceForceAuto,
-            selectionStartsFirst: settings.selectionStartsFirst !== false,
+            startView: settings.startView || "",
             strictMode: !!settings.strictMode
         };
         const payload = {
@@ -4024,7 +4209,10 @@ Output ONLY valid JSON.`;
             if(typeof s.worksheetMatchMode === "string") appData.settings.worksheetMatchMode = s.worksheetMatchMode;
             if(typeof s.practiceFixedTemplate === "boolean") appData.settings.practiceFixedTemplate = s.practiceFixedTemplate;
             if(typeof s.practiceForceAuto === "boolean") appData.settings.practiceForceAuto = s.practiceForceAuto;
-            if(typeof s.selectionStartsFirst === "boolean") appData.settings.selectionStartsFirst = s.selectionStartsFirst;
+            if(typeof s.startView === "string") appData.settings.startView = s.startView;
+            else if(typeof s.selectionStartsFirst === "boolean") {
+                appData.settings.startView = s.selectionStartsFirst ? "select" : "lab";
+            }
             if(typeof s.strictMode === "boolean") appData.settings.strictMode = s.strictMode;
         }
         if(appData.items && appData.settings && appData.settings.levelBank) {
@@ -4036,7 +4224,17 @@ Output ONLY valid JSON.`;
         admin.renderAll();
     },
     generatePrompt: (silent) => {
-        const c = document.getElementById("ai-count").value;
+        const aiCountEl = document.getElementById("ai-count");
+        const activeLevels = (appData.settings && appData.settings.aiPromptAllLevels)
+            ? Array.from({length:9}, (_,i)=>i+1)
+            : app.getActiveLevels();
+        const levelBank = app.getLevelBank();
+        const autoTarget = activeLevels.reduce((sum, lvl) => {
+            const entry = levelBank[lvl] || {};
+            return sum + (entry.quoteTarget || 4) + (entry.distractorCount || 4);
+        }, 0);
+        if(aiCountEl) aiCountEl.value = String(autoTarget);
+        const c = aiCountEl ? aiCountEl.value : autoTarget;
         const txt = (document.getElementById("ai-input").value || "").trim() || (appData.sourceText || "");
         const q = document.getElementById("ai-question").value || "How does the writer use language?";
         if(!txt) { if(!silent) alert("Paste text."); return; }
@@ -4046,11 +4244,8 @@ Output ONLY valid JSON.`;
         appData.settings.quoteTarget = parseInt(c, 10) || pointCount;
         const settings = admin.getAiSettings();
         const lvl = settings.levels;
-        const enabledLevels = (appData.settings && appData.settings.aiPromptAllLevels)
-            ? Array.from({length:9}, (_,i)=>i+1)
-            : app.getActiveLevels();
+        const enabledLevels = activeLevels;
         if(enabledLevels.length === 0) { if(!silent) alert("Select at least one level."); return; }
-        const levelBank = app.getLevelBank();
         const levelRules = enabledLevels.map(n => {
             const l = lvl[n] || {};
             const bankMax = levelBank[n] ? levelBank[n].maxWords : (n > 3 ? 30 + (n-3)*4 : 12);
@@ -4091,6 +4286,7 @@ Focus Question: "${q}"
 
 Requirements:
 1. Create ${c} items. Each item object must have: { id, original (quote from text), translation (meaning), translationDistractors (2 wrong meanings), type (tone/structure/language), effect (analysis sentence), effectDistractors (2 wrong analysis sentences), levels:[1..10], includeInWorksheet:true }.
+   - Balance item types across the lesson: aim for roughly 30% tone, 30% structure, 40% language (adjust only if the text truly lacks one category).
 2. Assign EACH item to one level only (${enabledLevels.join(", ")}). Ensure lower levels are simpler and higher levels are more nuanced.
 3. Level rules (STRICT): 
 ${levelRules}
@@ -4292,6 +4488,10 @@ Output ONLY valid JSON.`;
             const td = entry.distractorCount || 4;
             return `- L${lvl}: ${tq} correct quotes, ${td} distractors`;
         }).join("\\n");
+        const totalTarget = activeLevels.reduce((sum, lvl) => {
+            const entry = levelBank[lvl] || {};
+            return sum + (entry.quoteTarget || 4) + (entry.distractorCount || 4);
+        }, 0);
         const prompt = `Role: Expert English Teacher
 Task: Create a JSON template for quote-selection practice.
 
@@ -4322,6 +4522,8 @@ ${targetSummary}
 10. Use UK English spelling throughout (e.g., humanises, emphasises, organise).
 11. Match the language complexity for each item to its levelBank.languageTier (low/medium/advanced) across all levels globally.
 12. Do NOT use placeholders like "Reason needed." or "Weaker choice." Use real reasons.
+13. Total target = ${totalTarget} quotes. If the text cannot supply that many real quotes, include as many as possible and mark each as correct:true/false accordingly.
+14. Make incorrect quotes plausible (near-miss): choose lines that are thematically related but do not answer the question as well as the correct quotes. Avoid obvious random lines.
 
 Output ONLY JSON.`;
         const out = document.getElementById("selection-prompt-out");
@@ -4436,6 +4638,8 @@ Output ONLY JSON.`;
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 10px 0;">
                 <button class="btn btn-outline btn-small" onclick="admin.autoFillSelectionDevices()">Auto-fill device (tone/language/structure)</button>
                 <button class="btn btn-outline btn-small" onclick="admin.autoFillSelectionDeviceReasons()">Auto-fill device reason</button>
+                <button class="btn btn-outline btn-small" onclick="admin.autoAssignSelectionLevels()">Auto-assign levels (match targets)</button>
+                <button class="btn btn-outline btn-small" onclick="admin.autoAssignSelectionLevels(true)">Auto-assign levels (unassigned only)</button>
             </div>
             <div style="font-weight:700; margin:10px 0 6px 0;">Quotes</div>
             ${sel.items.map((item, idx) => {
@@ -4614,6 +4818,46 @@ Output ONLY JSON.`;
             alert("No device reasons were auto-filled.");
         }
     },
+    autoAssignSelectionLevels: (unassignedOnly) => {
+        admin.ensureSelectionData();
+        const sel = appData.selection;
+        if(!sel || !Array.isArray(sel.items) || !sel.items.length) return;
+        const levelBank = app.getLevelBank();
+        const activeLevels = app.getActiveLevels();
+        const isInSource = (q) => app.quoteInSource(q, sel.text && sel.text.source ? sel.text.source : appData.sourceText);
+        const baseFilter = (i) => i && i.quote && isInSource(i.quote);
+        const levelUnset = (i) => !Array.isArray(i.levels) || !i.levels.length;
+        const correctItems = sel.items.filter(i => i && i.correct && baseFilter(i) && (!unassignedOnly || levelUnset(i)));
+        const incorrectItems = sel.items.filter(i => i && !i.correct && baseFilter(i) && (!unassignedOnly || levelUnset(i)));
+        const targets = {};
+        activeLevels.forEach(lvl => {
+            const entry = levelBank[lvl] || {};
+            targets[lvl] = {
+                correct: entry.quoteTarget || 0,
+                incorrect: entry.distractorCount || 0
+            };
+        });
+        const assignPool = (items, key) => {
+            let idx = 0;
+            const levels = activeLevels.slice();
+            const expanded = [];
+            levels.forEach(lvl => {
+                const count = targets[lvl][key] || 0;
+                for(let i = 0; i < count; i++) expanded.push(lvl);
+            });
+            if(!expanded.length) return;
+            items.forEach(item => {
+                const lvl = expanded[idx % expanded.length];
+                item.levels = [lvl];
+                idx += 1;
+            });
+        };
+        assignPool(correctItems, "correct");
+        assignPool(incorrectItems, "incorrect");
+        app.save();
+        admin.renderSelectionEditor();
+        ui.renderSelection();
+    },
     addSelectionItem: () => {
         admin.ensureSelectionData();
         appData.selection.items.push({
@@ -4775,8 +5019,8 @@ Output ONLY JSON.`;
                 <div>Max words</div>
                 <div>Ellipses at</div>
                 <div>Language tier</div>
-                <div>Quotes</div>
-                <div>Distractors</div>
+                <div>Quote target (correct)</div>
+                <div>Weak quotes (incorrect)</div>
             </div>
             ${rows.join("")}
         `;
@@ -4955,7 +5199,10 @@ Output ONLY JSON.`;
                 exportData.selection.items = [];
             }
         }
-        if(!exportData.sourceText || !String(exportData.sourceText).trim()) {
+        const exportSource = app.getSourceText();
+        if(exportSource && exportSource.trim()) {
+            exportData.sourceText = exportSource;
+        } else if(!exportData.sourceText || !String(exportData.sourceText).trim()) {
             const aiInput = document.getElementById("ai-input");
             const sourceInline = document.getElementById("source-inline");
             const sourceModal = document.getElementById("source-content");
@@ -4972,7 +5219,7 @@ Output ONLY JSON.`;
                 exportData.sourceText = app.cleanSourceText(selText);
             }
         }
-        if(exportData.selection && (!exportData.selection.text || !exportData.selection.text.source)) {
+        if(exportData.selection) {
             exportData.selection.text = exportData.selection.text || {};
             exportData.selection.text.source = exportData.sourceText || "";
         }
