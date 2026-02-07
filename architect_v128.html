@@ -379,6 +379,12 @@
                         <input type="number" id="reward-minutes" min="0" value="0" onchange="admin.setRewardMinutes(this.value)">
                         <div style="font-size:0.8rem; opacity:0.7; margin-top:4px;">0 disables time limit.</div>
                     </div>
+                    <div class="input-group" style="margin-top:6px;">
+                        <label>Quote Selection: Allow Partial</label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;">
+                            <input type="checkbox" id="allow-partial-selection" onchange="admin.setAllowPartialSelection(this.checked)"> Allow fewer correct quotes than target
+                        </label>
+                    </div>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="practice-mode" onchange="admin.setPracticeMode(this.checked)"> Practice Mode (lock selected level)</label>
                     <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
                         <label style="font-size:0.85rem;">Start in:</label>
@@ -441,13 +447,13 @@
                 <div class="admin-section">
                     <h3 class="admin-h">🧭 Quote Selection Editor</h3>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Mark quotes as analysis-worthy or noise. Edit reasons and distractors for teacher control.</div>
-                    <div id="selection-editor-list" style="max-height:300px; overflow-y:auto; padding-right:5px;"></div>
+                    <div id="selection-editor-list" style="padding-right:5px;"></div>
                     <button class="btn btn-success" onclick="admin.addSelectionItem()">+ Add Selection Quote</button>
                 </div>
 
                 <div class="admin-section">
                     <h3 class="admin-h">📝 Edit Evidence (Quotes)</h3>
-                    <div id="quote-editor-list" style="max-height:300px; overflow-y:auto; padding-right:5px;"></div>
+                    <div id="quote-editor-list" style="padding-right:5px;"></div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 10px 0;">
                         <button class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()">Generate & Split Model Answers</button>
                     </div>
@@ -968,6 +974,7 @@ const defaultData = {
         quoteTarget: 4,
         rewardUrl: "",
         rewardMinutes: 0,
+        allowPartialSelection: false,
         strictMode: false,
         selectionStages: ["discriminate","align","justify"],
         modulesActive: { selection: true, lab: true, desk: true },
@@ -1271,17 +1278,21 @@ const app = {
                 ],
             items: items.map((it, idx) => {
                 const item = it && typeof it === "object" ? it : {};
+                const stripLabel = (q) => {
+                    const raw = String(q || "");
+                    return raw.replace(/^(start|end|beginning|conclusion|intro|opening|closing|final)\s*:\s*/i, "").trim();
+                };
                 const rawDistractors = Array.isArray(item.distractors) ? item.distractors : [];
                 const reasons = Array.isArray(item.reasons)
                     ? item.reasons.filter(v => typeof v === "string" && v.trim()).map(v => v.trim())
                     : (typeof item.reason === "string" && item.reason.trim() ? [item.reason.trim()] : []);
                 const distractors = rawDistractors.map((d, di) => {
                     if(typeof d === "string") {
-                        return { id: `sd${idx+1}_${di+1}`, quote: d, reason: "" };
+                        return { id: `sd${idx+1}_${di+1}`, quote: stripLabel(d), reason: "" };
                     }
                     return {
                         id: typeof d.id === "string" ? d.id : `sd${idx+1}_${di+1}`,
-                        quote: typeof d.quote === "string" ? d.quote : "",
+                        quote: typeof d.quote === "string" ? stripLabel(d.quote) : "",
                         reason: typeof d.reason === "string" ? d.reason.trim() : ""
                     };
                 });
@@ -1306,11 +1317,12 @@ const app = {
                     ? item.device
                     : "";
                 const deviceReason = typeof item.deviceReason === "string" ? item.deviceReason.trim() : "";
-                const inSource = app.quoteInSource(item.quote, sourceText);
+                const cleanedQuote = stripLabel(item.quote);
+                const inSource = app.quoteInSource(cleanedQuote, sourceText);
                 const correct = normalizeCorrect(item.correct, reasons.length);
                 return {
                     id: typeof item.id === "string" ? item.id : `s${idx+1}`,
-                    quote: typeof item.quote === "string" ? item.quote : "",
+                    quote: typeof item.quote === "string" ? cleanedQuote : "",
                     correct: correct,
                     reasons: reasons,
                     distractors: cleanedDistractors,
@@ -1605,6 +1617,7 @@ const app = {
         if(typeof safe.settings.rewardUrl !== "string") safe.settings.rewardUrl = "";
         safe.settings.rewardMinutes = parseInt(safe.settings.rewardMinutes, 10);
         if(isNaN(safe.settings.rewardMinutes) || safe.settings.rewardMinutes < 0) safe.settings.rewardMinutes = 0;
+        if(typeof safe.settings.allowPartialSelection !== "boolean") safe.settings.allowPartialSelection = false;
         if(typeof safe.settings.strictMode !== 'boolean') safe.settings.strictMode = false;
         safe.settings.selectionStages = Array.isArray(safe.settings.selectionStages) && safe.settings.selectionStages.length
             ? safe.settings.selectionStages.filter(v => ["discriminate","boundary","align","justify"].includes(v))
@@ -1699,6 +1712,10 @@ const app = {
         if(!Array.isArray(safe.items)) safe.items = [];
         safe.items = safe.items.map((i, idx) => {
             const item = i && typeof i === 'object' ? i : {};
+            const stripLabel = (q) => {
+                const raw = String(q || "");
+                return raw.replace(/^(start|end|beginning|conclusion|intro|opening|closing|final)\s*:\s*/i, "").trim();
+            };
             const rawLevels = Array.isArray(item.levels)
                 ? item.levels
                 : (typeof item.level === 'number' || typeof item.level === 'string')
@@ -1730,7 +1747,7 @@ const app = {
                 : (['tone','structure','language'].includes(item.category) ? item.category : 'tone');
             return {
                 id: typeof item.id === 'string' ? item.id : `q${idx + 1}`,
-                original: original,
+                original: stripLabel(original),
                 translation: translation,
                 translationDistractors: translationDistractors.filter(v => typeof v === 'string'),
                 type: type,
@@ -2797,14 +2814,16 @@ const ui = {
             </div>`;
             return;
         }
-        const stages = sel.modes && sel.modes.stages ? sel.modes.stages : ["discriminate","align","justify"];
+        const quickPick = sel.modes && sel.modes.quickPick;
+        const baseStages = sel.modes && sel.modes.stages ? sel.modes.stages : ["discriminate","align","justify"];
+        const stages = quickPick ? ["guided"] : baseStages;
         const stageIndex = Math.max(1, Math.min(stages.length, userState.selectionStage || 1));
         const stageKey = stages[stageIndex - 1];
         const level = app.getEffectiveLevel();
         const stageConfig = sel.stageConfigByLevel && sel.stageConfigByLevel[level] ? sel.stageConfigByLevel[level] : {};
         const stageMode = stageConfig[stageKey] || "choice";
         const levelEntry = app.getLevelBank()[level] || {};
-        const targetCount = Math.max(
+        let targetCount = Math.max(
             1,
             (levelEntry.quoteTarget) ? parseInt(levelEntry.quoteTarget, 10)
                 : (appData.settings && appData.settings.quoteTarget) ? parseInt(appData.settings.quoteTarget, 10)
@@ -2831,13 +2850,26 @@ const ui = {
             </div>`;
             return;
         }
+        const totalCorrect = correctItemsAll.length;
+        const inSourceCorrect = correctItemsAll.filter(i => isInSource(i.quote)).length;
+        const levelCorrect = correctItemsAll.filter(i => Array.isArray(i.levels) ? i.levels.includes(level) : false).length;
+        const notChosenCorrect = correctItems.length;
+        const debugLine = `<div style="font-size:0.8rem; opacity:0.7; margin-top:6px;">Debug: total=${totalCorrect}, inSource=${inSourceCorrect}, level=${levelCorrect}, remaining=${notChosenCorrect}, chosen=${chosenList.length}</div>`;
+        const shortBy = Math.max(0, targetCount - (correctItems.length + chosenList.length));
+        const allowPartial = (sel.modes && sel.modes.allowPartial) || (appData.settings && appData.settings.allowPartialSelection) || shortBy <= 1;
+        if(shortBy > 0 && allowPartial) {
+            targetCount = Math.max(1, correctItems.length + chosenList.length);
+        }
         if((correctItems.length + chosenList.length) < targetCount) {
-            cont.innerHTML = `<div class="card" style="cursor:default;">
-                <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Not enough correct quotes</div>
-                <div style="opacity:0.8; margin-bottom:8px;">Target: ${targetCount} correct quotes. Remaining: ${correctItems.length}. Add more correct quotes in the Quote Selection Editor.</div>
-                <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
-            </div>`;
-            return;
+            if(!allowPartial) {
+                cont.innerHTML = `<div class="card" style="cursor:default;">
+                    <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Not enough correct quotes</div>
+                    <div style="opacity:0.8; margin-bottom:8px;">Target: ${targetCount} correct quotes. Remaining: ${correctItems.length}. Add more correct quotes in the Quote Selection Editor.</div>
+                    ${debugLine}
+                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
+                </div>`;
+                return;
+            }
         }
         const primaryCorrect = correctItems[0] || sel.items[0];
         const validChosen = ui._selectionCorrectItem && Array.isArray(ui._selectionCorrectItem.levels)
@@ -3932,6 +3964,8 @@ const admin = {
         if(reward) reward.value = appData.settings.rewardUrl || "";
         const rewardMinutes = document.getElementById("reward-minutes");
         if(rewardMinutes) rewardMinutes.value = String(appData.settings.rewardMinutes || 0);
+        const allowPartial = document.getElementById("allow-partial-selection");
+        if(allowPartial) allowPartial.checked = !!appData.settings.allowPartialSelection;
         const aiTone = document.getElementById("ai-include-tone");
         if(aiTone) aiTone.checked = appData.settings.aiIncludeTone !== false;
         const aiStructure = document.getElementById("ai-include-structure");
@@ -4024,6 +4058,12 @@ const admin = {
         const n = parseInt(v, 10);
         appData.settings.rewardMinutes = isNaN(n) || n < 0 ? 0 : n;
         app.save();
+    },
+    setAllowPartialSelection: (c) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.allowPartialSelection = !!c;
+        app.save();
+        ui.renderSelection();
     },
     setFocusQuestion: (v) => {
         if(!appData) return;
@@ -4624,6 +4664,7 @@ Output ONLY valid JSON.`;
                 userState.selectionEliminated = [];
                 userState.selectionChosen = [];
                 admin.seedLessonFromSelection();
+                admin.autoAssignSelectionLevels(false);
             }
             admin.applyModelAnswersFromItems({ overwrite: false, generate: false });
             app.save();
@@ -4939,6 +4980,7 @@ Requirements:
    - If you can, also include per-slot fields: marker, starter, method, link (optional but preferred).
 ${balanceLine}
 2. Assign EACH item to one level only (${enabledLevels.join(", ")}). Ensure lower levels are simpler and higher levels are more nuanced.
+   - Ensure each level meets its quote target from the Level Bank. Do not leave any level short.
 3. Level rules (STRICT): 
 ${levelRules}
    - Enforce max word limits per level. If a quote exceeds max words, shorten with ellipses per level rule and keep it faithful to the text.
@@ -4994,6 +5036,7 @@ Output ONLY valid JSON.`;
                     appData.selection.modes.stages = appData.settings.selectionStages;
                 }
                 admin.seedLessonFromSelection();
+                admin.autoAssignSelectionLevels(false);
                 userState.selectionCompleted = false;
                 userState.selectionStage = 1;
                 userState.selectionKey = "";
@@ -5113,6 +5156,7 @@ Output ONLY valid JSON.`;
                 appData.selection.modes.stages = appData.settings.selectionStages;
             }
             admin.seedLessonFromSelection();
+            admin.autoAssignSelectionLevels(false);
             userState.selectionCompleted = false;
             userState.selectionStage = 1;
             userState.selectionKey = "";
@@ -5163,9 +5207,10 @@ Requirements:
   items:[{id, quote, correct:true|false, reasons[2], distractors:[{quote, reason}], levels:[1..9], device:"${typeLabel}", deviceReason}],
   modes:{selectionMode:"closed"|"open", showHints:true|false, requireReason:true|false, quoteCount, stages:["recognize","guided","justify","open"]}
 }
-2. Create quotes for ALL active levels:
+2. Create quotes for ALL active levels (required):
 ${targetSummary}
    - Assign each item to one level via levels:[level]
+   - Ensure each level has AT LEAST its target number of correct quotes (no short levels)
    - All quotes must be from the source text
 3. For every correct quote, include device (${typeLabel}) and a short deviceReason.
 4. ${aiDevices.structure ? "Include structurePrompts (7–10) that guide structural discussion (e.g., paragraphing shifts, time/sequence, zoom, placement, repetition, circular structure, juxtaposition)." : "Skip structurePrompts (structure is disabled)."}
@@ -5283,6 +5328,12 @@ Output ONLY JSON.`;
                 <input type="number" id="selection-quote-count" min="2" max="10" value="${parseInt(sel.modes.quoteCount, 10) || 4}" onchange="admin.updateSelectionMeta('quoteCount', this.value)">
             </div>
             <div class="input-group">
+                <label>Quick Pick Mode</label>
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;">
+                    <input type="checkbox" ${sel.modes.quickPick ? "checked" : ""} onchange="admin.updateSelectionMeta('quickPick', this.checked)"> Pick one quote at a time (skip other stages)
+                </label>
+            </div>
+            <div class="input-group">
                 <label>Require Justification</label>
                 <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;">
                     <input type="checkbox" ${sel.modes.requireReason ? "checked" : ""} onchange="admin.updateSelectionMeta('requireReason', this.checked)"> Require reason before saving quotes
@@ -5351,6 +5402,8 @@ Output ONLY JSON.`;
             appData.selection.modes.quoteCount = n;
         } else if(key === "requireReason") {
             appData.selection.modes.requireReason = !!value;
+        } else if(key === "quickPick") {
+            appData.selection.modes.quickPick = !!value;
         }
         app.save();
         ui.init();
@@ -5412,6 +5465,13 @@ Output ONLY JSON.`;
                 : 4;
         };
         const isLevelMatch = (item, lvl) => (!Array.isArray(item.levels) || item.levels.includes(lvl));
+        const normalizeLine = (s) => String(s || "").replace(/\s+/g, " ").trim();
+        const buildDistractorsFromQuotes = (base, pool, count) => {
+            const items = pool
+                .map(p => ({ quote: p, reason: "Weaker choice." }))
+                .filter(p => p.quote && app.quoteKey(p.quote) !== app.quoteKey(base));
+            return app.shuffle(items).slice(0, count).map((d, i) => ({ id: `sd_auto_${Date.now()}_${i+1}`, quote: d.quote, reason: d.reason }));
+        };
         activeLevels.forEach(lvl => {
             const target = getTarget(lvl);
             const correctItems = sel.items.filter(i => i && i.correct && isLevelMatch(i, lvl));
@@ -5421,6 +5481,11 @@ Output ONLY JSON.`;
             promotable.slice(0, needed).forEach(i => {
                 i.correct = true;
                 if(!Array.isArray(i.reasons) || !i.reasons.length) i.reasons = ["Strong evidence."];
+                // Rebuild distractors from other quotes at the same level.
+                const sameLevelQuotes = sel.items
+                    .filter(x => x && x.quote && x !== i && isLevelMatch(x, lvl))
+                    .map(x => normalizeLine(x.quote));
+                i.distractors = buildDistractorsFromQuotes(normalizeLine(i.quote), sameLevelQuotes, 2);
             });
         });
         app.save();
@@ -5500,7 +5565,7 @@ Output ONLY JSON.`;
                 incorrect: entry.distractorCount || 0
             };
         });
-        const assignPool = (items, key) => {
+        const assignPool = (items, key, preserve) => {
             let idx = 0;
             const levels = activeLevels.slice();
             const expanded = [];
@@ -5511,12 +5576,35 @@ Output ONLY JSON.`;
             if(!expanded.length) return;
             items.forEach(item => {
                 const lvl = expanded[idx % expanded.length];
-                item.levels = [lvl];
+                if(!preserve || !Array.isArray(item.levels) || !item.levels.length) {
+                    item.levels = [lvl];
+                }
                 idx += 1;
             });
         };
-        assignPool(correctItems, "correct");
-        assignPool(incorrectItems, "incorrect");
+        // Auto-assign only when a level is short (preserve existing assignments).
+        const countByLevel = (items) => {
+            const counts = Object.fromEntries(activeLevels.map(l => [l, 0]));
+            items.forEach(it => {
+                const lvl = Array.isArray(it.levels) && it.levels.length ? it.levels[0] : null;
+                if(lvl && counts[lvl] !== undefined) counts[lvl] += 1;
+            });
+            return counts;
+        };
+        const correctCounts = countByLevel(correctItems);
+        activeLevels.forEach(lvl => {
+            const needed = Math.max(0, (targets[lvl].correct || 0) - (correctCounts[lvl] || 0));
+            if(!needed) return;
+            const candidates = correctItems.filter(i => !Array.isArray(i.levels) || !i.levels.length || i.levels[0] !== lvl);
+            candidates.slice(0, needed).forEach(i => { i.levels = [lvl]; });
+        });
+        const incorrectCounts = countByLevel(incorrectItems);
+        activeLevels.forEach(lvl => {
+            const needed = Math.max(0, (targets[lvl].incorrect || 0) - (incorrectCounts[lvl] || 0));
+            if(!needed) return;
+            const candidates = incorrectItems.filter(i => !Array.isArray(i.levels) || !i.levels.length || i.levels[0] !== lvl);
+            candidates.slice(0, needed).forEach(i => { i.levels = [lvl]; });
+        });
         app.save();
         admin.renderSelectionEditor();
         ui.renderSelection();
