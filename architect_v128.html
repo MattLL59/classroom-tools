@@ -15,7 +15,9 @@
         --reader-highlight-border: rgba(0, 150, 136, 0.5);
         --reader-highlight-line: rgba(0, 150, 136, 0.6);
         --reader-highlight-line-height: 2px;
+        --reader-window-height-base: 3.2em;
         --reader-window-height: 3.2em;
+        --reader-zoom: 1.1rem;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
@@ -130,6 +132,7 @@
     .reader-label { font-size:0.85rem; display:flex; align-items:center; gap:6px; }
     .reader-controls input[type="range"] { width:120px; }
     .reader-body { position: relative; }
+    #source-content, #source-inline, #intro-text, #reader-window { font-size: var(--reader-zoom) !important; }
     .reader-window { position: absolute; left: 10px; right: 10px; top: 72px; height: var(--reader-window-height); border: 2px solid var(--reader-highlight-border); border-radius: 8px; background: var(--reader-highlight); pointer-events: none; z-index: 2; }
     .reader-window-line { display:none; }
     .stage-tag { background: rgba(0,0,0,0.04); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
@@ -178,7 +181,10 @@
         <div class="celebration-inner">
             <div class="celebration-title" id="celebration-title">Level Complete! 🎉</div>
             <div id="celebration-sub" style="margin-bottom:15px; color:#cfd8dc;">Great work!</div>
-            <button class="btn btn-primary" id="celebration-btn" onclick="ui.closeCelebration()">Continue</button>
+            <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                <button class="btn btn-primary" id="celebration-btn" onclick="ui.closeCelebration()">Continue</button>
+                <button class="btn btn-outline" id="celebration-reward" style="display:none;">Play Reward</button>
+            </div>
         </div>
     </div>
 
@@ -253,6 +259,7 @@
         <div id="view-desk" class="hub">
             <div style="padding:15px;">
                 <div class="section-header" style="margin-top:0;">Sentence Construction</div>
+                <div id="desk-quote-tabs" class="hidden" style="display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px 0;"></div>
                 <div id="sentence-builder" class="builder-area">
                     <div style="text-align:center; opacity:0.6; padding:20px;">Select a quote in the Evidence Lab to start.</div>
                 </div>
@@ -296,9 +303,6 @@
                     <button class="btn btn-outline btn-small" id="reader-toggle" onclick="ui.toggleReader()">Auto-Scroll</button>
                     <label class="reader-label">Speed
                         <input type="range" id="reader-speed" min="1" max="120" value="40">
-                    </label>
-                    <label class="reader-label">Zoom
-                        <input type="range" id="reader-zoom" min="90" max="160" value="110">
                     </label>
                     <label class="reader-label">Window
                         <input type="range" id="reader-height" min="2" max="8" step="0.2" value="3.2">
@@ -365,6 +369,16 @@
                     <h3 class="admin-h">🛠️ Controls</h3>
                     <label style="display:block; margin-bottom:5px;"><input type="checkbox" id="keep-unlocked" onchange="admin.setUnlocked(this.checked)"> Keep Unlocked</label>
                     <label style="display:block; margin-bottom:5px;"><input type="checkbox" id="auto-progress" onchange="admin.setAutoProgress(this.checked)"> Auto-progress Levels</label>
+                    <div class="input-group" style="margin-top:8px;">
+                        <label>Reward Link (Student)</label>
+                        <input type="text" id="reward-url" placeholder="https://example.com/game" onchange="admin.setRewardUrl(this.value)">
+                        <div style="font-size:0.8rem; opacity:0.7; margin-top:4px;">Shown on Level Complete screen.</div>
+                    </div>
+                    <div class="input-group" style="margin-top:6px;">
+                        <label>Reward Time (minutes)</label>
+                        <input type="number" id="reward-minutes" min="0" value="0" onchange="admin.setRewardMinutes(this.value)">
+                        <div style="font-size:0.8rem; opacity:0.7; margin-top:4px;">0 disables time limit.</div>
+                    </div>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="practice-mode" onchange="admin.setPracticeMode(this.checked)"> Practice Mode (lock selected level)</label>
                     <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
                         <label style="font-size:0.85rem;">Start in:</label>
@@ -434,6 +448,9 @@
                 <div class="admin-section">
                     <h3 class="admin-h">📝 Edit Evidence (Quotes)</h3>
                     <div id="quote-editor-list" style="max-height:300px; overflow-y:auto; padding-right:5px;"></div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 10px 0;">
+                        <button class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()">Generate & Split Model Answers</button>
+                    </div>
                     <button class="btn btn-success" onclick="admin.addQuote()">+ New Quote</button>
                 </div>
 
@@ -534,6 +551,23 @@
                         <div style="width:120px"><label style="font-size:0.8rem">Quotes (lesson items)</label><input type="number" id="ai-count" value="6" min="1" max="20" style="width:100%; padding:5px;"></div>
                     </div>
                     <div style="font-size:0.75rem; opacity:0.7; margin-bottom:8px;">This count is for correct lesson quotes; distractors are generated inside each item.</div>
+                    <div class="input-group" style="margin-bottom:8px;">
+                        <label>AI Prompt Includes</label>
+                        <div class="level-checks" style="margin-top:0;">
+                            <label>Language<input type="checkbox" checked disabled></label>
+                            <label>Tone<input type="checkbox" id="ai-include-tone" onchange="admin.setAiDevice('tone', this.checked)"></label>
+                            <label>Structure<input type="checkbox" id="ai-include-structure" onchange="admin.setAiDevice('structure', this.checked)"></label>
+                        </div>
+                    </div>
+                    <div class="input-group" style="margin-bottom:8px;">
+                        <label>Student App Exports Include</label>
+                        <div class="level-checks" style="margin-top:0;">
+                            <label>Language<input type="checkbox" checked disabled></label>
+                            <label>Tone<input type="checkbox" id="export-include-tone" onchange="admin.setExportDevice('tone', this.checked)"></label>
+                            <label>Structure<input type="checkbox" id="export-include-structure" onchange="admin.setExportDevice('structure', this.checked)"></label>
+                        </div>
+                        <div style="font-size:0.75rem; opacity:0.7;">Set these before exporting to create different student versions.</div>
+                    </div>
                     <button class="btn btn-outline btn-small" onclick="admin.toggleAiPanel()" style="margin-bottom:8px;">Show/Hide JSON Panel</button>
                     <details class="guide-box">
                         <summary>Level Rules (1–9)</summary>
@@ -919,7 +953,7 @@ const defaultData = {
     sourceText: "The sky was a bruised purple...",
     question: "How is language used?",
     settings: { 
-        autoProgress: false,
+        autoProgress: true,
         practiceMode: false,
         practiceModeLevel: 1,
         practiceForceAuto: false,
@@ -927,7 +961,13 @@ const defaultData = {
         worksheetMatchMode: "jumbled",
         activeLevels: [1,2,3],
         aiPromptAllLevels: false,
+        aiIncludeTone: true,
+        aiIncludeStructure: true,
+        exportIncludeTone: true,
+        exportIncludeStructure: true,
         quoteTarget: 4,
+        rewardUrl: "",
+        rewardMinutes: 0,
         strictMode: false,
         selectionStages: ["discriminate","align","justify"],
         modulesActive: { selection: true, lab: true, desk: true },
@@ -1002,9 +1042,39 @@ const app = {
         }
         return "tsa_v5_1_state";
     },
+    getAiDevices: function() {
+        const s = appData && appData.settings ? appData.settings : {};
+        return {
+            tone: s.aiIncludeTone !== false,
+            structure: s.aiIncludeStructure !== false,
+            language: true
+        };
+    },
+    getExportDevices: function() {
+        const s = appData && appData.settings ? appData.settings : {};
+        return {
+            tone: s.exportIncludeTone !== false,
+            structure: s.exportIncludeStructure !== false,
+            language: true
+        };
+    },
+    getDeviceOptions: function() {
+        const labels = { tone: "Tone", language: "Language", structure: "Structure" };
+        const devices = appData && appData.isStandalone ? app.getExportDevices() : { tone: true, structure: true, language: true };
+        const options = Object.keys(labels).filter(k => devices[k]);
+        const labelText = options.length ? options.map(k => labels[k]).join(" / ") : "Language";
+        const listText = options.length <= 1
+            ? (options[0] || "language")
+            : `${options.slice(0, -1).join(", ")} or ${options[options.length - 1]}`;
+        const evidenceText = options.includes("structure")
+            ? (options.includes("language") ? "words or structure" : "structure")
+            : "words";
+        return { options, labels, labelText, listText, evidenceText };
+    },
     getEffectiveLevel: function() {
         const practice = appData && appData.settings && appData.settings.practiceMode;
-        if(practice) return appData.settings.practiceModeLevel || 1;
+        const autoProgress = appData && appData.settings && appData.settings.autoProgress;
+        if(practice && !autoProgress) return appData.settings.practiceModeLevel || 1;
         return userState && userState.level ? userState.level : 1;
     },
     getLevelBank: function() {
@@ -1162,7 +1232,25 @@ const app = {
                 stageConfigByLevel[lvl][key] = cfg[key] === "free" ? "free" : "choice";
             });
         });
-        const sourceText = app.cleanSourceText(text.source || safe.sourceText || "");
+        const rawPrimary = app.cleanSourceText(text.source || "");
+        const rawFallback = app.cleanSourceText(safe.sourceText || (appData && appData.sourceText) || "");
+        const sourceText = (rawPrimary && rawFallback && rawPrimary.length < 80 && rawFallback.length > rawPrimary.length)
+            ? rawFallback
+            : (rawPrimary || rawFallback);
+        const normalizeCorrect = (value, hasReasons) => {
+            if(value === true) return true;
+            if(value === false) return false;
+            if(typeof value === "number") return value > 0;
+            if(typeof value === "string") {
+                const v = value.trim().toLowerCase();
+                if(["true","yes","y","1","analysis","correct"].includes(v)) return true;
+                if(["false","no","n","0","noise","incorrect","wrong"].includes(v)) return false;
+            }
+            if(typeof value === "undefined" || value === null) {
+                return !!hasReasons;
+            }
+            return !!value && !!hasReasons;
+        };
         return {
             enabled: !!safe.enabled || items.length > 0,
             text: { source: sourceText },
@@ -1219,10 +1307,11 @@ const app = {
                     : "";
                 const deviceReason = typeof item.deviceReason === "string" ? item.deviceReason.trim() : "";
                 const inSource = app.quoteInSource(item.quote, sourceText);
+                const correct = normalizeCorrect(item.correct, reasons.length);
                 return {
                     id: typeof item.id === "string" ? item.id : `s${idx+1}`,
                     quote: typeof item.quote === "string" ? item.quote : "",
-                    correct: item.correct === true,
+                    correct: correct,
                     reasons: reasons,
                     distractors: cleanedDistractors,
                     levels: levels,
@@ -1473,6 +1562,7 @@ const app = {
         if(!userState.selectionProgress || typeof userState.selectionProgress !== "object") userState.selectionProgress = {};
         if(!Array.isArray(userState.selectionEliminated)) userState.selectionEliminated = [];
         if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+        if(!Array.isArray(userState.deskQueue)) userState.deskQueue = [];
         if(typeof userState.labCompleted !== "boolean") userState.labCompleted = false;
         if(typeof userState.view !== "string") userState.view = "";
 
@@ -1508,6 +1598,13 @@ const app = {
             : [1,2,3];
         if(!safe.settings.activeLevels.length) safe.settings.activeLevels = [1,2,3];
         if(typeof safe.settings.aiPromptAllLevels !== 'boolean') safe.settings.aiPromptAllLevels = false;
+        if(typeof safe.settings.aiIncludeTone !== 'boolean') safe.settings.aiIncludeTone = true;
+        if(typeof safe.settings.aiIncludeStructure !== 'boolean') safe.settings.aiIncludeStructure = true;
+        if(typeof safe.settings.exportIncludeTone !== 'boolean') safe.settings.exportIncludeTone = true;
+        if(typeof safe.settings.exportIncludeStructure !== 'boolean') safe.settings.exportIncludeStructure = true;
+        if(typeof safe.settings.rewardUrl !== "string") safe.settings.rewardUrl = "";
+        safe.settings.rewardMinutes = parseInt(safe.settings.rewardMinutes, 10);
+        if(isNaN(safe.settings.rewardMinutes) || safe.settings.rewardMinutes < 0) safe.settings.rewardMinutes = 0;
         if(typeof safe.settings.strictMode !== 'boolean') safe.settings.strictMode = false;
         safe.settings.selectionStages = Array.isArray(safe.settings.selectionStages) && safe.settings.selectionStages.length
             ? safe.settings.selectionStages.filter(v => ["discriminate","boundary","align","justify"].includes(v))
@@ -1690,6 +1787,9 @@ const app = {
         const target = parseInt(l, 10);
         const levels = app.getActiveLevels();
         userState.level = levels.includes(target) ? target : levels[0];
+        if(!(appData.settings && appData.settings.practiceMode && appData.settings.autoProgress)) {
+            userState.showDone = false;
+        }
         if(appData.selection && appData.selection.enabled) {
             userState.selectionCompleted = false;
             userState.selectionStage = 1;
@@ -1733,9 +1833,31 @@ const app = {
         if(ui.activeQuoteId && !userState.completed.includes(ui.activeQuoteId)) {
             userState.completed.push(ui.activeQuoteId);
         }
+        if(appData.settings && appData.settings.autoProgress) {
+            userState.showDone = false;
+        }
+        if(Array.isArray(userState.deskQueue) && ui.activeQuoteId) {
+            const active = appData.items.find(i => i.id === ui.activeQuoteId);
+            if(active && active.original && userState.deskQueue.length) {
+                const idx = userState.deskQueue.findIndex(q => q === active.original);
+                if(idx >= 0) {
+                    userState.deskQueue.splice(idx, 1);
+                } else {
+                    userState.deskQueue.shift();
+                }
+            }
+        }
         
         app.save();
         app.checkLevelCompletion();
+        if(Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
+            const nextItem = ui.ensureQuoteItem(userState.deskQueue[0]);
+            if(nextItem) {
+                ui.switchView('desk');
+                ui.runBuilder(nextItem);
+                return;
+            }
+        }
         if(appData.settings && appData.settings.modulesActive && appData.settings.modulesActive.selection) {
             ui.switchView('select');
             ui.renderSelection();
@@ -1746,7 +1868,9 @@ const app = {
     },
 
     checkLevelCompletion: function() {
-        if(appData.settings && appData.settings.practiceMode) return;
+        const practiceMode = appData.settings && appData.settings.practiceMode;
+        const autoProgress = appData.settings && appData.settings.autoProgress;
+        if(practiceMode && !autoProgress) return;
         const levelItems = appData.items
             .filter(i => i.levels.includes(userState.level))
             .filter(i => {
@@ -1759,8 +1883,18 @@ const app = {
         if(levelItems.length === 0) return;
 
         const allDone = levelItems.every(i => userState.completed.includes(i.id));
+        let meetsTarget = false;
+        if(autoProgress) {
+            const bank = app.getLevelBank();
+            const entry = bank && bank[userState.level] ? bank[userState.level] : {};
+            const target = parseInt(entry.quoteTarget, 10) || parseInt(appData.settings.quoteTarget, 10) || 0;
+            if(target > 0) {
+                const completedInLevel = levelItems.filter(i => userState.completed.includes(i.id)).length;
+                meetsTarget = completedInLevel >= target;
+            }
+        }
 
-        if(allDone) {
+        if(allDone || meetsTarget) {
             if(!userState.completedLevels.includes(userState.level)) {
                 userState.completedLevels.push(userState.level);
             }
@@ -1862,7 +1996,7 @@ const ui = {
     getStageLabel: function(key) {
         const map = {
             discriminate: "Choose best quote",
-            align: "Tone / Language / Structure",
+            align: app.getDeviceOptions().labelText,
             justify: "How / Why / Justify",
             boundary: "Length"
         };
@@ -1924,23 +2058,28 @@ const ui = {
         const activeLevels = app.getActiveLevels();
         if(!activeLevels.includes(userState.level)) userState.level = activeLevels[0];
         if(levelSelect) levelSelect.value = userState.level;
-        const hasSelection = appData.settings && appData.settings.modulesActive && appData.settings.modulesActive.selection && appData.selection && appData.selection.enabled;
+        const modules = appData.settings && appData.settings.modulesActive
+            ? appData.settings.modulesActive
+            : { selection: true, lab: true, desk: true };
+        const hasSelection = modules.selection && appData.selection && appData.selection.enabled;
         const pref = appData.settings && appData.settings.startView ? appData.settings.startView : "";
-        if(appData.isStandalone) {
-            if(pref === "select" && hasSelection) userState.view = "select";
-            else if(pref === "desk" && appData.settings.modulesActive && appData.settings.modulesActive.desk) userState.view = "desk";
-            else userState.view = hasSelection ? "select" : "lab";
-        } else if(pref === "select" && hasSelection) {
-            userState.view = "select";
-        } else if(pref === "desk" && appData.settings.modulesActive && appData.settings.modulesActive.desk) {
-            userState.view = "desk";
+        const resolveStartView = () => {
+            if(pref === "select" && hasSelection) return "select";
+            if(pref === "desk" && modules.desk) return "desk";
+            if(pref === "lab" && modules.lab) return "lab";
+            if(hasSelection) return "select";
+            if(modules.lab) return "lab";
+            return modules.desk ? "desk" : "lab";
+        };
+        if(pref) {
+            userState.view = resolveStartView();
         } else if(!userState.view) {
-            userState.view = hasSelection ? "select" : "lab";
+            userState.view = resolveStartView();
         }
         ui.switchView(userState.view);
         ui.loadTheme();
 
-        if(appData.settings && appData.settings.practiceMode) {
+        if(appData.settings && appData.settings.practiceMode && !(appData.settings && appData.settings.autoProgress)) {
             const lvl = appData.settings.practiceModeLevel || 1;
             userState.level = lvl;
             userState.showDone = true;
@@ -1965,15 +2104,13 @@ const ui = {
             admin.syncUI();
         }
 
-        const modules = appData.settings && appData.settings.modulesActive
-            ? appData.settings.modulesActive
-            : { selection: true, lab: true, desk: true };
+        const modulesActive = modules;
         const selectNav = document.getElementById("nav-select");
         if(selectNav) {
-            const hasSelection = modules.selection && appData.selection && appData.selection.enabled && appData.selection.items.length;
+            const hasSelection = modulesActive.selection && appData.selection && appData.selection.enabled && appData.selection.items.length;
             selectNav.classList.toggle("hidden", !hasSelection);
         }
-        const selectionEnabled = modules.selection && appData.selection && appData.selection.enabled && appData.selection.items.length;
+        const selectionEnabled = modulesActive.selection && appData.selection && appData.selection.enabled && appData.selection.items.length;
         if(selectionEnabled) {
             const key = app.getSelectionKey();
             if(key && userState.selectionKey !== key) {
@@ -1998,7 +2135,9 @@ const ui = {
         const zoom = document.getElementById("reader-zoom");
         if(zoom && !zoom.dataset.bound) {
             zoom.dataset.bound = "true";
-            zoom.addEventListener("input", () => ui.applyReaderZoom(zoom.value));
+            const onZoom = () => ui.applyReaderZoom(zoom.value);
+            zoom.addEventListener("input", onZoom);
+            zoom.addEventListener("change", onZoom);
         }
         const saved = localStorage.getItem("tsa_reader_zoom");
         if(zoom && saved) zoom.value = saved;
@@ -2028,17 +2167,31 @@ const ui = {
         win.style.top = `${offset}px`;
     },
     applyReaderZoom: function(value) {
-        const content = document.getElementById("source-content");
-        if(!content) return;
         const pct = Math.max(80, Math.min(180, parseInt(value, 10) || 110));
-        content.style.fontSize = (pct / 100) + "rem";
+        const size = (pct / 100) + "rem";
+        document.documentElement.style.setProperty("--reader-zoom", size);
+        ui.updateReaderWindowHeight(pct);
+        ["source-content", "source-inline", "intro-text"].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) el.style.setProperty("font-size", size, "important");
+        });
+        const windowEl = document.getElementById("reader-window");
+        if(windowEl) windowEl.style.setProperty("font-size", size, "important");
         localStorage.setItem("tsa_reader_zoom", String(pct));
+    },
+    updateReaderWindowHeight: function(pct) {
+        const zoomPct = Math.max(80, Math.min(180, parseInt(pct, 10) || 110));
+        const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--reader-window-height-base")) || 3.2;
+        const scaled = base * (zoomPct / 110);
+        document.documentElement.style.setProperty("--reader-window-height", `${scaled}em`);
+        ui.positionReaderWindow();
     },
     applyReaderHeight: function(value) {
         const v = Math.max(2, Math.min(8, parseFloat(value) || 3.2));
-        document.documentElement.style.setProperty("--reader-window-height", `${v}em`);
+        document.documentElement.style.setProperty("--reader-window-height-base", `${v}em`);
         localStorage.setItem("tsa_reader_height", String(v));
-        ui.positionReaderWindow();
+        const zoomEl = document.getElementById("reader-zoom");
+        ui.updateReaderWindowHeight(zoomEl ? zoomEl.value : 110);
     },
     getKeywordMap: function(question, focusTags) {
         const map = {};
@@ -2191,8 +2344,20 @@ const ui = {
             document.getElementById("global-card-container").innerHTML = "";
             return;
         }
+
+        const deviceSettings = appData.isStandalone ? app.getExportDevices() : { tone: true, structure: true, language: true };
+        const filterButtons = document.querySelectorAll(".filter-btn[data-filter]");
+        filterButtons.forEach(btn => {
+            const f = btn.dataset.filter;
+            if(f === "tone" || f === "structure" || f === "language") {
+                btn.classList.toggle("hidden", !deviceSettings[f]);
+            }
+        });
+        if(appData.isStandalone && userState.filter !== "all" && !deviceSettings[userState.filter]) {
+            userState.filter = "all";
+        }
         
-        const practiceMode = appData.settings && appData.settings.practiceMode;
+        const practiceMode = appData.settings && appData.settings.practiceMode && !(appData.settings && appData.settings.autoProgress);
         const effectiveLevel = practiceMode ? (appData.settings.practiceModeLevel || 1) : userState.level;
 
         // If current level has no items, jump to first available level
@@ -2205,7 +2370,10 @@ const ui = {
             }
         }
 
-        const levelItems = appData.items.filter(i => practiceMode ? true : i.levels.includes(userState.level));
+        let levelItems = appData.items.filter(i => practiceMode ? true : i.levels.includes(userState.level));
+        if(appData.isStandalone) {
+            levelItems = levelItems.filter(i => !i || !i.type || deviceSettings[i.type]);
+        }
         const levelDone = levelItems.length > 0 && levelItems.every(i => userState.completed.includes(i.id));
         const maxLevel = Math.max(...app.getActiveLevels());
         if(!practiceMode && userState.level === maxLevel && levelDone) {
@@ -2282,7 +2450,15 @@ const ui = {
         if(v === "select") ui.renderSelection();
     },
 
-    openModal: (id) => document.getElementById(id).classList.add("open"),
+    openModal: (id) => {
+        const modal = document.getElementById(id);
+        if(modal) modal.classList.add("open");
+        if(id === "modal-source") {
+            const zoom = document.getElementById("reader-zoom");
+            ui.applyReaderZoom(zoom ? zoom.value : 110);
+            ui.positionReaderWindow();
+        }
+    },
     closeModal: (id) => {
         document.getElementById(id).classList.remove("open");
         if(id === 'modal-source') { ui.stopReader(); }
@@ -2440,15 +2616,16 @@ const ui = {
     runBuilder: function(item) {
         ui.activeQuoteId = item.id;
         ui.switchView("desk");
+        ui.renderDeskQuoteTabs();
         const cont = document.getElementById("sentence-builder"); cont.innerHTML = "";
-        const level = (appData.settings && appData.settings.practiceMode)
+        const level = (appData.settings && appData.settings.practiceMode && !(appData.settings && appData.settings.autoProgress))
             ? (appData.settings.practiceModeLevel || 1)
             : userState.level;
         let cfg = appData.sentenceConfig[level] || appData.sentenceConfig[3] || [];
-        if(appData.settings && appData.settings.practiceMode && appData.settings.practiceFixedTemplate) {
+        if(appData.settings && appData.settings.practiceMode && !appData.settings.autoProgress && appData.settings.practiceFixedTemplate) {
             cfg = app.getPracticeTemplate(level);
         }
-        if(appData.settings && appData.settings.practiceMode && appData.settings.practiceForceAuto) {
+        if(appData.settings && appData.settings.practiceMode && !appData.settings.autoProgress && appData.settings.practiceForceAuto) {
             const linkSlot = `link_l${level}`;
             const mapSlot = (slot) => {
                 if(!slot || !slot.startsWith("manual")) return slot;
@@ -2468,6 +2645,7 @@ const ui = {
                 row.innerHTML = `<span class="slot-label">EVIDENCE</span><div class="slot-static" data-v='"${item.original}"'>"${item.original}"</div>`;
             } else if(slot.startsWith("manual")) {
                 let lbl = slot.split('_')[1] || "Text";
+                // Manual slots are always student-filled (no auto-prefill).
                 row.innerHTML = `<span class="slot-label">${lbl.toUpperCase()} (Idea)</span><input class="slot-input" oninput="ui.updPrev()">`;
             } else {
                 let key = slot.includes("link") ? (slot.split('_')[1]||'l1') : slot+"s";
@@ -2491,6 +2669,10 @@ const ui = {
                         const base = Array.isArray(item.methods) ? item.methods : (item.method ? [item.method] : null);
                         if(base && base.length) return [...base, ...(item.methodDistractors || [])].filter(Boolean);
                     }
+                    if(slot.includes("link")) {
+                        const base = Array.isArray(item.links) ? item.links : (item.link ? [item.link] : null);
+                        if(base && base.length) return [...base, ...(item.linkDistractors || [])].filter(Boolean);
+                    }
                     return null;
                 })();
 
@@ -2502,6 +2684,7 @@ const ui = {
                     if(slot === "starter") correct = item.starter || (Array.isArray(item.starters) ? item.starters[0] : null);
                     if(slot === "marker") correct = item.marker || (Array.isArray(item.markers) ? item.markers[0] : null);
                     if(slot === "method") correct = item.method || (Array.isArray(item.methods) ? item.methods[0] : null);
+                    if(slot.includes("link")) correct = item.link || (Array.isArray(item.links) ? item.links[0] : null);
                 }
                 else if(slot.includes("link")) {
                     list = appData.banks.links[key];
@@ -2510,7 +2693,13 @@ const ui = {
                     list = appData.banks[key];
                 }
                 if(list) {
-                    const options = correct ? app.shuffle(list) : list;
+                    const toText = (o) => {
+                        if(typeof o === "string") return o;
+                        if(o && typeof o === "object" && typeof o.text === "string") return o.text;
+                        return "";
+                    };
+                    const normalized = list.map(toText).filter(Boolean);
+                    const options = correct ? app.shuffle(normalized) : normalized;
                     row.innerHTML = `<span class="slot-label">${slot.toUpperCase()}</span><select class="slot-select" onchange="ui.updPrev()"><option value="">Select...</option>${options.map(o=>`<option>${o}</option>`).join('')}</select>`;
                     if(correct) {
                         const sel = row.querySelector("select");
@@ -2623,14 +2812,29 @@ const ui = {
                 : sel.modes.quoteCount
         );
         const correctItemsAll = sel.items.filter(i => i.correct);
-        const sourceText = sel.text && sel.text.source ? sel.text.source : appData.sourceText;
-        const isInSource = (q) => app.quoteInSource(q, sourceText);
+        const sourceText = app.getSourceText();
+        const hasSource = !!(sourceText && String(sourceText).trim());
+        const isInSource = (q) => hasSource ? app.quoteInSource(q, sourceText) : true;
         let correctItems = correctItemsAll.filter(i => Array.isArray(i.levels) ? i.levels.includes(level) : false);
         correctItems = correctItems.filter(i => isInSource(i.quote));
-        if(correctItems.length < targetCount) {
+        if(!correctItems.length && correctItemsAll.length) {
+            correctItems = correctItemsAll.filter(i => isInSource(i.quote));
+        }
+        const chosenList = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
+        const chosenSet = new Set(chosenList.map(q => app.quoteKey(q)));
+        correctItems = correctItems.filter(i => !chosenSet.has(app.quoteKey(i.quote)));
+        if(chosenList.length >= targetCount) {
+            cont.innerHTML = `<div class="card" style="cursor:default;">
+                <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">All quotes selected</div>
+                <div style="opacity:0.8; margin-bottom:8px;">You have selected ${chosenList.length} / ${targetCount} quotes.</div>
+                <button class="btn btn-outline" onclick="ui.sendSelectionQuotesToBuilder()">Send quotes to Sentence Builder</button>
+            </div>`;
+            return;
+        }
+        if((correctItems.length + chosenList.length) < targetCount) {
             cont.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Not enough correct quotes</div>
-                <div style="opacity:0.8; margin-bottom:8px;">Target: ${targetCount} correct quotes. Found: ${correctItems.length}. Add more correct quotes in the Quote Selection Editor.</div>
+                <div style="opacity:0.8; margin-bottom:8px;">Target: ${targetCount} correct quotes. Remaining: ${correctItems.length}. Add more correct quotes in the Quote Selection Editor.</div>
                 <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
             </div>`;
             return;
@@ -2683,8 +2887,6 @@ const ui = {
             .filter(o => !eliminatedSet.has(app.quoteKey(o.quote)) || o.correct)
             .slice(0, sel.modes.quoteCount);
         const reasons = app.shuffle([...(chosenCorrect.reasons || []), ...distractorItems.map(d => d.reason).filter(Boolean)]);
-        const chosenList = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
-        const chosenSet = new Set(chosenList.map(q => app.quoteKey(q)));
         const textHtml = app.formatSourceHtml(sel.text && sel.text.source ? sel.text.source : appData.sourceText);
         const tier = app.getLanguageTier(level);
         const easy = tier === "low";
@@ -2711,7 +2913,7 @@ const ui = {
                 <summary style="font-weight:700;">Why quote choice matters</summary>
                 <div style="margin-top:8px; font-size:0.9rem; opacity:0.9;">
                     Choosing evidence is like being a literary lawyer. You are not just picking a "good line" — you are building a case.
-                    The best quote must show how the writer uses words or structure to support your exact claim.
+                    The best quote must show how the writer uses ${app.getDeviceOptions().evidenceText} to support your exact claim.
                 </div>
                 <div style="margin-top:8px; font-size:0.9rem; opacity:0.9;">
                     Three skills:
@@ -2761,6 +2963,7 @@ const ui = {
         if(clearBtn) {
             clearBtn.onclick = () => {
                 userState.selectionChosen = [];
+                userState.deskQueue = [];
                 app.save();
                 ui.renderSelection();
             };
@@ -2836,7 +3039,7 @@ const ui = {
                     const correct = o.correct ? "analysis" : "noise";
                     userState.selectionProgress.discriminate[key] = choice;
                     const reasonRaw = reasonMap.get(app.quoteKey(o.quote)) || (o.correct
-                        ? "Good choice: it shows the writer's words or structure."
+                        ? `Good choice: it shows the writer's ${app.getDeviceOptions().evidenceText}.`
                         : "Not strong: this is mostly what happened.");
                     const reason = app.simplifyText(reasonRaw, tier);
                     if(choice === correct) {
@@ -2915,8 +3118,10 @@ const ui = {
             return;
         }
         if(stageKey === "align") {
-            const deviceOptions = ["tone","language","structure"];
-            const deviceLabels = { tone: "Tone", language: "Language", structure: "Structure" };
+            const deviceInfo = app.getDeviceOptions();
+            const deviceOptions = deviceInfo.options;
+            const deviceLabels = deviceInfo.labels;
+            const deviceLabelText = deviceInfo.labelText;
             const storedKey = `${level}:${stageKey}`;
             userState.selectionProgress.freeText = userState.selectionProgress.freeText || {};
             userState.selectionProgress.alignDone = userState.selectionProgress.alignDone || {};
@@ -2936,7 +3141,7 @@ const ui = {
                 : (alignPool.length ? alignPool[alignIndex % alignPool.length] : (correctItems[0] || chosenCorrect));
             if(stageMode === "free") {
                 const existing = userState.selectionProgress.freeText[storedKey] || "";
-                body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Tone / Language / Structure</div>
+                body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">${deviceLabelText}</div>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Which category best fits this quote, and why? Use the question and key words to explain.</div>
                     <div class="card" style="cursor:default; margin-bottom:8px;"><div class="quote-text">"${app.escapeHtml(alignCorrect.quote)}"</div></div>
                     ${alignCorrect && alignCorrect.device === "structure" ? `<div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">If this is structure, consider: ${structurePrompts.map(p=>`<span class="bank-tag">${app.escapeHtml(p)}</span>`).join(" ")}</div>` : ""}
@@ -2967,7 +3172,7 @@ const ui = {
             }
             const correctDevice = (alignCorrect && alignCorrect.device) ? alignCorrect.device : "";
             if(!correctDevice) {
-                body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Tone / Language / Structure</div>
+                body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">${deviceLabelText}</div>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Set the device for this quote in the Quote Selection Editor to use this stage.</div>
                     <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>`;
                 return;
@@ -2985,7 +3190,7 @@ const ui = {
                     "Circular structure (ending mirrors the beginning)",
                     "Juxtaposition (contrasting ideas placed together)"
                 ];
-            body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Tone / Language / Structure</div>
+            body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">${deviceLabelText}</div>
                 <div class="card" style="cursor:default; margin-bottom:8px;"><div class="quote-text">"${app.escapeHtml(alignCorrect.quote)}"</div></div>
                 <div style="font-size:0.85rem; opacity:0.7; margin-bottom:6px;"><strong>Question:</strong> ${app.escapeHtml(questionText)}</div>
                 ${correctDevice === "structure" ? `<div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Structure prompts: ${structurePrompts.map(p=>`<span class="bank-tag">${app.escapeHtml(p)}</span>`).join(" ")}</div>` : ""}
@@ -3012,7 +3217,7 @@ const ui = {
                         }
                         if(nextBtn) nextBtn.disabled = false;
                     } else {
-                        if(feedback) feedback.textContent = "Try again. Think about whether the wording shows tone, language choices, or structure.";
+                        if(feedback) feedback.textContent = `Try again. Think about whether the wording shows ${deviceInfo.listText}.`;
                         if(sel.modes.showHints) btn.classList.add("shake");
                     }
                     app.save();
@@ -3077,12 +3282,36 @@ const ui = {
                         btn.classList.add("quote-picked");
                         ui._selectionQuote = o.quote;
                         ui._selectionCorrectItem = o.item || primaryCorrect;
+                        const addChosenAndMaybeAdvance = () => {
+                            const quoteToAdd = o.quote || "";
+                            if(quoteToAdd && !userState.selectionChosen.includes(quoteToAdd)) {
+                                userState.selectionChosen.push(quoteToAdd);
+                            }
+                            if(userState.selectionChosen.length >= targetCount) {
+                                userState.selectionCompleted = true;
+                                app.save();
+                                ui.showSelectionMessage("All quotes selected!", "Great work. Your quotes are ready for the Sentence Builder.");
+                            } else {
+                                userState.selectionCompleted = false;
+                                if(stages.includes("align")) {
+                                    userState.selectionStage = stages.indexOf("align") + 1;
+                                } else if(stages.includes("guided")) {
+                                    userState.selectionStage = stages.indexOf("guided") + 1;
+                                } else if(stages.includes("recognize")) {
+                                    userState.selectionStage = stages.indexOf("recognize") + 1;
+                                }
+                                app.save();
+                                ui.showSelectionMessage("Well done!", "Quote saved. Pick your next quote.");
+                            }
+                            ui.renderSelection();
+                        };
                         if(sel.modes.requireReason && stages.includes("justify")) {
                             userState.selectionStage = stages.indexOf("justify") + 1;
                         } else if(stages.includes("open")) {
                             userState.selectionStage = stages.indexOf("open") + 1;
                         } else {
-                            userState.selectionCompleted = true;
+                            addChosenAndMaybeAdvance();
+                            return;
                         }
                         app.save();
                         ui.renderSelection();
@@ -3143,6 +3372,7 @@ const ui = {
                             ui.showSelectionMessage("All quotes selected!", "Great work. Your quotes are ready for the Sentence Builder.");
                         } else {
                             userState.selectionCompleted = false;
+                            userState.selectionStage = stages.includes("guided") ? (stages.indexOf("guided") + 1) : 1;
                             if(stages.includes("align")) {
                                 userState.selectionStage = stages.indexOf("align") + 1;
                             } else if(stages.includes("guided")) {
@@ -3191,6 +3421,7 @@ const ui = {
                             ui.showSelectionMessage("All quotes selected!", "Great work. Your quotes are ready for the Sentence Builder.");
                         } else {
                             userState.selectionCompleted = false;
+                            userState.selectionStage = stages.includes("guided") ? (stages.indexOf("guided") + 1) : 1;
                             if(stages.includes("align")) {
                                 userState.selectionStage = stages.indexOf("align") + 1;
                             } else if(stages.includes("guided")) {
@@ -3236,34 +3467,243 @@ const ui = {
         if(!trimmed) return null;
         let item = appData.items.find(i => i.original === trimmed);
         if(!item) item = appData.items.find(i => i.original && trimmed && i.original.includes(trimmed));
-        if(!item) {
-            const selItems = appData.selection && Array.isArray(appData.selection.items) ? appData.selection.items : [];
-            const selItem = selItems.find(i => i && i.quote === trimmed)
-                || selItems.find(i => i && i.quote && trimmed && i.quote.includes(trimmed))
-                || selItems.find(i => i && i.quote && trimmed && trimmed.includes(i.quote));
+        const selItems = appData.selection && Array.isArray(appData.selection.items) ? appData.selection.items : [];
+        const selItem = selItems.find(i => i && i.quote === trimmed)
+            || selItems.find(i => i && i.quote && trimmed && i.quote.includes(trimmed))
+            || selItems.find(i => i && i.quote && trimmed && trimmed.includes(i.quote));
+        const starterOptionsByDevice = (device) => {
+            if(device === "tone") {
+                return [
+                    "The writer admiringly uses the phrase",
+                    "The writer approvingly uses the phrase",
+                    "The writer positively presents the phrase",
+                    "The writer celebrates the phrase"
+                ];
+            }
+            if(device === "structure") {
+                return [
+                    "The writer structures the text by stating",
+                    "The writer signals a shift by stating",
+                    "The writer organises the text by stating",
+                    "The writer moves the narrative on by stating"
+                ];
+            }
+            return [
+                "The writer uses the phrase",
+                "The writer describes Blondin as",
+                "The writer presents the scene as",
+                "The writer portrays Blondin as"
+            ];
+        };
+        const pickStarter = (device, bankStarters) => {
+            const base = starterOptionsByDevice(device);
+            const extras = bankStarters.map(v => v.trim()).filter(Boolean);
+            const pool = [...base, ...extras].filter(Boolean);
+            const unique = Array.from(new Set(pool));
+            const correct = unique[0] || "The writer uses the phrase";
+            const distractors = app.shuffle(unique.filter(v => v !== correct)).slice(0, 3);
+            return { correct, distractors };
+        };
+        const normalizeEffect = (raw) => {
+            if(!raw) return "";
+            let txt = String(raw).trim();
+            if(!txt) return "";
+            txt = txt.replace(/\.$/, "");
+            txt = txt.replace(/^(this|it)\s+(shows|suggests|implies|indicates|reveals|demonstrates)\s+(that\s+)?/i, "");
+            const smoothNounPhrase = (phrase) => {
+                const p = String(phrase || "").trim();
+                if(!p) return p;
+                if(/^skill\b/i.test(p)) return `his ${p}`;
+                if(/^agility\b/i.test(p)) return `his ${p}`;
+                if(/^confidence\b/i.test(p)) return `his ${p}`;
+                if(/^control\b/i.test(p)) return `his ${p}`;
+                return p;
+            };
+            const nounifyVerb = (verb, rest) => {
+                const r = smoothNounPhrase(rest);
+                const v = verb.toLowerCase();
+                if(v === "uses" || v === "use") return `the use of ${r}`;
+                if(v === "shows" || v === "show") return `the showing of ${r}`;
+                if(v === "demonstrates" || v === "demonstrate") return `the demonstration of ${r}`;
+                if(v === "highlights" || v === "highlight") return `the highlighting of ${r}`;
+                if(v === "emphasises" || v === "emphasizes" || v === "emphasise" || v === "emphasize") return `the emphasis on ${r}`;
+                if(v === "conveys" || v === "convey") return `the conveying of ${r}`;
+                if(v === "suggests" || v === "suggest") return `the suggestion of ${r}`;
+                if(v === "reveals" || v === "reveal") return `the revelation of ${r}`;
+                if(v === "reflects" || v === "reflect") return `the reflection of ${r}`;
+                if(v === "creates" || v === "create") return `the creation of ${r}`;
+                if(v === "evokes" || v === "evoke") return `the evocation of ${r}`;
+                if(v === "portrays" || v === "portray") return `the portrayal of ${r}`;
+                if(v === "indicates" || v === "indicate") return `the indication of ${r}`;
+                if(v === "focuses" || v === "focus") {
+                    const cleaned = r.replace(/^on\s+/i, "");
+                    return `the focus on ${cleaned}`;
+                }
+                if(v === "builds" || v === "build") return `the building of ${r}`;
+                return `the ${v} of ${r}`;
+            };
+            const writerVerb = txt.match(/^the writer\s+([a-z]+)\s+(.*)$/i);
+            if(writerVerb && writerVerb[2]) {
+                const rest = writerVerb[2].trim();
+                return `the writer's ${nounifyVerb(writerVerb[1], rest).replace(/^the\s+/i, "")}`;
+            }
+            const leadingVerb = txt.match(/^([a-z]+)\s+(.*)$/i);
+            if(leadingVerb && leadingVerb[2]) {
+                return nounifyVerb(leadingVerb[1], leadingVerb[2].trim());
+            }
+            const verbStarters = [
+                "uses","use","shows","show","demonstrates","demonstrate","highlights","highlight",
+                "emphasises","emphasizes","conveys","suggests","suggest","reveals","reflects",
+                "creates","evokes","portrays","indicates","focuses","focus","builds","build"
+            ];
+            const lower = txt.toLowerCase();
+            const startsWithVerb = verbStarters.some(v => lower.startsWith(v + " "));
+            if(startsWithVerb) {
+                const lowered = txt.charAt(0).toLowerCase() + txt.slice(1);
+                return `the writer ${lowered}`;
+            }
+            return txt.charAt(0).toLowerCase() + txt.slice(1);
+        };
+        const linkOptionsByTier = (tier) => {
+            if(tier === "low") return ["This shows that", "This shows", "This means that", "This tells us that"];
+            if(tier === "medium") return ["This suggests that", "This shows that", "This indicates that", "This creates"];
+            return ["This implies that", "This suggests that", "This highlights", "This establishes"];
+        };
+        const pickLinkForPoint = (point, level) => {
+            const tier = app.getLanguageTier(level);
+            const p = String(point || "").trim().toLowerCase();
+            const options = linkOptionsByTier(tier);
+            if(!p) return options[0];
+            if(p.startsWith("the writer ")) return options.find(v => !/that$/i.test(v)) || options[0];
+            if(p.startsWith("a ") || p.startsWith("an ") || p.startsWith("the ")) return options.find(v => !/that$/i.test(v)) || options[0];
+            if(p.startsWith("using ") || p.startsWith("showing ") || p.startsWith("highlighting ") || p.startsWith("emphasising ") || p.startsWith("emphasizing ")) {
+                return options.find(v => !/that$/i.test(v)) || options[0];
+            }
+            return options[0];
+        };
+        const tuneLinkPoint = (linkText, pointText) => {
+            let link = String(linkText || "").trim();
+            let point = String(pointText || "").trim();
+            if(!point) return { link, point };
+            if(/^that\s+/i.test(point)) {
+                point = point.replace(/^that\s+/i, "");
+                link = link.replace(/\s+that\s*$/i, "");
+            }
+            if(/to\s*$/i.test(link)) {
+                point = point.replace(/^to\s+/i, "");
+            }
+            if(/creates$/i.test(link) && !/^a\s|^an\s|^the\s/i.test(point)) {
+                link = "This shows that";
+            }
+            return { link: link.trim(), point: point.trim() };
+        };
+        const buildSelectionDefaults = () => {
             const reasons = selItem && Array.isArray(selItem.reasons) ? selItem.reasons.filter(Boolean) : [];
             const distractorReasons = selItem && Array.isArray(selItem.distractors)
                 ? selItem.distractors.map(d => d && d.reason).filter(Boolean)
                 : [];
+            const device = selItem && selItem.device ? String(selItem.device).toLowerCase() : "language";
+            const effectRaw = (selItem && selItem.deviceReason) || reasons[1] || reasons[0] || "";
+            const effect = normalizeEffect(effectRaw);
+            const bankStarters = Array.isArray(appData.banks && appData.banks.starters)
+                ? appData.banks.starters
+                : [];
+            const normalizeText = (o) => (typeof o === "string" ? o : (o && typeof o === "object" && typeof o.text === "string" ? o.text : ""));
+            const starterTextPool = bankStarters.map(normalizeText).filter(Boolean);
+            const pickedStarter = pickStarter(device, starterTextPool);
+            const starter = pickedStarter.correct;
+            const starterDistractors = pickedStarter.distractors;
+            const tempLevel = admin.getItemLevel({ levels: (selItem && selItem.levels) ? selItem.levels : [1] });
+            const tuned = tuneLinkPoint(pickLinkForPoint(effect, tempLevel), effect);
+            const link = tuned.link;
+            const tunedEffect = tuned.point;
+            const linkPool = linkOptionsByTier(app.getLanguageTier(tempLevel)).filter(v => v !== link);
+            const linkDistractors = app.shuffle(linkPool).slice(0, 3);
+            const modelAnswer = [
+                starter ? `STARTER: ${starter}` : "",
+                trimmed ? `QUOTE: ${trimmed}` : "",
+                link ? `LINK: ${link}` : "",
+                tunedEffect ? `POINT: ${tunedEffect}` : ""
+            ].filter(Boolean).join(" | ");
+            return { reasons, distractorReasons, device, starter, starterDistractors, link, linkDistractors, effect: tunedEffect, modelAnswer };
+        };
+        const inDeskQueue = Array.isArray(userState.deskQueue) && userState.deskQueue.includes(trimmed);
+        if(item && selItem && (item.fromSelection || String(item.id || "").startsWith("sel_") || inDeskQueue)) {
+            const defaults = buildSelectionDefaults();
+            item.type = defaults.device || item.type || "language";
+            item.starter = defaults.starter || item.starter;
+            item.starters = [item.starter].filter(Boolean);
+            if(defaults.starterDistractors && defaults.starterDistractors.length) {
+                item.starterDistractors = defaults.starterDistractors;
+            } else if(!item.starterDistractors) {
+                item.starterDistractors = [];
+            }
+            item.link = defaults.link || item.link;
+            if(defaults.linkDistractors && defaults.linkDistractors.length) {
+                item.linkDistractors = defaults.linkDistractors;
+            } else if(!item.linkDistractors) {
+                item.linkDistractors = [];
+            }
+            if(inDeskQueue || item.fromSelection || String(item.id || "").startsWith("sel_")) {
+                if(defaults.effect) item.effect = defaults.effect;
+                if(defaults.modelAnswer) item.modelAnswer = defaults.modelAnswer;
+                item.links = [item.link].filter(Boolean);
+            } else if(defaults.effect && (!item.effect || item.effect === item.translation)) {
+                item.effect = defaults.effect;
+            }
+        }
+        if(!item) {
+            const defaults = buildSelectionDefaults();
             const newItem = {
                 id: `sel_${Date.now()}`,
                 original: trimmed,
-                translation: reasons[0] || "Meaning not provided.",
-                translationDistractors: distractorReasons.slice(0, 3),
-                type: "language",
-                effect: reasons[1] || reasons[0] || "",
-                effectDistractors: distractorReasons,
-                levels: [1,2,3],
-                includeInWorksheet: true
+                translation: defaults.reasons[0] || defaults.effect || "Meaning not provided.",
+                translationDistractors: defaults.distractorReasons.slice(0, 3),
+                type: defaults.device || "language",
+                effect: defaults.effect || defaults.reasons[0] || "",
+                effectDistractors: defaults.distractorReasons,
+                levels: (selItem && Array.isArray(selItem.levels) && selItem.levels.length) ? selItem.levels.slice() : [1,2,3],
+                includeInWorksheet: true,
+                starter: defaults.starter,
+                starters: [defaults.starter].filter(Boolean),
+                starterDistractors: defaults.starterDistractors || [],
+                link: defaults.link,
+                links: [defaults.link].filter(Boolean),
+                linkDistractors: defaults.linkDistractors || [],
+                modelAnswer: defaults.modelAnswer,
+                fromSelection: true
             };
             appData.items.push(newItem);
             item = newItem;
         }
         return item || null;
     },
+    renderDeskQuoteTabs: function() {
+        const wrap = document.getElementById("desk-quote-tabs");
+        if(!wrap) return;
+        const queue = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
+        if(!queue.length) { wrap.innerHTML = ""; wrap.classList.add("hidden"); return; }
+        const items = queue.map(q => ui.ensureQuoteItem(q)).filter(Boolean);
+        if(!items.length) { wrap.innerHTML = ""; wrap.classList.add("hidden"); return; }
+        wrap.classList.remove("hidden");
+        wrap.innerHTML = items.map(i => {
+            const label = (i.original || "").length > 60 ? `${i.original.slice(0, 60)}...` : (i.original || "");
+            const active = i.id === ui.activeQuoteId ? "active" : "";
+            const encoded = encodeURIComponent(i.original || "");
+            return `<button class="btn btn-outline btn-small ${active}" data-quote-enc="${encoded}">${app.escapeHtml(label)}</button>`;
+        }).join("");
+        Array.from(wrap.querySelectorAll("button[data-quote-enc]")).forEach(btn => {
+            btn.onclick = () => {
+                const q = decodeURIComponent(btn.dataset.quoteEnc || "");
+                const item = ui.ensureQuoteItem(q);
+                if(item) ui.runBuilder(item);
+            };
+        });
+    },
     sendSelectionQuotesToBuilder: function() {
         const chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
         if(!chosen.length) return;
+        userState.deskQueue = chosen.slice();
         chosen.forEach(q => ui.ensureQuoteItem(q));
         userState.selectionCompleted = true;
         app.save();
@@ -3292,6 +3732,37 @@ const ui = {
         const title = document.getElementById('celebration-title');
         const sub = document.getElementById('celebration-sub');
         const btn = document.getElementById('celebration-btn');
+        const rewardBtn = document.getElementById('celebration-reward');
+        const rewardUrl = appData.settings && appData.settings.rewardUrl ? appData.settings.rewardUrl : "";
+        const rewardMinutes = appData.settings && typeof appData.settings.rewardMinutes === "number" ? appData.settings.rewardMinutes : 0;
+        const rewardUntilKey = "tsa_reward_until";
+        const rewardLevelKey = "tsa_reward_level";
+        const now = Date.now();
+        const rewardUntil = parseInt(localStorage.getItem(rewardUntilKey) || "0", 10) || 0;
+        const rewardLevel = parseInt(localStorage.getItem(rewardLevelKey) || "0", 10) || 0;
+        if(rewardBtn) {
+            if(rewardUrl) {
+                rewardBtn.style.display = "inline-flex";
+                if(rewardMinutes > 0 && rewardLevel === userState.level && rewardUntil && now > rewardUntil) {
+                    rewardBtn.disabled = true;
+                    rewardBtn.textContent = "Reward locked (complete next level)";
+                    rewardBtn.onclick = null;
+                } else {
+                    rewardBtn.disabled = false;
+                    rewardBtn.textContent = rewardMinutes > 0 ? `Play Reward (${rewardMinutes} min)` : "Play Reward";
+                    rewardBtn.onclick = () => {
+                        if(rewardMinutes > 0) {
+                            localStorage.setItem(rewardUntilKey, String(Date.now() + rewardMinutes * 60000));
+                            localStorage.setItem(rewardLevelKey, String(userState.level || 0));
+                        }
+                        window.open(rewardUrl, "_blank");
+                    };
+                }
+            } else {
+                rewardBtn.style.display = "none";
+                rewardBtn.onclick = null;
+            }
+        }
 
         overlay.classList.remove('hidden');
         app.playSound(isFinal ? 'final' : 'celebrate');
@@ -3305,7 +3776,7 @@ const ui = {
         } else {
             title.innerText = `Level ${userState.level} Complete! 🎉`;
             sub.innerText = "Great work! Moving up...";
-            if (autoAdvance) {
+            if (autoAdvance && !rewardUrl) {
                 btn.style.display = 'none';
                 setTimeout(() => {
                     ui.closeCelebration();
@@ -3457,6 +3928,18 @@ const admin = {
         if(wmm) wmm.value = appData.settings.worksheetMatchMode || "jumbled";
         const allLevels = document.getElementById("ai-all-levels");
         if(allLevels) allLevels.checked = !!appData.settings.aiPromptAllLevels;
+        const reward = document.getElementById("reward-url");
+        if(reward) reward.value = appData.settings.rewardUrl || "";
+        const rewardMinutes = document.getElementById("reward-minutes");
+        if(rewardMinutes) rewardMinutes.value = String(appData.settings.rewardMinutes || 0);
+        const aiTone = document.getElementById("ai-include-tone");
+        if(aiTone) aiTone.checked = appData.settings.aiIncludeTone !== false;
+        const aiStructure = document.getElementById("ai-include-structure");
+        if(aiStructure) aiStructure.checked = appData.settings.aiIncludeStructure !== false;
+        const exportTone = document.getElementById("export-include-tone");
+        if(exportTone) exportTone.checked = appData.settings.exportIncludeTone !== false;
+        const exportStructure = document.getElementById("export-include-structure");
+        if(exportStructure) exportStructure.checked = appData.settings.exportIncludeStructure !== false;
         const strict = document.getElementById("strict-mode");
         if(strict) strict.checked = !!appData.settings.strictMode;
         const startView = document.getElementById("start-view");
@@ -3531,6 +4014,17 @@ const admin = {
         appData.settings.autoProgress = c; 
         app.save(); 
     },
+    setRewardUrl: (v) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.rewardUrl = String(v || "").trim();
+        app.save();
+    },
+    setRewardMinutes: (v) => {
+        if(!appData.settings) appData.settings = {};
+        const n = parseInt(v, 10);
+        appData.settings.rewardMinutes = isNaN(n) || n < 0 ? 0 : n;
+        app.save();
+    },
     setFocusQuestion: (v) => {
         if(!appData) return;
         const text = String(v || "");
@@ -3576,6 +4070,18 @@ const admin = {
     setAiAllLevels: (c) => {
         if(!appData.settings) appData.settings = {};
         appData.settings.aiPromptAllLevels = c;
+        app.save();
+    },
+    setAiDevice: (device, enabled) => {
+        if(!appData.settings) appData.settings = {};
+        if(device === "tone") appData.settings.aiIncludeTone = !!enabled;
+        if(device === "structure") appData.settings.aiIncludeStructure = !!enabled;
+        app.save();
+    },
+    setExportDevice: (device, enabled) => {
+        if(!appData.settings) appData.settings = {};
+        if(device === "tone") appData.settings.exportIncludeTone = !!enabled;
+        if(device === "structure") appData.settings.exportIncludeStructure = !!enabled;
         app.save();
     },
     setStartView: (v) => {
@@ -3676,11 +4182,127 @@ const admin = {
         userState.selectionProgress = {};
         userState.selectionEliminated = [];
         userState.selectionChosen = [];
+        userState.deskQueue = [];
         ui._selectionCorrectItem = null;
         ui._selectionQuote = null;
         userState.labCompleted = false;
         app.save();
         ui.init();
+    },
+    getItemLevel: (item) => {
+        const lvl = Array.isArray(item.levels) && item.levels.length ? parseInt(item.levels[0], 10) : 1;
+        return (lvl >= 1 && lvl <= 9) ? lvl : 1;
+    },
+    getSlotBase: (slot) => {
+        const raw = String(slot || "").toLowerCase();
+        const tail = raw.startsWith("manual_") ? raw.split("_")[1] : raw;
+        if(tail === "analysis" || tail === "effect" || tail === "point") return "point";
+        if(tail.startsWith("link")) return "link";
+        return tail;
+    },
+    buildModelAnswerFromTemplate: (item, level) => {
+        const cfg = (appData.sentenceConfig && appData.sentenceConfig[level]) || (appData.sentenceConfig && appData.sentenceConfig[3]) || [];
+        const pick = (list) => {
+            if(!Array.isArray(list) || !list.length) return "";
+            const raw = list[Math.floor(Math.random() * list.length)];
+            if(typeof raw === "string") return raw;
+            if(raw && typeof raw === "object" && typeof raw.text === "string") return raw.text;
+            return "";
+        };
+        const linkKey = `l${level}`;
+        const slotValue = (slot) => {
+            const base = admin.getSlotBase(slot);
+            if(base === "quote") return item.original || "";
+            if(base === "point") return item.effect || item.translation || "";
+            if(base === "marker") return item.marker || pick(appData.banks && appData.banks.markers);
+            if(base === "starter") return item.starter || pick(appData.banks && appData.banks.starters);
+            if(base === "method") return item.method || pick(appData.banks && appData.banks.methods);
+            if(base === "link") {
+                const links = (appData.banks && appData.banks.links && appData.banks.links[linkKey]) || (appData.banks && appData.banks.links && appData.banks.links.l3);
+                return item.link || pick(links);
+            }
+            return "";
+        };
+        const parts = cfg.map(slot => {
+            const base = admin.getSlotBase(slot);
+            const val = slotValue(slot);
+            if(!val) return "";
+            const label = base.toUpperCase();
+            return `${label}: ${val}`;
+        }).filter(Boolean);
+        return parts.join(" | ");
+    },
+    parseModelAnswer: (text) => {
+        const raw = String(text || "").trim();
+        if(!raw) return {};
+        const parts = raw.split(/\s*\|\s*/);
+        const out = {};
+        const normalizeKey = (k) => k.trim().toLowerCase().replace(/\s+/g, "_");
+        parts.forEach(part => {
+            const idx = part.indexOf(":");
+            if(idx <= 0) return;
+            const key = normalizeKey(part.slice(0, idx));
+            const value = part.slice(idx + 1).trim();
+            if(!value) return;
+            out[key] = value;
+        });
+        return out;
+    },
+    applyModelSlotsToItem: (item, slotMap, overwrite) => {
+        const setIf = (key, value) => {
+            if(!value) return;
+            if(!overwrite && item[key]) return;
+            item[key] = value;
+        };
+        setIf("marker", slotMap.marker);
+        setIf("starter", slotMap.starter);
+        setIf("method", slotMap.method);
+        setIf("link", slotMap.link || slotMap.link_l1 || slotMap.link_l2 || slotMap.link_l3);
+        setIf("effect", slotMap.point || slotMap.analysis || slotMap.effect);
+    },
+    splitModelAnswerForItem: (item, overwrite) => {
+        const modelAnswer = item.modelAnswer || "";
+        const slotMap = admin.parseModelAnswer(modelAnswer);
+        if(Object.keys(slotMap).length) {
+            admin.applyModelSlotsToItem(item, slotMap, overwrite);
+            return true;
+        }
+        return false;
+    },
+    applyModelAnswersFromItems: (opts = {}) => {
+        const overwrite = !!opts.overwrite;
+        const generate = !!opts.generate;
+        const items = Array.isArray(appData.items) ? appData.items : [];
+        if(!items.length) return 0;
+        let updated = 0;
+        items.forEach(item => {
+            if(!item) return;
+            const hasModel = !!(item.modelAnswer && String(item.modelAnswer).trim());
+            let applied = false;
+            if(hasModel) {
+                applied = admin.splitModelAnswerForItem(item, overwrite);
+            }
+            if(!applied && generate) {
+                const level = admin.getItemLevel(item);
+                const built = admin.buildModelAnswerFromTemplate(item, level);
+                if(built) {
+                    if(overwrite || !item.modelAnswer) item.modelAnswer = built;
+                    applied = admin.splitModelAnswerForItem(item, overwrite);
+                }
+            }
+            if(applied) updated += 1;
+        });
+        return updated;
+    },
+    generateAndSplitModelAnswers: (opts = {}) => {
+        const overwrite = !!opts.overwrite;
+        const items = Array.isArray(appData.items) ? appData.items : [];
+        if(!items.length) return alert("No lesson items to update.");
+        const updated = admin.applyModelAnswersFromItems({ overwrite, generate: true });
+        app.save();
+        admin.renderQuoteList();
+        ui.init();
+        alert(`Model answers processed for ${updated} / ${items.length} items.`);
     },
     setWorksheetMatchMode: (v) => {
         if(!appData.settings) appData.settings = {};
@@ -3699,6 +4321,7 @@ const admin = {
                 <div class="input-group"><label>Translation Distractors (CSV)</label><input value="${(item.translationDistractors||[]).join(',')}" onchange="admin.updQuote(${idx},'translationDistractors',this.value.split(','))"></div>
                 <div class="input-group"><label>Analysis (Effect)</label><input value="${item.effect || ''}" onchange="admin.updQuote(${idx},'effect',this.value)"></div>
                 <div class="input-group"><label>Analysis Distractors (CSV)</label><input value="${(item.effectDistractors||[]).join(',')}" onchange="admin.updQuote(${idx},'effectDistractors',this.value.split(','))"></div>
+                <div class="input-group"><label>Model Answer (slot labels)</label><textarea onchange="admin.updQuote(${idx},'modelAnswer',this.value)" style="height:60px;">${app.escapeHtml(item.modelAnswer || "")}</textarea></div>
                 <div class="level-checks">
                     <label>Worksheet: <input type="checkbox" ${item.includeInWorksheet?'checked':''} onchange="admin.updQuote(${idx},'includeInWorksheet',this.checked)"></label>
                     | Lvl:
@@ -3857,8 +4480,9 @@ Lesson schema (use these exact keys):
   banks:{markers[], starters[], methods[], points[], links{l1[],l2[],l3[]}},
   sentenceConfig:{1:[...],2:[...],3:[...],4:[...],5:[...],6:[...],7:[...],8:[...],9:[...]},
   globalStructure:{enabled:true, items:[{id, question, correct, distractors[]}]},
-  items:[{id, original, translation, translationDistractors[], type, effect, effectDistractors[], levels:[1..9], includeInWorksheet:true}]
+  items:[{id, original, translation, translationDistractors[], type, effect, effectDistractors[], levels:[1..9], includeInWorksheet:true, modelAnswer, marker?, starter?, method?, link?}]
 }
+modelAnswer must be a single string with slot labels: "MARKER: ... | STARTER: ... | QUOTE: ... | METHOD: ... | POINT: ... | LINK: ...".
 
 Quote-selection schema (NO empty strings):
 {
@@ -3942,6 +4566,33 @@ Output ONLY valid JSON.`;
         }
         if(typeof prevSettings.strictMode === "boolean") target.settings.strictMode = prevSettings.strictMode;
     },
+    seedLessonFromSelection: () => {
+        const lessonItems = Array.isArray(appData.items) ? appData.items : [];
+        if(!appData.selection || !Array.isArray(appData.selection.items)) return;
+        const correctItems = appData.selection.items.filter(i => i && i.correct && i.quote);
+        if(!correctItems.length) return;
+        if(lessonItems.length >= correctItems.length) return;
+        const existing = new Set(lessonItems.map(i => app.quoteKey(i && i.original)));
+        const startIdx = lessonItems.length + 1;
+        const seeded = correctItems
+            .filter(i => !existing.has(app.quoteKey(i.quote)))
+            .map((i, idx) => {
+                const r = Array.isArray(i.reasons) ? i.reasons.find(Boolean) : "";
+                const effect = (i.deviceReason || r || "").trim();
+                return {
+                    id: `auto_s${startIdx + idx}`,
+                    original: i.quote,
+                    translation: r || effect,
+                    translationDistractors: [],
+                    type: i.device || "language",
+                    effect: effect,
+                    effectDistractors: [],
+                    levels: Array.isArray(i.levels) && i.levels.length ? i.levels.slice() : [1],
+                    includeInWorksheet: true
+                };
+            });
+        if(seeded.length) appData.items = lessonItems.concat(seeded);
+    },
     loadUnifiedJson: () => {
         try {
             const raw = document.getElementById("unified-json-in").value;
@@ -3972,30 +4623,9 @@ Output ONLY valid JSON.`;
                 userState.selectionProgress = {};
                 userState.selectionEliminated = [];
                 userState.selectionChosen = [];
-                const lessonItems = Array.isArray(appData.items) ? appData.items : [];
-                const correctItems = appData.selection.items.filter(i => i && i.correct && i.quote);
-                if(correctItems.length && lessonItems.length < correctItems.length) {
-                    const existing = new Set(lessonItems.map(i => app.quoteKey(i && i.original)));
-                    const seeded = correctItems
-                        .filter(i => !existing.has(app.quoteKey(i.quote)))
-                        .map((i, idx) => {
-                            const r = Array.isArray(i.reasons) ? i.reasons.find(Boolean) : "";
-                            const effect = (i.deviceReason || r || "").trim();
-                            return {
-                                id: `auto_s${idx+1}`,
-                                original: i.quote,
-                                translation: r || effect,
-                                translationDistractors: [],
-                                type: i.device || "language",
-                                effect: effect,
-                                effectDistractors: [],
-                                levels: Array.isArray(i.levels) && i.levels.length ? i.levels.slice() : [1],
-                                includeInWorksheet: true
-                            };
-                        });
-                    appData.items = lessonItems.concat(seeded);
-                }
+                admin.seedLessonFromSelection();
             }
+            admin.applyModelAnswersFromItems({ overwrite: false, generate: false });
             app.save();
             ui.init();
             admin.renderAll();
@@ -4052,6 +4682,8 @@ Output ONLY valid JSON.`;
             question: document.getElementById("ai-question").value,
             count: parseInt(document.getElementById("ai-count").value, 10) || 6,
             mode: document.getElementById("ai-mode").value,
+            includeTone: appData && appData.settings ? appData.settings.aiIncludeTone !== false : true,
+            includeStructure: appData && appData.settings ? appData.settings.aiIncludeStructure !== false : true,
             levels: Object.fromEntries(Array.from({length:9}, (_,i)=>i+1).map(l => [l, getLevel(l)]))
         };
     },
@@ -4060,6 +4692,13 @@ Output ONLY valid JSON.`;
         if(typeof s.question === 'string') document.getElementById("ai-question").value = s.question;
         if(typeof s.count === 'number') document.getElementById("ai-count").value = s.count;
         if(typeof s.mode === 'string') document.getElementById("ai-mode").value = s.mode;
+        if(!appData.settings) appData.settings = {};
+        if(typeof s.includeTone === 'boolean') appData.settings.aiIncludeTone = s.includeTone;
+        if(typeof s.includeStructure === 'boolean') appData.settings.aiIncludeStructure = s.includeStructure;
+        const aiTone = document.getElementById("ai-include-tone");
+        if(aiTone && typeof s.includeTone === 'boolean') aiTone.checked = s.includeTone;
+        const aiStructure = document.getElementById("ai-include-structure");
+        if(aiStructure && typeof s.includeStructure === 'boolean') aiStructure.checked = s.includeStructure;
         const applyLevel = (lvl) => {
             const l = s.levels && s.levels[lvl] ? s.levels[lvl] : {};
             const enabledEl = document.getElementById(`ai-level-${lvl}`);
@@ -4278,6 +4917,16 @@ Output ONLY valid JSON.`;
         ));
         const anyCounts = enabledLevels.some(n => (lvl[n] && (lvl[n].count || 0) > 0));
         const targetSplit = anyCounts ? enabledLevels.map(n => `${lvl[n].count || 0}`).join(" / ") : "balanced across selected levels";
+        const aiDevices = app.getAiDevices();
+        const allowedTypes = Object.keys(aiDevices).filter(k => aiDevices[k]);
+        const typeLabel = allowedTypes.join("/");
+        const balanceLine = allowedTypes.length === 1
+            ? `   - All items must be ${allowedTypes[0]}.`
+            : `   - Balance item types across enabled categories: ${allowedTypes.join(", ")}.`;
+        const structureBlock = aiDevices.structure
+            ? `7. Populate 'globalStructure': { enabled:true, items:[ {question, correct, distractors:[2]} ] } (Create 2 distinct questions about the whole text structure, relevant to the Focus Question).
+   - Also include selection.structurePrompts (7–10) that align with these globalStructure ideas (paragraphing shifts, time/sequence, zoom, placement, repetition, circular structure, juxtaposition).`
+            : `7. Skip globalStructure and selection.structurePrompts (structure is disabled).`;
 
         document.getElementById("ai-prompt-out").value = `Role: Expert English Teacher. 
 Task: Create a JSON lesson for students.
@@ -4285,8 +4934,10 @@ Source Text: "${txt.substring(0,800)}..."
 Focus Question: "${q}"
 
 Requirements:
-1. Create ${c} items. Each item object must have: { id, original (quote from text), translation (meaning), translationDistractors (2 wrong meanings), type (tone/structure/language), effect (analysis sentence), effectDistractors (2 wrong analysis sentences), levels:[1..10], includeInWorksheet:true }.
-   - Balance item types across the lesson: aim for roughly 30% tone, 30% structure, 40% language (adjust only if the text truly lacks one category).
+1. Create ${c} items. Each item object must have: { id, original (quote from text), translation (meaning), translationDistractors (2 wrong meanings), type (${typeLabel}), effect (analysis sentence), effectDistractors (2 wrong analysis sentences), levels:[1..10], includeInWorksheet:true, modelAnswer }.
+   - modelAnswer must be a single string with slot labels, e.g. "MARKER: ... | STARTER: ... | QUOTE: ... | METHOD: ... | POINT: ... | LINK: ...".
+   - If you can, also include per-slot fields: marker, starter, method, link (optional but preferred).
+${balanceLine}
 2. Assign EACH item to one level only (${enabledLevels.join(", ")}). Ensure lower levels are simpler and higher levels are more nuanced.
 3. Level rules (STRICT): 
 ${levelRules}
@@ -4295,8 +4946,7 @@ ${levelRules}
 4. Manage cognitive load: keep L1 very accessible to reduce overload, L2 for regular practice, L3 to stretch comprehension, memory, and attention. Increase subtlety gradually across levels.
 5. Quality target: L2 and L3 meanings/effects should model Eduqas Grade 4+ responses; L1 is simplified practice phrasing.
 6. If you cannot match the exact target split (${targetSplit}) then keep the level proportions close.
-7. Populate 'globalStructure': { enabled:true, items:[ {question, correct, distractors:[2]} ] } (Create 2 distinct questions about the whole text structure, relevant to the Focus Question).
-   - Also include selection.structurePrompts (7–10) that align with these globalStructure ideas (paragraphing shifts, time/sequence, zoom, placement, repetition, circular structure, juxtaposition).
+${structureBlock}
 8. Provide 'sentenceConfig' for each level to build grammatically correct sentences. Use:
    - L1: ["starter","quote","link_l1","point"]
    - L2: ["marker","starter","quote","method","point","link_l2"]
@@ -4322,7 +4972,7 @@ ${levelRules}
     - starter or starters + starterDistractors (2)
     - method or methods + methodDistractors (2)
     - effect + effectDistractors (2) for analysis/point slots
-12. Include settings: { autoProgress:false, practiceMode:false, practiceModeLevel:1, practiceForceAuto:false, practiceFixedTemplate:false, worksheetMatchMode:"jumbled", levelRules: ${levelRulesJson}, levelBank: ${levelBankJson} }.
+12. Include settings: { autoProgress:true, practiceMode:false, practiceModeLevel:1, practiceForceAuto:false, practiceFixedTemplate:false, worksheetMatchMode:"jumbled", levelRules: ${levelRulesJson}, levelBank: ${levelBankJson} }.
 
 Output ONLY valid JSON.`;
         const step2 = document.getElementById("ai-step2");
@@ -4343,6 +4993,7 @@ Output ONLY valid JSON.`;
                     appData.selection.modes = appData.selection.modes || {};
                     appData.selection.modes.stages = appData.settings.selectionStages;
                 }
+                admin.seedLessonFromSelection();
                 userState.selectionCompleted = false;
                 userState.selectionStage = 1;
                 userState.selectionKey = "";
@@ -4405,7 +5056,7 @@ Output ONLY valid JSON.`;
             } else if (mode === "append") {
                 appData.items = [...(appData.items||[]), ...(safe.items||[])];
             }
-            
+            admin.applyModelAnswersFromItems({ overwrite: false, generate: false });
             app.save();
             ui.init();
             ui.renderLab();
@@ -4461,6 +5112,7 @@ Output ONLY valid JSON.`;
                 appData.selection.modes = appData.selection.modes || {};
                 appData.selection.modes.stages = appData.settings.selectionStages;
             }
+            admin.seedLessonFromSelection();
             userState.selectionCompleted = false;
             userState.selectionStage = 1;
             userState.selectionKey = "";
@@ -4482,6 +5134,9 @@ Output ONLY valid JSON.`;
         if(!text.trim()) return alert("Paste source text first.");
         const activeLevels = app.getActiveLevels();
         const levelBank = app.getLevelBank();
+        const aiDevices = app.getAiDevices();
+        const allowedTypes = Object.keys(aiDevices).filter(k => aiDevices[k]);
+        const typeLabel = allowedTypes.join("/");
         const targetSummary = activeLevels.map(lvl => {
             const entry = levelBank[lvl] || {};
             const tq = entry.quoteTarget || 4;
@@ -4505,15 +5160,15 @@ Requirements:
   text:{source, type, wordCount},
   question:{prompt, focusTags[]},
   structurePrompts:[...],
-  items:[{id, quote, correct:true|false, reasons[2], distractors:[{quote, reason}], levels:[1..9], device:"tone|language|structure", deviceReason}],
+  items:[{id, quote, correct:true|false, reasons[2], distractors:[{quote, reason}], levels:[1..9], device:"${typeLabel}", deviceReason}],
   modes:{selectionMode:"closed"|"open", showHints:true|false, requireReason:true|false, quoteCount, stages:["recognize","guided","justify","open"]}
 }
 2. Create quotes for ALL active levels:
 ${targetSummary}
    - Assign each item to one level via levels:[level]
    - All quotes must be from the source text
-3. For every correct quote, include device (tone/language/structure) and a short deviceReason.
-4. Include structurePrompts (7–10) that guide structural discussion (e.g., paragraphing shifts, time/sequence, zoom, placement, repetition, circular structure, juxtaposition).
+3. For every correct quote, include device (${typeLabel}) and a short deviceReason.
+4. ${aiDevices.structure ? "Include structurePrompts (7–10) that guide structural discussion (e.g., paragraphing shifts, time/sequence, zoom, placement, repetition, circular structure, juxtaposition)." : "Skip structurePrompts (structure is disabled)."}
 5. Write at least 1 short reason for the correct quote (no blanks). Prefer 2.
 6. Each correct quote must include 2+ distractors, each with a reason explaining why it is weaker (no blanks).
 7. Use accessible language (Entry 3 – Grade 3).
@@ -4628,6 +5283,12 @@ Output ONLY JSON.`;
                 <input type="number" id="selection-quote-count" min="2" max="10" value="${parseInt(sel.modes.quoteCount, 10) || 4}" onchange="admin.updateSelectionMeta('quoteCount', this.value)">
             </div>
             <div class="input-group">
+                <label>Require Justification</label>
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;">
+                    <input type="checkbox" ${sel.modes.requireReason ? "checked" : ""} onchange="admin.updateSelectionMeta('requireReason', this.checked)"> Require reason before saving quotes
+                </label>
+            </div>
+            <div class="input-group">
                 <label>Quote Check (per level)</label>
                 <div style="font-size:0.85rem; opacity:0.8; margin-bottom:2px;">Targets come from Level Bank → Quotes.</div>
                 <div style="font-size:0.8rem; opacity:0.7; margin-bottom:6px;">Set quote targets and distractors per level in the Level Bank.</div>
@@ -4688,6 +5349,8 @@ Output ONLY JSON.`;
         } else if(key === "quoteCount") {
             const n = Math.max(2, Math.min(10, parseInt(value, 10) || 4));
             appData.selection.modes.quoteCount = n;
+        } else if(key === "requireReason") {
+            appData.selection.modes.requireReason = !!value;
         }
         app.save();
         ui.init();
@@ -5048,10 +5711,10 @@ Output ONLY JSON.`;
     exportWorksheet: function() {
         let content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
         <head><meta charset='utf-8'><title>Worksheet</title>
-        <style>body{font-family:'Aptos','Calibri',sans-serif;} .box{border:1px solid #999; padding:10px; margin-bottom:15px;} .dotted{border-bottom:1px dotted #000; display:inline-block; width:95%; margin-top:5px;}</style>
+        <style>body{font-family:'Aptos','Calibri',sans-serif;} .box{border:1px solid #999; padding:10px; margin-bottom:15px; break-inside:avoid; page-break-inside:avoid;} .dotted{border-bottom:1px dotted #000; display:inline-block; width:95%; margin-top:5px;} .rubric-line{display:block; margin-top:10px;} .rubric-slot{display:inline-block; vertical-align:bottom; margin-right:16px; margin-bottom:8px; font-size:0.9rem;} .rubric-label{font-style:italic; font-weight:600; font-size:0.85rem; opacity:0.8; text-transform:none;} .rubric-blank{border-bottom:1px dotted #000; min-width:180px; height:18px;} .glossary-table{width:100%; border-collapse:collapse; margin:6px 0 8px 0; break-inside:avoid; page-break-inside:avoid;} .glossary-table td{padding:4px 6px; border-bottom:1px dotted #ccc;}</style>
         </head><body>
         <h1>${appData.meta.title}</h1>
-        <p>${appData.sourceText.replace(/\n/g, '<br>')}</p><hr>`;
+        <p>${appData.sourceText.replace(/\n/g, '<br>')}</p>`;
         
         const shuffle = (arr) => {
             const a = arr.slice();
@@ -5061,10 +5724,36 @@ Output ONLY JSON.`;
             }
             return a;
         };
+        const extractScanWords = (text, maxCount = 6) => {
+            const stop = new Set(["the","and","that","with","this","from","were","their","have","has","had","into","over","under","after","before","about","there","they","them","then","than","when","where","which","while","your","you","his","her","its","our","ours","was","are","is","be","been","being","but","for","not","too","very","also","only","each","every","some","such","these","those","who","whom","what","why","how","can","could","would","should","will","shall","may","might","must","as","of","in","on","at","to","by","a","an"]);
+            const words = String(text || "")
+                .replace(/[^A-Za-z'\- ]/g, " ")
+                .split(/\s+/)
+                .map(w => w.replace(/^'+|'+$/g, ""))
+                .filter(w => w.length >= 5);
+            const seen = new Set();
+            const picked = [];
+            words.forEach(w => {
+                const key = w.toLowerCase();
+                if(stop.has(key) || seen.has(key)) return;
+                seen.add(key);
+                picked.push({ word: w, meaning: "" });
+            });
+            return picked.slice(0, maxCount);
+        };
+        const scanWords = extractScanWords(appData.sourceText || "", 6);
+        if(scanWords.length) {
+            content += `<div class="box"><p><strong>Scan for words</strong></p>`;
+            content += `<table class="glossary-table">`;
+            scanWords.forEach(g => {
+                content += `<tr><td style="width:30%;"><strong>${app.escapeHtml(g.word)}</strong></td><td><span class="dotted" style="width:60%;"></span></td></tr>`;
+            });
+            content += `</table></div><hr>`;
+        } else {
+            content += `<hr>`;
+        }
         const uiLevel = parseInt((document.getElementById("level-selector") || {}).value, 10) || 1;
-        const level = (appData.settings && appData.settings.practiceMode)
-            ? (appData.settings.practiceModeLevel || 1)
-            : uiLevel;
+        const level = app.getEffectiveLevel ? app.getEffectiveLevel() : uiLevel;
         let structure = appData.sentenceConfig[level] || appData.sentenceConfig[3] || ["starter", "quote", "point"];
         if(appData.settings && appData.settings.practiceMode && appData.settings.practiceFixedTemplate) {
             structure = app.getPracticeTemplate(level);
@@ -5122,42 +5811,43 @@ Output ONLY JSON.`;
             content += `</table>`;
         }
 
-        // Part B: Analysis
-        content += `<br><h3>Part B: Analysis</h3>`;
+        // Part B: Sentence Construction
+        content += `<br><h3>Part B: Sentence Construction</h3>`;
+        const isValidSlot = (slot) => {
+            if(!slot) return false;
+            if(slot === "choice") return false;
+            if(slot === "starter" || slot === "marker" || slot === "method" || slot === "quote" || slot === "point" || slot === "analysis") return true;
+            if(slot.startsWith("manual_")) return true;
+            if(slot.startsWith("link_")) return true;
+            return false;
+        };
+        const labelForSlot = (slot) => {
+            if(!isValidSlot(slot)) return null;
+            const base = slot.startsWith("manual") ? (slot.split('_')[1] || "") : slot;
+            if(base.includes("link")) return "Link";
+            if(base === "point" || base === "analysis") return "Point";
+            if(base === "quote") return "Quote";
+            const cleaned = base.replace(/^./, c => c.toUpperCase()).replace(/_/g, " ");
+            return cleaned;
+        };
         appData.items.forEach((item, idx) => {
             if(!item.includeInWorksheet) return;
             content += `<div class="box"><p><strong>${idx+1}. Quote: "${worksheetQuote(item)}"</strong></p>`;
             
-            structure.forEach(slot => {
-                let label = slot.toUpperCase();
-                let inner = "";
-                
-                if(slot === 'quote') return; 
-                else if(slot.startsWith('manual')) {
-                    inner = `<span class="dotted"></span>`;
-                    label = slot.split('_')[1].toUpperCase();
-                } else {
-                    let key = slot.includes('link') ? (slot.split('_')[1]||'l2') : slot+"s";
-                    if(slot==='point' || slot === "analysis") key='points';
-                    let opts = null;
-                    if(slot === "point" || slot === "analysis") {
-                        if(item.effect || (item.effectDistractors && item.effectDistractors.length)) {
-                            opts = [item.effect, ...(item.effectDistractors || [])].filter(Boolean);
-                        }
-                    }
-                    if(!opts) {
-                        if(slot.includes('link')) {
-                            opts = appData.banks.links[key];
-                            if(!opts || !opts.length) opts = appData.banks.links.l3;
-                        } else {
-                            opts = appData.banks[key];
-                        }
-                    }
-                    if(opts) inner = `<em>${opts.join(' / ')}</em><br><span class="dotted"></span>`;
-                }
-                content += `<p><strong>${label}:</strong> ${inner}</p>`;
-            });
-            content += `<br><p><strong>Sentence:</strong><br><span class="dotted"></span><br><span class="dotted"></span></p></div>`;
+            let rubricSlots = structure.filter(isValidSlot);
+            if(!rubricSlots.length) rubricSlots = ["starter","quote","point"];
+            const labels = rubricSlots.map(labelForSlot).filter(Boolean);
+            const header = labels.length
+                ? labels.map(l => `<td style="padding:6px 8px; font-style:italic; font-size:0.85rem;">${l}</td>`).join("")
+                : `<td style="padding:6px 8px; font-style:italic; font-size:0.85rem;">Starter</td><td style="padding:6px 8px; font-style:italic; font-size:0.85rem;">Quote</td><td style="padding:6px 8px; font-style:italic; font-size:0.85rem;">Point</td>`;
+            const colCount = labels.length || 3;
+            content += `
+                <table style="width:100%; border:1px solid #999; border-collapse:collapse; margin-top:8px;">
+                    <tr>${header}</tr>
+                    <tr><td colspan="${colCount}" style="height:28px; border-top:1px solid #999;"></td></tr>
+                    <tr><td colspan="${colCount}" style="height:28px; border-top:1px solid #999;"></td></tr>
+                </table>
+            </div>`;
         });
         
         content += `</body></html>`;
@@ -5226,6 +5916,30 @@ Output ONLY JSON.`;
         if(!exportData.meta) exportData.meta = {};
         if(!exportData.meta.id) exportData.meta.id = "lesson_" + Date.now();
 
+        const exportDevices = app.getExportDevices();
+        const allowedTypes = Object.keys(exportDevices).filter(k => exportDevices[k]);
+        if(Array.isArray(exportData.items)) {
+            exportData.items = exportData.items.filter(i => !i || !i.type || allowedTypes.includes(i.type));
+            if(exportData.items.length === 0) {
+                return alert("Export blocked: no lesson items match the selected device types.");
+            }
+        }
+        if(exportData.selection && Array.isArray(exportData.selection.items)) {
+            exportData.selection.items = exportData.selection.items.filter(i => {
+                if(!i || !i.device) return true;
+                return allowedTypes.includes(i.device);
+            });
+        }
+        if(!exportDevices.structure) {
+            if(exportData.globalStructure) {
+                exportData.globalStructure.enabled = false;
+                exportData.globalStructure.items = [];
+            }
+            if(exportData.selection && Array.isArray(exportData.selection.structurePrompts)) {
+                exportData.selection.structurePrompts = [];
+            }
+        }
+
         // 2. Clone document to avoid mutating live DOM
         const clone = document.documentElement.cloneNode(true);
         const cloneDoc = document.implementation.createHTMLDocument();
@@ -5236,6 +5950,12 @@ Output ONLY JSON.`;
         if (adminBtn) adminBtn.remove();
         const adminModal = cloneDoc.querySelector('#modal-admin');
         if (adminModal) adminModal.remove();
+        const zoomInput = cloneDoc.querySelector('#reader-zoom');
+        if(zoomInput) {
+            const zoomLabel = zoomInput.closest("label");
+            if(zoomLabel) zoomLabel.remove();
+            else zoomInput.remove();
+        }
 
         // 4. Inject standalone data at start of body
         const dataScript = cloneDoc.createElement('script');
