@@ -385,6 +385,17 @@
                         <div style="font-size:0.8rem; opacity:0.7; margin-top:4px;">0 disables time limit.</div>
                     </div>
                     <div class="input-group" style="margin-top:6px;">
+                        <label>Reward Every N Levels</label>
+                        <input type="number" id="reward-every-levels" min="0" value="0" onchange="admin.setRewardEveryLevels(this.value)">
+                        <div style="font-size:0.8rem; opacity:0.7; margin-top:4px;">0 disables; reward shows every N levels.</div>
+                    </div>
+                    <div class="input-group" style="margin-top:6px;">
+                        <label>Reward Only at End</label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;">
+                            <input type="checkbox" id="reward-at-end" onchange="admin.setRewardAtEnd(this.checked)"> Show reward only after final level
+                        </label>
+                    </div>
+                    <div class="input-group" style="margin-top:6px;">
                         <label>Quote Selection: Allow Partial</label>
                         <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;">
                             <input type="checkbox" id="allow-partial-selection" onchange="admin.setAllowPartialSelection(this.checked)"> Allow fewer correct quotes than target
@@ -979,6 +990,8 @@ const defaultData = {
         quoteTarget: 4,
         rewardUrl: "",
         rewardMinutes: 0,
+        rewardEveryLevels: 0,
+        rewardAtEnd: false,
         allowPartialSelection: false,
         strictMode: false,
         selectionStages: ["discriminate","align","justify"],
@@ -1638,6 +1651,9 @@ const app = {
         if(typeof safe.settings.rewardUrl !== "string") safe.settings.rewardUrl = "";
         safe.settings.rewardMinutes = parseInt(safe.settings.rewardMinutes, 10);
         if(isNaN(safe.settings.rewardMinutes) || safe.settings.rewardMinutes < 0) safe.settings.rewardMinutes = 0;
+        safe.settings.rewardEveryLevels = parseInt(safe.settings.rewardEveryLevels, 10);
+        if(isNaN(safe.settings.rewardEveryLevels) || safe.settings.rewardEveryLevels < 0) safe.settings.rewardEveryLevels = 0;
+        if(typeof safe.settings.rewardAtEnd !== "boolean") safe.settings.rewardAtEnd = false;
         if(typeof safe.settings.allowPartialSelection !== "boolean") safe.settings.allowPartialSelection = false;
         if(typeof safe.settings.strictMode !== 'boolean') safe.settings.strictMode = false;
         safe.settings.selectionStages = Array.isArray(safe.settings.selectionStages) && safe.settings.selectionStages.length
@@ -3833,13 +3849,19 @@ const ui = {
         const rewardBtn = document.getElementById('celebration-reward');
         const rewardUrl = appData.settings && appData.settings.rewardUrl ? appData.settings.rewardUrl : "";
         const rewardMinutes = appData.settings && typeof appData.settings.rewardMinutes === "number" ? appData.settings.rewardMinutes : 0;
+        const rewardEvery = appData.settings && typeof appData.settings.rewardEveryLevels === "number" ? appData.settings.rewardEveryLevels : 0;
+        const rewardAtEnd = appData.settings && appData.settings.rewardAtEnd === true;
         const rewardUntilKey = "tsa_reward_until";
         const rewardLevelKey = "tsa_reward_level";
         const now = Date.now();
         const rewardUntil = parseInt(localStorage.getItem(rewardUntilKey) || "0", 10) || 0;
         const rewardLevel = parseInt(localStorage.getItem(rewardLevelKey) || "0", 10) || 0;
         if(rewardBtn) {
-            if(rewardUrl) {
+            const maxLevel = Math.max(...app.getActiveLevels());
+            const shouldShowReward = rewardAtEnd
+                ? (userState.level >= maxLevel)
+                : (rewardEvery > 0 ? (userState.level % rewardEvery === 0) : true);
+            if(rewardUrl && shouldShowReward) {
                 rewardBtn.style.display = "inline-flex";
                 if(rewardMinutes > 0 && rewardLevel === userState.level && rewardUntil && now > rewardUntil) {
                     rewardBtn.disabled = true;
@@ -4033,6 +4055,10 @@ const admin = {
         if(reward) reward.value = appData.settings.rewardUrl || "";
         const rewardMinutes = document.getElementById("reward-minutes");
         if(rewardMinutes) rewardMinutes.value = String(appData.settings.rewardMinutes || 0);
+        const rewardEvery = document.getElementById("reward-every-levels");
+        if(rewardEvery) rewardEvery.value = String(appData.settings.rewardEveryLevels || 0);
+        const rewardAtEnd = document.getElementById("reward-at-end");
+        if(rewardAtEnd) rewardAtEnd.checked = !!appData.settings.rewardAtEnd;
         const allowPartial = document.getElementById("allow-partial-selection");
         if(allowPartial) allowPartial.checked = !!appData.settings.allowPartialSelection;
         const aiTone = document.getElementById("ai-include-tone");
@@ -4126,6 +4152,17 @@ const admin = {
         if(!appData.settings) appData.settings = {};
         const n = parseInt(v, 10);
         appData.settings.rewardMinutes = isNaN(n) || n < 0 ? 0 : n;
+        app.save();
+    },
+    setRewardEveryLevels: (v) => {
+        if(!appData.settings) appData.settings = {};
+        const n = parseInt(v, 10);
+        appData.settings.rewardEveryLevels = isNaN(n) || n < 0 ? 0 : n;
+        app.save();
+    },
+    setRewardAtEnd: (c) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.rewardAtEnd = !!c;
         app.save();
     },
     setSelectionDevice: (device, enabled) => {
@@ -5965,6 +6002,7 @@ Output ONLY JSON.`;
         <style>body{font-family:'Aptos','Calibri',sans-serif;} .box{border:1px solid #999; padding:10px; margin-bottom:15px; break-inside:avoid; page-break-inside:avoid;} .dotted{border-bottom:1px dotted #000; display:inline-block; width:95%; margin-top:5px;} .rubric-line{display:block; margin-top:10px;} .rubric-slot{display:inline-block; vertical-align:bottom; margin-right:16px; margin-bottom:8px; font-size:0.9rem;} .rubric-label{font-style:italic; font-weight:600; font-size:0.85rem; opacity:0.8; text-transform:none;} .rubric-blank{border-bottom:1px dotted #000; min-width:180px; height:18px;} .glossary-table{width:100%; border-collapse:collapse; margin:6px 0 8px 0; break-inside:avoid; page-break-inside:avoid;} .glossary-table td{padding:4px 6px; border-bottom:1px dotted #ccc;}</style>
         </head><body>
         <h1>${appData.meta.title}</h1>
+        <p><strong>Question:</strong> ${app.escapeHtml(appData.question || "")}</p>
         <p>${appData.sourceText.replace(/\n/g, '<br>')}</p>`;
         
         const shuffle = (arr) => {
