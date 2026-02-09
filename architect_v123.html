@@ -165,7 +165,7 @@
     <div id="emergency-reset">
         <h2>⚠️ App Crashed</h2>
         <p>The loaded data was corrupted.</p>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="localStorage.clear(); location.reload();">Emergency Reset</button>
+        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="app.emergencyReset()">Emergency Reset</button>
     </div>
 
     <div id="celebration-overlay" class="celebration hidden">
@@ -356,6 +356,7 @@
                     <label style="display:block; margin-bottom:5px;"><input type="checkbox" id="auto-progress" onchange="admin.setAutoProgress(this.checked)"> Auto-progress Levels</label>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="practice-mode" onchange="admin.setPracticeMode(this.checked)"> Practice Mode (lock selected level)</label>
                     <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="strict-mode" onchange="admin.setStrictMode(this.checked)"> Strict Mode (block incorrect choices)</label>
+                    <label style="display:block; margin-bottom:6px;"><input type="checkbox" id="selection-start-first" onchange="admin.setSelectionStartFirst(this.checked)"> Start in Quote Selection</label>
                     <button class="btn btn-outline" onclick="admin.resetSelectionProgress()">Reset Selection Progress</button>
                     <div style="display:flex; gap:6px; align-items:center; font-size:0.85rem;">
                         <span>Practice Level:</span>
@@ -395,17 +396,10 @@
                         <button class="btn btn-outline" onclick="admin.saveTemplate()">Save Template</button>
                         <button class="btn btn-outline" onclick="admin.loadTemplate()">Load Template</button>
                         <button class="btn btn-outline" onclick="admin.exportTemplates()">Save Templates As…</button>
+                        <button class="btn btn-outline" onclick="admin.triggerTemplateImport()">Import Templates…</button>
                         <select id="template-select" style="width:100%; padding:6px;"></select>
                     </div>
                     <div style="font-size:0.85rem; opacity:0.7;">Templates store AI level settings and sentence structures.</div>
-                </div>
-
-                <div class="admin-section">
-                    <h3 class="admin-h">🎯 Quote Selection</h3>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <button class="btn btn-outline" onclick="admin.clearSelectionGate()">Unlock Evidence Lab</button>
-                        <button class="btn btn-outline" onclick="admin.markLabComplete()">Mark Evidence Complete</button>
-                    </div>
                 </div>
 
                 <div class="admin-section">
@@ -927,6 +921,7 @@ const defaultData = {
         strictMode: false,
         selectionStages: ["discriminate","align","justify"],
         modulesActive: { selection: true, lab: true, desk: true },
+        selectionStartsFirst: true,
         levelRules: {
             1: { maxWords: 12, ellipsesMaxWords: 7 },
             2: { maxWords: 20, ellipsesMaxWords: 7 },
@@ -984,6 +979,9 @@ let saveTimeout = null;
 const app = {
     normalizeKey: function(raw) {
         return String(raw || "lesson").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 60);
+    },
+    quoteKey: function(text) {
+        return String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
     },
     getStateKey: function() {
         if(appData && appData.isStandalone) {
@@ -1049,12 +1047,33 @@ const app = {
         const parts = clean.split(/\n\s*\n/);
         return parts.map(p => `<p style="margin:0 0 16px 0;">${app.escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
     },
-    repairSelection: function(s) {
+    repairSelection: function(s, opts) {
         const safe = s && typeof s === "object" ? s : {};
         const text = safe.text && typeof safe.text === "object" ? safe.text : {};
         const question = safe.question && typeof safe.question === "object" ? safe.question : {};
         const items = Array.isArray(safe.items) ? safe.items : [];
         const modes = safe.modes && typeof safe.modes === "object" ? safe.modes : {};
+        const options = opts && typeof opts === "object" ? opts : {};
+        const rawLevels = Array.isArray(options.activeLevels)
+            ? options.activeLevels
+            : (appData && appData.settings && Array.isArray(appData.settings.activeLevels)
+                ? appData.settings.activeLevels
+                : [1,2,3]);
+        const activeLevels = rawLevels
+            .map(n => parseInt(n, 10))
+            .filter(n => n >= 1 && n <= 9);
+        const levelFallback = activeLevels.length ? activeLevels : [1,2,3];
+        const lessonItems = Array.isArray(options.lessonItems)
+            ? options.lessonItems
+            : (appData && Array.isArray(appData.items) ? appData.items : []);
+        const lessonLevelMap = new Map();
+        lessonItems.forEach(it => {
+            const key = it && it.original ? app.quoteKey(it.original) : "";
+            const levels = Array.isArray(it.levels)
+                ? it.levels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 9)
+                : [];
+            if(key && levels.length) lessonLevelMap.set(key, levels);
+        });
         return {
             enabled: !!safe.enabled || items.length > 0,
             text: { source: app.cleanSourceText(text.source || safe.sourceText || "") },
@@ -1081,12 +1100,27 @@ const app = {
                 const cleanedDistractors = distractors
                     .filter(d => d.quote)
                     .map(d => ({ id: d.id, quote: d.quote, reason: d.reason || "" }));
+                const rawLevels = Array.isArray(item.levels)
+                    ? item.levels
+                    : (typeof item.level === "number" || typeof item.level === "string")
+                        ? [item.level]
+                        : (typeof item.levels === "string" ? item.levels.split(",") : []);
+                let levels = Array.isArray(rawLevels)
+                    ? rawLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 9)
+                    : [];
+                if(!levels.length) {
+                    const match = lessonLevelMap.get(app.quoteKey(item.quote));
+                    if(match && match.length) levels = match.slice();
+                }
+                if(!levels.length) levels = [levelFallback[idx % levelFallback.length]];
+                levels = Array.from(new Set(levels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 9)));
                 return {
                     id: typeof item.id === "string" ? item.id : `s${idx+1}`,
                     quote: typeof item.quote === "string" ? item.quote : "",
                     correct: item.correct === true,
                     reasons: reasons,
-                    distractors: cleanedDistractors
+                    distractors: cleanedDistractors,
+                    levels: levels
                 };
             }).filter(i => i.quote),
             modes: {
@@ -1143,7 +1177,8 @@ const app = {
     getSelectionKey: function() {
         const sel = appData && appData.selection ? appData.selection : null;
         if(!sel || !sel.items || !sel.items.length) return "";
-        const base = `${sel.text && sel.text.source ? sel.text.source.slice(0,120) : ""}|${sel.question && sel.question.prompt ? sel.question.prompt : ""}|${sel.items.length}`;
+        const level = app.getEffectiveLevel();
+        const base = `${sel.text && sel.text.source ? sel.text.source.slice(0,120) : ""}|${sel.question && sel.question.prompt ? sel.question.prompt : ""}|${sel.items.length}|lvl:${level}`;
         return base;
     },
     shuffle: function(arr) {
@@ -1330,6 +1365,7 @@ const app = {
         if(typeof safe.settings.modulesActive.selection !== "boolean") safe.settings.modulesActive.selection = true;
         if(typeof safe.settings.modulesActive.lab !== "boolean") safe.settings.modulesActive.lab = true;
         if(typeof safe.settings.modulesActive.desk !== "boolean") safe.settings.modulesActive.desk = true;
+        if(typeof safe.settings.selectionStartsFirst !== "boolean") safe.settings.selectionStartsFirst = true;
         safe.settings.levelRules = safe.settings.levelRules && typeof safe.settings.levelRules === 'object'
             ? safe.settings.levelRules
             : JSON.parse(JSON.stringify(defaultData.settings.levelRules));
@@ -1466,7 +1502,7 @@ const app = {
             safe.settings.quoteTarget = Array.isArray(safe.items) ? safe.items.length : defaultData.settings.quoteTarget;
         }
 
-        safe.selection = app.repairSelection(safe.selection);
+        safe.selection = app.repairSelection(safe.selection, { activeLevels: safe.settings.activeLevels, lessonItems: safe.items });
         return safe;
     },
 
@@ -1494,17 +1530,39 @@ const app = {
     },
 
     factoryReset: function() {
-        if(confirm("Delete ALL data?")) { localStorage.clear(); location.reload(); }
+        if(confirm("Delete ALL data?")) {
+            const templates = localStorage.getItem("tsa_templates_v1");
+            localStorage.clear();
+            if(templates) localStorage.setItem("tsa_templates_v1", templates);
+            location.reload();
+        }
+    },
+    emergencyReset: function() {
+        const templates = localStorage.getItem("tsa_templates_v1");
+        localStorage.clear();
+        if(templates) localStorage.setItem("tsa_templates_v1", templates);
+        location.reload();
     },
 
     setLevel: function(l) {
         const target = parseInt(l, 10);
         const levels = app.getActiveLevels();
         userState.level = levels.includes(target) ? target : levels[0];
+        if(appData.selection && appData.selection.enabled) {
+            userState.selectionCompleted = false;
+            userState.selectionStage = 1;
+            userState.selectionProgress = {};
+            userState.selectionEliminated = [];
+            userState.selectionChosen = [];
+            userState.selectionKey = app.getSelectionKey();
+            ui._selectionCorrectItem = null;
+            ui._selectionQuote = null;
+        }
         app.save();
         const levelBadge = document.getElementById("level-display");
         if(levelBadge) levelBadge.innerText = "Lvl " + userState.level;
         document.getElementById("sentence-builder").innerHTML = '<div style="text-align:center; opacity:0.6; padding:20px;">Level Changed. Select quote.</div>';
+        if(userState.view === "select") ui.renderSelection();
     },
 
     setFilter: function(f) { userState.filter = f; ui.renderLab(); },
@@ -1695,9 +1753,13 @@ const ui = {
         const activeLevels = app.getActiveLevels();
         if(!activeLevels.includes(userState.level)) userState.level = activeLevels[0];
         if(levelSelect) levelSelect.value = userState.level;
-        const hasSelection = appData.settings && appData.settings.modulesActive && appData.settings.modulesActive.selection && appData.selection && appData.selection.enabled;
-        if(!userState.view) {
-            userState.view = hasSelection ? "select" : "lab";
+        const selectionModuleActive = appData.settings && appData.settings.modulesActive && appData.settings.modulesActive.selection;
+        const selectionEnabled = selectionModuleActive && appData.selection && appData.selection.enabled;
+        const startInSelection = selectionEnabled && (appData.settings.selectionStartsFirst !== false);
+        if(startInSelection) {
+            userState.view = "select";
+        } else if(!userState.view) {
+            userState.view = "lab";
         }
         ui.switchView(userState.view);
         ui.loadTheme();
@@ -1709,9 +1771,6 @@ const ui = {
             const sel = document.getElementById("level-selector");
             if(sel) { sel.value = lvl; sel.disabled = true; sel.title = "Practice mode locks the selected level"; }
         }
-        
-        // --- FORCE LAB VIEW ON START ---
-        ui.switchView('lab'); 
         
         ui.renderLab();
 
@@ -1733,16 +1792,19 @@ const ui = {
 
         const selectNav = document.getElementById("nav-select");
         if(selectNav) {
-            const hasSelection = appData.selection && appData.selection.enabled && appData.selection.items.length && !appData.isStandalone;
-            selectNav.classList.toggle("hidden", !hasSelection);
+            selectNav.classList.toggle("hidden", !selectionEnabled);
         }
-        const selectionEnabled = appData.selection && appData.selection.enabled && appData.selection.items.length && !appData.isStandalone;
         if(selectionEnabled) {
             const key = app.getSelectionKey();
             if(key && userState.selectionKey !== key) {
                 userState.selectionCompleted = false;
                 userState.selectionStage = 1;
                 userState.selectionKey = key;
+                userState.selectionProgress = {};
+                userState.selectionEliminated = [];
+                userState.selectionChosen = [];
+                ui._selectionCorrectItem = null;
+                ui._selectionQuote = null;
                 userState.labCompleted = false;
                 app.save();
             }
@@ -2017,18 +2079,32 @@ const ui = {
     },
 
     startWizard: function(item) {
+        if(!item) return;
         const tier = app.getLanguageTier(app.getEffectiveLevel());
-        const opts = [item.translation, ...item.translationDistractors||[]]
+        const translation = typeof item.translation === "string" ? item.translation : "";
+        const distractors = Array.isArray(item.translationDistractors)
+            ? item.translationDistractors
+            : (typeof item.translationDistractors === "string" ? item.translationDistractors.split(",") : []);
+        const cleaned = [translation, ...distractors].map(v => String(v || "").trim()).filter(Boolean);
+        if(!cleaned.length) {
+            ui.runBuilder(item);
+            return;
+        }
+        const opts = cleaned
             .map(v => ({ raw: v, display: app.simplifyText(v, tier) }))
             .sort(()=>Math.random()-0.5);
         ui.openModal("modal-wizard");
-        document.getElementById("wizard-title").innerText = "Phase 1: Meaning";
-        document.getElementById("wizard-prompt").innerHTML = `<p class="quote-text">"${item.original}"</p><p>What does this mean?</p>`;
-        const grid = document.getElementById("wizard-options"); grid.innerHTML = "";
+        const titleEl = document.getElementById("wizard-title");
+        if(titleEl) titleEl.innerText = "Phase 1: Meaning";
+        const promptEl = document.getElementById("wizard-prompt");
+        if(promptEl) promptEl.innerHTML = `<p class="quote-text">"${item.original || ""}"</p><p>What does this mean?</p>`;
+        const grid = document.getElementById("wizard-options");
+        if(!grid) { ui.runBuilder(item); return; }
+        grid.innerHTML = "";
         opts.forEach(o => {
             const b = document.createElement("button"); b.className = "btn btn-outline"; b.textContent = o.display;
             b.onclick = () => {
-                if(o.raw === item.translation) {
+                if(o.raw === translation) {
                     b.style.background = "var(--success)"; b.style.color="white"; app.playSound('correct');
                     setTimeout(() => {
                         const hasAnalysis = item.effect || (item.effectDistractors && item.effectDistractors.length);
@@ -2047,17 +2123,31 @@ const ui = {
 
     runAnalysisStep: function(item) {
         const tier = app.getLanguageTier(app.getEffectiveLevel());
-        const opts = [item.effect, ...item.effectDistractors||[]]
+        const effect = typeof item.effect === "string" ? item.effect : "";
+        const distractors = Array.isArray(item.effectDistractors)
+            ? item.effectDistractors
+            : (typeof item.effectDistractors === "string" ? item.effectDistractors.split(",") : []);
+        const opts = [effect, ...distractors]
+            .map(v => String(v || "").trim())
             .filter(Boolean)
             .map(v => ({ raw: v, display: app.simplifyText(v, tier) }))
             .sort(()=>Math.random()-0.5);
-        document.getElementById("wizard-title").innerText = "Phase 2: Analysis";
-        document.getElementById("wizard-prompt").innerHTML = `<p class="quote-text">"${item.original}"</p><p>Which analysis is most accurate?</p>`;
-        const grid = document.getElementById("wizard-options"); grid.innerHTML = "";
+        if(!opts.length) {
+            ui.closeModal("modal-wizard");
+            ui.runBuilder(item);
+            return;
+        }
+        const titleEl = document.getElementById("wizard-title");
+        if(titleEl) titleEl.innerText = "Phase 2: Analysis";
+        const promptEl = document.getElementById("wizard-prompt");
+        if(promptEl) promptEl.innerHTML = `<p class="quote-text">"${item.original || ""}"</p><p>Which analysis is most accurate?</p>`;
+        const grid = document.getElementById("wizard-options");
+        if(!grid) { ui.closeModal("modal-wizard"); ui.runBuilder(item); return; }
+        grid.innerHTML = "";
         opts.forEach(o => {
             const b = document.createElement("button"); b.className = "btn btn-outline"; b.textContent = o.display;
             b.onclick = () => {
-                if(o.raw === item.effect) {
+                if(o.raw === effect) {
                     b.style.background = "var(--success)"; b.style.color="white"; app.playSound('correct');
                     setTimeout(() => {
                         ui.closeModal("modal-wizard");
@@ -2229,7 +2319,10 @@ const ui = {
         const cont = document.getElementById("selection-area");
         if(!cont) return;
         if(!appData.selection) {
-            appData.selection = app.repairSelection({});
+            appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
+        }
+        if(!userState.selectionProgress || typeof userState.selectionProgress !== "object") {
+            userState.selectionProgress = {};
         }
         const sel = appData.selection;
         if(!sel || !sel.enabled || !sel.items.length || sel.items.length < 2) {
@@ -2243,7 +2336,8 @@ const ui = {
         const stages = sel.modes && sel.modes.stages ? sel.modes.stages : ["discriminate","align","justify"];
         const stageIndex = Math.max(1, Math.min(stages.length, userState.selectionStage || 1));
         const stageKey = stages[stageIndex - 1];
-        const levelEntry = app.getLevelBank()[app.getEffectiveLevel()] || {};
+        const level = app.getEffectiveLevel();
+        const levelEntry = app.getLevelBank()[level] || {};
         const targetCount = Math.max(
             1,
             (levelEntry.quoteTarget) ? parseInt(levelEntry.quoteTarget, 10)
@@ -2251,14 +2345,17 @@ const ui = {
                 : (sel.modes && sel.modes.quoteTarget) ? parseInt(sel.modes.quoteTarget, 10)
                 : sel.modes.quoteCount
         );
-        const correctItems = sel.items.filter(i => i.correct);
+        const correctItemsAll = sel.items.filter(i => i.correct);
+        let correctItems = correctItemsAll.filter(i => Array.isArray(i.levels) ? i.levels.includes(level) : false);
         if(correctItems.length < targetCount) {
             const promoteNeeded = targetCount - correctItems.length;
-            const promotable = sel.items.filter(i => i && !i.correct && i.quote).slice(0, promoteNeeded);
+            const promotable = sel.items
+                .filter(i => i && !i.correct && i.quote && (!Array.isArray(i.levels) || i.levels.includes(level)))
+                .slice(0, promoteNeeded);
             if(promotable.length) {
                 promotable.forEach(i => { i.correct = true; if(!Array.isArray(i.reasons) || !i.reasons.length) i.reasons = ["Strong evidence."]; });
                 app.save();
-                correctItems.push(...promotable);
+                correctItems = correctItems.concat(promotable);
             }
         }
         if(correctItems.length < targetCount) {
@@ -2270,30 +2367,33 @@ const ui = {
             return;
         }
         const primaryCorrect = correctItems[0] || sel.items[0];
-        const chosenCorrect = ui._selectionCorrectItem || primaryCorrect;
+        const validChosen = ui._selectionCorrectItem && Array.isArray(ui._selectionCorrectItem.levels)
+            ? ui._selectionCorrectItem.levels.includes(level)
+            : false;
+        const chosenCorrect = validChosen ? ui._selectionCorrectItem : primaryCorrect;
+        if(!validChosen) { ui._selectionCorrectItem = null; ui._selectionQuote = null; }
         const baseDistractors = Array.isArray(primaryCorrect.distractors) ? primaryCorrect.distractors : [];
         const distractorItems = baseDistractors.map(d => ({ quote: d.quote, reason: d.reason, correct: false })).filter(d => d.quote);
-        const incorrectItems = sel.items
-            .filter(i => !i.correct)
+        const levelIncorrect = sel.items.filter(i => !i.correct && (Array.isArray(i.levels) ? i.levels.includes(level) : true));
+        const incorrectItems = (levelIncorrect.length ? levelIncorrect : sel.items.filter(i => !i.correct))
             .map(i => ({ quote: i.quote, correct: false, item: i }))
             .filter(i => i.quote);
         const fallbackIncorrect = incorrectItems.length
             ? incorrectItems
             : distractorItems.map(d => ({ quote: d.quote, correct: false, item: { quote: d.quote, correct: false } }))
                 .filter(i => i.quote);
-        const quoteKey = (q) => String(q || "").toLowerCase().replace(/\s+/g, " ").trim();
-        const eliminatedSet = new Set((userState.selectionEliminated || []).map(q => quoteKey(q)));
+        const eliminatedSet = new Set((userState.selectionEliminated || []).map(q => app.quoteKey(q)));
         const reasonMap = new Map();
         correctItems.forEach(i => {
             const r = Array.isArray(i.reasons) ? i.reasons.find(Boolean) : "";
-            if(i.quote && r) reasonMap.set(quoteKey(i.quote), r);
+            if(i.quote && r) reasonMap.set(app.quoteKey(i.quote), r);
         });
         incorrectItems.forEach(i => {
             const r = i.item && Array.isArray(i.item.reasons) ? i.item.reasons.find(Boolean) : "";
-            if(i.quote && r) reasonMap.set(quoteKey(i.quote), r);
+            if(i.quote && r) reasonMap.set(app.quoteKey(i.quote), r);
         });
         baseDistractors.forEach(d => {
-            if(d && d.quote && d.reason) reasonMap.set(quoteKey(d.quote), d.reason);
+            if(d && d.quote && d.reason) reasonMap.set(app.quoteKey(d.quote), d.reason);
         });
         const otherCorrect = correctItems.filter(i => i !== primaryCorrect).map(i => ({ quote: i.quote, correct: true, item: i }));
         const distractorPool = distractorItems.map(d => ({ quote: d.quote, correct: false, item: { quote: d.quote, correct: false, reasons: [d.reason].filter(Boolean) } }));
@@ -2309,14 +2409,13 @@ const ui = {
         ]);
         const options = app.shuffle([{ quote: primaryCorrect.quote, correct: true, item: primaryCorrect }, ...poolCandidates])
             .filter(o => o && o.quote)
-            .filter((o, idx, arr) => arr.findIndex(x => quoteKey(x.quote) === quoteKey(o.quote)) === idx)
-            .filter(o => !eliminatedSet.has(quoteKey(o.quote)) || o.correct)
+            .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx)
+            .filter(o => !eliminatedSet.has(app.quoteKey(o.quote)) || o.correct)
             .slice(0, sel.modes.quoteCount);
         const reasons = app.shuffle([...(chosenCorrect.reasons || []), ...distractorItems.map(d => d.reason).filter(Boolean)]);
         const chosenList = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
-        const chosenSet = new Set(chosenList.map(q => quoteKey(q)));
+        const chosenSet = new Set(chosenList.map(q => app.quoteKey(q)));
         const textHtml = app.formatSourceHtml(sel.text && sel.text.source ? sel.text.source : appData.sourceText);
-        const level = app.getEffectiveLevel();
         const tier = app.getLanguageTier(level);
         const easy = tier === "low";
         const canJumpStages = !appData.isStandalone;
@@ -2420,7 +2519,7 @@ const ui = {
                 ...distractorPool
             ])
                 .filter(o => o && o.quote)
-                .filter((o, idx, arr) => arr.findIndex(x => quoteKey(x.quote) === quoteKey(o.quote)) === idx);
+                .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx);
             userState.selectionProgress.discriminate = userState.selectionProgress.discriminate || {};
             body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Choose the strong quotes.</div>
                 <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">${easy
@@ -2443,9 +2542,15 @@ const ui = {
                 const meta = card.querySelector(".card-meta span");
                 const key = o.quote;
                 const update = (choice) => {
+                    if(!userState.selectionProgress || typeof userState.selectionProgress !== "object") {
+                        userState.selectionProgress = {};
+                    }
+                    if(!userState.selectionProgress.discriminate || typeof userState.selectionProgress.discriminate !== "object") {
+                        userState.selectionProgress.discriminate = {};
+                    }
                     const correct = o.correct ? "analysis" : "noise";
                     userState.selectionProgress.discriminate[key] = choice;
-                    const reasonRaw = reasonMap.get(quoteKey(o.quote)) || (o.correct
+                    const reasonRaw = reasonMap.get(app.quoteKey(o.quote)) || (o.correct
                         ? "Good choice: it shows the writer's words or structure."
                         : "Not strong: this is mostly what happened.");
                     const reason = app.simplifyText(reasonRaw, tier);
@@ -2532,7 +2637,7 @@ const ui = {
                 <div class="grid" id="selection-quotes"></div>`;
             const grid = body.querySelector("#selection-quotes");
             const correctOptions = options.filter(o => o.correct);
-            const alignPool = options.filter(o => !eliminatedSet.has(quoteKey(o.quote)) || o.correct);
+            const alignPool = options.filter(o => !eliminatedSet.has(app.quoteKey(o.quote)) || o.correct);
             const alignOptions = app.shuffle(alignPool.length ? alignPool : options).slice(0, sel.modes.quoteCount);
             if(!alignOptions.some(o => o.correct) && correctOptions.length) {
                 alignOptions.pop();
@@ -2542,7 +2647,7 @@ const ui = {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline";
                 btn.textContent = `"${o.quote}"`;
-                if(chosenSet.has(quoteKey(o.quote))) btn.classList.add("quote-picked");
+                if(chosenSet.has(app.quoteKey(o.quote))) btn.classList.add("quote-picked");
                 btn.onclick = () => {
                     if(o.correct) {
                         btn.style.background = "var(--success)";
@@ -2575,7 +2680,7 @@ const ui = {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline";
                 btn.textContent = `"${o.quote}"`;
-                if(chosenSet.has(quoteKey(o.quote))) btn.classList.add("quote-picked");
+                if(chosenSet.has(app.quoteKey(o.quote))) btn.classList.add("quote-picked");
                 btn.onclick = () => {
                     if(o.correct) { btn.style.background = "var(--success)"; btn.style.color = "white"; btn.classList.add("quote-picked"); }
                     else if(sel.modes.showHints) { btn.classList.add("shake"); btn.classList.add("quote-dim"); }
@@ -2600,7 +2705,7 @@ const ui = {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline";
                 btn.textContent = `"${o.quote}"`;
-                if(chosenSet.has(quoteKey(o.quote))) btn.classList.add("quote-picked");
+                if(chosenSet.has(app.quoteKey(o.quote))) btn.classList.add("quote-picked");
                 btn.onclick = () => {
                     if(o.correct) {
                         btn.style.background = "var(--success)";
@@ -2891,7 +2996,7 @@ const admin = {
     },
     ensureSelectionData: () => {
         if(!appData.selection || typeof appData.selection !== "object") {
-            appData.selection = app.repairSelection({});
+            appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
         }
         if(!appData.selection.question || typeof appData.selection.question !== "object") {
             appData.selection.question = { prompt: "", focusTags: [] };
@@ -2920,6 +3025,8 @@ const admin = {
         if(allLevels) allLevels.checked = !!appData.settings.aiPromptAllLevels;
         const strict = document.getElementById("strict-mode");
         if(strict) strict.checked = !!appData.settings.strictMode;
+        const startFirst = document.getElementById("selection-start-first");
+        if(startFirst) startFirst.checked = appData.settings.selectionStartsFirst !== false;
         const modulesWrap = document.getElementById("modules-active");
         if(modulesWrap) {
             const modules = ["selection","lab","desk"];
@@ -3030,6 +3137,12 @@ const admin = {
         appData.settings.strictMode = c;
         app.save();
     },
+    setSelectionStartFirst: (c) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.selectionStartsFirst = !!c;
+        app.save();
+        ui.init();
+    },
     setAiAllLevels: (c) => {
         if(!appData.settings) appData.settings = {};
         appData.settings.aiPromptAllLevels = c;
@@ -3110,6 +3223,10 @@ const admin = {
         userState.selectionStage = 1;
         userState.selectionKey = "";
         userState.selectionProgress = {};
+        userState.selectionEliminated = [];
+        userState.selectionChosen = [];
+        ui._selectionCorrectItem = null;
+        ui._selectionQuote = null;
         userState.labCompleted = false;
         app.save();
         ui.init();
@@ -3322,7 +3439,7 @@ Output ONLY valid JSON.`;
                 appData = safe;
             }
             if(selection) {
-                appData.selection = app.repairSelection(selection);
+                appData.selection = app.repairSelection(selection, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
                 if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                     appData.selection.modes = appData.selection.modes || {};
                     appData.selection.modes.stages = appData.settings.selectionStages;
@@ -3331,6 +3448,8 @@ Output ONLY valid JSON.`;
                 userState.selectionStage = 1;
                 userState.selectionKey = "";
                 userState.selectionProgress = {};
+                userState.selectionEliminated = [];
+                userState.selectionChosen = [];
             }
             app.save();
             ui.init();
@@ -3486,8 +3605,14 @@ Output ONLY valid JSON.`;
     loadTemplate: () => {
         const sel = document.getElementById("template-select");
         const name = sel ? sel.value : "";
-        if(!name) return alert("Select a template.");
         const templates = admin.getTemplates();
+        if(!templates.length) {
+            if(confirm("No templates found. Import templates from a file?")) {
+                admin.triggerTemplateImport();
+            }
+            return;
+        }
+        if(!name) return alert("Select a template.");
         const t = templates.find(x => x.name === name);
         if(!t) return alert("Template not found.");
         admin.applyAiSettings(t.aiSettings);
@@ -3605,7 +3730,7 @@ Output ONLY valid JSON.`;
             const mode = document.getElementById("ai-mode").value;
             const existingTemplates = admin.getTemplates();
             if(j && j.text && j.items && j.items[0] && j.items[0].quote) {
-                appData.selection = app.repairSelection(j);
+                appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
                 if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                     appData.selection.modes = appData.selection.modes || {};
                     appData.selection.modes.stages = appData.settings.selectionStages;
@@ -3720,7 +3845,7 @@ Output ONLY valid JSON.`;
             if(missing.length) {
                 return alert("Selection JSON has missing fields:\n" + missing.slice(0, 10).join("\n"));
             }
-            appData.selection = app.repairSelection(j);
+            appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
             if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                 appData.selection.modes = appData.selection.modes || {};
                 appData.selection.modes.stages = appData.settings.selectionStages;
@@ -3868,6 +3993,9 @@ Output ONLY JSON.`;
         admin.ensureSelectionData();
         const item = appData.selection.items[idx];
         if(!item) return;
+        if(!Array.isArray(item.levels) || !item.levels.length) {
+            item.levels = [app.getEffectiveLevel()];
+        }
         if(key === "quote") {
             item.quote = String(value || "");
         } else if(key === "correct") {
@@ -3891,7 +4019,8 @@ Output ONLY JSON.`;
             quote: "New quote",
             correct: false,
             reasons: ["Reason 1", "Reason 2"],
-            distractors: [{ id: "sd_new_1", quote: "Distractor quote", reason: "Weaker reason" }]
+            distractors: [{ id: "sd_new_1", quote: "Distractor quote", reason: "Weaker reason" }],
+            levels: [app.getEffectiveLevel()]
         });
         app.save();
         admin.renderSelectionEditor();
@@ -4181,6 +4310,12 @@ Output ONLY JSON.`;
             ].map(v => (v || "").trim()).filter(Boolean);
             if(candidates.length) exportData.sourceText = app.cleanSourceText(candidates[0]);
         }
+        if(!exportData.sourceText && exportData.selection && exportData.selection.text && exportData.selection.text.source) {
+            exportData.sourceText = app.cleanSourceText(exportData.selection.text.source);
+        }
+        if(!exportData.question && exportData.selection && exportData.selection.question && exportData.selection.question.prompt) {
+            exportData.question = exportData.selection.question.prompt;
+        }
         if(!exportData.meta) exportData.meta = {};
         if(!exportData.meta.id) exportData.meta.id = "lesson_" + Date.now();
 
@@ -4214,6 +4349,11 @@ Output ONLY JSON.`;
         const payload = { templates };
         const b = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
         const a = document.createElement('a'); a.href=URL.createObjectURL(b); a.download='templates.json'; a.click();
+    },
+    triggerTemplateImport: () => {
+        const input = document.getElementById("templates-up");
+        if(input) input.click();
+        else alert("Templates file input not found. Use Load & Import tab.");
     },
     importTemplates: (input) => {
         const f = input.files[0]; if(!f) return;
