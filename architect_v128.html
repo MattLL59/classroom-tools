@@ -5747,27 +5747,63 @@ Output ONLY JSON.`;
             });
         };
         // Auto-assign only when a level is short (preserve existing assignments).
-        const countByLevel = (items) => {
+        // Count unique quotes per level (same quote text only counts once).
+        const countByLevel = (items, uniqueByQuote) => {
             const counts = Object.fromEntries(activeLevels.map(l => [l, 0]));
-            items.forEach(it => {
-                const lvl = Array.isArray(it.levels) && it.levels.length ? it.levels[0] : null;
-                if(lvl && counts[lvl] !== undefined) counts[lvl] += 1;
-            });
+            if(uniqueByQuote) {
+                activeLevels.forEach(lvl => {
+                    const keys = new Set();
+                    items.forEach(it => {
+                        const lvlAssigned = Array.isArray(it.levels) && it.levels.length ? it.levels[0] : null;
+                        if(lvlAssigned === lvl && it.quote) {
+                            keys.add(app.quoteKey(it.quote));
+                        }
+                    });
+                    counts[lvl] = keys.size;
+                });
+            } else {
+                items.forEach(it => {
+                    const lvl = Array.isArray(it.levels) && it.levels.length ? it.levels[0] : null;
+                    if(lvl && counts[lvl] !== undefined) counts[lvl] += 1;
+                });
+            }
             return counts;
         };
-        const correctCounts = countByLevel(correctItems);
+        const correctCounts = countByLevel(correctItems, true);
         activeLevels.forEach(lvl => {
             const needed = Math.max(0, (targets[lvl].correct || 0) - (correctCounts[lvl] || 0));
             if(!needed) return;
-            const candidates = correctItems.filter(i => !Array.isArray(i.levels) || !i.levels.length || i.levels[0] !== lvl);
-            candidates.slice(0, needed).forEach(i => { i.levels = [lvl]; });
+            const alreadyOnLevel = new Set(
+                correctItems.filter(i => Array.isArray(i.levels) && i.levels.includes(lvl)).map(i => app.quoteKey(i.quote))
+            );
+            const candidates = correctItems.filter(i => !Array.isArray(i.levels) || !i.levels.length || !i.levels.includes(lvl));
+            let assigned = 0;
+            for(let i = 0; i < candidates.length && assigned < needed; i++) {
+                const it = candidates[i];
+                const key = app.quoteKey(it.quote);
+                if(alreadyOnLevel.has(key)) continue;
+                alreadyOnLevel.add(key);
+                it.levels = [lvl];
+                assigned += 1;
+            }
         });
-        const incorrectCounts = countByLevel(incorrectItems);
+        const incorrectCounts = countByLevel(incorrectItems, true);
         activeLevels.forEach(lvl => {
             const needed = Math.max(0, (targets[lvl].incorrect || 0) - (incorrectCounts[lvl] || 0));
             if(!needed) return;
-            const candidates = incorrectItems.filter(i => !Array.isArray(i.levels) || !i.levels.length || i.levels[0] !== lvl);
-            candidates.slice(0, needed).forEach(i => { i.levels = [lvl]; });
+            const alreadyOnLevel = new Set(
+                incorrectItems.filter(i => Array.isArray(i.levels) && i.levels.includes(lvl)).map(i => app.quoteKey(i.quote))
+            );
+            const candidates = incorrectItems.filter(i => !Array.isArray(i.levels) || !i.levels.length || !i.levels.includes(lvl));
+            let assigned = 0;
+            for(let i = 0; i < candidates.length && assigned < needed; i++) {
+                const it = candidates[i];
+                const key = app.quoteKey(it.quote);
+                if(alreadyOnLevel.has(key)) continue;
+                alreadyOnLevel.add(key);
+                it.levels = [lvl];
+                assigned += 1;
+            }
         });
         app.save();
         admin.renderSelectionEditor();
