@@ -147,6 +147,7 @@
     .reader-controls input[type="range"] { width:120px; }
     .reader-body { position: relative; }
     #source-content, #source-inline, #source-inline-select, #intro-text, #reader-window { font-size: var(--reader-zoom) !important; }
+    #source-content, #source-inline-select, #selection-free-select-source { touch-action: manipulation; -webkit-touch-callout: default; }
     .reader-window { position: absolute; left: 10px; right: 10px; top: 72px; height: var(--reader-window-height); border: 2px solid var(--reader-highlight-border); border-radius: 8px; background: var(--reader-highlight); pointer-events: none; z-index: 2; }
     .reader-window-line { display:none; }
     .stage-tag { background: rgba(0,0,0,0.04); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
@@ -2351,12 +2352,20 @@ const ui = {
         const sourceContent = document.getElementById("source-content");
         if(sourceContent && !sourceContent.dataset.selectBound) {
             sourceContent.dataset.selectBound = "true";
-            const tryProcessSelection = (sourceEl, sourceText, closeReaderThenSwitch) => {
-                const selection = window.getSelection ? window.getSelection() : null;
-                if(!selection || selection.isCollapsed) return;
-                const text = selection.toString().trim();
+            const tryProcessSelection = (sourceEl, sourceText, closeReaderThenSwitch, preCaptured) => {
+                let text, anchor, focus;
+                if(preCaptured && preCaptured.text) {
+                    text = preCaptured.text;
+                    anchor = preCaptured.anchorNode;
+                    focus = preCaptured.focusNode;
+                } else {
+                    const selection = window.getSelection ? window.getSelection() : null;
+                    if(!selection || selection.isCollapsed) return;
+                    text = selection.toString().trim();
+                    anchor = selection.anchorNode;
+                    focus = selection.focusNode;
+                }
                 if(!text || text.length < 3) return;
-                const anchor = selection.anchorNode; const focus = selection.focusNode;
                 const ancEl = anchor && anchor.nodeType === 3 ? anchor.parentNode : anchor;
                 const focEl = focus && focus.nodeType === 3 ? focus.parentNode : focus;
                 if(!sourceEl || !sourceEl.contains(ancEl) || !sourceEl.contains(focEl)) return;
@@ -2371,7 +2380,7 @@ const ui = {
             };
             if(!document.body.dataset.freeSelectMouseBound) {
                 document.body.dataset.freeSelectMouseBound = "true";
-                const docSelectHandler = () => {
+                const docSelectHandler = (e) => {
                     const sel = appData.selection;
                     const levelBank = app.getLevelBank();
                     const level = app.getEffectiveLevel();
@@ -2380,22 +2389,46 @@ const ui = {
                     if(!modules.selection || !sel || !sel.enabled || !levelEntry.freeSelectFromText) return;
                     const sourceText = app.getSourceText();
                     if(!sourceText || !String(sourceText).trim()) return;
-                    requestAnimationFrame(() => {
-                        setTimeout(() => {
-                            const modal = document.getElementById("modal-source");
-                            if(modal && modal.classList.contains("open")) {
-                                tryProcessSelection(sourceContent, sourceText, true);
-                                return;
+                    let preCaptured = null;
+                    if(e && e.type === "touchend") {
+                        const selObj = window.getSelection ? window.getSelection() : null;
+                        if(selObj && !selObj.isCollapsed) {
+                            const txt = selObj.toString().trim();
+                            if(txt && txt.length >= 3) {
+                                const anc = selObj.anchorNode;
+                                const foc = selObj.focusNode;
+                                if(sourceContent && (sourceContent.contains(anc) || sourceContent.contains(foc))) {
+                                    preCaptured = { text: txt, anchorNode: anc, focusNode: foc };
+                                } else {
+                                    const quoteSelectEl = document.getElementById("selection-free-select-source");
+                                    if(quoteSelectEl && quoteSelectEl.offsetParent !== null && (quoteSelectEl.contains(anc) || quoteSelectEl.contains(foc))) {
+                                        preCaptured = { text: txt, anchorNode: anc, focusNode: foc };
+                                    }
+                                }
                             }
-                            const quoteSelectEl = document.getElementById("selection-free-select-source");
-                            if(quoteSelectEl && quoteSelectEl.offsetParent !== null) {
-                                tryProcessSelection(quoteSelectEl, sourceText, false);
-                            }
-                        }, 10);
-                    });
+                        }
+                    }
+                    const modal = document.getElementById("modal-source");
+                    const quoteSelectEl = document.getElementById("selection-free-select-source");
+                    const runProcess = () => {
+                        const inModal = modal && modal.classList.contains("open");
+                        const inQuoteSelect = quoteSelectEl && quoteSelectEl.offsetParent !== null;
+                        const usePreForModal = preCaptured && sourceContent && (sourceContent.contains(preCaptured.anchorNode) || sourceContent.contains(preCaptured.focusNode));
+                        const usePreForQuote = preCaptured && quoteSelectEl && (quoteSelectEl.contains(preCaptured.anchorNode) || quoteSelectEl.contains(preCaptured.focusNode));
+                        if(inModal) {
+                            tryProcessSelection(sourceContent, sourceText, true, usePreForModal ? preCaptured : null);
+                        } else if(inQuoteSelect) {
+                            tryProcessSelection(quoteSelectEl, sourceText, false, usePreForQuote ? preCaptured : null);
+                        }
+                    };
+                    if(preCaptured) {
+                        runProcess();
+                    } else {
+                        requestAnimationFrame(() => { setTimeout(runProcess, 10); });
+                    }
                 };
                 document.addEventListener("mouseup", docSelectHandler, true);
-                document.addEventListener("touchend", docSelectHandler, true);
+                document.addEventListener("touchend", docSelectHandler, { capture: true, passive: true });
             }
         }
     },
