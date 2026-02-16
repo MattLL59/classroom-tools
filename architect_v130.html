@@ -453,7 +453,6 @@
                         <label style="font-size:0.85rem;">Start in:</label>
                         <select id="start-view" onchange="admin.setStartView(this.value)" style="padding:4px;">
                             <option value="select">Quote Select</option>
-                            <option value="lab">Evidence Lab</option>
                             <option value="desk">Writing Desk</option>
                         </select>
                     </div>
@@ -505,11 +504,6 @@
                         <button class="btn btn-outline" onclick="admin.editBank('starters')">Starters</button>
                         <button class="btn btn-outline" onclick="admin.editBank('methods')">Methods</button>
                         <button class="btn btn-outline" onclick="admin.editBank('points')">Points</button>
-                    </div>
-                    <div class="bank-btn-grid">
-                        <button class="btn btn-outline" style="border-color:var(--primary);" onclick="admin.editBank('link_l1')">Links L1</button>
-                        <button class="btn btn-outline" style="border-color:var(--primary);" onclick="admin.editBank('link_l2')">Links L2</button>
-                        <button class="btn btn-outline" style="border-color:var(--primary);" onclick="admin.editBank('link_l3')">Links L3</button>
                     </div>
                     <div id="bank-editor-ui" class="hidden" style="background:var(--bg); padding:10px; border-radius:6px; border:1px solid var(--border);">
                         <strong id="bank-name-display" style="display:block; margin-bottom:5px; color:var(--primary);"></strong>
@@ -1004,15 +998,14 @@
                 <ol style="margin:0.5em 0 1em 1.2em; padding:0;">
                     <li>Open the app (teacher mode). Use the ⚙️ Settings button to configure the lesson.</li>
                     <li>Add content: paste Source Text and Focus Question (e.g. in AI tab → generate prompt → copy to ChatGPT/Claude → paste JSON back and Load Data), or Load JSON or build manually in Edit.</li>
-                    <li>Set <strong>Start in</strong>: Quote Select, Evidence Lab, or Writing Desk. The app always opens on this view; students can switch tabs if they wish.</li>
-                    <li>Turn on <strong>Active Modules</strong>: Quote Select, Evidence Lab, Writing Desk. Enabling Quote Select automatically enables free select (tap text) for active levels.</li>
+                    <li>Set <strong>Start in</strong>: Quote Select or Writing Desk. The app always opens on this view; students can switch tabs if they wish.</li>
+                    <li>Turn on <strong>Active Modules</strong>: Quote Select, Writing Desk. Enabling Quote Select automatically enables free select (tap text) for active levels.</li>
                     <li>In <strong>Level Bank</strong>, set <strong>Quote target (correct)</strong> and <strong>Weak quotes (distractors)</strong> per level. Quote targets are taken only from Level Bank (no separate setting).</li>
                     <li>Export: <strong>Worksheet (Word)</strong> or <strong>Student App</strong> (standalone HTML).</li>
                 </ol>
                 <p><strong>Modules</strong></p>
                 <ul style="margin:0.5em 0 1em 1.2em; padding:0;">
                     <li><strong>Quote Select 🎯</strong> — Students choose Strong/Not strong, match evidence type, justify. Set stages in Selection stages (Beginner = align + justify only). Level Bank controls how many correct and distractor options appear.</li>
-                    <li><strong>Evidence Lab 🧪</strong> — Browse source text and quote cards; filters (Lang/Struct/Tone); tap a quote to build a sentence.</li>
                     <li><strong>Writing Desk ✍️</strong> — Build sentences (slots from Sentence Structure and banks), preview, Commit to Answer. Practice Mode locks level and turns off Auto progress; Practice Force Auto / Fixed Template simplify the builder.</li>
                 </ul>
                 <p><strong>Settings summary</strong></p>
@@ -1314,6 +1307,28 @@ const app = {
         if(!t) return false;
         if(!(t.startsWith("{") || t.startsWith("["))) return false;
         return /\"items\"|\"quote\"|\"sourceText\"|\"selection\"/i.test(t);
+    },
+    tryParseJson: function(text) {
+        if (typeof text !== "string") return { parsed: undefined, error: "Input is not a string." };
+        let s = text.replace(/^\uFEFF/, ""); // BOM
+        s = s.replace(/,(\s*[}\]])/g, "$1"); // trailing commas before } or ]
+        try {
+            return { parsed: JSON.parse(s) };
+        } catch (e) {
+            const msg = e && e.message ? String(e.message) : "Invalid JSON";
+            let lineHint = "";
+            const posMatch = msg.match(/position\s+(\d+)/i);
+            if (posMatch) {
+                const pos = Math.min(parseInt(posMatch[1], 10), s.length);
+                const before = s.slice(0, pos);
+                const lineNum = (before.match(/\n/g) || []).length + 1;
+                const lastN = before.lastIndexOf("\n");
+                const col = lastN === -1 ? pos + 1 : pos - lastN;
+                lineHint = " (around line " + lineNum + ", column " + col + ")";
+            }
+            const hint = "Check for: unescaped double quote (\") inside a value, trailing comma before } or ], or smart/curly quotes. Fix the JSON in a text editor and try again.";
+            return { parsed: undefined, error: "Invalid JSON" + lineHint + ": " + msg + "\n\n" + hint };
+        }
     },
     formatSourceHtml: function(text) {
         const clean = app.cleanSourceText(text || "");
@@ -1776,9 +1791,9 @@ const app = {
             ? safe.settings.modulesActive
             : { selection: true, lab: true, desk: true };
         if(typeof safe.settings.modulesActive.selection !== "boolean") safe.settings.modulesActive.selection = true;
-        if(typeof safe.settings.modulesActive.lab !== "boolean") safe.settings.modulesActive.lab = true;
+        if(typeof safe.settings.modulesActive.lab !== "boolean") safe.settings.modulesActive.lab = false;
         if(typeof safe.settings.modulesActive.desk !== "boolean") safe.settings.modulesActive.desk = true;
-        if(typeof safe.settings.startView !== "string") safe.settings.startView = "lab";
+        if(typeof safe.settings.startView !== "string") safe.settings.startView = "desk";
         safe.settings.levelRules = safe.settings.levelRules && typeof safe.settings.levelRules === 'object'
             ? safe.settings.levelRules
             : JSON.parse(JSON.stringify(defaultData.settings.levelRules));
@@ -3322,29 +3337,26 @@ const ui = {
                         if(base && base.length) return [...base, ...(item.methodDistractors || [])].filter(Boolean);
                     }
                     if(slot.includes("link") && linkKey) {
-                        const bankLinks = (appData.banks && appData.banks.links && appData.banks.links[linkKey]) || (appData.banks && appData.banks.links && appData.banks.links.l3) || [];
                         const perQuote = Array.isArray(item.links) ? item.links : (item.link ? [item.link] : []);
-                        const normalized = [...perQuote, ...bankLinks].map(s => String(s).trim()).filter(Boolean);
-                        const merged = [...new Map(normalized.map(s => [s.toLowerCase(), s])).values()];
-                        if(merged.length) return merged;
+                        const normalized = perQuote.map(s => String(s).trim()).filter(Boolean);
+                        if(normalized.length) return normalized;
                     }
                     return null;
                 })();
 
                 let list = null;
                 let correct = null;
+                if(slot.includes("link")) {
+                    row.innerHTML = `<span class="slot-label">${(slot.split("_")[1] || "LINK").toUpperCase()} (link between quote and point)</span><input class="slot-input" placeholder="e.g. This suggests that" value="${app.escapeHtml((item.link || (Array.isArray(item.links) ? item.links[0] : "") || ""))}" oninput="ui.updPrev()">`;
+                    cont.appendChild(row);
+                    return;
+                }
                 if(perQuoteList) {
                     list = perQuoteList;
                     if(slot === "point" || slot === "analysis") correct = item.effect;
                     if(slot === "starter") correct = item.starter || (Array.isArray(item.starters) ? item.starters[0] : null);
                     if(slot === "marker") correct = item.marker || (Array.isArray(item.markers) ? item.markers[0] : null);
                     if(slot === "method") correct = item.method || (Array.isArray(item.methods) ? item.methods[0] : null);
-                    if(slot.includes("link")) correct = item.link || (Array.isArray(item.links) ? item.links[0] : null);
-                }
-                else if(slot.includes("link") && linkKey) {
-                    const raw = (appData.banks && appData.banks.links && appData.banks.links[linkKey]) || (appData.banks && appData.banks.links && appData.banks.links.l3) || [];
-                    const norm = raw.map(s => String(s).trim()).filter(Boolean);
-                    list = [...new Map(norm.map(s => [s.toLowerCase(), s])).values()];
                 } else {
                     list = appData.banks && appData.banks[key] ? appData.banks[key] : null;
                 }
@@ -3501,7 +3513,7 @@ const ui = {
                 : (sel.modes && sel.modes.quoteCount) ? parseInt(sel.modes.quoteCount, 10)
                 : app.getQuoteTargetForLevel(level)
         );
-        const distractorTarget = parseInt(levelEntry.distractorCount, 10) || 0;
+        const distractorTarget = Math.max(0, parseInt(levelEntry.distractorCount, 10) || 0);
         const optionCount = Math.max(2, Math.min(10, targetCount + distractorTarget));
         const correctItemsAll = sel.items.filter(i => i.correct)
             .filter(i => !i.device || selectionDevices[i.device] !== false);
@@ -3521,10 +3533,8 @@ const ui = {
         let correctInSource = correctItems.filter(i => isInSource(i.quote));
         if(correctInSource.length) {
             correctItems = correctInSource;
-        } else if(!correctItems.length && correctItemsAll.length) {
-            const anyInSource = correctItemsAll.filter(i => isInSource(i.quote));
-            if(anyInSource.length) correctItems = anyInSource;
         }
+        /* Do not fall back to other levels: only use quotes assigned to this level so level 3 does not reuse level 1 quotes. */
         const chosenList = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
         const chosenSet = new Set(chosenList.map(q => app.quoteKey(q)));
         const uniqueChosenCount = chosenSet.size;
@@ -3666,7 +3676,7 @@ const ui = {
             .filter(d => d.quote && isInSource(d.quote));
         const levelIncorrect = sel.items.filter(i => !i.correct && (Array.isArray(i.levels) ? i.levels.includes(level) : true))
             .filter(i => !i.device || selectionDevices[i.device] !== false);
-        const incorrectItems = (levelIncorrect.length ? levelIncorrect : sel.items.filter(i => !i.correct))
+        const incorrectItems = levelIncorrect
             .map(i => ({ quote: i.quote, correct: false, item: i }))
             .filter(i => i.quote && isInSource(i.quote));
         const fallbackIncorrect = incorrectItems.length
@@ -3689,9 +3699,8 @@ const ui = {
         const otherCorrect = correctItems.filter(i => i !== primaryCorrect).map(i => ({ quote: i.quote, correct: true, item: i }));
         const distractorPool = distractorItems.map(d => ({ quote: d.quote, correct: false, item: { quote: d.quote, correct: false, reasons: [d.reason].filter(Boolean) } }));
         const lessonPool = (appData.items || [])
-            .map(i => i && i.original)
-            .filter(Boolean)
-            .map(q => ({ quote: q, correct: false, item: { quote: q, correct: false } }));
+            .filter(i => i && i.original && Array.isArray(i.levels) && i.levels.includes(level))
+            .map(i => ({ quote: i.original, correct: false, item: { quote: i.original, correct: false } }));
         const buildPool = () => {
             const combined = [
                 ...otherCorrect,
@@ -3775,11 +3784,13 @@ const ui = {
             const incorrectToShow = Math.min(distractorTarget || optionCount - correctToShow, incorrectPool.length);
             const correctOpts = app.shuffle(correctItems.map(i => ({ quote: i.quote, correct: true, item: i })).filter(o => o.quote)).slice(0, correctToShow);
             const incorrectOpts = app.shuffle(incorrectPool).slice(0, incorrectToShow);
-            const pool = app.shuffle([...correctOpts, ...incorrectOpts])
+            const alreadyRejected = userState.selectionProgress.discriminate || {};
+            let pool = app.shuffle([...correctOpts, ...incorrectOpts])
                 .filter(o => o && o.quote)
-                .slice(0, optionCount);
+                .filter(o => alreadyRejected[app.quoteKey(o.quote)] !== "noise");
+            pool = pool.slice(0, optionCount);
             userState.selectionProgress.discriminate = userState.selectionProgress.discriminate || {};
-            if(pool.length < 2) {
+            if(pool.length < 1) {
                 body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Choose the best quote for the question.</div>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Not enough choices yet. Add more correct quotes or distractors for this level.</div>
                     <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
@@ -4673,6 +4684,7 @@ const ui = {
                 setTimeout(() => {
                     ui.closeCelebration();
                     app.setLevel(userState.level + 1);
+                    ui.switchView('select');
                 }, 3000);
             } else {
                 btn.innerText = "Continue";
@@ -4680,7 +4692,7 @@ const ui = {
                 btn.onclick = () => {
                     ui.closeCelebration();
                     app.setLevel(userState.level + 1);
-                    ui.switchView('desk');
+                    ui.switchView('select');
                 };
             }
         }
@@ -4841,13 +4853,13 @@ const admin = {
         if(aiStructure) aiStructure.checked = appData.settings.aiIncludeStructure !== false;
         const startView = document.getElementById("start-view");
         if(startView) {
-            const pref = appData.settings && appData.settings.startView ? appData.settings.startView : "lab";
-            startView.value = pref;
+            const pref = appData.settings && appData.settings.startView ? appData.settings.startView : "desk";
+            startView.value = (pref === "lab") ? "desk" : pref;
         }
         const modulesWrap = document.getElementById("modules-active");
         if(modulesWrap) {
-            const modules = ["selection","lab","desk"];
-            const labels = { selection: "Quote Select", lab: "Evidence Lab", desk: "Writing Desk" };
+            const modules = ["selection","desk"];
+            const labels = { selection: "Quote Select", desk: "Writing Desk" };
             modulesWrap.innerHTML = "";
             modules.forEach(m => {
                 const lbl = document.createElement("label");
@@ -5093,7 +5105,7 @@ const admin = {
                 return acc;
             }, {});
         if(!appData.settings) appData.settings = {};
-        appData.settings.modulesActive = Object.assign({ selection: true, lab: true, desk: true }, selected);
+        appData.settings.modulesActive = Object.assign({ selection: true, lab: false, desk: true }, selected);
         if(selected.selection) {
             const bank = app.getLevelBank();
             const activeLevels = app.getActiveLevels();
@@ -5565,7 +5577,12 @@ Output ONLY valid JSON.`;
         try {
             const raw = document.getElementById("unified-json-in").value;
             if(!raw || !raw.trim()) return alert("Paste unified JSON.");
-            const j = JSON.parse(raw);
+            const result = app.tryParseJson(raw);
+            if (result.error) {
+                alert(result.error);
+                return;
+            }
+            const j = result.parsed;
             const existingTemplates = admin.getTemplates();
             const lesson = j.lesson || (j.items && j.banks ? j : null);
             const selection = j.selection || (j.text && j.items && j.items[0] && j.items[0].quote ? j : null);
@@ -6458,7 +6475,9 @@ Output ONLY JSON.`;
             return app.shuffle(items).slice(0, count).map((d, i) => ({ id: `sd_auto_${Date.now()}_${i+1}`, quote: d.quote, reason: d.reason }));
         };
         activeLevels.forEach(lvl => {
+            const entry = levelBank[lvl] || {};
             const target = getTarget(lvl);
+            const distractorCount = Math.max(0, parseInt(entry.distractorCount, 10) || 0);
             const correctItems = sel.items.filter(i => i && i.correct && isLevelMatch(i, lvl));
             let needed = Math.max(0, target - correctItems.length);
             if(!needed) return;
@@ -6466,11 +6485,10 @@ Output ONLY JSON.`;
             promotable.slice(0, needed).forEach(i => {
                 i.correct = true;
                 if(!Array.isArray(i.reasons) || !i.reasons.length) i.reasons = ["Strong evidence."];
-                // Rebuild distractors from other quotes at the same level.
                 const sameLevelQuotes = sel.items
                     .filter(x => x && x.quote && x !== i && isLevelMatch(x, lvl))
                     .map(x => normalizeLine(x.quote));
-                i.distractors = buildDistractorsFromQuotes(normalizeLine(i.quote), sameLevelQuotes, 2);
+                i.distractors = buildDistractorsFromQuotes(normalizeLine(i.quote), sameLevelQuotes, distractorCount);
             });
         });
         app.save();
@@ -6871,14 +6889,30 @@ Output ONLY JSON.`;
         let content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
         <head><meta charset='utf-8'><title>Worksheet</title>
         <style>
+        *{box-sizing:border-box;}
         @page{margin:1.25cm 1.5cm;}
-        body{font-family:'Aptos','Calibri',sans-serif; margin:1.25cm 1.5cm; line-height:1.5; text-align:justify;}
+        body{font-family:'Aptos','Calibri',sans-serif; margin:1.25cm 1.5cm; line-height:1.5; text-align:justify; max-width:100%; overflow-wrap:break-word; word-wrap:break-word;}
         h1{font-size:14pt; margin:0 0 12px 0;}
-        .source-section{margin-bottom:20px; page-break-after:always;}
+        .source-section{margin-bottom:20px; page-break-after:always; max-width:100%; overflow-wrap:break-word; word-wrap:break-word;}
         .source-section p{margin:0 0 12px 0;}
-        .questions-section{page-break-before:avoid; break-inside:avoid; page-break-inside:avoid;}
-        .box{border:1px solid #999; padding:10px; margin-bottom:15px; break-inside:avoid; page-break-inside:avoid; overflow:hidden;}
-        .box table{box-sizing:border-box; width:100%; max-width:100%; table-layout:fixed;} .dotted{border-bottom:1px dotted #000; display:inline-block; width:95%; margin-top:5px;} .rubric-line{display:block; margin-top:10px;} .rubric-slot{display:inline-block; vertical-align:bottom; margin-right:16px; margin-bottom:8px; font-size:0.9rem;} .rubric-label{font-style:italic; font-weight:600; font-size:0.85rem; opacity:0.8; text-transform:none;} .rubric-blank{border-bottom:1px dotted #000; min-width:180px; height:18px;} .glossary-table{width:100%; border-collapse:collapse; margin:6px 0 8px 0; break-inside:avoid; page-break-inside:avoid;} .glossary-table td{padding:4px 6px; border-bottom:1px dotted #ccc;}
+        .questions-section{page-break-before:avoid; break-inside:avoid; page-break-inside:avoid; width:100%; max-width:100%;}
+        .box{border:1px solid #999; padding:10px; margin-bottom:15px; break-inside:avoid; page-break-inside:avoid; overflow:hidden; width:100%; max-width:15cm;}
+        .box-inner{overflow:hidden; width:100%; max-width:15cm;}
+        .box table{box-sizing:border-box; width:100% !important; max-width:15cm; table-layout:fixed;}
+        .box td,.box th{overflow-wrap:break-word; word-wrap:break-word; word-break:break-word; box-sizing:border-box;}
+        .dotted{border-bottom:1px dotted #000; display:inline-block; width:95%; margin-top:5px; max-width:100%;}
+        .rubric-line{display:block; margin-top:10px;}
+        .rubric-slot{display:inline-block; vertical-align:bottom; margin-right:16px; margin-bottom:8px; font-size:0.9rem;}
+        .rubric-label{font-style:italic; font-weight:600; font-size:0.85rem; opacity:0.8; text-transform:none;}
+        .rubric-blank{border-bottom:1px dotted #000; min-width:120px; max-width:100%; height:18px;}
+        .glossary-table{width:100%; max-width:100%; border-collapse:collapse; margin:6px 0 8px 0; break-inside:avoid; page-break-inside:avoid; table-layout:fixed;}
+        .glossary-table td{padding:4px 6px; border-bottom:1px dotted #ccc; overflow-wrap:break-word; word-wrap:break-word;}
+        .match-table{width:100%; max-width:100%; table-layout:fixed;}
+        .match-table td,.match-table th{overflow-wrap:break-word; word-wrap:break-word; word-break:break-word; vertical-align:top;}
+        .sentence-table{width:100%; max-width:15cm; table-layout:fixed; border-collapse:collapse; border:1px solid #999;}
+        .sentence-table td,.sentence-table th{overflow:hidden; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word; box-sizing:border-box; min-width:0;}
+        .sentence-table tr:first-child td{text-align:center;}
+        .sentence-table .writing-cell{height:18px; overflow:hidden; border-top:1px solid #999; border-bottom:1px dotted #999; padding:0 8px;}
         </style>
         </head><body>
         <h1>${appData.meta.title || "Worksheet"}</h1>
@@ -6919,10 +6953,10 @@ Output ONLY JSON.`;
         content += `<div class="questions-section">`;
         if(scanRows.length) {
             content += `<div class="box"><p><strong>Scan for words</strong></p>`;
-            content += `<table class="glossary-table">`;
+            content += `<table class="glossary-table"><colgroup><col style="width:60%"><col style="width:40%"></colgroup>`;
             scanRows.forEach(row => {
                 const words = row.map(w => `<strong>${app.escapeHtml(w)}</strong>`).join(' / ');
-                content += `<tr><td style="width:60%;">${words}</td><td><span class="dotted" style="width:100%;"></span></td></tr>`;
+                content += `<tr><td>${words}</td><td><span class="dotted"></span></td></tr>`;
             });
             content += `</table></div><hr>`;
         } else {
@@ -6974,15 +7008,15 @@ Output ONLY JSON.`;
             const rightSide = matchMode === "aligned" ? meanings : shuffle(meanings);
             content += `<h3>Part A: Match Meanings</h3>`;
             content += `<p><em>Draw a line through the middle column to match each quote with its interpretation.</em></p>`;
-            content += `<table style="width:100%; border-collapse:collapse; margin-bottom:15px; table-layout:fixed;">`;
+            content += `<table class="match-table" style="border-collapse:collapse; margin-bottom:15px;">`;
             content += `<colgroup><col style="width:42%"><col style="width:16%"><col style="width:42%"></colgroup>`;
             content += `<tr><th style="text-align:left; border-bottom:1px solid #999; padding:6px;">Quote</th><th style="text-align:center; border-bottom:1px solid #999; padding:6px;">Match</th><th style="text-align:left; border-bottom:1px solid #999; padding:6px;">Interpretation</th></tr>`;
             included.forEach((item, idx) => {
                 const right = rightSide[idx] || "";
                 content += `<tr>
-                    <td style="border-bottom:1px dotted #ccc; padding:6px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;">${idx+1}. "${worksheetQuote(item)}"</td>
-                    <td style="border-bottom:1px dotted #ccc; padding:6px; text-align:center; vertical-align:top;">&nbsp;</td>
-                    <td style="border-bottom:1px dotted #ccc; padding:6px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;">${right}</td>
+                    <td style="border-bottom:1px dotted #ccc; padding:6px;">${idx+1}. "${worksheetQuote(item)}"</td>
+                    <td style="border-bottom:1px dotted #ccc; padding:6px; text-align:center;">&nbsp;</td>
+                    <td style="border-bottom:1px dotted #ccc; padding:6px;">${right}</td>
                 </tr>`;
             });
             content += `</table>`;
@@ -7010,21 +7044,27 @@ Output ONLY JSON.`;
         appData.items.forEach((item, idx) => {
             if(!item.includeInWorksheet) return;
             content += `<div class="box"><p style="margin:0 0 8px 0;"><strong>${idx+1}. Quote: "${worksheetQuote(item)}"</strong></p>`;
-            
             let rubricSlots = structure.filter(isValidSlot);
             if(!rubricSlots.length) rubricSlots = ["starter","quote","point"];
             const labels = rubricSlots.map(labelForSlot).filter(Boolean);
             const colCount = labels.length || 3;
+            const basePct = Math.floor(100 / colCount);
+            const remainder = 100 - basePct * colCount;
+            const colgroup = `<colgroup>${Array(colCount).fill(0).map((_, i) => {
+                const pct = i === colCount - 1 ? basePct + remainder : basePct;
+                return `<col style="width:${pct}%">`;
+            }).join("")}</colgroup>`;
             const header = labels.length
-                ? labels.map(l => `<td style="padding:4px 6px; font-style:italic; font-size:0.85rem; width:${100/colCount}%;">${l}</td>`).join("")
-                : `<td style="padding:4px 6px; font-style:italic; font-size:0.85rem; width:33%;">Starter</td><td style="padding:4px 6px; font-style:italic; font-size:0.85rem; width:33%;">Quote</td><td style="padding:4px 6px; font-style:italic; font-size:0.85rem; width:34%;">Point</td>`;
-            const writingCell = `<td style="height:18px; border-top:1px solid #999; border-bottom:1px dotted #999;"></td>`;
+                ? labels.map(l => `<td style="padding:6px 8px; font-style:italic; font-size:0.85rem; text-align:center;">${l}</td>`).join("")
+                : `<td style="padding:6px 8px; font-style:italic; font-size:0.85rem; text-align:center;">Starter</td><td style="padding:6px 8px; font-style:italic; font-size:0.85rem; text-align:center;">Quote</td><td style="padding:6px 8px; font-style:italic; font-size:0.85rem; text-align:center;">Point</td>`;
+            const writingCell = `<td class="writing-cell" style="height:18px; border-top:1px solid #999; border-bottom:1px dotted #999; padding:0 8px;">&nbsp;</td>`;
             const writingRow = Array(colCount).fill(writingCell).join("");
-            content += `
-                <table style="width:100%; border:1px solid #999; border-collapse:collapse; margin-top:6px; table-layout:fixed;">
+            content += `<div class="box-inner">
+                <table class="sentence-table" style="border:1px solid #999; border-collapse:collapse; margin-top:6px;">${colgroup}
                     <tr>${header}</tr>
                     <tr>${writingRow}</tr>
                 </table>
+                </div>
             </div>`;
         });
 
@@ -7281,8 +7321,14 @@ Output ONLY JSON.`;
         r.onload = e => {
             const raw = e.target.result || "";
             const text = String(raw || "");
+            const result = app.tryParseJson(text);
+            if (result.error) {
+                alert(result.error);
+                input.value = "";
+                return;
+            }
+            const parsed = result.parsed;
             try {
-                const parsed = JSON.parse(text);
                 appData = app.repair(parsed);
                 userState = { score: 0, level: 1, view: "", essay: "", completed: [], completedLevels: [], filter: "all", showDone: false, selectionCompleted: false, selectionStage: 1, selectionKey: "", selectionProgress: {}, selectionEliminated: [], labCompleted: false };
                 app.save();
