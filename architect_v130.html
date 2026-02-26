@@ -498,7 +498,7 @@
                 <details class="admin-section" open>
                     <summary class="admin-h">🎚️ Level Bank (1–9)</summary>
                     <div style="font-size:0.85rem; opacity:0.8; margin-bottom:4px;">Controls word limits, ellipses, language tier, and which question(s) apply to each level.</div>
-                    <div style="font-size:0.8rem; opacity:0.7; margin-bottom:8px;">Quote targets = correct real quotes. Weak quotes = real quotes that do not answer the question. Question(s): leave empty for default (first question); or Ctrl/Cmd+click to assign one or more questions to that level.</div>
+                    <div style="font-size:0.8rem; opacity:0.7; margin-bottom:8px;">Quote targets = correct real quotes. Weak quotes = real quotes that do not answer the question. <strong>Question(s)</strong>: lists all focus questions (from past papers or Focus questions in Load &amp; AI). Leave empty for default (first question); or Ctrl/Cmd+click to assign one or more questions per level so the lesson focus can be adjusted by level.</div>
                     <div id="level-bank-editor"></div>
                 </details>
 
@@ -965,6 +965,27 @@
 
                 <div class="admin-tab" data-tab="export">
                 <details class="admin-section" open>
+                    <summary class="admin-h">📄 Import past paper</summary>
+                    <p style="font-size:0.85rem; opacity:0.9; margin:0 0 10px 0;">Upload the three PDFs for a past paper. Text is extracted and combined so you can use the AI generator, or paste past-paper JSON and use <strong>Load JSON</strong> below.</p>
+                    <div class="input-group" style="margin-bottom:8px;">
+                        <label style="font-size:0.9rem;">1. Questions paper (PDF)</label>
+                        <label class="btn btn-outline" style="cursor:pointer; display:inline-block; margin-top:4px;">Choose file<input type="file" id="past-paper-questions" class="hidden" accept=".pdf,application/pdf" onchange="admin.setPastPaperFile('questions', this)"></label>
+                        <span id="past-paper-name-1" style="font-size:0.8rem; opacity:0.8; margin-left:8px;"></span>
+                    </div>
+                    <div class="input-group" style="margin-bottom:8px;">
+                        <label style="font-size:0.9rem;">2. Resource paper (PDF)</label>
+                        <label class="btn btn-outline" style="cursor:pointer; display:inline-block; margin-top:4px;">Choose file<input type="file" id="past-paper-resource" class="hidden" accept=".pdf,application/pdf" onchange="admin.setPastPaperFile('resource', this)"></label>
+                        <span id="past-paper-name-2" style="font-size:0.8rem; opacity:0.8; margin-left:8px;"></span>
+                    </div>
+                    <div class="input-group" style="margin-bottom:10px;">
+                        <label style="font-size:0.9rem;">3. Mark scheme (PDF)</label>
+                        <label class="btn btn-outline" style="cursor:pointer; display:inline-block; margin-top:4px;">Choose file<input type="file" id="past-paper-markscheme" class="hidden" accept=".pdf,application/pdf" onchange="admin.setPastPaperFile('markscheme', this)"></label>
+                        <span id="past-paper-name-3" style="font-size:0.8rem; opacity:0.8; margin-left:8px;"></span>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="past-paper-extract-btn" onclick="admin.extractPastPaperText()" disabled>Extract text and load</button>
+                    <p style="font-size:0.8rem; opacity:0.7; margin-top:8px;">At least one PDF is required. For Component 1: the <strong>Resource</strong> passage is taken from pages 2 and 3 only (line numbers and paragraphing preserved). The <strong>Questions</strong> paper (page 2 only) populates the question bank. Use Load JSON if you have past-paper JSON.</p>
+                </details>
+                <details class="admin-section" open>
                     <summary class="admin-h">📌 Template</summary>
                     <p style="font-size:0.85rem; opacity:0.8; margin:0 0 8px 0;">Save your current configuration (sentence builder, level bank, device types, etc.) under a name, or import a template file to apply its settings. Only one template is active; importing replaces current settings and shows the template name.</p>
                     <div class="input-group">
@@ -1397,7 +1418,28 @@ const app = {
         }
         const clean = app.cleanSourceText(raw);
         if(!clean) return "Source text not provided.";
-        const parts = clean.split(/\n\s*\n/);
+        const lines = clean.split(/\n/);
+        const hasLineNumbers = lines.some(l => /^\s*\d+[.)]?\s+/.test(l));
+        if(hasLineNumbers) {
+            const rows = lines.map(l => {
+                const m = l.match(/^\s*(\d+)[.)]?\s+(.*)$/);
+                if(m) return { num: m[1], text: m[2] };
+                return { num: "", text: l };
+            });
+            const body = rows.map(r => `<div class="source-line-row"><span class="source-line-num">${app.escapeHtml(r.num)}</span><span class="source-line-text">${app.escapeHtml(r.text)}</span></div>`).join("");
+            return `<div class="source-with-line-numbers" style="display:flex;flex-direction:column;font-family:inherit;"><style>.source-with-line-numbers .source-line-row{display:flex;align-items:flex-start;min-height:1.4em;}.source-with-line-numbers .source-line-num{flex:0 0 2.5em;text-align:right;padding-right:0.75em;color:var(--muted, #666);font-size:0.9em;user-select:none;}.source-with-line-numbers .source-line-text{flex:1;min-width:0;}</style>${body}</div>`;
+        }
+        let parts = clean.split(/\n\s*\n/);
+        if(parts.length === 1 && clean.length > 300) {
+            const sentences = clean.split(/(?<=[.!?])\s+(?=[A-Z])/);
+            if(sentences.length >= 3) {
+                const groupSize = Math.max(2, Math.ceil(sentences.length / 6));
+                parts = [];
+                for(let i = 0; i < sentences.length; i += groupSize) {
+                    parts.push(sentences.slice(i, i + groupSize).join(" "));
+                }
+            }
+        }
         return parts.map(p => `<p style="margin:0 0 16px 0;">${app.escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
     },
     repairSelection: function(s, opts) {
@@ -1555,6 +1597,9 @@ const app = {
         if(app.isLikelyJson(t)) return "";
         t = t.replace(/<[^>]*>/g, " ");
         t = t.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">");
+        t = t.replace(/\([A-Z][A-Z0-9\-]{4,}\)\s*©?\s*WJEC\s*CBAC\s*(?:Ltd\.?)?/gi, " ");
+        t = t.replace(/\([A-Z][A-Z0-9\-]{4,}\)/g, " ");
+        t = t.replace(/©\s*WJEC\s*CBAC\s*Ltd\.?/gi, " ");
         const cutoffIdx = (() => {
             const markers = ["Part A: Match", "Part B: Analysis", "Worksheet", "Match Meanings"];
             let idx = -1;
@@ -1811,17 +1856,21 @@ const app = {
         safe.meta.author = typeof safe.meta.author === 'string' ? safe.meta.author : defaultData.meta.author;
         safe.meta.version = typeof safe.meta.version === 'string' ? safe.meta.version : defaultData.meta.version;
         const rawSource = typeof safe.sourceText === 'string' ? safe.sourceText : (defaultData.sourceText || "");
-        safe.sourceText = (rawSource && /<(?:\/?(?:p|br|b|strong|i|em|u))[\s>]/i.test(rawSource))
+        const hasHtml = rawSource && /<[a-z][a-z0-9]*[\s>]/i.test(rawSource);
+        safe.sourceText = (rawSource && hasHtml)
             ? app.sanitizeSourceHtml(rawSource)
             : app.cleanSourceText(rawSource);
         safe.question = typeof safe.question === 'string' ? safe.question : defaultData.question;
         if(!Array.isArray(safe.questions) || safe.questions.length === 0) {
             safe.questions = [{ id: "q1", prompt: (safe.question && typeof safe.question === "string") ? safe.question : "" }];
         }
-        safe.questions = safe.questions.filter(q => q && typeof q === "object").map((q, i) => ({
-            id: (q.id && typeof q.id === "string") ? q.id : "q" + (i + 1),
-            prompt: typeof q.prompt === "string" ? q.prompt : (typeof q === "string" ? q : "")
-        }));
+        safe.questions = safe.questions.map((q, i) => {
+            if (q && typeof q === "object") {
+                return { id: (q.id && typeof q.id === "string") ? q.id : "q" + (i + 1), prompt: typeof q.prompt === "string" ? q.prompt : "" };
+            }
+            if (typeof q === "string" && q.trim()) return { id: "q" + (i + 1), prompt: q.trim() };
+            return null;
+        }).filter(Boolean);
         if(safe.questions.length === 0) safe.questions = [{ id: "q1", prompt: safe.question || "" }];
         safe.question = safe.questions[0] && safe.questions[0].prompt ? safe.questions[0].prompt : safe.question;
 
@@ -1901,6 +1950,15 @@ const app = {
                 freeSelectFromText: r.freeSelectFromText === true,
                 questionIds: questionIds
             };
+        }
+        if(safe.questions && safe.questions.length > 1) {
+            const allIds = safe.questions.map(q => q && q.id).filter(Boolean);
+            const anyLevelHasQuestions = allIds.length && [1,2,3,4,5,6,7,8,9].some(lvl => (safe.settings.levelBank[lvl] && safe.settings.levelBank[lvl].questionIds && safe.settings.levelBank[lvl].questionIds.length));
+            if(allIds.length && !anyLevelHasQuestions) {
+                for(let lvl = 1; lvl <= 9; lvl++) {
+                    if(safe.settings.levelBank[lvl]) safe.settings.levelBank[lvl].questionIds = allIds.slice();
+                }
+            }
         }
 
         safe.globalStructure = safe.globalStructure && typeof safe.globalStructure === 'object' ? safe.globalStructure : { enabled: true, items: [] };
@@ -4840,6 +4898,166 @@ const ui = {
 const admin = {
     aiAutoBound: false,
     tabsBound: false,
+    pastPaperFiles: { questions: null, resource: null, markscheme: null },
+    setPastPaperFile: function(slot, input) {
+        const f = input.files[0];
+        admin.pastPaperFiles[slot] = f || null;
+        const spanId = slot === "questions" ? "past-paper-name-1" : slot === "resource" ? "past-paper-name-2" : "past-paper-name-3";
+        const span = document.getElementById(spanId);
+        if(span) span.textContent = f ? f.name : "";
+        const btn = document.getElementById("past-paper-extract-btn");
+        if(btn) btn.disabled = !admin.pastPaperFiles.questions && !admin.pastPaperFiles.resource && !admin.pastPaperFiles.markscheme;
+    },
+    /** Extract text from a PDF page preserving line breaks and paragraphing (using item positions). */
+    extractPageTextWithLayout: async function(page) {
+        const content = await page.getTextContent();
+        const items = (content.items || []).filter(it => it.str != null);
+        if(!items.length) return "";
+        const lineHeight = 12;
+        const paraGap = lineHeight * 1.8;
+        const withPos = items.map(it => {
+            const t = it.transform || [1,0,0,1,0,0];
+            return { str: it.str, x: t[4], y: t[5] };
+        });
+        withPos.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+        let out = "";
+        let lastY = null;
+        for(const it of withPos) {
+            const y = it.y;
+            if(lastY !== null) {
+                const dy = Math.abs(y - lastY);
+                if(dy > paraGap) out += "\n\n";
+                else if(dy > lineHeight * 0.4) out += "\n";
+                else out += " ";
+            }
+            out += it.str;
+            lastY = y;
+        }
+        return app.cleanSourceText(out);
+    },
+    /** Split questions-PDF text into exam questions (excludes candidate instructions).
+     * Exam questions are preceded by boxed two-digit numbers (01, 02, 03, 04, 05) on the left.
+     * Many questions start with "Read lines X-Y" which is a reliable marker. */
+    parseQuestionsFromText: function(text) {
+        if(!text || typeof text !== "string") return [];
+        const raw = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+        if(!raw) return [];
+        const normalize = s => s.trim();
+        const minLen = 8;
+        const readLinesMarker = /(?=[Rr]ead\s+lines?\s+\d+\s*[-–]\s*\d+)/i;
+        let chunks = raw.split(readLinesMarker).map(normalize).filter(s => s.length >= minLen);
+        if(chunks.length >= 2) {
+            const firstChunk = chunks[0];
+            if(!/^[Rr]ead\s+lines?\s+\d+\s*[-–]\s*\d+/.test(firstChunk)) chunks = chunks.slice(1);
+            if(chunks.length >= 2) return chunks;
+        }
+        const digitsOnSeparateLines = /[\r\n]+\s*(?=0\s*[\r\n]+\s*[1-9]\s+[A-Za-z\[])/;
+        chunks = raw.split(digitsOnSeparateLines).map(normalize).filter(s => s.length >= minLen);
+        if(chunks.length < 2) {
+            const boxedNum = /[\r\n]+\s*(?=\d{1,2}[.)\s]+[A-Za-z\[])/;
+            chunks = raw.split(boxedNum).map(normalize).filter(s => s.length >= minLen);
+        }
+        if(chunks.length < 2) {
+            const boxedTwoDigit = /[\r\n]+\s*(?=(?:0\s*[1-9]|0[1-9]|[1-9]\s*[0-9])\s+\S)/;
+            chunks = raw.split(boxedTwoDigit).map(normalize).filter(s => s.length >= minLen);
+        }
+        if(chunks.length >= 2) {
+            const firstLooksLikeInstructions = !/^(?:0\s*[\r\n]+\s*[1-9]|(?:0\s*[1-9]|0[1-9]|[1-9]\s*[0-9]))\s*/.test(chunks[0]);
+            if(firstLooksLikeInstructions) chunks = chunks.slice(1);
+            if(chunks.length >= 2) return chunks;
+        }
+        const boxedLoose = /[\r\n]+\s*(?=\d{1,2}[.)\s]\s*\S)/;
+        chunks = raw.split(boxedLoose).map(normalize).filter(s => s.length >= minLen);
+        if(chunks.length >= 2) {
+            const firstLooksLikeInstructions = !/^\d{1,2}[.)\s]/.test(chunks[0]);
+            if(firstLooksLikeInstructions) chunks = chunks.slice(1);
+            if(chunks.length >= 2) return chunks;
+        }
+        const re = /[\r\n]\s*(?=\d+[.)]\s*|\d+\s*\(\s*[a-z]\s*\)\s*|\(\s*[a-z]\s*\)\s*|Question\s+\d+\s*)/gi;
+        chunks = raw.split(re).map(normalize).filter(s => s.length >= minLen);
+        if(chunks.length >= 2) return chunks;
+        if(chunks.length === 1 && raw.length > 80) {
+            const byDouble = raw.split(/\n\s*\n+/).map(normalize).filter(s => s.length >= 12);
+            if(byDouble.length >= 2) return byDouble;
+        }
+        return [];
+    },
+    extractPastPaperText: async function() {
+        const files = admin.pastPaperFiles;
+        if(!files.questions && !files.resource && !files.markscheme) return;
+        if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        const order = [files.questions, files.resource, files.markscheme].filter(Boolean);
+        const labels = [];
+        if(files.questions) labels.push("Questions");
+        if(files.resource) labels.push("Resource");
+        if(files.markscheme) labels.push("Mark scheme");
+        let combined = "";
+        let questionsSectionText = "";
+        let resourcePassageText = "";
+        for(let i = 0; i < order.length; i++) {
+            const f = order[i];
+            try {
+                const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
+                const pdf = await window.pdfjsLib.getDocument({ data: ab }).promise;
+                const isResource = (labels[i] || "").toLowerCase() === "resource";
+                const isQuestions = (labels[i] || "").toLowerCase() === "questions";
+                const pageTexts = [];
+                let resourcePages23 = [];
+                for(let p = 1; p <= pdf.numPages; p++) {
+                    const page = await pdf.getPage(p);
+                    if(isResource && (p === 2 || p === 3)) {
+                        const layoutText = await admin.extractPageTextWithLayout(page);
+                        resourcePages23.push(layoutText);
+                        pageTexts.push(layoutText + "\n\n");
+                    } else if(isQuestions && p === 2) {
+                        const layoutText = await admin.extractPageTextWithLayout(page);
+                        questionsSectionText = layoutText;
+                        pageTexts.push(layoutText + "\n\n");
+                    } else {
+                        const content = await page.getTextContent();
+                        pageTexts.push(content.items.map(it => it.str).join(" ") + "\n\n");
+                    }
+                }
+                if(isQuestions && pdf.numPages < 2 && pageTexts.length) {
+                    questionsSectionText = app.cleanSourceText(pageTexts.join(""));
+                }
+                if(isResource) {
+                    if(resourcePages23.length) {
+                        resourcePassageText = resourcePages23.join("\n").trim();
+                    } else if(pdf.numPages >= 1) {
+                        const p1 = await pdf.getPage(1);
+                        resourcePassageText = (await admin.extractPageTextWithLayout(p1)).trim();
+                    }
+                }
+                combined += "—— " + (labels[i] || "PDF") + " ——\n\n" + app.cleanSourceText(pageTexts.join("")) + "\n\n";
+            } catch(e) {
+                alert("Could not read " + (f.name || "PDF") + ". " + (e.message || ""));
+                return;
+            }
+        }
+        if(!combined.trim()) { alert("No text extracted."); return; }
+        if(!appData) appData = app.repair(defaultData);
+        appData.sourceText = resourcePassageText.trim() || (files.resource ? "" : combined.trim());
+        const parsed = admin.parseQuestionsFromText(questionsSectionText);
+        if(parsed.length >= 2) {
+            appData.questions = parsed.map((prompt, i) => ({ id: "q" + (i + 1), prompt }));
+            appData.question = appData.questions[0].prompt || appData.question;
+            if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
+        }
+        app.save();
+        ui.init();
+        app.setAiInputValue(app.formatSourceHtml(appData.sourceText || combined.trim()));
+        const step2 = document.getElementById("ai-step2");
+        if(step2) step2.classList.remove("hidden");
+        admin.refreshQuestionsList();
+        admin.renderAll();
+        if(localStorage.getItem("tsa_unlocked") === "true") {
+            const m = document.getElementById("modal-admin");
+            if(m && !m.classList.contains("open")) ui.openModal("modal-admin");
+        }
+        const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
+        alert("Past paper text loaded." + (qCount >= 2 ? " " + qCount + " questions were detected and added to the question bank." : " Go to Load & AI to add focus questions or use Load JSON if you have past-paper JSON."));
+    },
     initTabs: () => {
         if(admin.tabsBound) return;
         const wrap = document.getElementById("admin-tabs");
@@ -6197,7 +6415,10 @@ Output ONLY valid JSON.`;
             const aiText = (app.getAiInputValue() || "").trim();
             admin.syncQuestionsFromList();
             const aiQuestion = (appData.questions && appData.questions[0]) ? appData.questions[0].prompt : (appData.question || "");
-            if(aiText && !j.sourceText) safe.sourceText = aiText;
+            if(aiText) {
+                safe.sourceText = aiText;
+                if(safe.selection && safe.selection.text) safe.selection.text.source = aiText;
+            }
             if(aiQuestion && !j.question) {
                 safe.question = aiQuestion;
                 if(!Array.isArray(safe.questions) || safe.questions.length === 0) safe.questions = [{ id: "q1", prompt: aiQuestion }];
@@ -7003,9 +7224,9 @@ Output ONLY JSON.`;
             const freeSelect = !!entry.freeSelectFromText;
             const selectedIds = Array.isArray(entry.questionIds) ? entry.questionIds : [];
             const optsWithSelected = questions.map(q => {
-                const short = (q.prompt || "").slice(0, 45);
+                const short = (q.prompt || "").slice(0, 95);
                 const sel = selectedIds.indexOf(q.id) !== -1 ? " selected" : "";
-                return `<option value="${app.escapeHtml(q.id)}"${sel}>${app.escapeHtml(q.id)}: ${app.escapeHtml(short)}${(q.prompt || "").length >= 45 ? "…" : ""}</option>`;
+                return `<option value="${app.escapeHtml(q.id)}"${sel}>${app.escapeHtml(q.id)}: ${app.escapeHtml(short)}${(q.prompt || "").length >= 95 ? "…" : ""}</option>`;
             }).join("");
             rows.push(`
                 <div class="level-bank-row" style="display:grid; gap:6px; align-items:center; margin-bottom:6px;">
@@ -7023,7 +7244,7 @@ Output ONLY JSON.`;
                         <input type="checkbox" id="level-bank-tap-${lvl}" data-lvl="${lvl}" data-key="freeSelectFromText" class="level-bank-free-select" ${freeSelect ? "checked" : ""} aria-label="Tap text for level ${lvl}">
                         <label for="level-bank-tap-${lvl}" style="font-size:0.8rem; white-space:nowrap; cursor:pointer; margin:0;">Tap text</label>
                     </div>
-                    <select multiple data-lvl="${lvl}" data-key="questionIds" class="level-bank-input level-bank-questions" title="Assign question(s) to this level (default = first question). Ctrl/Cmd+click for multiple." size="2">${optsWithSelected}</select>
+                    <select multiple data-lvl="${lvl}" data-key="questionIds" class="level-bank-input level-bank-questions" title="Assign question(s) to this level (default = first question). Ctrl/Cmd+click for multiple." size="5">${optsWithSelected}</select>
                 </div>
             `);
         }
