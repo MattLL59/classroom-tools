@@ -376,6 +376,12 @@
                     <button class="btn btn-doc" onclick="app.exportDoc()">Download .doc</button>
                     <button class="btn btn-danger" onclick="app.clearEssay()">Clear</button>
                 </div>
+
+                <div id="commit-answer-panel" class="hidden" style="margin-top:20px; padding:20px; background:rgba(0,150,136,0.1); border:2px solid var(--primary); border-radius:8px;">
+                    <div style="font-weight:800; font-size:1.1rem; margin-bottom:8px;">Commit your answer to <span id="commit-answer-q-label">Question 1</span></div>
+                    <p style="font-size:0.95rem; opacity:0.9; margin:0 0 12px 0;">Review your answer above. When you are ready to move on, click below.</p>
+                    <button type="button" class="btn btn-primary" id="btn-ready-next-question">Ready for next question →</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1335,7 +1341,8 @@ const app = {
         const lvl = parseInt(level, 10) || 1;
         const bank = app.getLevelBank();
         const entry = bank && bank[lvl] ? bank[lvl] : null;
-        const ids = entry && Array.isArray(entry.questionIds) && entry.questionIds.length ? entry.questionIds : null;
+        let ids = entry && Array.isArray(entry.questionIds) && entry.questionIds.length ? entry.questionIds : null;
+        if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
         if(!ids || ids.length === 0) return null;
         const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number")
             ? Math.max(0, Math.min(userState.currentQuestionIndexByLevel[lvl], ids.length - 1))
@@ -1405,11 +1412,51 @@ const app = {
         }
         return (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "";
     },
+    shouldShowCommitAnswerPanel: function() {
+        const level = app.getEffectiveLevel();
+        const levelBank = app.getLevelBank();
+        const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
+        let ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+        if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+        if(!ids || ids.length <= 1) return false;
+        const deskQ = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
+        if(deskQ.length > 0) return false;
+        const currentId = app.getCurrentQuestionIdForLevel(level);
+        const sel = appData.selection;
+        if(!sel || !sel.items) return false;
+        const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const levelCorrectKeys = new Set(sel.items.filter(i => {
+            if(!i.correct || !(Array.isArray(i.levels) ? i.levels.includes(level) : false)) return false;
+            const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
+            if(qids.length === 0) return true;
+            return qids.some(qid => normId(qid) === normId(currentId));
+        }).map(i => app.quoteKey(i.quote)));
+        const chosenList = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
+        const answeredList = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
+        const seen = new Set();
+        let pointsMade = 0;
+        [...chosenList, ...deskQ, ...answeredList].forEach(ch => {
+            const key = app.quoteKey(typeof ch === "object" && ch && "quote" in ch ? ch.quote : ch);
+            if(key && levelCorrectKeys.has(key) && !seen.has(key)) { pointsMade++; seen.add(key); }
+        });
+        const questions = Array.isArray(appData.questions) ? appData.questions : [{ id: "q1", prompt: "" }];
+        const currentQ = currentId ? questions.find(qq => qq && qq.id === currentId) : null;
+        const prompt = currentQ && typeof currentQ.prompt === "string" ? currentQ.prompt : "";
+        const pointsGoal = app.parseRequiredCountFromQuestion(prompt) || parseInt(levelEntry.quoteTarget, 10) || 4;
+        if(pointsMade < pointsGoal) return false;
+        const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[level] === "number") ? userState.currentQuestionIndexByLevel[level] : 0;
+        if(idx >= ids.length - 1) return false;
+        return true;
+    },
     advanceSelectionQuestionIfComplete: function() {
         const level = app.getEffectiveLevel();
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
-        const ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+        let ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+        if(!ids || ids.length === 0) {
+            const questions = Array.isArray(appData.questions) ? appData.questions : [];
+            ids = questions.filter(q => q && q.id).map(q => q.id);
+        }
         if(!ids || ids.length <= 1) return false;
         const currentId = app.getCurrentQuestionIdForLevel(level);
         const questions = Array.isArray(appData.questions) ? appData.questions : [{ id: "q1", prompt: "" }];
@@ -1544,36 +1591,71 @@ const app = {
         if (typeof text !== "string") return { parsed: undefined, error: "Input is not a string." };
         let s = text.replace(/^\uFEFF/, ""); // BOM
         s = s.replace(/^[\s\S]*?```(?:json)?\s*/i, "").replace(/\s*```[\s\S]*$/i, ""); // strip markdown code blocks
+        s = s.replace(/\u201C/g, '"').replace(/\u201D/g, '"'); // smart double quotes -> straight
+        s = s.replace(/\u2018/g, "'").replace(/\u2019/g, "'"); // smart single quotes -> straight
         s = s.replace(/,(\s*[}\]])/g, "$1"); // trailing commas before } or ]
         s = s.replace(/\\U/g, "\\\\U"); // fix \U (invalid; e.g. C:\Users)
         s = s.replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u"); // fix \u not followed by 4 hex (invalid unicode escape)
-        try {
-            return { parsed: JSON.parse(s) };
-        } catch (e) {
-            const afterJson = /after JSON|Unexpected non-whitespace character after/i.test(e && e.message ? e.message : "");
-            if (afterJson && s.trim().startsWith("{")) {
-                let depth = 0, inStr = false, esc = false;
-                for (let i = 0; i < s.length; i++) {
-                    const c = s[i];
-                    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
-                    if (!esc && c === '"') { inStr = true; continue; }
-                    if (c === "{") depth++; else if (c === "}") { depth--; if (depth === 0) { s = s.slice(0, i + 1); try { return { parsed: JSON.parse(s) }; } catch (e2) { } break; } }
-                }
+        s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n"); // normalize line endings
+        const attemptParse = (str) => {
+            try { return { ok: true, parsed: JSON.parse(str) }; } catch (err) { return { ok: false, err, str }; }
+        };
+        const findUnescapedQuoteBefore = (str, pos) => {
+            for (let i = pos - 1; i >= 0; i--) {
+                if (str[i] !== '"') continue;
+                let bs = 0, j = i - 1;
+                while (j >= 0 && str[j] === "\\") { bs++; j--; }
+                if (bs % 2 === 0) return i; // not escaped
             }
-            const msg = e && e.message ? String(e.message) : "Invalid JSON";
-            let lineHint = "";
+            return -1;
+        };
+        let result = attemptParse(s);
+        const unescapedPatterns = [/Expected\s+','\s+or\s+'}'/i, /Expected\s+','\s+or\s+'\]'/i, /Unexpected\s+(token|character)/i];
+        for (let fixAttempt = 0; !result.ok && fixAttempt < 50; fixAttempt++) {
+            const msg = result.err && result.err.message ? String(result.err.message) : "";
             const posMatch = msg.match(/position\s+(\d+)/i);
-            if (posMatch) {
-                const pos = Math.min(parseInt(posMatch[1], 10), s.length);
-                const before = s.slice(0, pos);
+            const pos = posMatch ? Math.min(parseInt(posMatch[1], 10), result.str.length) : result.str.length;
+            if (!posMatch || pos <= 0) break;
+            const shouldFix = unescapedPatterns.some(p => p.test(msg));
+            if (!shouldFix) break;
+            const idx = findUnescapedQuoteBefore(result.str, pos);
+            if (idx < 0) break;
+            result = attemptParse(result.str.slice(0, idx) + "\\" + result.str.slice(idx));
+        }
+        if (result.ok) return { parsed: result.parsed };
+        const e = result.err;
+        const afterJson = /after JSON|Unexpected non-whitespace character after/i.test(e && e.message ? e.message : "");
+        if (afterJson && s.trim().startsWith("{")) {
+            let depth = 0, inStr = false, esc = false;
+            for (let i = 0; i < s.length; i++) {
+                const c = s[i];
+                if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+                if (!esc && c === '"') { inStr = true; continue; }
+                if (c === "{") depth++; else if (c === "}") { depth--; if (depth === 0) { s = s.slice(0, i + 1); try { return { parsed: JSON.parse(s) }; } catch (e2) { } break; } }
+            }
+        }
+        const errMsg = e && e.message ? String(e.message) : "Invalid JSON";
+        let lineHint = "";
+        let snippet = "";
+        const errPosMatch = errMsg.match(/position\s+(\d+)/i);
+        if (errPosMatch) {
+            const pos = Math.min(parseInt(errPosMatch[1], 10), result.str.length);
+            const before = result.str.slice(0, pos);
                 const lineNum = (before.match(/\n/g) || []).length + 1;
                 const lastN = before.lastIndexOf("\n");
                 const col = lastN === -1 ? pos + 1 : pos - lastN;
                 lineHint = " (around line " + lineNum + ", column " + col + ")";
+                const lineStart = before.lastIndexOf("\n") + 1;
+                const lineEnd = result.str.indexOf("\n", pos);
+                const line = (lineEnd === -1 ? result.str.slice(lineStart) : result.str.slice(lineStart, lineEnd)).trim();
+                if (line.length > 0) {
+                    const maxLen = 100;
+                    const show = line.length > maxLen ? line.slice(Math.max(0, col - 50), col + 50) : line;
+                    snippet = "\n\nSnippet: " + show.replace(/\t/g, " ").replace(/\n/g, " ");
+                }
             }
-            const hint = "Check for: unescaped double quote (\") inside a value, trailing comma before } or ], or smart/curly quotes. Fix the JSON in a text editor and try again.";
-            return { parsed: undefined, error: "Invalid JSON" + lineHint + ": " + msg + "\n\n" + hint };
-        }
+        const hint = "Check for: unescaped double quote (\") inside a value, trailing comma before } or ], or smart/curly quotes. Fix the JSON in a text editor and try again.";
+        return { parsed: undefined, error: "Invalid JSON" + lineHint + ": " + errMsg + snippet + "\n\n" + hint };
     },
     convertPastPaperToLesson: function(pp) {
         if(!pp || typeof pp !== "object") return pp;
@@ -2505,6 +2587,24 @@ const app = {
         if(item) ui.startWizard(item);
     },
 
+    commitAnswerAndAdvanceToNextQuestion: function() {
+        userState.pendingCommitForNextQuestion = false;
+        const modules = app.getModulesActive();
+        if(modules.selection) app.advanceSelectionQuestionIfComplete();
+        userState.selectionChosen = [];
+        userState.selectionAnsweredForQuestion = [];
+        userState.selectionStage = 1;
+        userState.essay = "";
+        const essayEl = document.getElementById("essay-area");
+        if(essayEl) essayEl.value = "";
+        app.save();
+        ui.updateCommitAnswerPanel();
+        ui.renderDeskQuoteTabs();
+        if(modules.selection) {
+            ui.switchView("select");
+            ui.renderSelection();
+        }
+    },
     commitSentence: function() {
         const txt = document.getElementById("preview-box").innerText.trim();
         if(!txt) return alert("Empty sentence.");
@@ -2538,6 +2638,14 @@ const app = {
                 ui.runBuilder(nextItem);
                 return;
             }
+        }
+        if(app.shouldShowCommitAnswerPanel()) {
+            userState.pendingCommitForNextQuestion = true;
+            app.save();
+            ui.switchView("desk");
+            ui.updateCommitAnswerPanel();
+            ui.renderDeskQuoteTabs();
+            return;
         }
         const modules = app.getModulesActive();
         const activeLevels = app.getActiveLevels();
@@ -3382,9 +3490,12 @@ const ui = {
         if(!appData.isStandalone) app.save();
         if(v === "select") {
             ui.renderSelection();
-        } else if(v === "desk" && redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
-            const first = ui.ensureQuoteItem(userState.deskQueue[0]);
-            if(first) ui.runBuilder(first);
+        } else if(v === "desk") {
+            ui.updateCommitAnswerPanel();
+            if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
+                const first = ui.ensureQuoteItem(userState.deskQueue[0]);
+                if(first) ui.runBuilder(first);
+            }
         }
     },
 
@@ -3828,6 +3939,14 @@ const ui = {
                         const next = ui.ensureQuoteItem(userState.deskQueue[0]);
                         if(next) { app.save(); ui.runBuilder(next); return; }
                     }
+                    if(app.shouldShowCommitAnswerPanel()) {
+                        userState.pendingCommitForNextQuestion = true;
+                        app.save();
+                        ui.switchView("desk");
+                        ui.updateCommitAnswerPanel();
+                        ui.renderDeskQuoteTabs();
+                        return;
+                    }
                     app.advanceSelectionQuestionIfComplete();
                     userState.selectionChosen = [];
                     userState.selectionCompleted = true;
@@ -4236,6 +4355,7 @@ const ui = {
             if(key && levelCorrectKeys.has(key) && !pointsMadeSeen.has(key)) { pointsMade++; pointsMadeSeen.add(key); }
         });
         correctItems = correctItems.filter(i => !chosenSet.has(app.quoteKey(i.quote)));
+        correctItems = correctItems.filter((i, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(i.quote)) === idx);
         const canPickFromText = (levelEntry.freeSelectFromText || levelEntry.noQuotesDistractors) && hasSource;
         if(canPickFromText && pointsMade === 0 && uniqueChosenCount > 0) pointsMade = uniqueChosenCount;
         const questionTextGlobal = app.getQuestionForLevel(level);
@@ -4307,7 +4427,10 @@ const ui = {
                 const cancelBtn = document.getElementById("free-select-cancel");
                 if(useBtn) useBtn.onclick = () => {
                     if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
-                    userState.selectionChosen.push(pendingQuote);
+                    const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q)));
+                    if(pendingQuote && !chosenKeys.has(app.quoteKey(pendingQuote))) {
+                        userState.selectionChosen.push(pendingQuote);
+                    }
                     ui._freeSelectPendingQuote = "";
                     app.save();
                     ui.renderSelection();
@@ -4668,6 +4791,18 @@ const ui = {
             const alignIndex = userState.selectionProgress.alignIndex[level];
             const alignPool = correctItems.filter(i => i.quote);
             const alignCandidates = alignPool.filter(i => !alignDone[app.quoteKey(i.quote)]);
+            if(alignPool.length === 0) {
+                if(pointsMade >= pointsGoal) {
+                    userState.selectionCompleted = true;
+                    app.save();
+                    ui.sendSelectionQuotesToBuilder();
+                } else {
+                    userState.selectionStage = 1;
+                    app.save();
+                    ui.renderSelection();
+                }
+                return;
+            }
             const alignCorrect = alignCandidates.length
                 ? alignCandidates[0]
                 : (alignPool.length ? alignPool[alignIndex % alignPool.length] : (correctItems[0] || chosenCorrect));
@@ -4676,8 +4811,9 @@ const ui = {
                 const freeAlignEditBtn = !appData.isStandalone && alignCorrect && alignCorrect.quote
                     ? `<button type="button" class="card-edit-btn" onclick="event.stopPropagation(); ui.openAdminToQuoteOrSelection('${String(alignCorrect.quote || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}', null)" title="Edit quote" style="position:absolute;top:8px;right:8px;">✏️</button>`
                     : "";
+                const freeAlignPrompt = deviceOptions.length > 1 ? "Which category best fits this quote, and why? Use the question and key words to explain." : "Why does this quote support your answer? Use the question and key words to explain.";
                 body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">${deviceLabelText}</div>
-                    <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Which category best fits this quote, and why? Use the question and key words to explain.</div>
+                    <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">${freeAlignPrompt}</div>
                     <div class="card card-select-quote" style="cursor:default; margin-bottom:8px; position:relative;">${freeAlignEditBtn}<div class="quote-text">"${app.escapeHtml(alignCorrect.quote)}"</div></div>
                     ${alignCorrect && alignCorrect.device === "structure" ? `<div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">If this is structure, consider: ${structurePrompts.map(p=>`<span class="bank-tag">${app.escapeHtml(p)}</span>`).join(" ")}</div>` : ""}
                     <textarea id="selection-free-align" style="height:90px; width:100%; margin-bottom:8px;" placeholder="Write your answer...">${app.escapeHtml(existing)}</textarea>
@@ -4698,9 +4834,15 @@ const ui = {
                             ui._selectionQuote = alignCorrect.quote;
                             userState.selectionProgress.alignIndex[level] = (userState.selectionProgress.alignIndex[level] + 1) || 1;
                         }
-                        userState.selectionStage = stageIndex + 1;
-                        app.save();
-                        ui.renderSelection();
+                        if(pointsMade >= pointsGoal) {
+                            userState.selectionCompleted = true;
+                            app.save();
+                            ui.sendSelectionQuotesToBuilder();
+                        } else {
+                            userState.selectionStage = 1;
+                            app.save();
+                            ui.renderSelection();
+                        }
                     };
                 }
                 return;
@@ -4728,18 +4870,19 @@ const ui = {
             const alignEditBtn = !appData.isStandalone && alignCorrect && alignCorrect.quote
                 ? `<button type="button" class="card-edit-btn" onclick="event.stopPropagation(); ui.openAdminToQuoteOrSelection('${String(alignCorrect.quote || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}', null)" title="Edit quote" style="position:absolute;top:8px;right:8px;">✏️</button>`
                 : "";
+            const onlyOneDevice = deviceOptions.length <= 1;
             body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">${deviceLabelText}</div>
                 <div class="card card-select-quote" style="cursor:default; margin-bottom:8px; position:relative;">${alignEditBtn}<div class="quote-text">"${app.escapeHtml(alignCorrect.quote)}"</div></div>
                 <div style="font-size:0.85rem; opacity:0.7; margin-bottom:6px;"><strong>Question:</strong> ${app.escapeHtml(questionText)}</div>
-                ${correctDevice === "structure" ? `<div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Structure prompts: ${structurePrompts.map(p=>`<span class="bank-tag">${app.escapeHtml(p)}</span>`).join(" ")}</div>` : ""}
-                <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Which category best matches this quote?</div>
+                ${correctDevice === "structure" && !onlyOneDevice ? `<div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Structure prompts: ${structurePrompts.map(p=>`<span class="bank-tag">${app.escapeHtml(p)}</span>`).join(" ")}</div>` : ""}
+                ${onlyOneDevice ? "" : `<div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Which category best matches this quote?</div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;" id="selection-device-options"></div>
-                <div id="selection-device-feedback" style="margin-top:8px; font-size:0.85rem; opacity:0.8;"></div>
-                <div style="margin-top:10px;"><button class="btn btn-primary" id="selection-device-next" disabled>Continue</button></div>`;
+                <div id="selection-device-feedback" style="margin-top:8px; font-size:0.85rem; opacity:0.8;"></div>`}
+                <div style="margin-top:10px;"><button class="btn btn-primary" id="selection-device-next" ${onlyOneDevice ? "" : "disabled"}>Continue</button></div>`;
             const wrap = body.querySelector("#selection-device-options");
             const feedback = body.querySelector("#selection-device-feedback");
             const nextBtn = body.querySelector("#selection-device-next");
-            deviceOptions.forEach(opt => {
+            if(!onlyOneDevice) deviceOptions.forEach(opt => {
                 const btn = document.createElement("button");
                 btn.className = "btn btn-outline btn-small";
                 btn.textContent = deviceLabels[opt];
@@ -4770,9 +4913,15 @@ const ui = {
                         ui._selectionQuote = alignCorrect.quote;
                         userState.selectionProgress.alignIndex[level] = (userState.selectionProgress.alignIndex[level] + 1) || 1;
                     }
-                    userState.selectionStage = stageIndex + 1;
-                    app.save();
-                    ui.renderSelection();
+                    if(pointsMade >= pointsGoal) {
+                        userState.selectionCompleted = true;
+                        app.save();
+                        ui.sendSelectionQuotesToBuilder();
+                    } else {
+                        userState.selectionStage = 1;
+                        app.save();
+                        ui.renderSelection();
+                    }
                 };
             }
             return;
@@ -4825,7 +4974,7 @@ const ui = {
                         ui._selectionCorrectItem = o.item || primaryCorrect;
                         const addChosenAndMaybeAdvance = () => {
                             const quoteToAdd = o.quote || "";
-                            const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(q)));
+                            const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q)));
                             if(quoteToAdd && !chosenKeys.has(app.quoteKey(quoteToAdd))) {
                                 userState.selectionChosen.push(quoteToAdd);
                             }
@@ -4917,7 +5066,7 @@ const ui = {
                             userState.selectionJustification = userState.selectionJustification || {};
                             userState.selectionJustification[app.quoteKey(quoteToAdd)] = justificationText;
                         }
-                        const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(q)));
+                        const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q)));
                         if(quoteToAdd && !chosenKeys.has(app.quoteKey(quoteToAdd))) {
                             userState.selectionChosen.push(quoteToAdd);
                         }
@@ -4975,7 +5124,7 @@ const ui = {
                             userState.selectionJustification = userState.selectionJustification || {};
                             userState.selectionJustification[app.quoteKey(quoteToAdd)] = rb.dataset.reason;
                         }
-                        const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(q)));
+                        const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q)));
                         if(quoteToAdd && !chosenKeys.has(app.quoteKey(quoteToAdd))) {
                             userState.selectionChosen.push(quoteToAdd);
                         }
@@ -5245,7 +5394,31 @@ const ui = {
         }
         return item || null;
     },
+    updateCommitAnswerPanel: function() {
+        const panel = document.getElementById("commit-answer-panel");
+        if(!panel) return;
+        const show = !!(userState.pendingCommitForNextQuestion);
+        if(show) {
+            panel.classList.remove("hidden");
+            const level = app.getEffectiveLevel();
+            const levelEntry = app.getLevelBank() && app.getLevelBank()[level] ? app.getLevelBank()[level] : {};
+            let ids = levelEntry.questionIds && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+            if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+            const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[level] === "number") ? userState.currentQuestionIndexByLevel[level] : 0;
+            const qNum = Math.min(idx + 1, ids.length || 1);
+            const labelEl = document.getElementById("commit-answer-q-label");
+            if(labelEl) labelEl.textContent = "Question " + qNum;
+            const btn = document.getElementById("btn-ready-next-question");
+            if(btn && !btn._wired) {
+                btn._wired = true;
+                btn.onclick = () => app.commitAnswerAndAdvanceToNextQuestion();
+            }
+        } else {
+            panel.classList.add("hidden");
+        }
+    },
     renderDeskQuoteTabs: function() {
+        ui.updateCommitAnswerPanel();
         const wrap = document.getElementById("desk-quote-tabs");
         if(!wrap) return;
         const queue = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
@@ -5284,28 +5457,20 @@ const ui = {
             return true;
         });
         if(!uniqueChosen.length) return;
-        const answeredSet = new Set((userState.selectionAnsweredForQuestion || []).map(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q)));
-        const inDesk = new Set((userState.deskQueue || []).map(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q)));
-        const firstQuote = uniqueChosen.find(q => {
-            const k = app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q);
-            return k && !answeredSet.has(k) && !inDesk.has(k);
-        }) || uniqueChosen[0];
-        const qRaw = typeof firstQuote === "object" && firstQuote && "quote" in firstQuote ? firstQuote.quote : firstQuote;
-        const qStr = String(qRaw || "").trim();
-        if(!qStr) return;
-        const sentKey = app.quoteKey(qStr);
-        userState.selectionChosen = (userState.selectionChosen || []).filter(q => app.quoteKey(typeof q === "object" && q && "quote" in q ? q.quote : q) !== sentKey);
+        const deskStrings = uniqueChosen.map(q => String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim()).filter(Boolean);
+        if(!deskStrings.length) return;
+        userState.selectionChosen = [];
+        userState.deskQueue = deskStrings;
+        deskStrings.forEach(qStr => ui.ensureQuoteItem(qStr));
         ui._sendToBuilderGuard = true;
         try {
-            userState.deskQueue = [qStr];
-            ui.ensureQuoteItem(qStr);
             userState.selectionCompleted = false;
             userState.view = "desk";
             app.save();
-            const first = ui.ensureQuoteItem(deskDeduped[0]);
             if(window.getSelection) window.getSelection().removeAllRanges();
             ui._textSelecting = false;
             ui.switchView("desk", true);
+            const first = ui.ensureQuoteItem(deskStrings[0]);
             if(first) ui.runBuilder(first);
         } finally {
             ui._sendToBuilderGuard = false;
