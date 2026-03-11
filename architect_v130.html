@@ -525,7 +525,13 @@
                     <summary class="admin-h">📌 Quotes (one bank)</summary>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Add, edit, or remove quotes. Mark each as <strong>Good quote</strong> (strong evidence) or <strong>Bad quote</strong> (standalone wrong option). For good quotes, add <strong>Distractors</strong> (wrong-quote options shown with that quote). Assign <strong>Level(s)</strong> and run Auto-assign so wrong options appear in the game.</div>
                     <div id="selection-editor-list" style="margin-bottom:12px;"></div>
-                    <div id="quotes-bank-list" style="padding-right:5px;"></div>
+                    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+                        <span style="font-size:0.9rem; font-weight:600;">Show:</span>
+                        <button type="button" class="btn btn-outline btn-small" id="quotes-filter-all" onclick="admin.setQuotesBankFilter('all'); admin.renderQuotesBank();">All</button>
+                        <button type="button" class="btn btn-outline btn-small" id="quotes-filter-good" onclick="admin.setQuotesBankFilter('good'); admin.renderQuotesBank();">Good only</button>
+                        <button type="button" class="btn btn-outline btn-small" id="quotes-filter-bad" onclick="admin.setQuotesBankFilter('bad'); admin.renderQuotesBank();">Bad only</button>
+                    </div>
+                    <div id="quotes-bank-list" style="padding-right:5px; max-height:60vh; overflow-y:auto;"></div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0 0;">
                         <button class="btn btn-success" onclick="admin.addQuoteItem()">+ Add quote</button>
                         <button class="btn btn-outline btn-small" onclick="admin.addQuoteItem(false)" title="Add a bad quote (standalone wrong option). Assign Level(s) and run Auto-assign so it appears in the game.">+ Add bad quote</button>
@@ -2184,6 +2190,40 @@ const app = {
     },
     isImportingPdf: false,
 
+    /** On import: if there are too many good quotes, dedupe and cap to targets. Runs automatically during repair. */
+    reduceGoodQuotesToTargetsOnImport: function(safe) {
+        if(!safe || !Array.isArray(safe.items)) return;
+        const bank = (safe.settings && safe.settings.levelBank) || defaultData.settings.levelBank || {};
+        let totalTarget = 0;
+        for(let l = 1; l <= 9; l++) {
+            const ent = bank[l];
+            totalTarget += (ent && ent.quoteTarget != null) ? Math.max(1, parseInt(ent.quoteTarget, 10) || 4) : 4;
+        }
+        const cap = Math.max(60, Math.min(120, totalTarget * 2));
+        const good = safe.items.filter(i => i && i.correct !== false);
+        const bad = safe.items.filter(i => !i || i.correct === false);
+        if(good.length <= cap) return;
+        const seen = new Set();
+        const deduped = [];
+        for(const item of good) {
+            const q = (item.quote || item.original || "").trim();
+            if(!q) continue;
+            const key = app.quoteKey(q);
+            if(seen.has(key)) continue;
+            if(deduped.some(ex => app.quoteIsMostlySame && app.quoteIsMostlySame(q, ex.quote || ex.original))) continue;
+            seen.add(key);
+            deduped.push(item);
+        }
+        if(deduped.length <= cap) {
+            safe.items = [...deduped, ...bad];
+            return;
+        }
+        const score = (i) => (Array.isArray(i.reasons) && i.reasons.length ? 2 : 0) + (i.deviceReason ? 1 : 0) + (Array.isArray(i.distractors) && i.distractors.length ? 1 : 0);
+        deduped.sort((a, b) => score(b) - score(a));
+        const keptGood = deduped.slice(0, cap);
+        safe.items = [...keptGood, ...bad];
+    },
+
     repair: function(d) {
         if(!d || typeof d !== 'object') return JSON.parse(JSON.stringify(defaultData));
 
@@ -2502,6 +2542,7 @@ const app = {
         if(safe.settings.modulesActive && safe.settings.modulesActive.selection) safe.selection.enabled = true;
         const anyFreeSelect = safe.settings.levelBank && Object.keys(safe.settings.levelBank).some(l => safe.settings.levelBank[l] && safe.settings.levelBank[l].freeSelectFromText === true);
         if(anyFreeSelect) safe.selection.enabled = true;
+        app.reduceGoodQuotesToTargetsOnImport(safe);
         return safe;
     },
 
@@ -4725,12 +4766,14 @@ const ui = {
         if(stageKey === "discriminate") {
             const correctKeysForLevel = new Set((usedFallbackCorrect ? correctItems : correctItemsInRangeMain).map(i => app.quoteKey(getQuote(i))));
             const lessonPoolForDiscriminate = (appData.items || [])
-                .filter(i => i && i.original && Array.isArray(i.levels) && i.levels.includes(level))
+                .filter(i => i && i.original && i.correct === false)
+                .filter(i => Array.isArray(i.levels) && i.levels.includes(level))
                 .filter(i => !correctKeysForLevel.has(app.quoteKey(i.original)))
                 .filter(i => !lineRange || !hasSource || app.quoteInLineRange(i.original, sourceText, lineRange))
                 .map(i => ({ quote: i.original, correct: false, item: i }));
             const otherLevelQuotes = (appData.items || [])
-                .filter(i => i && i.original && Array.isArray(i.levels) && !i.levels.includes(level))
+                .filter(i => i && i.original && i.correct === false)
+                .filter(i => Array.isArray(i.levels) && !i.levels.includes(level))
                 .filter(i => isInSource(i.original))
                 .filter(i => !lineRange || !hasSource || app.quoteInLineRange(i.original, sourceText, lineRange))
                 .filter(i => !correctKeysForLevel.has(app.quoteKey(i.original)))
@@ -5784,6 +5827,8 @@ const admin = {
     tabsBound: false,
     pastPaperFiles: { questions: null, resource: null, markscheme: null },
     _quoteBankStateBeforePrepare: null,
+    quotesBankFilter: "all",
+    setQuotesBankFilter: function(v) { admin.quotesBankFilter = (v === "good" || v === "bad") ? v : "all"; ["all","good","bad"].forEach(f => { const b = document.getElementById("quotes-filter-" + f); if(b) { b.classList.toggle("btn-primary", admin.quotesBankFilter === f); b.classList.toggle("btn-outline", admin.quotesBankFilter !== f); } }); },
     /** Parse "Resource page(s)" input: "2", "2-3", "2,3,4", "all" or empty = default [2,3]. Returns array of 1-based page numbers or null for all. */
     getResourcePageSpec: function() {
         const inp = document.getElementById("past-paper-resource-pages");
@@ -6709,9 +6754,13 @@ const admin = {
                     </details>
                 </div>`;
         };
-        const goodSection = goodList.length ? `<div style="margin-bottom:16px;"><div class="admin-h" style="margin-bottom:8px;">Good quotes</div><div style="display:flex; flex-direction:column; gap:12px;">${goodList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : "";
-        const badSection = badList.length ? `<div><div class="admin-h" style="margin-bottom:8px;">Bad quotes</div><div style="display:flex; flex-direction:column; gap:12px;">${badList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : "";
-        wrap.innerHTML = (goodSection || "<div style='opacity:0.7; margin-bottom:12px;'>No good quotes yet. Add a quote and check “Good quote (strong evidence)”.</div>") + (badSection || "<div style='opacity:0.7;'>No bad quotes yet. Use “+ Add bad quote” or uncheck “Good quote” on an item.</div>");
+        const f = admin.quotesBankFilter || "all";
+        const showGood = (f === "all" || f === "good") && goodList.length;
+        const showBad = (f === "all" || f === "bad") && badList.length;
+        const goodSection = showGood ? `<div style="margin-bottom:16px;"><div class="admin-h" style="margin-bottom:8px;">Good quotes (${goodList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${goodList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "good" ? "<div style='opacity:0.7;'>No good quotes. Add a quote and check Good quote, or switch filter to All.</div>" : "");
+        const badSection = showBad ? `<div><div class="admin-h" style="margin-bottom:8px;">Bad quotes (${badList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${badList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "bad" ? "<div style='opacity:0.7;'>No bad quotes. Use + Add bad quote or uncheck Good quote, or switch filter to All.</div>" : "");
+        wrap.innerHTML = f === "bad" ? badSection : (goodSection + badSection) || "<div style='opacity:0.7;'>No quotes match the filter.</div>";
+        if(document.getElementById("quotes-filter-all")) { ["all","good","bad"].forEach(function(id){ var b=document.getElementById("quotes-filter-"+id); if(b){ var active=(id==="all"&&f==="all")||(id==="good"&&f==="good")||(id==="bad"&&f==="bad"); b.classList.toggle("btn-primary",active); b.classList.toggle("btn-outline",!active); } }); }
     },
     suggestQuotesFromMarkScheme: () => {
         admin.ensureSelectionData();
@@ -7884,7 +7933,8 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                 appData.banks = JSON.parse(JSON.stringify(defaultData.banks));
                 appData.sentenceConfig = JSON.parse(JSON.stringify(defaultData.sentenceConfig));
                 appData.globalStructure = JSON.parse(JSON.stringify(defaultData.globalStructure));
-                appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
+                appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: j.items });
+                appData.items = appData.selection.items;
                 if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                     appData.selection.modes = appData.selection.modes || {};
                     appData.selection.modes.stages = appData.settings.selectionStages;
@@ -7892,6 +7942,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                 admin.seedLessonFromSelection();
                 admin.autoAssignSelectionLevels(false);
                 admin.derivePointsFromQuestions();
+                app.reduceGoodQuotesToTargetsOnImport(appData);
                 userState.selectionCompleted = false;
                 userState.selectionStage = 1;
                 userState.selectionKey = "";
@@ -8027,7 +8078,8 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             if(missing.length) {
                 return alert("Selection JSON has missing fields:\n" + missing.slice(0, 10).join("\n"));
             }
-            appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: appData.items });
+            appData.selection = app.repairSelection(j, { activeLevels: app.getActiveLevels(), lessonItems: j.items });
+            appData.items = appData.selection.items;
             if(appData.settings && Array.isArray(appData.settings.selectionStages)) {
                 appData.selection.modes = appData.selection.modes || {};
                 appData.selection.modes.stages = appData.settings.selectionStages;
@@ -8035,6 +8087,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             admin.seedLessonFromSelection();
             admin.autoAssignSelectionLevels(false);
             admin.derivePointsFromQuestions();
+            app.reduceGoodQuotesToTargetsOnImport(appData);
             userState.selectionCompleted = false;
             userState.selectionStage = 1;
             userState.selectionKey = "";
