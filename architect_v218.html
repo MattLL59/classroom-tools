@@ -44,6 +44,7 @@
         .btn-doc { background: #1976d2; color: white; }
         .btn-danger { background: var(--error); color: white; }
         .btn-outline { background: white; border: 2px solid var(--border); color: var(--text); }
+        .btn-small { padding: 4px 8px; font-size: 0.8rem; width: auto; margin: 0; }
         .hidden { display: none !important; }
 
         /* EVIDENCE LAB */
@@ -65,6 +66,7 @@
         .slot-static { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; padding: 10px; border-radius: 6px; font-style: italic; }
         .preview-box { padding: 15px; background: #fff8e1; border: 2px dashed #ffb74d; border-radius: 8px; font-size: 1.1rem; min-height: 60px; margin-bottom: 15px; }
         textarea#final-essay { width: 100%; height: 200px; padding: 15px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; font-family: inherit; resize: vertical; }
+        .hint-panel { background: #fff8e1; border: 1px solid #ffb74d; color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; }
 
         /* ADMIN MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
@@ -85,8 +87,14 @@
         .bank-btn-grid { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
         .bank-btn-grid button { flex: 1; min-width: 80px; font-size: 0.85rem; padding: 6px; }
 
+        .quote-editor { border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 10px; background: #fff; }
+        .editor-header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
+
         .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; }
         .toggle-row label { font-weight: 600; font-size: 0.9rem; }
+
+        #save-status { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.78); color: #fff; padding: 5px 14px; border-radius: 20px; font-size: 0.8rem; opacity: 0; transition: 0.3s; z-index: 2100; }
+        .quote-picked { color: var(--success); font-weight: 700; }
 
         /* Print & Utils */
         @media print { .no-print { display: none; } }
@@ -95,6 +103,8 @@
     </style>
 </head>
 <body>
+
+    <div id="save-status">💾 Saved</div>
 
     <header class="no-print">
         <h1>
@@ -130,6 +140,11 @@
             <div id="global-structure-container" style="margin-top:20px;"></div>
         </div>
 
+        <div id="hub-select" class="hub">
+            <div class="section-title">Quote Selection</div>
+            <div id="selection-area"></div>
+        </div>
+
         <div id="hub-write" class="hub">
             <div class="section-title">Sentence Construction</div>
             <div class="builder-container" id="sentence-builder"></div>
@@ -150,6 +165,7 @@
 
     <nav class="bottom-nav no-print">
         <button class="nav-item active" onclick="ui.switchHub('lab')" id="nav-btn-lab"><span class="nav-icon">🧪</span><span class="nav-label">Evidence</span></button>
+        <button class="nav-item hidden" onclick="ui.switchHub('select')" id="nav-btn-select"><span class="nav-icon">🎯</span><span class="nav-label">Quote Select</span></button>
         <button class="nav-item" onclick="ui.switchHub('write')" id="nav-btn-write"><span class="nav-icon">✍️</span><span class="nav-label">Writing</span></button>
     </nav>
 
@@ -185,6 +201,18 @@
                         <p style="font-size:0.8rem; color:#666; margin:5px 0;">Copy above -> Paste to AI -> Paste JSON below:</p>
                         <textarea id="ai-json-in" style="height:80px;" placeholder="Paste JSON here..."></textarea>
                         <button class="btn btn-success" style="background:var(--success); color:white;" onclick="admin.loadJson()">2. Load Data</button>
+                    </div>
+                </div>
+
+                <div class="admin-panel">
+                    <h3>📘 Lesson Details</h3>
+                    <div class="input-group">
+                        <label>Title</label>
+                        <input id="edit-title" onchange="admin.updateMeta('title', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Question</label>
+                        <input id="edit-question" onchange="admin.updateMeta('question', this.value)">
                     </div>
                 </div>
 
@@ -228,6 +256,32 @@
                 </div>
 
                 <div class="admin-panel">
+                    <h3>🎯 Quote Selection</h3>
+                    <div class="toggle-row">
+                        <label>Enable Module</label>
+                        <input type="checkbox" id="selection-enabled" onchange="admin.updateSelectionMeta('enabled', this.checked)">
+                    </div>
+                    <div class="input-group">
+                        <label>Question Prompt</label>
+                        <input id="selection-question" onchange="admin.updateSelectionMeta('question', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Target # of Quotes</label>
+                        <input type="number" id="selection-target" min="1" onchange="admin.updateSelectionMeta('targetCount', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Source Text Override (optional)</label>
+                        <textarea id="selection-source" style="height:70px;" onchange="admin.updateSelectionMeta('source', this.value)"></textarea>
+                    </div>
+                    <div style="font-size:0.85rem; opacity:0.75; margin-bottom:8px;">Mark quotes as analysis-worthy or noise.</div>
+                    <div id="selection-editor-list" style="max-height:260px; overflow-y:auto; padding-right:4px;"></div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                        <button class="btn btn-outline" style="width:auto;" onclick="admin.addSelectionItem()">+ Add Selection Quote</button>
+                        <button class="btn btn-outline" style="width:auto;" onclick="admin.seedSelectionFromLesson()">Use Lesson Quotes</button>
+                    </div>
+                </div>
+
+                <div class="admin-panel">
                     <h3>🏗️ Structural Analysis Question</h3>
                     <div class="toggle-row">
                         <label>Enable Section</label>
@@ -267,7 +321,7 @@
     </div>
 
     <div id="modal-source" class="modal"><div class="modal-content"><div class="modal-header">Source Text <button class="icon-btn" onclick="ui.closeModal('modal-source')">✕</button></div><div class="modal-body"><div id="source-content" style="white-space: pre-wrap; font-family:'Georgia'; line-height:1.6;"></div></div></div></div>
-    <div id="modal-help" class="modal"><div class="modal-content"><div class="modal-header">Help <button class="icon-btn" onclick="ui.closeModal('modal-help')">✕</button></div><div class="modal-body"><p>1. <strong>Evidence Lab:</strong> Select quotes.</p><p>2. <strong>Writing Desk:</strong> Build sentences.</p></div></div></div>
+    <div id="modal-help" class="modal"><div class="modal-content"><div class="modal-header">Help <button class="icon-btn" onclick="ui.closeModal('modal-help')">✕</button></div><div class="modal-body"><p>1. <strong>Quote Selection:</strong> (Optional) Practice choosing the best evidence.</p><p>2. <strong>Evidence Lab:</strong> Select quotes.</p><p>3. <strong>Writing Desk:</strong> Build sentences.</p></div></div></div>
 
 <script>
 /* CORE DATA */
@@ -276,6 +330,13 @@ const defaultData = {
     sourceText: "The sky was a bruised purple...",
     question: "How is tone created?",
     globalStructure: { enabled: true, question: "How does it shift?", correct: "Outside to inside.", distractors: ["It doesn't."] },
+    selection: {
+        enabled: false,
+        targetCount: 2,
+        question: { prompt: "" },
+        text: { source: "" },
+        items: []
+    },
     banks: {
         markers: ["Furthermore,", "However,"],
         starters: ["The writer implies", "The text suggests"],
@@ -294,7 +355,7 @@ const defaultData = {
 };
 
 let appData = null;
-let userState = { score: 0, level: 1, essay: "", completed: [] };
+let userState = { score: 0, level: 1, essay: "", completed: [], selectionChosen: [], selectionProgress: {} };
 let currentBankKey = null;
 
 /* APP LOGIC */
@@ -305,10 +366,13 @@ const app = {
         appData = d ? JSON.parse(d) : JSON.parse(JSON.stringify(defaultData));
         if(!appData.banks.points) appData.banks.points = []; // Safety init
         if(!appData.banks.links.l3) appData.banks.links.l3 = [];
+        appData.selection = app.normalizeSelection(appData.selection);
 
         // Load State
         let s = localStorage.getItem('tsa_v218_state');
         if(s) userState = JSON.parse(s);
+        if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+        if(!userState.selectionProgress || typeof userState.selectionProgress !== 'object') userState.selectionProgress = {};
 
         // Load Settings
         const al = localStorage.getItem('tsa_auto_login');
@@ -319,11 +383,43 @@ const app = {
         ui.update();
     },
 
+    normalizeSelection: (sel) => {
+        const base = sel && typeof sel === 'object' ? sel : {};
+        const safe = { ...base };
+        safe.enabled = typeof base.enabled === 'boolean' ? base.enabled : false;
+        const target = parseInt(base.targetCount, 10);
+        safe.targetCount = Number.isFinite(target) && target > 0 ? target : 2;
+        if(!safe.question || typeof safe.question !== 'object') {
+            safe.question = { prompt: typeof base.question === 'string' ? base.question : "" };
+        } else if(typeof safe.question.prompt !== 'string') {
+            safe.question.prompt = "";
+        }
+        if(!safe.text || typeof safe.text !== 'object') {
+            safe.text = { source: typeof base.text === 'string' ? base.text : "" };
+        } else if(typeof safe.text.source !== 'string') {
+            safe.text.source = "";
+        }
+        if(!Array.isArray(safe.items)) safe.items = [];
+        return safe;
+    },
+
+    escapeHtml: (val) => String(val || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;"),
+
+    quoteKey: (q) => String(q || "").toLowerCase().replace(/\s+/g, " ").trim(),
+
     save: () => {
         localStorage.setItem('tsa_v218_data', JSON.stringify(appData));
         localStorage.setItem('tsa_v218_state', JSON.stringify(userState));
-        document.getElementById('save-status').style.opacity = 1;
-        setTimeout(()=>document.getElementById('save-status').style.opacity=0, 1000);
+        const status = document.getElementById('save-status');
+        if(status) {
+            status.style.opacity = 1;
+            setTimeout(()=>status.style.opacity=0, 1000);
+        }
     },
 
     setLevel: (l) => {
@@ -331,6 +427,14 @@ const app = {
         app.save();
         ui.renderLab();
         document.getElementById('sentence-builder').innerHTML = '<div style="text-align:center; padding:20px; color:#888;">Level changed. Reselect quote.</div>';
+    },
+
+    resetSession: () => {
+        if(confirm("Reset progress?")) {
+            userState = { score: 0, level: 1, essay: "", completed: [], selectionChosen: [], selectionProgress: {} };
+            app.save();
+            location.reload();
+        }
     },
 
     resetCompleted: () => {
@@ -400,14 +504,36 @@ const ui = {
         document.getElementById('final-essay').value = userState.essay;
         
         // Admin Fields
-        document.getElementById('edit-title').value = appData.meta.title;
-        document.getElementById('edit-question').value = appData.question;
-        document.getElementById('gs-enable').checked = appData.globalStructure.enabled;
-        document.getElementById('gs-question').value = appData.globalStructure.question;
-        document.getElementById('gs-correct').value = appData.globalStructure.correct;
-        document.getElementById('gs-distractors').value = (appData.globalStructure.distractors || []).join(", ");
+        const editTitle = document.getElementById('edit-title');
+        if(editTitle) editTitle.value = appData.meta.title;
+        const editQuestion = document.getElementById('edit-question');
+        if(editQuestion) editQuestion.value = appData.question;
+        const gsEnable = document.getElementById('gs-enable');
+        if(gsEnable) gsEnable.checked = appData.globalStructure.enabled;
+        const gsQuestion = document.getElementById('gs-question');
+        if(gsQuestion) gsQuestion.value = appData.globalStructure.question;
+        const gsCorrect = document.getElementById('gs-correct');
+        if(gsCorrect) gsCorrect.value = appData.globalStructure.correct;
+        const gsDistractors = document.getElementById('gs-distractors');
+        if(gsDistractors) gsDistractors.value = (appData.globalStructure.distractors || []).join(", ");
+
+        appData.selection = app.normalizeSelection(appData.selection);
+        const sel = appData.selection;
+        const selEnabled = document.getElementById('selection-enabled');
+        if(selEnabled) selEnabled.checked = !!sel.enabled;
+        const selQuestion = document.getElementById('selection-question');
+        if(selQuestion) selQuestion.value = sel.question && typeof sel.question === 'object' ? sel.question.prompt : (sel.question || "");
+        const selTarget = document.getElementById('selection-target');
+        if(selTarget) selTarget.value = sel.targetCount || 2;
+        const selSource = document.getElementById('selection-source');
+        if(selSource) selSource.value = sel.text && typeof sel.text === 'object' ? sel.text.source : (sel.text || "");
+        if(admin.renderSelectionList) admin.renderSelectionList();
+
+        const navSelect = document.getElementById('nav-btn-select');
+        if(navSelect) navSelect.classList.toggle('hidden', !sel.enabled);
 
         ui.renderLab();
+        ui.renderSelection();
     },
 
     renderLab: () => {
@@ -426,6 +552,173 @@ const ui = {
         if(appData.globalStructure.enabled) {
             gs.innerHTML = `<div class="card card-structure" onclick="ui.runGlobal()"><strong>🏗️ Global Structure</strong><br><small>Click to answer</small></div>`;
         } else { gs.innerHTML = ''; }
+    },
+
+    renderSelection: () => {
+        const cont = document.getElementById('selection-area');
+        if(!cont) return;
+        const sel = appData.selection || app.normalizeSelection({});
+        if(!sel.enabled) {
+            cont.innerHTML = `<div class="card" style="cursor:default;">Quote Selection is disabled. Enable it in Settings.</div>`;
+            return;
+        }
+        const items = (sel.items || []).map(item => {
+            const quote = item.quote || item.original || "";
+            const reason = item.reason || (Array.isArray(item.reasons) ? item.reasons.find(Boolean) : "") || "";
+            return { ...item, quote, reason, correct: !!item.correct };
+        }).filter(i => i.quote);
+        if(items.length < 2) {
+            cont.innerHTML = `<div class="card" style="cursor:default;">Quote Selection needs at least 2 quotes. Add them in Settings.</div>`;
+            return;
+        }
+        const correctItems = items.filter(i => i.correct);
+        if(correctItems.length === 0) {
+            cont.innerHTML = `<div class="card" style="cursor:default;">Mark at least one quote as analysis-worthy.</div>`;
+            return;
+        }
+        const targetRaw = parseInt(sel.targetCount, 10);
+        const targetCount = Math.min(Math.max(1, Number.isFinite(targetRaw) ? targetRaw : Math.min(2, correctItems.length)), correctItems.length);
+        if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+        const chosenList = userState.selectionChosen.filter(Boolean);
+        const questionText = sel.question && typeof sel.question === 'object' ? sel.question.prompt : sel.question;
+        const sourceText = sel.text && typeof sel.text === 'object' ? sel.text.source : sel.text;
+        const questionDisplay = questionText || appData.question || "";
+        const sourceDisplay = sourceText || appData.sourceText || "";
+
+        cont.innerHTML = `
+            <div class="builder-container" style="cursor:default;">
+                <div style="font-weight:700; margin-bottom:6px;">Selected quotes: ${chosenList.length} / ${targetCount}</div>
+                <div id="selection-chosen-list" style="font-size:0.9rem; margin-bottom:8px;"></div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn btn-outline" style="width:auto;" id="selection-clear-chosen">Clear selected quotes</button>
+                    <button class="btn btn-primary" style="width:auto;" id="selection-send-chosen" ${chosenList.length >= targetCount ? "" : "disabled"}>Send quotes to Writing Desk</button>
+                </div>
+            </div>
+            <div class="builder-container" style="cursor:default; margin-top:15px;">
+                <div style="font-weight:700; margin-bottom:6px;">Question</div>
+                <div class="hint-panel">${app.escapeHtml(questionDisplay)}</div>
+                <div style="font-weight:700; margin:10px 0 6px;">Source Text</div>
+                <div style="white-space:pre-wrap; font-family:'Georgia', serif; line-height:1.6; background:#fff; border:1px solid var(--border); border-radius:6px; padding:10px; max-height:260px; overflow:auto;">${app.escapeHtml(sourceDisplay)}</div>
+            </div>
+            <div class="grid" id="selection-grid" style="margin-top:15px;"></div>
+        `;
+
+        const chosenListEl = cont.querySelector('#selection-chosen-list');
+        if(chosenListEl) {
+            if(!chosenList.length) {
+                chosenListEl.innerHTML = `<div style="opacity:0.7;">No quotes selected yet.</div>`;
+            } else {
+                chosenListEl.innerHTML = chosenList.map((q, i) => `
+                    <div style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
+                        <span class="quote-picked" style="flex:1;">"${app.escapeHtml(q)}"</span>
+                        <button class="btn btn-outline" style="width:auto;" onclick="ui.removeSelectionChoice(${i})">Remove</button>
+                    </div>
+                `).join("");
+            }
+        }
+
+        const clearBtn = cont.querySelector('#selection-clear-chosen');
+        if(clearBtn) {
+            clearBtn.onclick = () => {
+                userState.selectionChosen = [];
+                userState.selectionProgress = {};
+                app.save();
+                ui.renderSelection();
+            };
+        }
+        const sendBtn = cont.querySelector('#selection-send-chosen');
+        if(sendBtn) {
+            sendBtn.onclick = () => ui.sendSelectionQuotesToBuilder();
+        }
+
+        const grid = cont.querySelector('#selection-grid');
+        if(!grid) return;
+        const progress = userState.selectionProgress || {};
+        items.forEach(item => {
+            const key = app.quoteKey(item.quote);
+            const choice = progress[key];
+            const correctChoice = item.correct ? "analysis" : "noise";
+            const isCorrect = choice && choice === correctChoice;
+            const statusText = choice ? (isCorrect ? "Correct" : "Try again") : "";
+            const statusColor = isCorrect ? "var(--success)" : "var(--error)";
+            const reasonText = isCorrect && item.reason ? item.reason : "";
+
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <span class="card-quote">"${app.escapeHtml(item.quote)}"</span>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+                    <button class="btn btn-outline" style="width:auto;" data-choice="analysis">Analysis-worthy</button>
+                    <button class="btn btn-outline" style="width:auto;" data-choice="noise">Noise</button>
+                </div>
+                <div class="card-meta" style="justify-content:flex-start; gap:8px;">
+                    <span style="color:${choice ? statusColor : 'transparent'};">${statusText || "."}</span>
+                </div>
+                ${reasonText ? `<div style="margin-top:6px; font-size:0.9rem; opacity:0.85;">${app.escapeHtml(reasonText)}</div>` : ""}
+            `;
+            const analysisBtn = card.querySelector('button[data-choice="analysis"]');
+            const noiseBtn = card.querySelector('button[data-choice="noise"]');
+            if(choice === 'analysis' && analysisBtn) {
+                analysisBtn.classList.remove('btn-outline');
+                analysisBtn.classList.add('btn-primary');
+            }
+            if(choice === 'noise' && noiseBtn) {
+                noiseBtn.classList.remove('btn-outline');
+                noiseBtn.classList.add('btn-primary');
+            }
+            if(analysisBtn) analysisBtn.onclick = () => ui.setSelectionChoice(item, "analysis");
+            if(noiseBtn) noiseBtn.onclick = () => ui.setSelectionChoice(item, "noise");
+            grid.appendChild(card);
+        });
+    },
+
+    setSelectionChoice: (item, choice) => {
+        const key = app.quoteKey(item.quote);
+        if(!userState.selectionProgress || typeof userState.selectionProgress !== 'object') {
+            userState.selectionProgress = {};
+        }
+        userState.selectionProgress[key] = choice;
+        if(item.correct && choice === "analysis") {
+            if(!userState.selectionChosen.some(q => app.quoteKey(q) === key)) {
+                userState.selectionChosen.push(item.quote);
+            }
+        } else {
+            userState.selectionChosen = userState.selectionChosen.filter(q => app.quoteKey(q) !== key);
+        }
+        app.save();
+        ui.renderSelection();
+    },
+
+    removeSelectionChoice: (idx) => {
+        if(!Array.isArray(userState.selectionChosen)) return;
+        userState.selectionChosen.splice(idx, 1);
+        app.save();
+        ui.renderSelection();
+    },
+
+    ensureQuoteItem: (quote) => {
+        const trimmed = String(quote || "").trim();
+        if(!trimmed) return null;
+        let item = appData.items.find(i => i.original === trimmed);
+        if(!item) {
+            item = {
+                id: `sel_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+                original: trimmed,
+                type: "language",
+                levels: [1,2,3]
+            };
+            appData.items.push(item);
+        }
+        return item;
+    },
+
+    sendSelectionQuotesToBuilder: () => {
+        const chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
+        if(!chosen.length) return;
+        chosen.forEach(q => ui.ensureQuoteItem(q));
+        app.save();
+        const first = ui.ensureQuoteItem(chosen[0]);
+        if(first) ui.startAnalysis(first);
     },
 
     startAnalysis: (item) => {
@@ -479,7 +772,11 @@ const ui = {
 
     switchHub: (h) => {
         document.querySelectorAll('.hub').forEach(e=>e.classList.remove('active'));
-        document.getElementById('hub-'+h).classList.add('active');
+        const hub = document.getElementById('hub-'+h);
+        if(hub) hub.classList.add('active');
+        document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
+        const nav = document.getElementById('nav-btn-'+h);
+        if(nav) nav.classList.add('active');
     },
     openModal: (id) => document.getElementById(id).classList.add('open'),
     closeModal: (id) => document.getElementById(id).classList.remove('open'),
@@ -529,10 +826,12 @@ Output JSON Format:
         try {
             let raw = document.getElementById('ai-json-in').value.replace(/```json|```/g, '');
             const d = JSON.parse(raw);
-            const mode = document.getElementById('ai-bank-mode').value;
+            const mode = document.getElementById('ai-load-mode').value;
+            const previousSelection = appData && appData.selection ? appData.selection : null;
 
             if(mode === 'replace') {
                 appData = d;
+                if(!appData.selection && previousSelection) appData.selection = previousSelection;
                 // Ensure banks structure is robust
                 if(!appData.banks) appData.banks = defaultData.banks;
                 if(!appData.banks.links) appData.banks.links = defaultData.banks.links;
@@ -552,10 +851,123 @@ Output JSON Format:
             }
             // Ensure sentence config exists
             if(!appData.sentenceConfig) appData.sentenceConfig = defaultData.sentenceConfig;
+            appData.selection = app.normalizeSelection(appData.selection);
 
             app.save();
             location.reload();
         } catch(e) { alert("Invalid JSON"); }
+    },
+
+    updateMeta: (key, value) => {
+        if(key === 'title') appData.meta.title = value;
+        if(key === 'question') appData.question = value;
+        app.save();
+        ui.update();
+    },
+
+    updateSelectionMeta: (key, value) => {
+        appData.selection = app.normalizeSelection(appData.selection);
+        const sel = appData.selection;
+        if(key === 'enabled') sel.enabled = !!value;
+        if(key === 'question') {
+            if(!sel.question || typeof sel.question !== 'object') sel.question = { prompt: "" };
+            sel.question.prompt = value;
+        }
+        if(key === 'source') {
+            if(!sel.text || typeof sel.text !== 'object') sel.text = { source: "" };
+            sel.text.source = value;
+        }
+        if(key === 'targetCount') {
+            const parsed = parseInt(value, 10);
+            sel.targetCount = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+        }
+        app.save();
+        ui.update();
+    },
+
+    renderSelectionList: () => {
+        const cont = document.getElementById('selection-editor-list');
+        if(!cont) return;
+        appData.selection = app.normalizeSelection(appData.selection);
+        const sel = appData.selection;
+        if(!sel.items.length) {
+            cont.innerHTML = `<div style="opacity:0.7;">No selection quotes yet.</div>`;
+            return;
+        }
+        cont.innerHTML = sel.items.map((item, idx) => {
+            const quote = item.quote || item.original || "";
+            const reason = item.reason || (Array.isArray(item.reasons) ? item.reasons.find(Boolean) : "") || "";
+            return `
+                <div class="quote-editor">
+                    <div class="editor-header">#${idx+1} <button class="btn btn-danger btn-small" onclick="admin.removeSelectionItem(${idx})">Del</button></div>
+                    <div class="input-group"><label>Quote</label><input value="${app.escapeHtml(quote)}" onchange="admin.updateSelectionItem(${idx},'quote',this.value)"></div>
+                    <div class="input-group"><label>Analysis-worthy</label><input type="checkbox" ${item.correct ? "checked" : ""} onchange="admin.updateSelectionItem(${idx},'correct',this.checked)"></div>
+                    <div class="input-group"><label>Reason / Feedback</label><input value="${app.escapeHtml(reason)}" onchange="admin.updateSelectionItem(${idx},'reason',this.value)"></div>
+                </div>
+            `;
+        }).join("");
+    },
+
+    updateSelectionItem: (idx, key, value) => {
+        appData.selection = app.normalizeSelection(appData.selection);
+        const sel = appData.selection;
+        const item = sel.items[idx];
+        if(!item) return;
+        if(key === 'quote') {
+            item.quote = value;
+            if(item.original) item.original = value;
+        }
+        if(key === 'correct') item.correct = !!value;
+        if(key === 'reason') {
+            item.reason = value;
+            if(Array.isArray(item.reasons)) {
+                if(item.reasons.length) item.reasons[0] = value;
+                else item.reasons = [value];
+            }
+        }
+        app.save();
+        ui.renderSelection();
+    },
+
+    removeSelectionItem: (idx) => {
+        appData.selection = app.normalizeSelection(appData.selection);
+        const sel = appData.selection;
+        const removed = sel.items.splice(idx, 1)[0];
+        if(removed && removed.quote) {
+            const key = app.quoteKey(removed.quote);
+            userState.selectionChosen = (userState.selectionChosen || []).filter(q => app.quoteKey(q) !== key);
+            if(userState.selectionProgress && typeof userState.selectionProgress === 'object') {
+                delete userState.selectionProgress[key];
+            }
+        }
+        app.save();
+        admin.renderSelectionList();
+        ui.renderSelection();
+    },
+
+    addSelectionItem: () => {
+        appData.selection = app.normalizeSelection(appData.selection);
+        appData.selection.items.push({ quote: "New quote", correct: true, reason: "" });
+        app.save();
+        admin.renderSelectionList();
+    },
+
+    seedSelectionFromLesson: () => {
+        appData.selection = app.normalizeSelection(appData.selection);
+        const sel = appData.selection;
+        const existing = new Set(sel.items.map(i => app.quoteKey(i.quote || i.original || "")));
+        appData.items.forEach(item => {
+            if(item && item.original) {
+                const key = app.quoteKey(item.original);
+                if(key && !existing.has(key)) {
+                    sel.items.push({ quote: item.original, correct: true, reason: "" });
+                    existing.add(key);
+                }
+            }
+        });
+        app.save();
+        admin.renderSelectionList();
+        ui.update();
     },
 
     // BANK EDITOR
