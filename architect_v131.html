@@ -109,6 +109,12 @@
     #intro-text.architect-passage-line-mode .source-with-line-numbers .source-line-text {
         max-width: min(100%, var(--exam-passage-max-width));
     }
+    /* Leading prose before first “N …” line (formatSourceHtmlLoosePlain) — same column width as insert lines so the split is not half-page vs half-column. */
+    #source-inline .architect-passage-head-prose,
+    #source-inline-select .architect-passage-head-prose,
+    #intro-text .architect-passage-head-prose {
+        max-width: min(100%, var(--exam-passage-max-width));
+    }
     /* Gutter digits: readable on var(--bg); z-index above .reader-window (2) so WJEC ticks stay visible when the highlight band overlaps the passage. */
     #source-inline .source-with-line-numbers .source-line-num,
     #source-inline-select .source-with-line-numbers .source-line-num,
@@ -6660,10 +6666,21 @@ const app = {
         const lines = c.split(/\n/);
         const hasLineNumbers = lines.some(function(l) { return /^\s*-?\d+[.)]?\s+/.test(l); });
         if(hasLineNumbers) {
+            let firstNumIdx = lines.length;
+            for(let hi = 0; hi < lines.length; hi++) {
+                const t = String(lines[hi] || "").trim();
+                if(!t) continue;
+                if(/^\s*(-?\d{1,4})[.)]?\s+/.test(lines[hi])) {
+                    firstNumIdx = hi;
+                    break;
+                }
+            }
+            const headSlice = firstNumIdx > 0 ? lines.slice(0, firstNumIdx) : [];
+            const numberedSlice = firstNumIdx < lines.length ? lines.slice(firstNumIdx) : [];
             const base = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
             const entries = [];
             let idx = 0;
-            lines.forEach(function(l) {
+            numberedSlice.forEach(function(l) {
                 const mm = l.match(/^\s*(-?\d{1,4})[.)]?\s+([\s\S]*)$/);
                 if(mm) {
                     entries.push({ n: base + idx, text: (mm[2] || "").trim() });
@@ -6671,12 +6688,18 @@ const app = {
                 }
             });
             if(entries.length) {
-                return app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(app.expandLineEntriesOnNewlines(entries)), {
+                const gutterHtml = app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(app.expandLineEntriesOnNewlines(entries)), {
                     pdfPhysicalLines: true,
                     examMarginMultiplesOf5Only: true,
                     examShowAllBookletLines: false,
                     alwaysUseCleanPlain: true
                 });
+                const headJoined = headSlice.join("\n").replace(/\r\n/g, "\n").trim();
+                if(headJoined.length) {
+                    const intro = '<div class="architect-passage-head-prose"><p style="margin:0 0 12px 0;white-space:pre-wrap;">' + app.escapeHtml(headJoined).replace(/\n/g, "<br>") + "</p></div>";
+                    return intro + gutterHtml;
+                }
+                return gutterHtml;
             }
         }
         let parts = c.split(/\n\s*\n/);
