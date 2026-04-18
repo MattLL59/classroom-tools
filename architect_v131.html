@@ -4545,11 +4545,14 @@ const app = {
             const t = String(s || "").replace(/^\uFEFF/, "").trim();
             if(!t.startsWith("{")) return null;
             const o = JSON.parse(t);
-            if(!o || o.v !== app.PASSAGE_STRUCTURE_VERSION || !Array.isArray(o.lines) || !o.lines.length) return null;
+            const ver = o && (typeof o.v === "number" ? o.v : parseInt(String(o.v), 10));
+            if(!o || !Number.isFinite(ver) || ver !== app.PASSAGE_STRUCTURE_VERSION || !Array.isArray(o.lines) || !o.lines.length) return null;
             for(let i = 0; i < o.lines.length; i++) {
                 const L = o.lines[i];
-                if(!L || typeof L.n !== "number" || !Number.isFinite(L.n)) return null;
-                if(typeof L.html !== "string") return null;
+                if(!L) return null;
+                const n = typeof L.n === "number" ? L.n : parseInt(String(L.n), 10);
+                if(!Number.isFinite(n)) return null;
+                if(typeof L.html !== "string") L.html = L.html == null ? "" : String(L.html);
             }
             return app.normalizeStructuredPassageV2IfNeeded(o);
         } catch(eSp) {
@@ -6746,7 +6749,12 @@ const app = {
     formatSourceHtml: function(text) {
         if(!text || typeof text !== "string") return "Source text not provided.";
         const raw = String(text).trim();
-        const spFirst = app.parseStructuredPassageSource(raw);
+        let spFirst = app.parseStructuredPassageSource(raw);
+        /** Component 1: if the caller passed plain “1 …\\n2 …” (getSourceText) but appData.sourceText is v2 JSON, render from JSON so gutters match line count (tryPhysical collapse). Skip when component === 2 (separate resource / page texts). */
+        if(!spFirst && appData && appData.component !== 2 && typeof appData.sourceText === "string") {
+            const alt = appData.sourceText.trim();
+            if(alt.startsWith("{") && !raw.startsWith("{")) spFirst = app.parseStructuredPassageSource(alt);
+        }
         if(spFirst) return app.formatStructuredPassageHtml(spFirst);
         /* PDF → C2 layout stores this markup via normalizedPassageHtmlForC2Layout; re-normalizing can strip gutters if serialize fails on very long HTML. */
         if(/source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
