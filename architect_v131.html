@@ -5680,6 +5680,28 @@ const app = {
         lines.forEach(function(l) { splitOne(l); });
         return out.length ? out : lines;
     },
+    /**
+     * Apply the same insert-column reflow to each plain body line so gutter ticks (5/10/15) are dense and even; PDF text often mixes a few long paragraph blobs with many short rows.
+     */
+    _flattenInsertLinesForC1Import: function(lineBodies) {
+        if(!lineBodies || !lineBodies.length) return lineBodies || [];
+        var pw = 595;
+        var acc = [];
+        lineBodies.forEach(function(t) {
+            var s = String(t == null ? "" : t).trim();
+            if(!s) return;
+            var parts = typeof app._pdfReflowWidePrintLines === "function" ? app._pdfReflowWidePrintLines([s], pw) : null;
+            if(parts && parts.length) {
+                parts.forEach(function(p) {
+                    var u = String(p || "").trim();
+                    if(u) acc.push(u);
+                });
+            } else {
+                acc.push(s);
+            }
+        });
+        return acc.length ? acc : lineBodies;
+    },
     _pdfMergeLineWordsFromBoxes: function(words, spaceGap) {
         if(!words || !words.length) return "";
         var ws = words.slice().sort(function(a, b) { return a.x0 - b.x0; });
@@ -6275,7 +6297,8 @@ const app = {
                     if(!merged || !merged.length) merged = [flat];
                     if(merged.length) {
                         const startN = Number.isFinite(startLine) && startLine >= 1 ? Math.floor(startLine) : 1;
-                        return merged.concat(out).map(function(t, i) {
+                        var rest = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out) : out;
+                        return merged.concat(rest).map(function(t, i) {
                             return (startN + i) + " " + String(t).replace(/^\d{1,3}\s+/, "").trim();
                         });
                     }
@@ -6283,7 +6306,8 @@ const app = {
             }
         }
         const start = Number.isFinite(startLine) && startLine >= 1 ? Math.floor(startLine) : 1;
-        return out.map(function(t, i) { return (start + i) + " " + t; });
+        var uniform = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out) : out;
+        return uniform.map(function(t, i) { return (start + i) + " " + t; });
     },
     /**
      * When the insert anchor is split across PDF rows, the first word of the passage can sit on the last intro line.
