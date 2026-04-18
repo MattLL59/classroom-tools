@@ -4045,7 +4045,16 @@ const app = {
             el.innerHTML = "";
             return;
         }
-        el.innerHTML = app.formatSourceHtmlForEditor(plain) || "";
+        const repairedPlain = app.repairExamMarginDigitArtifacts(plain);
+        const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+        let v2FromPlain = app.plainNumberedLinesToStructuredV2(repairedPlain, pdfImp, { sequentialLineNumbers: true });
+        if(v2FromPlain && v2FromPlain.lines && v2FromPlain.lines.length >= 2) {
+            let w = app.normalizeStructuredPassageV2MergeOrphanRows(v2FromPlain);
+            w = app.normalizeStructuredPassageV2Sequential(w);
+            el.innerHTML = app.structuredPassageToEditorHtml(w) || "";
+            return;
+        }
+        el.innerHTML = app.formatSourceHtmlForEditor(repairedPlain) || "";
     },
     /**
      * Let the HTML parser close stray <b>/<i>/… inside each block. Regex “balancing” mis-orders nested tags (bold+italic) and can leave markup that looks fine in contenteditable but serializes wrong for the game.
@@ -4689,10 +4698,17 @@ const app = {
             root.innerHTML = String(html).trim();
             const wrap = root.querySelector(".source-with-line-numbers");
             if(!wrap) return null;
-            const rowEls = wrap.querySelectorAll(".source-line-row");
-            if(!rowEls.length) return null;
+            const rowArr = Array.from(wrap.querySelectorAll(".source-line-row"));
+            if(!rowArr.length) return null;
+            rowArr.sort(function(a, b) {
+                const na = parseInt(a.getAttribute("data-src-line") || "", 10);
+                const nb = parseInt(b.getAttribute("data-src-line") || "", 10);
+                const ia = Number.isFinite(na) ? na : 1e9;
+                const ib = Number.isFinite(nb) ? nb : 1e9;
+                return ia - ib;
+            });
             const lines = [];
-            rowEls.forEach(function(rowEl, i) {
+            rowArr.forEach(function(rowEl, i) {
                 const cell = rowEl.querySelector(".source-line-text");
                 if(!cell) return;
                 let bodyHtml = String(cell.innerHTML || "").trim();
@@ -5320,6 +5336,8 @@ const app = {
             return pe + " " + oq;
         });
         t = t.replace(new RegExp("([a-z\\u2019'])\\s*(" + marginMult + ")\\s+(?=" + capLook + ")", "gi"), "$1 ");
+        /** "…wasn't as good as 5 he…" / "…than 10 she…" — margin tick between function word and pronoun (no letter glued to digit). */
+        t = t.replace(/\b(as|than|good\s+as)\s+(5|10|15|20|25|30|35|40)\s+(he|she|they|it|we|you|I)\b/gi, "$1 $3");
         t = t.replace(new RegExp("(['\\u2018\\u2019!?])\\s*((?:5|10|15|20|25|30|35|40|45|50|55|60|65|70|75|80|85|90|95|100))\\s+(?=" + capLook + ")", "g"), "$1 ");
         t = t.replace(/([a-z\u2019'])\s*(5|10|15|20|25|30|35|40|45|50|55|60|65|70|75|80|85|90|95|100|105|110|115|120)\s+([a-z])/gi, "$1 $3");
         /** "…only four, 35 the best she could do…" — margin tick after comma before "the". */
@@ -6686,7 +6704,17 @@ const app = {
                 }
             } catch(e0) {}
             if(plain == null || plain === "") plain = app.serializeNumberedSourceLayoutToPlain(t);
-            if(plain != null && plain !== "") return plain.trim();
+            if(plain != null && plain !== "") {
+                const repaired = app.repairExamMarginDigitArtifacts(plain.trim());
+                const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+                let v2 = app.plainNumberedLinesToStructuredV2(repaired, pdfImp, { sequentialLineNumbers: true });
+                if(v2 && v2.lines && v2.lines.length) {
+                    let w = app.normalizeStructuredPassageV2MergeOrphanRows(v2);
+                    w = app.normalizeStructuredPassageV2Sequential(w);
+                    return app.serializeStructuredPassageV2(w);
+                }
+                return repaired.trim();
+            }
         }
         return app.sanitizeSourceHtml(t) || t;
     },
@@ -6852,9 +6880,8 @@ const app = {
         return '<p style="' + hang + '">' + prefix + bodyInner + "</p>";
     },
     /**
-     * Plain text → HTML for admin contenteditable only (Load &amp; AI / #ai-input). v131: 044-style — no exam gutter rows here
-     * (they break execCommand bold/italic). Numbered plain → one &lt;p&gt; per line; line number + hanging indent; inline markup in the body is sanitized.
-     * Student Lab / Quote Select still use formatSourceHtml + gutterLayoutHtmlFromCleanPlain.
+     * Plain text → HTML for admin #ai-input. Fully numbered plain → structuredPassageToEditorHtml (margin ticks; numbers not duplicated in body).
+     * Else numbered &lt;p&gt; / prose blocks. Student Lab uses formatSourceHtml.
      */
     formatSourceHtmlForEditor: function(text) {
         if(!text || typeof text !== "string") return "";
@@ -6876,20 +6903,29 @@ const app = {
         }
         const clean = app.cleanSourceText(raw);
         if(!clean) return "";
-        const strictNum = app.parseNumberedPlainSourceLines(app.repairExamMarginDigitArtifacts(clean));
+        const repaired = app.repairExamMarginDigitArtifacts(clean);
+        const pdfImpEd = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+        let v2Ed = app.plainNumberedLinesToStructuredV2(repaired, pdfImpEd, { sequentialLineNumbers: true });
+        if(v2Ed && v2Ed.lines && v2Ed.lines.length >= 2) {
+            let wEd = app.normalizeStructuredPassageV2MergeOrphanRows(v2Ed);
+            wEd = app.normalizeStructuredPassageV2Sequential(wEd);
+            const edHtml = app.structuredPassageToEditorHtml(wEd);
+            if(edHtml && String(edHtml).trim()) return edHtml;
+        }
+        const strictNum = app.parseNumberedPlainSourceLines(repaired);
         if(strictNum && strictNum.length >= 2) {
             return strictNum.map(function(r) {
                 return app._editorNumberedPlainLineToP(String(r.n) + ". " + String(r.text || "").trim());
             }).join("");
         }
-        const lines = clean.split(/\n/);
+        const lines = repaired.split(/\n/);
         const hasLineNumbers = lines.some(function(l) { return /^\s*-?\d+[.)]?\s+/.test(l); });
         if(hasLineNumbers) {
             return lines.map(function(l) { return app._editorNumberedPlainLineToP(l); }).join("");
         }
-        let parts = clean.split(/\n\s*\n/);
-        if(parts.length === 1 && clean.length > 300) {
-            const sentences = clean.split(/(?<=[.!?])\s+(?=[A-Z\u00C0-\u024F])/);
+        let parts = repaired.split(/\n\s*\n/);
+        if(parts.length === 1 && repaired.length > 300) {
+            const sentences = repaired.split(/(?<=[.!?])\s+(?=[A-Z\u00C0-\u024F])/);
             if(sentences.length >= 3) {
                 const groupSize = Math.max(2, Math.ceil(sentences.length / 6));
                 parts = [];
