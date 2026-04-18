@@ -1104,7 +1104,7 @@
                             <input type="file" id="c1-pdf-import-input" accept=".pdf,application/pdf" style="display:none" onchange="admin.handleC1PdfImportInput(this)">
                             <button type="button" class="btn btn-outline btn-small" onclick="document.getElementById('c1-pdf-import-input').click()" title="Extract numbered lines from a C1-style resource PDF (uses PDF.js; needs internet once)">Import PDF…</button>
                             <span style="font-size:0.72rem; opacity:0.78; white-space:nowrap;">Pages</span>
-                            <input type="number" id="c1-pdf-page-from" min="1" placeholder="1" title="First PDF page (1-based). Leave blank with ‘to’ blank: import scans the file and only keeps lines from the insert anchor onward (skips early question pages)." style="width:52px;padding:2px 4px;font-size:0.8rem;">
+                            <input type="number" id="c1-pdf-page-from" min="1" placeholder="1" title="First PDF page (1-based). If blank with ‘to’ blank, all pages are read from the start — use page numbers to limit to the insert pages only." style="width:52px;padding:2px 4px;font-size:0.8rem;">
                             <span style="font-size:0.72rem;">–</span>
                             <input type="number" id="c1-pdf-page-to" min="1" placeholder="all" title="Last PDF page (optional)" style="width:52px;padding:2px 4px;font-size:0.8rem;">
                             <label style="font-size:0.72rem; margin-left:6px; white-space:nowrap; opacity:0.9;" title="When checked: always OCR the left strip for 5/10/15… and prefer those ticks over the PDF text layer (fixes wrong/missing gutter digits). Slow; downloads Tesseract once. Import also prefers PDF line breaks (hasEOL) over y-clustering when that looks sane."><input type="checkbox" id="c1-pdf-ocr-margin"> OCR margin</label>
@@ -5465,8 +5465,9 @@ const app = {
         if(!t.trim()) return false;
         if(/WJEC|CBAC|SECTION A:\s*40\s+marks|Resource Material for use with Section A|C700U10[- ]?1A|A17[- ]?(5700|C700)/i.test(t)) return true;
         if(/\n(?:5|10|15|20|25)\s*\n(?:10|15|20|25|30)\s*\n(?:15|20|25|30|35)\s*\n/.test(t)) return true;
-        /** cleanSourceText often strips ©WJEC — still recognise WJEC-style PDF line breaks + margin ladder or long Lucy insert. */
-        if(/Lucy Faulkner was born in Luton|Brian Faulkner decided to team up/i.test(t) && (t.match(/\n/g) || []).length >= 30) return true;
+        /** Long numbered plain (any board): many lines starting with “N ” — tryPhysicalPdfLineNumberedEntries path. */
+        const nl = (t.match(/\n/g) || []).length;
+        if(nl >= 30 && t.length > 1200 && /^\s*\d{1,3}\s+/m.test(t)) return true;
         return false;
     },
     _isPdfBoilerLine: function(s) {
@@ -6154,10 +6155,7 @@ const app = {
             var b = pageTo != null && Number.isFinite(pageTo) ? Math.min(n, Math.floor(pageTo)) : n;
             if(b < a) throw new Error("Invalid page range");
             var multRe = app._pdfMarginLadderMult5Re();
-            var skipUntilInsert = (pageFrom == null && pageTo == null);
-            var seenInsertAnchor = !skipUntilInsert;
-            var insertAnchorRe = /Lucy Faulkner was born in Luton|The main character in this extract/i;
-            var pendingAnchorLines = [];
+            /** Do not wait for WJEC-specific insert phrases — any past paper may use different openings. Use PDF page range (or whole file) only; teacher trims in the editor if needed. */
             function loadPage(pi, acc) {
                 if(pi > b) return Promise.resolve(acc);
                 return pdf.getPage(pi).then(function(page) {
@@ -6165,23 +6163,6 @@ const app = {
                         (lines || []).forEach(function(line) {
                             var t = String(line || "").trim();
                             if(!t) return;
-                            if(skipUntilInsert && !seenInsertAnchor) {
-                                if(insertAnchorRe.test(t)) {
-                                    seenInsertAnchor = true;
-                                    pendingAnchorLines.length = 0;
-                                } else {
-                                    pendingAnchorLines.push(t);
-                                    if(pendingAnchorLines.length > 10) pendingAnchorLines.shift();
-                                    var tryJoin = pendingAnchorLines.join(" ");
-                                    if(insertAnchorRe.test(tryJoin)) {
-                                        t = tryJoin.replace(/\s+/g, " ").trim();
-                                        seenInsertAnchor = true;
-                                        pendingAnchorLines.length = 0;
-                                    } else {
-                                        return;
-                                    }
-                                }
-                            }
                             if(!app._isPdfBoilerLine(t) && !multRe.test(t)) acc.push(t);
                         });
                         return loadPage(pi + 1, acc);
@@ -6193,7 +6174,6 @@ const app = {
             allLines = app._stripPdfMarginLadderRuns(allLines);
             allLines = app._stripOrphanMarginDigitLines(allLines);
             allLines = allLines.filter(function(l) { return String(l || "").trim().length > 0; });
-            allLines = app._c1ResplitLinesAtInsertAnchor(allLines);
             if(!importOpts.strictPhysicalLines)
                 allLines = app._pdfRepairSoftLineBreaksInBodyLines(allLines);
             allLines = allLines.map(function(l) { return app.repairExamMarginDigitArtifacts(String(l || "").trim()); }).filter(function(l) { return l.length > 0; });
@@ -6240,134 +6220,22 @@ const app = {
             return stored;
         });
     },
-    /** First line of the numbered WJEC-style insert (after italic header / resource blurb on the PDF). */
-    _c1InsertAnchorRe: function() {
-        return /Lucy\s+Faulkner\s+was\s+born\s+in\s+Luton|The\s+main\s+character\s+in\s+this\s+extract/i;
-    },
     /**
-     * WJEC booklet line 1 is usually the first line of the extract body (e.g. "Lucy Faulkner was born in Luton…"),
-     * not the preceding "The main character in this extract…" summary. Prefer Lucy when both appear in the flat text.
-     */
-    _c1InsertAnchorSliceIndexInFlat: function(flat) {
-        const s = String(flat || "");
-        const lucy = /Lucy\s+Faulkner\s+was\s+born\s+in\s+Luton/i;
-        const main = /The\s+main\s+character\s+in\s+this\s+extract/i;
-        let m = s.match(lucy);
-        if(m && m.index != null && m.index >= 0) return m.index;
-        m = s.match(main);
-        if(m && m.index != null && m.index >= 0) return m.index;
-        return -1;
-    },
-    /**
-     * Drop preamble (italics / title block) before the insert; strip stray leading line numbers; re-sequence from startLine (default 1).
-     * Expects plain line bodies without "N " prefix; returns full "N text" lines joined logic handled by caller — returns array of body strings.
+     * PDF body lines → numbered "1 …" / "2 …" rows. No WJEC-specific phrases: first kept line after boilerplate filter is row 1.
+     * _flattenInsertLinesForC1Import unifies line length (insert column reflow).
      */
     trimC1InsertBodyLines: function(lines, startLine) {
         const L = Array.isArray(lines) ? lines.map(function(l) { return String(l || "").trim(); }).filter(function(l) { return l.length; }) : [];
         if(!L.length) return [];
-        const reLucy = /Lucy\s+Faulkner\s+was\s+born\s+in\s+Luton/i;
-        const reMain = /The\s+main\s+character\s+in\s+this\s+extract/i;
-        function lineHasLucy(raw) {
-            const stripped = String(raw || "").replace(/^\d{1,3}\s+/, "").trim();
-            return reLucy.test(raw) || reLucy.test(stripped);
-        }
-        function lineHasMain(raw) {
-            const stripped = String(raw || "").replace(/^\d{1,3}\s+/, "").trim();
-            return reMain.test(raw) || reMain.test(stripped);
-        }
-        let idx = -1;
-        for(let i = 0; i < L.length; i++) {
-            if(lineHasLucy(L[i])) {
-                idx = i;
-                break;
-            }
-        }
-        if(idx < 0) {
-            for(let i = 0; i < L.length; i++) {
-                if(lineHasMain(L[i])) {
-                    idx = i;
-                    break;
-                }
-            }
-        }
-        /** No Lucy / “main character…” anchor (generic extracts, some past papers). Old behaviour returned null → extractNumberedPlainFromPdfBuffer fell back to raw uneven PDF lines with no column reflow (“half processed”). Use the whole page range as the body and the same _flattenInsertLinesForC1Import as WJEC inserts. */
-        if(idx < 0) {
-            const outAll = [];
-            L.forEach(function(line) {
-                const t = String(line).replace(/^\d{1,3}\s+/, "").trim();
-                if(t) outAll.push(t);
-            });
-            if(!outAll.length) return [];
-            const startAll = Number.isFinite(startLine) && startLine >= 1 ? Math.floor(startLine) : 1;
-            const uniformAll = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(outAll) : outAll;
-            return uniformAll.map(function(t, i) { return (startAll + i) + " " + t; });
-        }
-        let body = L.slice(idx);
         const out = [];
-        body.forEach(function(line) {
+        L.forEach(function(line) {
             const t = String(line).replace(/^\d{1,3}\s+/, "").trim();
             if(t) out.push(t);
         });
-        if(out.length) {
-            const first = out[0];
-            const firstNorm = first.replace(/\s+/g, " ");
-            const looksTruncated = !(reLucy.test(firstNorm) || reMain.test(firstNorm))
-                && /\bto Luton while he looked for a flat\b/i.test(first);
-            if(looksTruncated) {
-                const head = L.slice(0, idx).join(" ");
-                const lucyM = head.match(/Lucy Faulkner was born in Luton[\s\S]*/i);
-                const anchorM = head.match(/The main character in this extract[\s\S]*/i);
-                const prefix = (lucyM ? lucyM[0] : null) || (anchorM ? anchorM[0] : "");
-                if(prefix && prefix.trim().length > 40) {
-                    const flat = prefix.replace(/\s+/g, " ").trim();
-                    /** Sentence-splitting here produced a few long “paragraph” lines while the rest of the insert stayed one PDF line per row — first half looked unnumbered/normal width, second half choppy with 5/10/15. Use the same column reflow as _pdfExtractBodyLinesOnePage. */
-                    var pw = 595;
-                    var merged = typeof app._pdfReflowWidePrintLines === "function" ? app._pdfReflowWidePrintLines([flat], pw) : [flat];
-                    if(!merged || !merged.length) merged = [flat];
-                    if(merged.length) {
-                        const startN = Number.isFinite(startLine) && startLine >= 1 ? Math.floor(startLine) : 1;
-                        var rest = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out) : out;
-                        return merged.concat(rest).map(function(t, i) {
-                            return (startN + i) + " " + String(t).replace(/^\d{1,3}\s+/, "").trim();
-                        });
-                    }
-                }
-            }
-        }
+        if(!out.length) return [];
         const start = Number.isFinite(startLine) && startLine >= 1 ? Math.floor(startLine) : 1;
-        var uniform = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out) : out;
+        const uniform = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out) : out;
         return uniform.map(function(t, i) { return (start + i) + " " + t; });
-    },
-    /**
-     * When the insert anchor is split across PDF rows, the first word of the passage can sit on the last intro line.
-     * Slice the joined text at the anchor so the first row begins with the full phrase (trimC1InsertBodyLines then aligns).
-     */
-    _c1ResplitLinesAtInsertAnchor: function(lines) {
-        const L = Array.isArray(lines) ? lines.map(function(l) { return String(l || "").replace(/\s+$/g, "").trim(); }).filter(function(l) { return l.length; }) : [];
-        if(!L.length) return lines;
-        const flat = L.join("\n");
-        const startIdx = app._c1InsertAnchorSliceIndexInFlat(flat);
-        if(startIdx < 0) return lines;
-        /** Map flat index back to original PDF rows. tail.split("\\n") collapsed to 1 row when the text layer had no newlines inside the tail. */
-        let p = 0;
-        for(let i = 0; i < L.length; i++) {
-            const line = L[i];
-            const lineStart = p;
-            const afterLine = p + line.length;
-            if(startIdx >= lineStart && startIdx < afterLine) {
-                const first = line.slice(startIdx - lineStart).replace(/\s+$/g, "").trim();
-                const out = [];
-                if(first) out.push(first);
-                for(let j = i + 1; j < L.length; j++)
-                    out.push(String(L[j] || "").replace(/\s+$/g, "").trim());
-                return out.filter(function(l) { return l.length; });
-            }
-            if(startIdx === afterLine && i < L.length - 1) {
-                return L.slice(i + 1).map(function(l) { return String(l || "").replace(/\s+$/g, "").trim(); }).filter(function(l) { return l.length; });
-            }
-            p = afterLine + (i < L.length - 1 ? 1 : 0);
-        }
-        return lines;
     },
     /** True when strict-parse rows look like one PDF line per row (do not merge with expandOversized…). */
     strictNumberedLooksLikePdfPhysicalLines: function(parsed) {
@@ -15495,13 +15363,9 @@ const admin = {
         if(ai && ai.id === "ai-input" && ai.getAttribute("contenteditable") === "true") {
             const txt = (ai.innerHTML || "").trim();
             if(txt && !app.isLikelyJson(txt)) {
-                let canon = "";
-                if(/source-with-line-numbers|source-line-row/i.test(txt)) {
-                    const plain = app.serializeNumberedSourceLayoutFromElement(ai) || app.serializeNumberedSourceLayoutToPlain(txt);
-                    canon = plain && plain.trim() ? plain.trim() : app.editorPassageToStoredCanonical(txt);
-                } else {
-                    canon = app.editorPassageToStoredCanonical(txt);
-                }
+                /** Always editorPassageToStoredCanonical (v2 JSON when possible). Do not save serializeNumberedSourceLayoutToPlain first — plain overwrites JSON, formatSourceHtml misses parseNumberedPlainSourceLines, plainProseToSyntheticNumberedEntries collapses to few rows and only ~5/10 show in the margin. */
+                const canon = app.editorPassageToStoredCanonical(txt);
+                if(!canon || !String(canon).trim()) return;
                 ai.innerHTML = app.storedCanonicalToEditorInnerHtml(canon) || ai.innerHTML;
                 app.syncLessonSourceCanonical(canon);
                 ui.refreshSourceDisplay(canon);
