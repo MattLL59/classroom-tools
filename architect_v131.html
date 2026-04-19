@@ -1115,6 +1115,9 @@
                             <input type="number" id="c1-pdf-page-to" min="1" placeholder="all" title="Last PDF page (optional)" style="width:52px;padding:2px 4px;font-size:0.8rem;">
                             <label style="font-size:0.72rem; margin-left:6px; white-space:nowrap; opacity:0.9;" title="When checked: always OCR the left strip for 5/10/15… and prefer those ticks over the PDF text layer (fixes wrong/missing gutter digits). Slow; downloads Tesseract once. Import also prefers PDF line breaks (hasEOL) over y-clustering when that looks sane."><input type="checkbox" id="c1-pdf-ocr-margin"> OCR margin</label>
                             <label style="font-size:0.72rem; margin-left:6px; white-space:nowrap; opacity:0.9;" title="Default on: use PDF.js hasEOL body rows as booklet lines; skip merging clusters to margin tick bands and skip post-merge line joining. Uncheck if you get too many tiny rows or a bad text layer."><input type="checkbox" id="c1-pdf-strict-lines" checked> Strict PDF lines</label>
+                            <span style="font-size:0.72rem; margin-left:10px; white-space:nowrap; opacity:0.85;" title="Narrow-column width for Lab / Quote Select (CSS ch). PDF import sets this from measured geometry (median). Edit to match the paper if wrapping is off.">Insert width</span>
+                            <input type="number" id="c1-passage-insert-width-ch" min="36" max="96" value="68" title="Passage column width (ch). PDF import updates from median print-line span ÷ character width." style="width:50px;padding:2px 4px;font-size:0.8rem;" onchange="app.applyPassageInsertWidthChFromInput()">
+                            <span style="font-size:0.72rem; opacity:0.85;">ch</span>
                             <span style="font-size:0.72rem; margin-left:10px; white-space:nowrap; opacity:0.9;" title="After PDF import, row 1 is always stored as line 1 and this control resets to 1. Use this only to align quotes with the printed booklet (offsets data-src-line and WJEC ticks); it does not re-run extraction.">Booklet line 1 =</span>
                             <input type="number" id="c1-passage-booklet-first" min="-500" max="500" value="1" title="Printed booklet number for app row 1 (quote refs / gutter). PDF import resets to 1; change if your extract starts at e.g. line 7 on the paper." style="width:58px;padding:2px 4px;font-size:0.8rem;">
                         </div>
@@ -1360,7 +1363,7 @@ const ARCHITECT_MAX_LEVEL = 10;
 /** After factory reset, passage must use `N ` line prefixes so parseNumberedPlainSourceLines + gutter layout run (demo quote “bruised purple” on line 1). */
 const DEFAULT_DEMO_NUMBERED_SOURCE = "1 The sky was a bruised purple at dusk, heavy with coming rain.\n2 A single streetlight flickered on the corner of the empty road.\n3 Footsteps echoed against the brick walls of the alley.\n4 Somewhere a dog barked twice and fell silent.\n5 She pulled her coat tighter and walked faster.\n6 The air tasted of iron and smoke.";
 const defaultData = {
-    meta: { title: "Demo Lesson", author: "System", version: "5.1" },
+    meta: { title: "Demo Lesson", author: "System", version: "5.1", pdfInsertWidthCh: null },
     sourceText: DEFAULT_DEMO_NUMBERED_SOURCE,
     question: "How is language used?",
     settings: { 
@@ -3912,7 +3915,15 @@ const app = {
         return lesson;
     },
     getAiInputValue: function() {
-        const el = (typeof admin !== "undefined" && admin.getActiveSourceEditorEl) ? admin.getActiveSourceEditorEl() : document.getElementById("ai-input");
+        /** Persist and auto-save must read the C1 passage box (#ai-input), not getActiveSourceEditorEl() — that prefers the C2 pooled editor when its wrap is visible; Level Bank / focus edge cases could snapshot the wrong box and overwrite lesson source with empty/slim HTML (gutter collapses to sparse 5/10 ticks). */
+        let el = null;
+        try {
+            const c2Wrap = document.getElementById("source-text-c2-wrap");
+            const c2Ui = !!(appData && appData.component === 2 && appData.component2Layout && typeof appData.component2Layout === "object"
+                && c2Wrap && !c2Wrap.classList.contains("hidden"));
+            if(c2Ui && typeof admin !== "undefined" && admin.getActiveSourceEditorEl) el = admin.getActiveSourceEditorEl();
+        } catch(eG) {}
+        if(!el) el = document.getElementById("ai-input");
         if(!el) return "";
         if(el.value !== undefined) return el.value;
         /* contenteditable: must use innerHTML so bold/italic persist and toggling format updates saved source (innerText is identical with/without tags). */
@@ -3932,6 +3943,15 @@ const app = {
                 delete appData.meta.sourceLineBasis;
             else
                 appData.meta.sourceLineBasis = String(opts.sourceLineBasis);
+        }
+        if(opts && typeof opts === "object" && opts.pdfInsertWidthCh !== undefined) {
+            appData.meta = appData.meta && typeof appData.meta === "object" ? appData.meta : {};
+            if(opts.pdfInsertWidthCh == null || opts.pdfInsertWidthCh === "" || (typeof opts.pdfInsertWidthCh === "number" && !Number.isFinite(opts.pdfInsertWidthCh)))
+                delete appData.meta.pdfInsertWidthCh;
+            else {
+                const cw = typeof opts.pdfInsertWidthCh === "number" ? opts.pdfInsertWidthCh : parseFloat(String(opts.pdfInsertWidthCh));
+                if(Number.isFinite(cw)) appData.meta.pdfInsertWidthCh = Math.max(36, Math.min(96, Math.round(cw)));
+            }
         }
         if(appData.selection) {
             if(!appData.selection.text) appData.selection.text = {};
@@ -4464,6 +4484,58 @@ const app = {
             if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
             if(typeof app.save === "function") app.save();
         } catch(eP) {}
+    },
+    /** Median measured print-line width from PDF geometry → ch for `--exam-passage-max-width` (Lab / intro). */
+    _pdfInsertWidthChFromMetrics: function(m) {
+        if(!m) return null;
+        if(m.targetChars != null && Number.isFinite(m.targetChars)) {
+            const t = Math.round(m.targetChars);
+            if(t >= 48 && t <= 96) return t;
+        }
+        if(m.colWidthPdf > 0 && m.avgCharWidthPdf > 0) {
+            const r = Math.round(m.colWidthPdf / m.avgCharWidthPdf * 0.96);
+            return Math.max(48, Math.min(96, r));
+        }
+        return null;
+    },
+    /** Apply `meta.pdfInsertWidthCh` (or default 68) to the root CSS variable so passage column width matches the insert. PDF imports: floor at 50ch so the passage is not squeezed like a fixed Word text box unless the teacher narrows it. */
+    applyExamPassageInsertWidthCh: function() {
+        let ch = 68;
+        const m = appData && appData.meta;
+        if(m && m.pdfInsertWidthCh != null && Number.isFinite(Number(m.pdfInsertWidthCh)))
+            ch = Math.max(36, Math.min(96, Math.round(Number(m.pdfInsertWidthCh))));
+        const pdfImp = !!(m && m.sourceLineBasis === "pdfImport");
+        if(pdfImp) ch = Math.max(50, Math.min(96, ch));
+        try {
+            document.documentElement.style.setProperty("--exam-passage-max-width", ch + "ch");
+        } catch(e) {}
+        const el = document.getElementById("c1-passage-insert-width-ch");
+        if(el && document.activeElement !== el) el.value = String(ch);
+    },
+    syncPassageInsertWidthInputFromMeta: function() {
+        const el = document.getElementById("c1-passage-insert-width-ch");
+        if(!el) return;
+        const m = appData && appData.meta;
+        const ch = m && m.pdfInsertWidthCh != null && Number.isFinite(Number(m.pdfInsertWidthCh))
+            ? Math.max(36, Math.min(96, Math.round(Number(m.pdfInsertWidthCh))))
+            : 68;
+        el.value = String(ch);
+    },
+    applyPassageInsertWidthChFromInput: function() {
+        const el = document.getElementById("c1-passage-insert-width-ch");
+        if(!el || !appData) return;
+        let v = parseFloat(String(el.value).trim());
+        if(!Number.isFinite(v)) v = 68;
+        v = Math.max(36, Math.min(96, Math.round(v)));
+        el.value = String(v);
+        appData.meta = appData.meta && typeof appData.meta === "object" ? appData.meta : {};
+        appData.meta.pdfInsertWidthCh = v;
+        app.applyExamPassageInsertWidthCh();
+        try {
+            if(typeof app.setAiInputValue === "function" && appData.sourceText) app.setAiInputValue(appData.sourceText);
+            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+            if(typeof app.save === "function") app.save();
+        } catch(eI) {}
     },
     /**
      * Lab / Quote Select plain-numbered passages (not stored as JSON) still use row prefixes "1 … 2 …" or synthetic paragraph rows.
@@ -5720,16 +5792,58 @@ const app = {
         return o;
     },
     /**
-     * PDF.js often emits one hasEOL “line” per paragraph (3 long blobs). Split strings that are wider than a typical insert column (~60–85 characters) at word boundaries so stored units approximate **printed** lines for gutter 5/10/15.
+     * Infer insert-column width from PDF word geometry: for each y-cluster (print line), span = last word’s right − first word’s left.
+     * Median span and median span/charCount drive reflow — closer to the booklet than a fixed fraction of page width.
      */
-    _pdfReflowWidePrintLines: function(lines, pageWidth) {
+    _pdfMeasureInsertColumnMetricsFromClusters: function(clusters, pageWidth) {
+        var pw = pageWidth != null && pageWidth > 40 ? pageWidth : 600;
+        if(!clusters || clusters.length < 3) return null;
+        var lineSpanPdf = [];
+        var charWidthEst = [];
+        for(var ci = 0; ci < clusters.length; ci++) {
+            var c = clusters[ci];
+            var ws = (c.words || []).slice();
+            if(ws.length < 1) continue;
+            ws.sort(function(a, b) { return a.x0 - b.x0; });
+            var first = ws[0];
+            var last = ws[ws.length - 1];
+            var span = Math.max(0.5, last.x1 - first.x0);
+            var merged = app._pdfMergeLineWordsFromBoxes(ws, null);
+            var plain = String(merged || "").replace(/\s+/g, " ").trim();
+            if(plain.length < 4) continue;
+            var comp = plain.replace(/\s/g, "");
+            if(ws.length <= 2 && /^\d{1,3}$/.test(comp) && first.x0 < pw * 0.24) continue;
+            lineSpanPdf.push(span);
+            charWidthEst.push(span / Math.max(plain.length, 5));
+        }
+        if(lineSpanPdf.length < 3) return null;
+        lineSpanPdf.sort(function(a, b) { return a - b; });
+        charWidthEst.sort(function(a, b) { return a - b; });
+        var medSpan = lineSpanPdf[Math.floor(lineSpanPdf.length * 0.5)];
+        var medCW = charWidthEst[Math.floor(charWidthEst.length * 0.5)];
+        medCW = Math.max(pw * 0.0045, Math.min(pw * 0.026, medCW));
+        medSpan = Math.max(52, Math.min(pw * 0.5, medSpan));
+        var targetChars = Math.max(28, Math.min(96, Math.round(medSpan / medCW)));
+        return { colWidthPdf: medSpan, avgCharWidthPdf: medCW, pageWidth: pw, targetChars: targetChars };
+    },
+    /**
+     * PDF.js often emits one hasEOL “line” per paragraph (3 long blobs). Split strings wider than the measured insert column at word boundaries so stored units approximate **printed** lines for gutter 5/10/15.
+     * @param {{colWidthPdf?: number, avgCharWidthPdf?: number, pageWidth?: number}} [insertMetrics] from _pdfMeasureInsertColumnMetricsFromClusters; if omitted, use PDF_INSERT_BODY_COLUMN_WIDTH_FRAC heuristic.
+     */
+    _pdfReflowWidePrintLines: function(lines, pageWidth, insertMetrics) {
         if(!lines || !lines.length) return lines || [];
         var pw = pageWidth != null && pageWidth > 40 ? pageWidth : 600;
-        var frac = typeof app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC === "number" && app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC > 0.2 && app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC < 0.95
-            ? app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC
-            : 0.46;
-        var colW = pw * frac;
-        var maxLen = Math.max(32, Math.min(78, Math.floor(colW * 0.168)));
+        var maxLen;
+        if(insertMetrics && insertMetrics.colWidthPdf > 0 && insertMetrics.avgCharWidthPdf > 0) {
+            var raw = Math.floor(insertMetrics.colWidthPdf / insertMetrics.avgCharWidthPdf * 0.93);
+            maxLen = Math.max(28, Math.min(96, raw));
+        } else {
+            var frac = typeof app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC === "number" && app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC > 0.2 && app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC < 0.95
+                ? app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC
+                : 0.46;
+            var colW = pw * frac;
+            maxLen = Math.max(32, Math.min(78, Math.floor(colW * 0.168)));
+        }
         var out = [];
         function splitOne(s) {
             var t = String(s || "").replace(/\s+/g, " ").trim();
@@ -5754,14 +5868,20 @@ const app = {
     /**
      * Apply the same insert-column reflow to each plain body line so gutter ticks (5/10/15) are dense and even; PDF text often mixes a few long paragraph blobs with many short rows.
      */
-    _flattenInsertLinesForC1Import: function(lineBodies) {
+    _flattenInsertLinesForC1Import: function(lineBodies, opts) {
+        opts = opts || {};
         if(!lineBodies || !lineBodies.length) return lineBodies || [];
         var pw = 595;
+        var insertMetrics = null;
+        if(opts.insertWidthCh != null && Number.isFinite(Number(opts.insertWidthCh))) {
+            var ch = Math.max(36, Math.min(96, Math.round(Number(opts.insertWidthCh))));
+            insertMetrics = { colWidthPdf: ch, avgCharWidthPdf: 1 };
+        }
         var acc = [];
         lineBodies.forEach(function(t) {
             var s = String(t == null ? "" : t).trim();
             if(!s) return;
-            var parts = typeof app._pdfReflowWidePrintLines === "function" ? app._pdfReflowWidePrintLines([s], pw) : null;
+            var parts = typeof app._pdfReflowWidePrintLines === "function" ? app._pdfReflowWidePrintLines([s], pw, insertMetrics) : null;
             if(parts && parts.length) {
                 parts.forEach(function(p) {
                     var u = String(p || "").trim();
@@ -6141,15 +6261,6 @@ const app = {
                 (eolLines || []).forEach(function(l) { eolChars += l ? l.length : 0; });
                 var eolAvg = eolLines && eolLines.length ? eolChars / eolLines.length : 1e9;
 
-                /* Strict: use hasEOL only when it already yields many lines OR clearly chunky paragraphs. Few hasEOL rows with modest avg are often “3 blobs for the whole page” — do not return early; y-cluster + reflow can split real print lines. */
-                if(strictPhysical && eolLines && eolLines.length >= 2 && eolAvg >= 4 && eolAvg <= 420) {
-                    var hasCoarseFewLongLines = eolLines.length <= 10 && eolAvg >= 88;
-                    var hasVeryFewChunkyLines = eolLines.length <= 4 && eolAvg >= 72;
-                    var tooFewEolForInsert = eolLines.length < 10 && eolAvg < 72;
-                    if(!tooFewEolForInsert && !hasCoarseFewLongLines && !hasVeryFewChunkyLines)
-                        return app._pdfReflowWidePrintLines(eolLines, pack.pageWidth);
-                }
-
                 var body = app._pdfFilterBodyWordsForPassage(words, pack.pageWidth);
                 var yTol = strictPhysical ? 3.1 : 4.4;
                 var groups = app._pdfClusterWordsToLines(body, yTol);
@@ -6159,6 +6270,22 @@ const app = {
                     return { words: g, y: g.length ? sy / g.length : 0 };
                 });
                 clusters.sort(function(a, b) { return b.y - a.y; });
+                var insertMetrics = app._pdfMeasureInsertColumnMetricsFromClusters(clusters, pack.pageWidth);
+                function wrapPdfPageLines(linesArr, metrics) {
+                    return { lines: linesArr || [], insertMetrics: metrics || null };
+                }
+
+                /* Strict: many short hasEOL rows ≈ real print lines — do not reflow (reflow was destroying ~98-line extracts). Few long blobs → reflow to split. */
+                if(strictPhysical && eolLines && eolLines.length >= 2 && eolAvg >= 4 && eolAvg <= 420) {
+                    var hasCoarseFewLongLines = eolLines.length <= 10 && eolAvg >= 88;
+                    var hasVeryFewChunkyLines = eolLines.length <= 4 && eolAvg >= 72;
+                    var tooFewEolForInsert = eolLines.length < 10 && eolAvg < 72;
+                    var trustPhysicalEol = eolLines.length >= 16 && eolAvg >= 6 && eolAvg <= 200 && !hasCoarseFewLongLines && !hasVeryFewChunkyLines;
+                    if(trustPhysicalEol)
+                        return wrapPdfPageLines(eolLines, insertMetrics);
+                    if(!tooFewEolForInsert && !hasCoarseFewLongLines && !hasVeryFewChunkyLines)
+                        return wrapPdfPageLines(app._pdfReflowWidePrintLines(eolLines, pack.pageWidth, insertMetrics), insertMetrics);
+                }
 
                 var mergedC = clusters;
                 if(!strictPhysical && ticks2.length >= 2)
@@ -6175,15 +6302,28 @@ const app = {
                     });
                 }
 
-                var useEolPrimary = eolLines && eolLines.length >= 4 && eolAvg >= 8 && eolAvg <= 240;
+                /**
+                 * GCSE/WJEC PDFs often give only a handful of hasEOL “lines” that are really whole columns/paragraphs (same avg char count as real print lines).
+                 * Preferring those produced “4 lines imported” for a full insert. Skip hasEOL primary when few lines are chunky.
+                 */
+                var eolLooksChunky = eolLines && eolLines.length > 0 && eolLines.length <= 8 && eolAvg > 85;
+                var useEolPrimary = eolLines && eolLines.length >= 4 && eolAvg >= 8 && eolAvg <= 240 && !eolLooksChunky;
                 if(useEolPrimary) {
                     /** Strict “printed lines”: prefer y-cluster lines when they split the page into more lines than PDF.js hasEOL (few long blobs vs many print lines). */
-                    if(strictPhysical && lines.length > eolLines.length) return app._pdfReflowWidePrintLines(lines, pack.pageWidth);
-                    return app._pdfReflowWidePrintLines(eolLines, pack.pageWidth);
+                    if(strictPhysical && lines.length > eolLines.length) return wrapPdfPageLines(app._pdfReflowWidePrintLines(lines, pack.pageWidth, insertMetrics), insertMetrics);
+                    return wrapPdfPageLines(app._pdfReflowWidePrintLines(eolLines, pack.pageWidth, insertMetrics), insertMetrics);
                 }
                 if(eolLines && eolLines.length >= 4 && eolAvg <= 280 && eolAvg >= 6 && lines.length + 2 < eolLines.length)
-                    return app._pdfReflowWidePrintLines(eolLines, pack.pageWidth);
-                return app._pdfReflowWidePrintLines(lines, pack.pageWidth);
+                    return wrapPdfPageLines(app._pdfReflowWidePrintLines(eolLines, pack.pageWidth, insertMetrics), insertMetrics);
+                var out = app._pdfReflowWidePrintLines(lines, pack.pageWidth, insertMetrics);
+                /** Last resort: y-cluster + reflow still yields very few rows for a long passage — split on measured column width (same as reflow) on merged text. */
+                var joinedLen = (out || []).join(" ").replace(/\s+/g, " ").trim().length;
+                if(out && out.length < 14 && joinedLen > 1600) {
+                    var mergedOne = (out || []).join(" ").replace(/\s+/g, " ").trim();
+                    var rep = app._pdfReflowWidePrintLines([mergedOne], pack.pageWidth, insertMetrics);
+                    if(rep && rep.length > out.length) out = rep;
+                }
+                return wrapPdfPageLines(out, insertMetrics);
             });
         });
     },
@@ -6208,21 +6348,32 @@ const app = {
             if(b < a) throw new Error("Invalid page range");
             var multRe = app._pdfMarginLadderMult5Re();
             /** Do not wait for WJEC-specific insert phrases — any past paper may use different openings. Use PDF page range (or whole file) only; teacher trims in the editor if needed. */
-            function loadPage(pi, acc) {
-                if(pi > b) return Promise.resolve(acc);
+            function loadPage(pi, state) {
+                if(pi > b) return Promise.resolve(state);
                 return pdf.getPage(pi).then(function(page) {
-                    return app._pdfExtractBodyLinesOnePage(page, multRe, importOpts).then(function(lines) {
-                        (lines || []).forEach(function(line) {
+                    return app._pdfExtractBodyLinesOnePage(page, multRe, importOpts).then(function(pageResult) {
+                        var arr = pageResult && pageResult.lines ? pageResult.lines : pageResult;
+                        (arr || []).forEach(function(line) {
                             var t = String(line || "").trim();
                             if(!t) return;
-                            if(!app._isPdfBoilerLine(t) && !multRe.test(t)) acc.push(t);
+                            if(!app._isPdfBoilerLine(t) && !multRe.test(t)) state.lines.push(t);
                         });
-                        return loadPage(pi + 1, acc);
+                        var chW = app._pdfInsertWidthChFromMetrics(pageResult && pageResult.insertMetrics);
+                        if(chW != null) state.chSamples.push(chW);
+                        return loadPage(pi + 1, state);
                     });
                 });
             }
-            return loadPage(a, []);
-        }).then(function(allLines) {
+            return loadPage(a, { lines: [], chSamples: [] });
+        }).then(function(state) {
+            var allLines = state.lines || [];
+            var samples = state.chSamples || [];
+            if(samples.length) {
+                samples.sort(function(x, y) { return x - y; });
+                app._lastC1PdfExtractInsertWidthCh = samples[Math.floor(samples.length / 2)];
+            } else {
+                app._lastC1PdfExtractInsertWidthCh = null;
+            }
             allLines = app._stripPdfMarginLadderRuns(allLines);
             allLines = app._stripOrphanMarginDigitLines(allLines);
             allLines = allLines.filter(function(l) { return String(l || "").trim().length > 0; });
@@ -6230,7 +6381,7 @@ const app = {
                 allLines = app._pdfRepairSoftLineBreaksInBodyLines(allLines);
             allLines = allLines.map(function(l) { return app.repairExamMarginDigitArtifacts(String(l || "").trim()); }).filter(function(l) { return l.length > 0; });
             if(allLines.length < 4) throw new Error("No passage lines extracted (try a different page range or PDF text layer)");
-            var numberedFull = app.trimC1InsertBodyLines(allLines, 1);
+            var numberedFull = app.trimC1InsertBodyLines(allLines, 1, { skipInsertReflow: true });
             if(numberedFull && numberedFull.length) return numberedFull.join("\n");
             var startN = 1;
             if(allLines.length >= 2 && /^\d{1,3}$/.test(String(allLines[0]).trim()) && String(allLines[1]).trim().length > 50) {
@@ -6265,7 +6416,10 @@ const app = {
             }
             const stored = v2 ? app.serializeStructuredPassageV2(v2) : plain;
             if(v2) app.resetBookletLineFirstAfterNumberedPdfExtract();
-            app.syncLessonSourceCanonical(stored, { sourceLineBasis: "pdfImport" });
+            const pdfCh = typeof app._lastC1PdfExtractInsertWidthCh === "number" && Number.isFinite(app._lastC1PdfExtractInsertWidthCh)
+                ? Math.max(36, Math.min(96, Math.round(app._lastC1PdfExtractInsertWidthCh))) : null;
+            app.syncLessonSourceCanonical(stored, { sourceLineBasis: "pdfImport", pdfInsertWidthCh: pdfCh != null ? pdfCh : undefined });
+            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
             app.setAiInputValue(stored);
             if(typeof app.save === "function") app.save();
             if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
@@ -6274,9 +6428,9 @@ const app = {
     },
     /**
      * PDF body lines → numbered "1 …" / "2 …" rows. No WJEC-specific phrases: first kept line after boilerplate filter is row 1.
-     * _flattenInsertLinesForC1Import unifies line length (insert column reflow).
+     * `skipInsertReflow`: PDF extract already has one string per print line — do **not** run _flattenInsertLinesForC1Import (it re-split by char count and destroyed line/gutter alignment).
      */
-    trimC1InsertBodyLines: function(lines, startLine) {
+    trimC1InsertBodyLines: function(lines, startLine, trimOpts) {
         const L = Array.isArray(lines) ? lines.map(function(l) { return String(l || "").trim(); }).filter(function(l) { return l.length; }) : [];
         if(!L.length) return [];
         const out = [];
@@ -6286,7 +6440,17 @@ const app = {
         });
         if(!out.length) return [];
         const start = Number.isFinite(startLine) && startLine >= 1 ? Math.floor(startLine) : 1;
-        const uniform = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out) : out;
+        const skipReflow = !!(trimOpts && trimOpts.skipInsertReflow);
+        let uniform;
+        if(skipReflow) {
+            uniform = out;
+        } else {
+            const iw = trimOpts && trimOpts.insertWidthCh != null && Number.isFinite(Number(trimOpts.insertWidthCh))
+                ? Number(trimOpts.insertWidthCh)
+                : (appData && appData.meta && appData.meta.pdfInsertWidthCh != null && Number.isFinite(Number(appData.meta.pdfInsertWidthCh))
+                    ? Number(appData.meta.pdfInsertWidthCh) : null);
+            uniform = typeof app._flattenInsertLinesForC1Import === "function" ? app._flattenInsertLinesForC1Import(out, { insertWidthCh: iw }) : out;
+        }
         return uniform.map(function(t, i) { return (start + i) + " " + t; });
     },
     /** True when strict-parse rows look like one PDF line per row (do not merge with expandOversized…). */
@@ -6304,7 +6468,7 @@ const app = {
     },
     /**
      * Build gutter layout. `lineEntries` is one flex **line unit** per item — intended to be one **printed line** of the insert (see PASSAGE_STRUCTURE_VERSION). Browser soft-wrap inside `.source-line-text` is not additional units.
-     * WJEC / exam: prefer **5, 10, 15…** on every **k**-th **print-line unit** (`lineOrd`); secondary tick when booklet `n` is a multiple of k; if none, fall back to each unit’s booklet index.
+     * WJEC / exam: margin ticks are **booklet line** numbers (5, 10, 15…), matching the paper — not display row index (row 1 can be booklet 7). Non-tick rows get a blank margin cell. Do not fall back to “1,2,3…” on exam passages (that looked like random numbers vs WJEC).
      */
     buildNumberedSourceLayoutHtml: function(lineEntries, opts) {
         const cnt = lineEntries.length;
@@ -6331,16 +6495,13 @@ const app = {
         });
         function computeMarginForRow(i, n) {
             let showInMargin = "";
-            const lineOrd = i + 1;
             if(examMarginOnly && examShowAllBookletLines && tickEvery > 0 && Number.isFinite(n) && !(examMarginOnly && n === 0)) {
                 showInMargin = String(n);
             } else if(showAllMargins) showInMargin = String(n);
             else if(denseEveryLineGutter) showInMargin = String(n);
             else if(examMarginOnly && !examShowAllBookletLines && tickEvery > 0) {
-                /** Primary: passage line 5, 10, 15… (every k-th line in this layout). */
-                if(lineOrd % tickEvery === 0) showInMargin = String(lineOrd);
-                /** Secondary: if booklet line (quotes / exam) is a multiple of k — e.g. extract starts at line 20. */
-                else if(!showInMargin && Number.isFinite(n) && !(examMarginOnly && n === 0) && app.bookletLineIsMultipleOf(n, tickEvery)) {
+                /** Booklet line `n` (data-src-line) is the printed line index; WJEC ticks on 5, 10, 15… in the **booklet**, not the k-th row of this layout. */
+                if(Number.isFinite(n) && !(examMarginOnly && n === 0) && app.bookletLineIsMultipleOf(n, tickEvery)) {
                     showInMargin = String(n);
                 }
             } else if(tickEvery > 0 && Number.isFinite(n) && app.bookletLineIsMultipleOf(n, tickEvery) && !(examMarginOnly && n === 0)) {
@@ -6351,8 +6512,8 @@ const app = {
         let margins = lineEntries.map(function(row, i) {
             return computeMarginForRow(i, ns[i]);
         });
-        /** If nothing matched (e.g. &lt;5 passage lines so no “5” yet), show each row’s booklet index so the column isn’t blank; still sparse vs every screen wrap. */
-        if(cnt > 0 && margins.every(function(m) { return !m; })) {
+        /** Non-exam layouts only: if no multiple-of-k tick matched, show each row’s booklet index so the column isn’t blank. Exam / WJEC: leave non-tick rows blank (do not show 1,2,3,4 instead of 5,10,15). */
+        if(cnt > 0 && margins.every(function(m) { return !m; }) && !examMarginOnly) {
             margins = ns.map(function(n) {
                 if(!Number.isFinite(n) || (examMarginOnly && n === 0)) return "";
                 return String(n);
@@ -6382,7 +6543,7 @@ const app = {
                 }
                 cellText = cellText.replace(/^\s*\d{1,4}[.)]\s+/, "").trim();
             }
-            /** WJEC gutter shows lineOrd (5,10,15…); data-src-line may be booklet n. OCR often leaves the same tick digit at the start of the cell while n≠digit — strip duplicate tick and stray ladder digits. */
+            /** Gutter shows booklet multiples of 5; data-src-line is booklet n. OCR may duplicate the tick digit inside the cell — strip when it matches the margin label. */
             if(showInMargin && /^\d+$/.test(String(showInMargin).trim())) {
                 const sm = String(showInMargin).trim();
                 const escSm = sm.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
@@ -7587,6 +7748,7 @@ const app = {
 
         if(ui._sendToBuilderGuard) ui._sendToBuilderGuard = false;
         try {
+            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
             if(typeof admin !== "undefined" && admin.derivePointsFromQuestions) admin.derivePointsFromQuestions();
             ui.init();
         } catch(e) {
@@ -7648,6 +7810,11 @@ const app = {
         safe.meta.title = typeof safe.meta.title === 'string' ? safe.meta.title : defaultData.meta.title;
         safe.meta.author = typeof safe.meta.author === 'string' ? safe.meta.author : defaultData.meta.author;
         safe.meta.version = typeof safe.meta.version === 'string' ? safe.meta.version : defaultData.meta.version;
+        if(safe.meta.pdfInsertWidthCh != null) {
+            const pc = Number(safe.meta.pdfInsertWidthCh);
+            if(!Number.isFinite(pc) || pc < 36 || pc > 96) delete safe.meta.pdfInsertWidthCh;
+            else safe.meta.pdfInsertWidthCh = Math.max(36, Math.min(96, Math.round(pc)));
+        }
         let rawSource = typeof safe.sourceText === 'string' ? safe.sourceText : (defaultData.sourceText || "");
         if(rawSource && app.isStructuredPassageSource && app.isStructuredPassageSource(rawSource)) {
             safe.sourceText = String(rawSource).trim();
@@ -8485,6 +8652,9 @@ const ui = {
         if(hostEl) hostEl.classList.toggle("architect-passage-line-mode", has);
     },
     refreshSourceDisplay: function(overrideContent) {
+        try {
+            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+        } catch(eR) {}
         let src = overrideContent != null ? overrideContent : null;
         if(src == null) src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
         let html;
@@ -13416,9 +13586,12 @@ const admin = {
                     }
                 } catch(eC1) { /* keep layout extract */ }
             }
-            if(typeof app.syncLessonSourceCanonical === "function")
-                app.syncLessonSourceCanonical(c1Source, { sourceLineBasis: numberedPdfImport ? "pdfImport" : null });
-            else {
+            if(typeof app.syncLessonSourceCanonical === "function") {
+                const pdfChPP = numberedPdfImport && typeof app._lastC1PdfExtractInsertWidthCh === "number" && Number.isFinite(app._lastC1PdfExtractInsertWidthCh)
+                    ? Math.max(36, Math.min(96, Math.round(app._lastC1PdfExtractInsertWidthCh))) : undefined;
+                app.syncLessonSourceCanonical(c1Source, { sourceLineBasis: numberedPdfImport ? "pdfImport" : null, pdfInsertWidthCh: pdfChPP });
+                if(numberedPdfImport && typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+            } else {
                 appData.sourceText = c1Source;
                 if(appData.selection) {
                     if(!appData.selection.text) appData.selection.text = {};
@@ -13681,9 +13854,12 @@ const admin = {
                         }
                     } catch(eRex) { /* keep layout */ }
                 }
-                if(typeof app.syncLessonSourceCanonical === "function")
-                    app.syncLessonSourceCanonical(c1Out, { sourceLineBasis: numberedPdfImport ? "pdfImport" : null });
-                else {
+                if(typeof app.syncLessonSourceCanonical === "function") {
+                    const pdfChR = numberedPdfImport && typeof app._lastC1PdfExtractInsertWidthCh === "number" && Number.isFinite(app._lastC1PdfExtractInsertWidthCh)
+                        ? Math.max(36, Math.min(96, Math.round(app._lastC1PdfExtractInsertWidthCh))) : undefined;
+                    app.syncLessonSourceCanonical(c1Out, { sourceLineBasis: numberedPdfImport ? "pdfImport" : null, pdfInsertWidthCh: pdfChR });
+                    if(numberedPdfImport && typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+                } else {
                     appData.sourceText = c1Out;
                     if(appData.selection) {
                         if(!appData.selection.text) appData.selection.text = {};
@@ -15441,17 +15617,16 @@ const admin = {
     ensureActiveSourcePersisted: function() {
         if(!appData || appData.isStandalone) return;
         const c2Wrap = document.getElementById("source-text-c2-wrap");
-        if(c2Wrap && !c2Wrap.classList.contains("hidden") && admin.isComponent2SourceEditing && admin.isComponent2SourceEditing()) {
+        const useC2Editors = !!(appData.component === 2 && appData.component2Layout && typeof appData.component2Layout === "object");
+        if(c2Wrap && !c2Wrap.classList.contains("hidden") && useC2Editors) {
             const el = document.getElementById("c2-pooled-editor");
             if(el && el.getAttribute("contenteditable") === "true") {
                 admin.syncC2PooledDataFromEditor({ rewriteEditor: true });
             }
             return;
         }
-        const ai = (typeof admin !== "undefined" && admin.getActiveSourceEditorEl)
-            ? admin.getActiveSourceEditorEl()
-            : document.getElementById("ai-input");
-        if(ai && ai.id === "ai-input" && ai.getAttribute("contenteditable") === "true") {
+        const ai = document.getElementById("ai-input");
+        if(ai && ai.getAttribute("contenteditable") === "true") {
             const txt = (ai.innerHTML || "").trim();
             if(txt && !app.isLikelyJson(txt)) {
                 /** Always editorPassageToStoredCanonical (v2 JSON when possible). Do not save serializeNumberedSourceLayoutToPlain first — plain overwrites JSON, formatSourceHtml misses parseNumberedPlainSourceLines, plainProseToSyntheticNumberedEntries collapses to few rows and only ~5/10 show in the margin. */
@@ -17132,7 +17307,7 @@ const admin = {
             }).then(function(stored) {
                 var n = typeof app.countStoredPassagePrintedLines === "function" ? app.countStoredPassagePrintedLines(stored) : (typeof app.countStoredPassageLineRows === "function" ? app.countStoredPassageLineRows(stored) : (stored ? String(stored).split(/\n/).filter(function(l) { return l.trim(); }).length : 0));
                 var lineNoun = n === 1 ? "line" : "lines";
-                alert("Imported " + n + " printed line " + lineNoun + " (one stored unit per line the extractor found). If the PDF merged several print lines into one, the count will be low and the gutter will not match the paper until extraction improves. Wrapped screen lines are not extra lines. Booklet line 1 was reset; change it if your paper starts elsewhere. Save if needed.");
+                alert("Imported " + n + " stored line " + lineNoun + " — each one is a row in the lesson (not a screen-wrapped line). If this count is far below the lines on the paper, the PDF text layer merged rows; try Import PDF again, or turn off “Strict PDF lines” for that file. Quote Select / Lab gutters use these rows. Booklet line 1 was reset. Save if needed.");
             }).catch(function(err) {
                 alert(err && err.message ? err.message : String(err));
             });
@@ -20772,7 +20947,10 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     if(!cleaned) throw new Error("No readable text found.");
                     if(!appData) appData = app.repair(defaultData);
                     appData.sourceText = cleaned;
-                    if(appData.meta) delete appData.meta.sourceLineBasis;
+                    if(appData.meta) {
+                        delete appData.meta.sourceLineBasis;
+                        delete appData.meta.pdfInsertWidthCh;
+                    }
                     app.save();
                     ui.init();
                     app.setAiInputValue(app.formatSourceHtml(cleaned));
@@ -20828,7 +21006,10 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     if(!cleaned) throw new Error("No readable text found.");
                     if(!appData) appData = app.repair(defaultData);
                     appData.sourceText = cleaned;
-                    if(appData.meta) delete appData.meta.sourceLineBasis;
+                    if(appData.meta) {
+                        delete appData.meta.sourceLineBasis;
+                        delete appData.meta.pdfInsertWidthCh;
+                    }
                     app.save();
                     ui.init();
                     app.setAiInputValue(app.formatSourceHtml(cleaned));
@@ -20896,7 +21077,10 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 }
                 if(!appData) appData = app.repair(defaultData);
                 appData.sourceText = cleaned;
-                if(appData.meta) delete appData.meta.sourceLineBasis;
+                if(appData.meta) {
+                    delete appData.meta.sourceLineBasis;
+                    delete appData.meta.pdfInsertWidthCh;
+                }
                 app.save();
                 ui.init();
                 app.setAiInputValue(app.formatSourceHtml(cleaned));
