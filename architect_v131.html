@@ -4878,7 +4878,12 @@ const app = {
         const seq = !!opts.sequentialLineNumbers;
         const c = String(plain || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
         if(!c) return null;
-        const linesArr = c.split(/\n/).map(function(l) { return String(l || "").replace(/\s+$/g, ""); });
+        let linesArr = c.split(/\n/).map(function(l) { return String(l || "").replace(/\s+$/g, ""); });
+        linesArr = linesArr.filter(function(line) {
+            const u = String(line || "").trim();
+            if(!u) return false;
+            return !app._isPdfBoilerLine(u);
+        });
         const rows = [];
         const pending = [];
         function pendingPlain() {
@@ -5526,6 +5531,14 @@ const app = {
         if(/^\([A-Z]\d{2,}[^)]{0,30}\)$/i.test(t) && t.length < 44) return true;
         if(/^SECTION A:\s*40\s+marks$/i.test(t)) return true;
         if(/^Read carefully the passage below\.?$/i.test(t)) return true;
+        /** GCSE / WJEC section rubric lines — not insert body (avoid “head prose” split + stray prefix). */
+        if(/^Prose Writing\.?$/i.test(t)) return true;
+        if(/^Imaginative Writing\.?$/i.test(t)) return true;
+        if(/^Transactional Writing\.?$/i.test(t)) return true;
+        if(/^Descriptive Writing\.?$/i.test(t)) return true;
+        if(/^Narrative Writing\.?$/i.test(t)) return true;
+        if(/^Reading\s*\(?\s*\d+\s+marks?\s*\)?$/i.test(t)) return true;
+        if(/^Writing\s*\(?\s*\d+\s+marks?\s*\)?$/i.test(t)) return true;
         if(/^component\s+\d/i.test(t)) return true;
         if(/^morning\s*$/i.test(t) || /^afternoon\s*$/i.test(t)) return true;
         if(/^time\s+allowed/i.test(t) || /^additional\s+materials/i.test(t)) return true;
@@ -6500,6 +6513,24 @@ const app = {
         t = t.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">");
         return t.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     },
+    /**
+     * When strict parseNumberedPlainSourceLines fails (gaps, leading unnumbered lines), use the same relaxed v2 path as editor storage — not plainProseToSyntheticNumberedEntries (few huge rows, wrong ticks).
+     */
+    layoutHtmlFromRelaxedNumberedPlain: function(clean, examMarginLesson) {
+        const s = String(clean || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        if(!s.trim()) return null;
+        const hasNum = s.split(/\n/).some(function(l) { return /^\s*-?\d{1,4}[.)]?\s+/.test(String(l || "").trim()); });
+        if(!hasNum) return null;
+        const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+        const repaired = app.repairExamMarginDigitArtifacts(s);
+        let v2 = app.plainNumberedLinesToStructuredV2(repaired, pdfImp || !!examMarginLesson, { sequentialLineNumbers: true });
+        if(!v2 || !v2.lines || !v2.lines.length) return null;
+        let w = app.normalizeStructuredPassageV2MergeOrphanRows(v2);
+        w = app.normalizeStructuredPassageV2Sequential(w);
+        const html = app.formatStructuredPassageHtml(w);
+        if(!html || /^Source text not provided/i.test(String(html).trim())) return null;
+        return html;
+    },
     /** After cleanSourceText — strict numbering, else synthetic prose rows; null if nothing to show. */
     gutterLayoutHtmlFromCleanPlain: function(clean) {
         if(!clean || typeof clean !== "string") return null;
@@ -6526,6 +6557,8 @@ const app = {
             const o = (usePdfOpts || examMarginLesson) ? fullExamBookletGutter : null;
             return app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(examPlainRows(fixed.map(function(r) { return { n: r.n, text: r.text }; }))), o);
         }
+        const relaxedGutter = app.layoutHtmlFromRelaxedNumberedPlain(cleanedForNum, examMarginLesson);
+        if(relaxedGutter) return relaxedGutter;
         const synthetic = app.plainProseToSyntheticNumberedEntries(cleanedForNum);
         if(synthetic.length) {
             return app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(examPlainRows(synthetic)), (examMarginLesson || synthetic.length >= 2) ? fullExamBookletGutter : null);
@@ -6699,6 +6732,10 @@ const app = {
         const lines = c.split(/\n/);
         const hasLineNumbers = lines.some(function(l) { return /^\s*-?\d+[.)]?\s+/.test(l); });
         if(hasLineNumbers) {
+            const pdfImport = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+            const examMarginLesson = pdfImport || (c.length > 800 && /The main character in this extract|Lucy Faulkner was born in Luton/i.test(c));
+            const relaxed = app.layoutHtmlFromRelaxedNumberedPlain(c, examMarginLesson);
+            if(relaxed) return relaxed;
             let firstNumIdx = lines.length;
             for(let hi = 0; hi < lines.length; hi++) {
                 const t = String(lines[hi] || "").trim();
@@ -6721,18 +6758,16 @@ const app = {
                 }
             });
             if(entries.length) {
-                const gutterHtml = app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(app.expandLineEntriesOnNewlines(entries)), {
+                const headJoined = headSlice.join("\n").replace(/\r\n/g, "\n").trim();
+                if(headJoined.length) {
+                    entries[0].text = (headJoined.replace(/\s+/g, " ").trim() + " " + String(entries[0].text || "").trim()).replace(/\s+/g, " ").trim();
+                }
+                return app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(app.expandLineEntriesOnNewlines(entries)), {
                     pdfPhysicalLines: true,
                     examMarginMultiplesOf5Only: true,
                     examShowAllBookletLines: false,
                     alwaysUseCleanPlain: true
                 });
-                const headJoined = headSlice.join("\n").replace(/\r\n/g, "\n").trim();
-                if(headJoined.length) {
-                    const intro = '<div class="architect-passage-head-prose"><p style="margin:0 0 12px 0;white-space:pre-wrap;">' + app.escapeHtml(headJoined).replace(/\n/g, "<br>") + "</p></div>";
-                    return intro + gutterHtml;
-                }
-                return gutterHtml;
             }
         }
         let parts = c.split(/\n\s*\n/);
