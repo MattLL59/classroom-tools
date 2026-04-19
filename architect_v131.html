@@ -4054,7 +4054,7 @@ const app = {
         const repairedPlain = app.repairExamMarginDigitArtifacts(plain);
         const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
         let v2FromPlain = app.plainNumberedLinesToStructuredV2(repairedPlain, pdfImp, { sequentialLineNumbers: true });
-        if(v2FromPlain && v2FromPlain.lines && v2FromPlain.lines.length >= 2) {
+        if(v2FromPlain && v2FromPlain.lines && v2FromPlain.lines.length >= 1) {
             let w = app.normalizeStructuredPassageV2MergeOrphanRows(v2FromPlain);
             w = app.normalizeStructuredPassageV2Sequential(w);
             el.innerHTML = app.structuredPassageToEditorHtml(w) || "";
@@ -4878,17 +4878,50 @@ const app = {
         const seq = !!opts.sequentialLineNumbers;
         const c = String(plain || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
         if(!c) return null;
-        const linesArr = c.split(/\n/).map(function(l) { return l.trim(); }).filter(Boolean);
-        const lines = [];
-        for(let i = 0; i < linesArr.length; i++) {
-            const mm = linesArr[i].match(/^\s*(-?\d{1,4})([.)]?)\s+([\s\S]*)$/);
-            if(!mm) return null;
-            let body = mm[3] || "";
-            if(seq) body = String(body).replace(/^\s*\d{1,4}[.)]\s+/, "").trim();
-            const n = seq ? (i + 1) : parseInt(mm[1], 10);
-            lines.push({ n: n, html: app.escapeHtml(body) });
+        const linesArr = c.split(/\n/).map(function(l) { return String(l || "").replace(/\s+$/g, ""); });
+        const rows = [];
+        const pending = [];
+        function pendingPlain() {
+            return pending.length ? pending.join("\n").replace(/\s+/g, " ").trim() : "";
         }
-        return { v: app.PASSAGE_STRUCTURE_VERSION, lines: lines, examMargin: !!examMargin };
+        function flushPendingBeforeBody(body) {
+            const pre = pendingPlain();
+            pending.length = 0;
+            if(!pre) return body || "";
+            return body ? (pre + " " + String(body).trim()) : pre;
+        }
+        for(let i = 0; i < linesArr.length; i++) {
+            const t = String(linesArr[i] || "").trim();
+            if(!t) continue;
+            const mm = t.match(/^\s*(-?\d{1,4})([.)]?)\s+([\s\S]*)$/);
+            if(mm) {
+                const numVal = parseInt(mm[1], 10);
+                /** Avoid "3000 pounds" / years being read as line 3000 — treat as prose continuation. */
+                if(!Number.isFinite(numVal) || numVal < -500 || numVal > 260) {
+                    pending.push(t);
+                    continue;
+                }
+                let body = (mm[3] || "").trim();
+                if(seq) body = String(body).replace(/^\s*\d{1,4}[.)]\s+/, "").trim();
+                body = flushPendingBeforeBody(body);
+                const n = seq ? (rows.length + 1) : numVal;
+                rows.push({ n: n, html: app.escapeHtml(body.replace(/\s+/g, " ").trim()) });
+            } else {
+                pending.push(t);
+            }
+        }
+        const tail = pendingPlain();
+        if(tail) {
+            if(rows.length) {
+                const last = rows[rows.length - 1];
+                const merged = (app.htmlFragmentToPlainText(last.html) + " " + tail).replace(/\s+/g, " ").trim();
+                last.html = app.escapeHtml(merged);
+            } else {
+                rows.push({ n: 1, html: app.escapeHtml(tail) });
+            }
+        }
+        if(!rows.length) return null;
+        return { v: app.PASSAGE_STRUCTURE_VERSION, lines: rows, examMargin: !!examMargin };
     },
     /**
      * contenteditable (esp. Chrome) emits <div> paragraphs; sanitizeSourceHtml strips <div> and merges lines, which breaks <b> boundaries.
@@ -6827,7 +6860,7 @@ const app = {
         const repaired = app.repairExamMarginDigitArtifacts(clean);
         const pdfImpEd = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
         let v2Ed = app.plainNumberedLinesToStructuredV2(repaired, pdfImpEd, { sequentialLineNumbers: true });
-        if(v2Ed && v2Ed.lines && v2Ed.lines.length >= 2) {
+        if(v2Ed && v2Ed.lines && v2Ed.lines.length >= 1) {
             let wEd = app.normalizeStructuredPassageV2MergeOrphanRows(v2Ed);
             wEd = app.normalizeStructuredPassageV2Sequential(wEd);
             const edHtml = app.structuredPassageToEditorHtml(wEd);
@@ -13339,7 +13372,7 @@ const admin = {
                     });
                     const repaired = app.repairExamMarginDigitArtifacts(String(numberedPlain || ""));
                     let v2 = app.plainNumberedLinesToStructuredV2(repaired, true, { sequentialLineNumbers: true });
-                    if(v2 && v2.lines && v2.lines.length >= 4) {
+                    if(v2 && v2.lines && v2.lines.length >= 1) {
                         v2 = app.normalizeStructuredPassageV2MergeOrphanRows(v2);
                         v2 = app.normalizeStructuredPassageV2Sequential(v2);
                         c1Source = app.serializeStructuredPassageV2(v2);
@@ -13604,7 +13637,7 @@ const admin = {
                         });
                         const repaired = app.repairExamMarginDigitArtifacts(String(numberedPlain || ""));
                         let v2 = app.plainNumberedLinesToStructuredV2(repaired, true, { sequentialLineNumbers: true });
-                        if(v2 && v2.lines && v2.lines.length >= 4) {
+                        if(v2 && v2.lines && v2.lines.length >= 1) {
                             v2 = app.normalizeStructuredPassageV2MergeOrphanRows(v2);
                             v2 = app.normalizeStructuredPassageV2Sequential(v2);
                             c1Out = app.serializeStructuredPassageV2(v2);
