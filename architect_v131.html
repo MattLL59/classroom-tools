@@ -592,7 +592,7 @@
         <h1>
             <button class="icon-btn" onclick="app.resetSession()" style="color:red; border-color:red;" title="Reset Session">✨</button>
             Answer Architect
-            <span id="arch-build-stamp" style="font-size:0.65rem;font-weight:600;opacity:0.55;margin-left:6px;white-space:nowrap;" title="If this does not read 131 · full-gutter, the page is cached or not this file.">131 · full-gutter</span>
+            <span id="arch-build-stamp" style="font-size:0.65rem;font-weight:600;opacity:0.55;margin-left:6px;white-space:nowrap;" title="If this does not read 131 · merged-row-recover, the page is cached or not this file.">131 · merged-row-recover</span>
             <span class="score-badge" id="score-display" title="">—</span>
             <span class="score-badge" id="level-display">Lvl 1</span>
         </h1>
@@ -3989,7 +3989,7 @@ const app = {
     },
     /**
      * Push lesson source into admin #ai-input (Component 1 only).
-     * Uses getSourceText() then formatSourceHtmlForEditor() — v131: editor HTML is &lt;p&gt; lines / sanitize (no exam gutter rows); Lab/Quote Select use formatSourceHtml.
+     * Uses getSourceText() then storedCanonicalToEditorInnerHtml / formatSourceHtmlForEditor — structured passages rebuild WJEC **5/10/15** exam gutters (same as Lab); Lab/Quote Select use formatSourceHtml.
      */
     syncAdminAiInputFromLesson: function(opts) {
         opts = opts || {};
@@ -4489,7 +4489,7 @@ const app = {
         return clone.innerHTML.trim();
     },
     /**
-     * Structured passage storage (v2): each `lines[]` item is one **segment** (app layout row: quoting, PDF alignment, `data-src-line`). Segments approximate printed lines when extraction is good; they are **not** labelled 1,2,3 in the student gutter — that stays **WJEC booklet lines 5, 10, 15…** only.
+     * Structured passage storage (v2): each `lines[]` item is one **segment** (app layout row: quoting, PDF alignment, `data-src-line`). Lab and Editing Suite margins both show **WJEC ticks 5, 10, 15…** only; `data-src-line` carries the booklet line index (PDF import: one row per printed line when Strict PDF lines is on).
      * The PDF importer aims for **one segment per print line**; merged PDF text may reduce segment count vs the paper.
      * `n` is sequential within storage (after normalize); **Booklet line 1** maps segment order to **booklet line numbers** for margin ticks and quotes.
      * JSON shape: { "v":2, "lines":[{ "n":1, "html":"…" }], "examMargin"?: bool }
@@ -4736,7 +4736,7 @@ const app = {
         return !!app.parseStructuredPassageSource(s);
     },
     /**
-     * Count of passage **segments** (layout rows after expand/split) in stored source — app-internal units for PDF alignment and quoting. **Not** the same as WJEC **booklet line** numbers (5, 10, 15…) in the student margin.
+     * Count of passage rows after expand/split — layout units for PDF alignment and quoting. Lab and Editing Suite margins both use WJEC 5/10/15 ticks on `data-src-line` booklet indices.
      * Same expansion as Lab / `formatStructuredPassageHtml`. For non-JSON plain text, falls back to counting non-empty newline-separated chunks.
      */
     countStoredPassageSegments: function(stored) {
@@ -4927,7 +4927,7 @@ const app = {
             return null;
         }
     },
-    /** Editing Suite: same layout as student Lab (WJEC margin: **5, 10, 15…** only). Internal passage **segments** (layout rows) drive quoting/PDF alignment; those are not labelled 1,2,3 in the gutter. Rich text in `.source-line-text`; gutter nums contenteditable=false. */
+    /** Editing Suite: same gutter as Lab — **WJEC booklet ticks 5, 10, 15…** only (blank cells between), tied to `data-src-line` / PDF lines — not chunked “layout row” indices. Rich text in `.source-line-text`; gutter nums contenteditable=false. */
     structuredPassageToEditorHtml: function(o) {
         if(!o || !Array.isArray(o.lines)) return "";
         const expanded = app.expandStructuredPassageLineEntries(o);
@@ -4968,6 +4968,7 @@ const app = {
         if(!rows || !rows.length) return rows || [];
         /** PDF import rows are authoritative booklet lines — do not invent extra rows by sentence-splitting (teacher should not re-tweak line count). */
         if(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport") return rows;
+        /** Non-PDF: avoid sentence-chunking once there are many rows — keeps one stored line ≈ one booklet row for margin ticks; chunking was misleading vs printed lines. */
         if(rows.length >= 12) return rows;
         const base = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
         const pieces = [];
@@ -4994,8 +4995,8 @@ const app = {
         });
     },
     /**
-     * Structured v2 → layout **segment** list for Lab/editor (same as student view): booklet base, split on internal newlines, optional long-line split (non-PDF).
-     * Each item is one **segment** (app-internal row for quoting/PDF alignment). Student-facing margin ticks remain **booklet lines 5, 10, 15…** only — not every segment index.
+     * Structured v2 → layout row list for Lab/editor: booklet base, split on internal newlines, optional long-row split (non-PDF only). PDF import does not split — rows follow the insert.
+     * If storage has **one** v2 row but the plain still looks like many consecutive “N text” lines (merged lesson / bad round-trip), re-split via {@link parseNumberedPlainSourceLines} so the margin gets multiple `data-src-line` values and WJEC ticks (5,10,15…) are not reduced to a single band.
      */
     expandStructuredPassageLineEntries: function(o) {
         if(!o || !Array.isArray(o.lines) || !o.lines.length) return [];
@@ -5011,10 +5012,24 @@ const app = {
                 : "";
             return { n: L.n, text: pt, html: html };
         });
-        const base = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
-        const entriesBook = entries.map(function(en) {
+        let lineBase = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
+        let useEntries = entries;
+        if(o.lines.length === 1 && entries.length === 1 && typeof app.parseNumberedPlainSourceLines === "function" && typeof app.repairExamMarginDigitArtifacts === "function") {
+            const repaired = app.repairExamMarginDigitArtifacts(String(entries[0].text || "").trim());
+            const parsed = app.parseNumberedPlainSourceLines(repaired);
+            if(parsed && parsed.length >= 2) {
+                const b0 = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
+                /** If OCR used relative 1…n, align with Booklet line 1; if excerpt starts at e.g. 20, parsed[0].n is already absolute. */
+                lineBase = parsed[0].n === 1 ? b0 : parsed[0].n;
+                useEntries = parsed.map(function(row, idx) {
+                    const t = String(row.text || "").replace(/\s+/g, " ").trim();
+                    return { n: idx + 1, text: t, html: t ? app.escapeHtml(t) : "" };
+                });
+            }
+        }
+        const entriesBook = useEntries.map(function(en) {
             const sn = (en.n != null && Number.isFinite(en.n)) ? en.n : 1;
-            return { n: base + sn - 1, text: en.text, html: en.html };
+            return { n: lineBase + sn - 1, text: en.text, html: en.html };
         });
         let expanded = app.expandLineEntriesOnNewlines(entriesBook);
         expanded = expanded.filter(function(row) {
@@ -5034,7 +5049,7 @@ const app = {
         if(!o || !Array.isArray(o.lines) || !o.lines.length) return "Source text not provided.";
         const expanded = app.expandStructuredPassageLineEntries(o);
         if(!expanded.length) return "Source text not provided.";
-        /** Student/Lab gutter: WJEC **5, 10, 15…** booklet ticks only (`examShowAllBookletLines: false`). Segment count behind the scenes does not change margin labelling. */
+        /** Student/Lab/Editing Suite gutter: WJEC **5, 10, 15…** booklet ticks only (`examShowAllBookletLines: false`). */
         return app.buildNumberedSourceLayoutHtml(expanded, {
             pdfPhysicalLines: true,
             examMarginMultiplesOf5Only: true,
@@ -6600,7 +6615,7 @@ const app = {
      */
     buildNumberedSourceLayoutHtml: function(lineEntries, opts) {
         const examMarginOnly = !!(opts && opts.examMarginMultiplesOf5Only);
-        /** Optional: every row shows `n` in the margin (rare; teacher tooling). Default student view: WJEC booklet ticks only. */
+        /** Optional: every row shows `n` in the margin (rare). Default exam + Editing Suite: WJEC booklet ticks 5, 10, 15… only (`examShowAllBookletLines: false`). */
         const denseEveryLineGutter = !examMarginOnly && !!(opts && opts.denseEveryLineGutter);
         const tickEvery = app.EXAM_GUTTER_INTERVAL || 5;
         const examShowAllBookletLines = !!(opts && opts.examShowAllBookletLines);
@@ -6706,7 +6721,7 @@ const app = {
                 entries.push({ n: useLead ? lead : (i + 1), text: mm[3] || "", html: bodyHtml });
             }
             if(!entries.length) return null;
-            const o = { pdfPhysicalLines: true, examMarginMultiplesOf5Only: true, examShowAllBookletLines: false };
+            const o = { pdfPhysicalLines: true, examMarginMultiplesOf5Only: true, examShowAllBookletLines: false, editorPassageMode: true };
             return app.buildNumberedSourceLayoutHtml(app.splitLongRowsForBookletLineGutter(app.expandLineEntriesOnNewlines(app.applyPassageBookletDisplayLineNumbers(entries))), o);
         } catch(eG) {
             return null;
@@ -6960,7 +6975,7 @@ const app = {
         }
         return app.sanitizeSourceHtml(t) || t;
     },
-    /** Rebuild #ai-input innerHTML from canonical: structured passages use the same `source-with-line-numbers` layout as Lab (WJEC margin ticks); rich text per line in `.source-line-text`. */
+    /** Rebuild #ai-input innerHTML from canonical: structured passages use `source-with-line-numbers` with WJEC **5, 10, 15…** margin ticks (same as Lab); rich text per line in `.source-line-text`. */
     storedCanonicalToEditorInnerHtml: function(canonical) {
         if(!canonical || typeof canonical !== "string") return "";
         const c = canonical.trim();
@@ -7143,7 +7158,7 @@ const app = {
         return '<p style="' + hang + '">' + prefix + bodyInner + "</p>";
     },
     /**
-     * Plain text → HTML for admin #ai-input. Fully numbered plain → structuredPassageToEditorHtml (margin ticks; numbers not duplicated in body).
+     * Plain text → HTML for admin #ai-input. Fully numbered plain → structuredPassageToEditorHtml (WJEC 5/10/15 margin ticks like Lab; numbers not duplicated in body).
      * Else numbered &lt;p&gt; / prose blocks. Student Lab uses formatSourceHtml.
      */
     formatSourceHtmlForEditor: function(text) {
@@ -15633,7 +15648,14 @@ const admin = {
         if(!el || el.getAttribute("contenteditable") !== "true") return;
         try {
             const raw = el.innerHTML || "";
-            if(/source-with-line-numbers|source-line-row/i.test(raw)) return;
+            if(/source-with-line-numbers|source-line-row/i.test(raw)) {
+                try {
+                    el.querySelectorAll(".source-line-text").forEach((cell) => {
+                        if(cell && cell.nodeType === 1) admin.flattenNestedSourceInlines(cell);
+                    });
+                } catch(eG) {}
+                return;
+            }
             admin.flattenNestedSourceInlines(el);
             const raw2 = el.innerHTML;
             /* Full sanitize on numbered &lt;p&gt; lessons rewrites boundaries and makes one &lt;b&gt; swallow the rest of the paragraph — skip; flatten above is enough. */
@@ -17451,8 +17473,8 @@ const admin = {
                 strictPhysicalLines: !(strictEl && strictEl.checked === false)
             }).then(function(stored) {
                 var n = typeof app.countStoredPassageSegments === "function" ? app.countStoredPassageSegments(stored) : (typeof app.countStoredPassagePrintedLines === "function" ? app.countStoredPassagePrintedLines(stored) : (typeof app.countStoredPassageLineRows === "function" ? app.countStoredPassageLineRows(stored) : (stored ? String(stored).split(/\n/).filter(function(l) { return l.trim(); }).length : 0)));
-                var segNoun = n === 1 ? "segment" : "segments";
-                alert("Imported " + n + " passage " + segNoun + " (layout units inside the lesson for text and quotes — not the WJEC margin numbers, which stay 5, 10, 15… only). If this count is far below the lines on the paper, the PDF text layer may have merged rows; try Import PDF again, or turn off “Strict PDF lines”. Booklet line 1 was reset. Save if needed.");
+                var segNoun = n === 1 ? "row" : "rows";
+                alert("Imported " + n + " passage " + segNoun + " (booklet lines from the PDF — used for quoting and alignment). Lab and Editing Suite both show WJEC-style margin ticks (5, 10, 15…) keyed to booklet line numbers, not soft-wrapped screen lines. If this count is far below the lines on the paper, the PDF text layer may have merged rows; try Import PDF again, or turn off “Strict PDF lines”. Booklet line 1 was reset. Save if needed.");
             }).catch(function(err) {
                 alert(err && err.message ? err.message : String(err));
             });
@@ -21117,7 +21139,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     }
                     app.save();
                     ui.init();
-                    app.setAiInputValue(app.formatSourceHtml(cleaned));
+                    app.setAiInputValue(app.formatSourceHtmlForEditor(cleaned));
                     localStorage.setItem("tsa_ai_step2", "true");
                     const step2 = document.getElementById("ai-step2");
                     if(step2) step2.classList.remove("hidden");
@@ -21176,7 +21198,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     }
                     app.save();
                     ui.init();
-                    app.setAiInputValue(app.formatSourceHtml(cleaned));
+                    app.setAiInputValue(app.formatSourceHtmlForEditor(cleaned));
                     localStorage.setItem("tsa_ai_step2", "true");
                     const step2 = document.getElementById("ai-step2");
                     if(step2) step2.classList.remove("hidden");
@@ -21248,7 +21270,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 }
                 app.save();
                 ui.init();
-                app.setAiInputValue(app.formatSourceHtml(cleaned));
+                app.setAiInputValue(app.formatSourceHtmlForEditor(cleaned));
                 localStorage.setItem("tsa_ai_step2", "true");
                 const step2 = document.getElementById("ai-step2");
                 if(step2) step2.classList.remove("hidden");
