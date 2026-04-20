@@ -4076,6 +4076,7 @@ const app = {
     },
     /**
      * Before rebuilding #ai-input from appData.sourceText (insert width / booklet reflow), persist the live editor so we do not revert unsaved passage edits.
+     * Callers must not replace this with “every input: editorPassageToStoredCanonical + syncLessonSourceCanonical” — that was arch131.10 and destroyed gutters while the DOM was mid-edit.
      */
     flushAiInputToLessonSourceIfEditable: function() {
         if(!appData || appData.component === 2) return;
@@ -4489,10 +4490,17 @@ const app = {
         return clone.innerHTML.trim();
     },
     /**
-     * Structured passage storage (v2): each `lines[]` item is one **segment** (app layout row: quoting, PDF alignment, `data-src-line`). Lab and Editing Suite margins both show **WJEC ticks 5, 10, 15…** only; `data-src-line` carries the booklet line index (PDF import: one row per printed line when Strict PDF lines is on).
-     * The PDF importer aims for **one segment per print line**; merged PDF text may reduce segment count vs the paper.
+     * Structured passage storage (v2): each `lines[]` item is one **segment** (quoting, PDF alignment). **Display** expands segments into **simulated printed lines** at **insert width (ch)** ({@link splitLongRowsForBookletLineGutter}) so each visual line has a `data-src-line` and WJEC margin ticks (5, 10, 15…) track **lines**, not merged blocks. Lab and Editing Suite use the same WJEC margin rules.
+     * The PDF importer may merge many print lines into few segments; layout expansion fixes the student/teacher view.
      * `n` is sequential within storage (after normalize); **Booklet line 1** maps segment order to **booklet line numbers** for margin ticks and quotes.
      * JSON shape: { "v":2, "lines":[{ "n":1, "html":"…" }], "examMargin"?: bool }
+     *
+     * --- Passage editor invariants (do not regress; see .cursor/rules/architect-passage-editor.mdc) ---
+     * 1) **WJEC margin**: booklet line indices at **5, 10, 15…** (blank cells on 1–4). **Layout rows** = simulated printed lines at insert width, not one row per merged PDF segment. PDF `sourceLineBasis === "pdfImport"` still sets column width and stored segments.
+     * 2) **#ai-input `input` events** must NOT run `editorPassageToStoredCanonical` + `syncLessonSourceCanonical` on every keystroke (old arch131.10 bug: mid-edit DOM broke storage and preview). Use {@link flushAiInputToLessonSourceIfEditable} and refresh from `appData.sourceText` after flush.
+     * 3) **Enter** inside `.source-with-line-numbers` must stay on the guarded keydown path (insertLineBreak / double break) — default paragraph creates `div`/`p` that break gutter extraction.
+     * 4) **Gutter HTML** must never pass through full-document `sanitizeSourceHtml` (strips `.source-line-row`). `cleanupSourceEditorBoldHtml` skips full sanitize when gutters are present; flatten inlines only inside `.source-line-text`.
+     * 5) **Persist**: prefer v2 JSON from {@link editorPassageToStoredCanonical}; if round-trip would drop gutters, flush keeps live HTML (see flush body).
      */
     PASSAGE_STRUCTURE_VERSION: 2,
     /** Exam-style gutter column: show line id every N booklet lines (WJEC-style: 5, 10, 15…). */
@@ -4584,6 +4592,20 @@ const app = {
         } catch(e) {}
         const el = document.getElementById("c1-passage-insert-width-ch");
         if(el && document.activeElement !== el) el.value = String(ch);
+    },
+    /** Column width (ch) for simulating printed lines: must match {@link applyExamPassageInsertWidthCh} so gutters split at the same width as `--exam-passage-max-width`. */
+    getPassageColumnWidthChForLayout: function() {
+        try {
+            let ch = 96;
+            const m = appData && appData.meta;
+            if(m && m.pdfInsertWidthCh != null && Number.isFinite(Number(m.pdfInsertWidthCh)))
+                ch = Math.max(36, Math.min(96, Math.round(Number(m.pdfInsertWidthCh))));
+            const pdfImp = !!(m && m.sourceLineBasis === "pdfImport");
+            if(pdfImp) ch = Math.max(50, Math.min(96, ch));
+            return ch;
+        } catch(eG) {
+            return 96;
+        }
     },
     syncPassageInsertWidthInputFromMeta: function() {
         const el = document.getElementById("c1-passage-insert-width-ch");
@@ -4927,7 +4949,7 @@ const app = {
             return null;
         }
     },
-    /** Editing Suite: same gutter as Lab — **WJEC booklet ticks 5, 10, 15…** only (blank cells between), tied to `data-src-line` / PDF lines — not chunked “layout row” indices. Rich text in `.source-line-text`; gutter nums contenteditable=false. */
+    /** Editing Suite: same WJEC margin as Lab (**5, 10, 15…**); layout rows are **simulated printed lines** at insert width (see {@link splitLongRowsForBookletLineGutter}), not one row per merged PDF block. Rich text in `.source-line-text`; gutter nums contenteditable=false. */
     structuredPassageToEditorHtml: function(o) {
         if(!o || !Array.isArray(o.lines)) return "";
         const expanded = app.expandStructuredPassageLineEntries(o);
@@ -4943,33 +4965,48 @@ const app = {
     /**
      * When PDF/import merged many printed lines into one stored row, the Lab only had one gutter per row while the browser wrapped text — looked like “only 1 and 2” with a big gap. Split long rows for display only; renumber from Booklet line 1 when splitting actually increases row count.
      */
-    _chunkBySentencesForGutterDisplay: function(block, threshold) {
-        const th = threshold != null && threshold > 80 ? threshold : 260;
-        const b = String(block || "").replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
-        if(!b || b.length <= th) return [b];
-        const sentences = b.split(/(?<=[.!?…])\s+(?=[A-Z\u00C0-\u024F\u2018\u201c])/);
-        if(sentences.length < 2) {
-            const mid = Math.floor(b.length / 2);
-            const sp = b.indexOf(" ", Math.max(20, mid - 40));
-            if(sp > 20 && sp < b.length - 20) return [b.slice(0, sp).trim(), b.slice(sp).trim()];
-            return [b];
-        }
-        const targetChunks = Math.max(2, Math.ceil(b.length / th));
-        const groupSize = Math.max(1, Math.ceil(sentences.length / targetChunks));
-        const out = [];
-        for(let i = 0; i < sentences.length; i += groupSize) {
-            const chunk = sentences.slice(i, i + groupSize).join(" ").trim();
-            if(chunk) out.push(chunk);
-        }
-        return out.length ? out : [b];
+    /**
+     * Split plain text into simulated **printed** lines at ~`maxCh` characters (word boundaries), matching the insert column (`--exam-passage-max-width`).
+     * One `.source-line-row` per segment so WJEC margin ticks (5, 10, 15…) align with **visual** lines, not merged PDF passage rows.
+     */
+    splitPlainIntoVisualLinesByCh: function(plain, maxCh) {
+        const text = String(plain || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+/g, " ").trim();
+        if(!text) return [];
+        const max = Math.max(12, Math.min(120, Math.round(maxCh)));
+        const words = text.split(" ");
+        const lines = [];
+        let cur = "";
+        words.forEach(function(w) {
+            if(!w) return;
+            if(w.length > max) {
+                if(cur) {
+                    lines.push(cur.trim());
+                    cur = "";
+                }
+                for(let i = 0; i < w.length; i += max) lines.push(w.slice(i, i + max));
+                return;
+            }
+            const cand = cur ? cur + " " + w : w;
+            if(cand.length <= max) cur = cand;
+            else {
+                if(cur) lines.push(cur.trim());
+                cur = w;
+            }
+        });
+        if(cur) lines.push(cur.trim());
+        return lines.length ? lines : [text];
     },
+    /**
+     * Expand stored rows into one layout row per **simulated printed line** at insert width (ch). PDF-import merges become many rows so each line gets a booklet index and WJEC ticks track screen lines.
+     * @param {number} [maxChars] — omit to use {@link getPassageColumnWidthChForLayout} (same as Lab column).
+     */
     splitLongRowsForBookletLineGutter: function(rows, maxChars) {
-        maxChars = maxChars != null && maxChars > 80 ? maxChars : 260;
         if(!rows || !rows.length) return rows || [];
-        /** PDF import rows are authoritative booklet lines — do not invent extra rows by sentence-splitting (teacher should not re-tweak line count). */
-        if(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport") return rows;
-        /** Non-PDF: avoid sentence-chunking once there are many rows — keeps one stored line ≈ one booklet row for margin ticks; chunking was misleading vs printed lines. */
-        if(rows.length >= 12) return rows;
+        let mc = maxChars;
+        if(mc == null || !Number.isFinite(mc)) {
+            mc = typeof app.getPassageColumnWidthChForLayout === "function" ? app.getPassageColumnWidthChForLayout() : 96;
+        }
+        mc = Math.max(28, Math.min(120, Math.round(mc)));
         const base = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
         const pieces = [];
         let nextBooklet = null;
@@ -4977,26 +5014,23 @@ const app = {
             const t = String(row.text == null ? "" : row.text).replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
             if(!t) return;
             const rowStart = row.n != null && Number.isFinite(Number(row.n)) ? Number(row.n) : (nextBooklet != null ? nextBooklet : base);
-            if(t.length <= maxChars) {
-                pieces.push({ text: t, html: row.html, n: rowStart });
-                nextBooklet = rowStart + 1;
-                return;
-            }
-            const ch = app._chunkBySentencesForGutterDisplay(t, maxChars);
-            ch.forEach(function(c, j) {
-                pieces.push({ text: c, html: j === 0 ? row.html : undefined, n: rowStart + j });
+            const segs = t.length <= mc ? [t] : app.splitPlainIntoVisualLinesByCh(t, mc);
+            segs.forEach(function(c, j) {
+                const chunk = String(c || "").trim();
+                if(!chunk) return;
+                pieces.push({ text: chunk, html: j === 0 ? row.html : undefined, n: rowStart + j });
             });
-            nextBooklet = rowStart + ch.length;
+            const lastN = rowStart + Math.max(0, segs.length - 1);
+            nextBooklet = lastN + 1;
         });
         if(!pieces.length) return rows;
-        if(pieces.length === rows.length) return rows;
         return pieces.map(function(p) {
             return { n: p.n, text: p.text, html: p.html };
         });
     },
     /**
-     * Structured v2 → layout row list for Lab/editor: booklet base, split on internal newlines, optional long-row split (non-PDF only). PDF import does not split — rows follow the insert.
-     * If storage has **one** v2 row but the plain still looks like many consecutive “N text” lines (merged lesson / bad round-trip), re-split via {@link parseNumberedPlainSourceLines} so the margin gets multiple `data-src-line` values and WJEC ticks (5,10,15…) are not reduced to a single band.
+     * Structured v2 → layout row list for Lab/editor: booklet base, split on internal newlines, then {@link splitLongRowsForBookletLineGutter} at **insert width (ch)** so each simulated printed line gets a row (WJEC ticks align with visual lines; merged PDF rows are expanded).
+     * If storage has **one** v2 row but the plain still looks like many consecutive “N text” lines (merged lesson / bad round-trip), re-split via {@link parseNumberedPlainSourceLines} first.
      */
     expandStructuredPassageLineEntries: function(o) {
         if(!o || !Array.isArray(o.lines) || !o.lines.length) return [];
@@ -5043,13 +5077,13 @@ const app = {
                 return o;
             });
         }
-        return app.splitLongRowsForBookletLineGutter(expanded, 260);
+        return app.splitLongRowsForBookletLineGutter(expanded);
     },
     formatStructuredPassageHtml: function(o) {
         if(!o || !Array.isArray(o.lines) || !o.lines.length) return "Source text not provided.";
         const expanded = app.expandStructuredPassageLineEntries(o);
         if(!expanded.length) return "Source text not provided.";
-        /** Student/Lab/Editing Suite gutter: WJEC **5, 10, 15…** booklet ticks only (`examShowAllBookletLines: false`). */
+        /** Student/Lab gutter: WJEC **5, 10, 15…** booklet ticks only. Editing Suite uses the same (`structuredPassageToEditorHtml`). */
         return app.buildNumberedSourceLayoutHtml(expanded, {
             pdfPhysicalLines: true,
             examMarginMultiplesOf5Only: true,
@@ -6611,11 +6645,11 @@ const app = {
     },
     /**
      * Build gutter layout. `lineEntries` is one flex row per **segment** (layout unit; see PASSAGE_STRUCTURE_VERSION). Browser soft-wrap inside `.source-line-text` is not additional units.
-     * WJEC / exam: margin shows **booklet line** numbers **5, 10, 15…** only. Non-tick rows get a blank margin cell. Non-exam layouts may show every index when `examMarginMultiplesOf5Only` is off.
+     * WJEC / exam: margin shows **booklet line** numbers **5, 10, 15…** unless `examShowAllBookletLines`. Non-tick rows get a blank margin cell. Lab and Editing Suite normally use **false** (WJEC only); optional dense mode shows every `n`.
      */
     buildNumberedSourceLayoutHtml: function(lineEntries, opts) {
         const examMarginOnly = !!(opts && opts.examMarginMultiplesOf5Only);
-        /** Optional: every row shows `n` in the margin (rare). Default exam + Editing Suite: WJEC booklet ticks 5, 10, 15… only (`examShowAllBookletLines: false`). */
+        /** `examShowAllBookletLines: true` → every row shows booklet `n`. False → WJEC ticks 5, 10, 15… only (blank cells for other lines). */
         const denseEveryLineGutter = !examMarginOnly && !!(opts && opts.denseEveryLineGutter);
         const tickEvery = app.EXAM_GUTTER_INTERVAL || 5;
         const examShowAllBookletLines = !!(opts && opts.examShowAllBookletLines);
@@ -6975,7 +7009,7 @@ const app = {
         }
         return app.sanitizeSourceHtml(t) || t;
     },
-    /** Rebuild #ai-input innerHTML from canonical: structured passages use `source-with-line-numbers` with WJEC **5, 10, 15…** margin ticks (same as Lab); rich text per line in `.source-line-text`. */
+    /** Rebuild #ai-input innerHTML from canonical: structured passages use `source-with-line-numbers` with WJEC ticks (5, 10, 15…) and simulated printed lines at insert width — same model as the Lab. */
     storedCanonicalToEditorInnerHtml: function(canonical) {
         if(!canonical || typeof canonical !== "string") return "";
         const c = canonical.trim();
@@ -7158,7 +7192,7 @@ const app = {
         return '<p style="' + hang + '">' + prefix + bodyInner + "</p>";
     },
     /**
-     * Plain text → HTML for admin #ai-input. Fully numbered plain → structuredPassageToEditorHtml (WJEC 5/10/15 margin ticks like Lab; numbers not duplicated in body).
+     * Plain text → HTML for admin #ai-input. Fully numbered plain → structuredPassageToEditorHtml (WJEC margin + insert-width line rows; same idea as Lab).
      * Else numbered &lt;p&gt; / prose blocks. Student Lab uses formatSourceHtml.
      */
     formatSourceHtmlForEditor: function(text) {
@@ -17346,6 +17380,9 @@ const admin = {
     },
 
     // AI
+    /**
+     * Binds #ai-input input/change. MUST keep: flush then refresh from appData.sourceText — NOT editorPassageToStoredCanonical(txt)+sync on every keystroke (arch131.10 regression: degraded canonical + preview while gutter DOM still mid-mutation).
+     */
     bindAiAutoPrompt: () => {
         if(admin.aiAutoBound) return;
         if(admin._installSourceSelectionMemory) admin._installSourceSelectionMemory();
@@ -17474,7 +17511,17 @@ const admin = {
             }).then(function(stored) {
                 var n = typeof app.countStoredPassageSegments === "function" ? app.countStoredPassageSegments(stored) : (typeof app.countStoredPassagePrintedLines === "function" ? app.countStoredPassagePrintedLines(stored) : (typeof app.countStoredPassageLineRows === "function" ? app.countStoredPassageLineRows(stored) : (stored ? String(stored).split(/\n/).filter(function(l) { return l.trim(); }).length : 0)));
                 var segNoun = n === 1 ? "row" : "rows";
-                alert("Imported " + n + " passage " + segNoun + " (booklet lines from the PDF — used for quoting and alignment). Lab and Editing Suite both show WJEC-style margin ticks (5, 10, 15…) keyed to booklet line numbers, not soft-wrapped screen lines. If this count is far below the lines on the paper, the PDF text layer may have merged rows; try Import PDF again, or turn off “Strict PDF lines”. Booklet line 1 was reset. Save if needed.");
+                alert([
+                    "Import complete: " + n + " passage " + segNoun + " stored.",
+                    "",
+                    "Terms:",
+                    "• Passage row — one stored block used for quoting. Often one printed line; a bad PDF text layer can merge many printed lines into one row (then this count is small).",
+                    "• Booklet line — the number on the exam insert; quotes use this. It is stored as data-src-line. “Booklet line 1” maps your first row to the number on the paper.",
+                    "• Lab & Editing Suite — the app splits text into simulated printed lines at your Insert width (ch), then shows WJEC margin ticks at booklet lines 5, 10, 15… (empty margin on 1–4). That matches visual lines, not one tick per merged PDF row.",
+                    "",
+                    "Stored passage rows (above) can be fewer than printed lines if the PDF merged lines. The on-screen layout still expands to ~one row per simulated line at insert width. If the count is far below lines on the paper, also try Import again, OCR margin, or turn off “Strict PDF lines”.",
+                    "Booklet line 1 was reset. Save if needed."
+                ].join("\n"));
             }).catch(function(err) {
                 alert(err && err.message ? err.message : String(err));
             });
