@@ -4888,7 +4888,10 @@ const app = {
             root.innerHTML = String(html).trim();
             const wrap = root.querySelector(".source-with-line-numbers");
             if(!wrap) return null;
-            const rowArr = Array.from(wrap.querySelectorAll(".source-line-row"));
+            /** Only top-level rows — nested .source-line-row (pasted layout) was duplicated on save/rebuild. */
+            const rowArr = Array.from(wrap.children).filter(function(el) {
+                return el && el.classList && el.classList.contains("source-line-row");
+            });
             if(!rowArr.length) return null;
             rowArr.sort(function(a, b) {
                 const na = parseInt(a.getAttribute("data-src-line") || "", 10);
@@ -5939,6 +5942,30 @@ const app = {
         return o;
     },
     /**
+     * PDF.js Web Workers often fail on mobile (CDN worker blocked, COOP, memory). Retry on main thread like generic PDF import.
+     */
+    _pdfTryGetDocumentFromBuffer: function(arrayBuffer) {
+        var opts = app._pdfGetDocumentFromBuffer(arrayBuffer);
+        var first = pdfjsLib.getDocument(opts).promise;
+        if(opts.disableWorker) return first;
+        return first.catch(function() {
+            return pdfjsLib.getDocument({ data: arrayBuffer, disableWorker: true }).promise;
+        });
+    },
+    /** File.arrayBuffer is missing on some older mobile WebViews — use FileReader. */
+    _readFileAsArrayBuffer: function(file) {
+        if(!file) return Promise.reject(new Error("No file"));
+        try {
+            if(typeof file.arrayBuffer === "function") return file.arrayBuffer();
+        } catch(eAb) {}
+        return new Promise(function(resolve, reject) {
+            var r = new FileReader();
+            r.onload = function() { resolve(r.result); };
+            r.onerror = function() { reject(r.error || new Error("File read failed")); };
+            r.readAsArrayBuffer(file);
+        });
+    },
+    /**
      * Infer insert-column width from PDF word geometry: for each y-cluster (print line), span = last word’s right − first word’s left.
      * Median span and median span/charCount drive reflow — closer to the booklet than a fixed fraction of page width.
      */
@@ -6496,8 +6523,7 @@ const app = {
     extractNumberedPlainFromPdfBuffer: function(arrayBuffer, pageFrom, pageTo, importOpts) {
         importOpts = importOpts || {};
         return app.ensurePdfJsLoaded().then(function() {
-            var task = pdfjsLib.getDocument(app._pdfGetDocumentFromBuffer(arrayBuffer));
-            return task.promise;
+            return app._pdfTryGetDocumentFromBuffer(arrayBuffer);
         }).then(function(pdf) {
             var n = pdf.numPages || 0;
             if(n < 1) throw new Error("PDF has no pages");
@@ -6560,7 +6586,7 @@ const app = {
         opts = opts || {};
         if(!file || !file.size) return Promise.reject(new Error("No file"));
         if(appData && appData.component === 2) return Promise.reject(new Error("Switch to Component 1 for single-passage PDF import"));
-        return file.arrayBuffer().then(function(buf) {
+        return app._readFileAsArrayBuffer(file).then(function(buf) {
             return app.extractNumberedPlainFromPdfBuffer(buf, opts.pageFrom, opts.pageTo, {
                 useMarginOcr: !!opts.useMarginOcr,
                 strictPhysicalLines: opts.strictPhysicalLines !== false
@@ -6887,8 +6913,17 @@ const app = {
     /** Walk a parsed or live .source-with-line-numbers root → plain "N text\\n…". */
     _serializeNumberedLayoutRowsFromWrap: function(wrap) {
         if(!wrap) return null;
-        const rowEls = wrap.querySelectorAll(".source-line-row");
+        const rowEls = Array.from(wrap.children).filter(function(el) {
+            return el && el.classList && el.classList.contains("source-line-row");
+        });
         if(!rowEls.length) return null;
+        rowEls.sort(function(a, b) {
+            const na = parseInt(a.getAttribute("data-src-line") || "", 10);
+            const nb = parseInt(b.getAttribute("data-src-line") || "", 10);
+            const ia = Number.isFinite(na) ? na : 1e9;
+            const ib = Number.isFinite(nb) ? nb : 1e9;
+            return ia - ib;
+        });
         const out = [];
         rowEls.forEach((rowEl, i) => {
             let n = parseInt(rowEl.getAttribute("data-src-line") || "", 10);
@@ -13618,7 +13653,7 @@ const admin = {
                 const lblLow = String(labels[i] || "").toLowerCase();
                 const pdfSlot = lblLow === "questions" ? "questions" : lblLow === "resource" ? "resource" : /mark/.test(lblLow) ? "markscheme" : null;
                 if(pdfSlot && ab instanceof ArrayBuffer) await admin.cachePastPaperPdfBuffer(pdfSlot, ab, f.name);
-                const pdf = await window.pdfjsLib.getDocument(app._pdfGetDocumentFromBuffer(ab)).promise;
+                const pdf = await app._pdfTryGetDocumentFromBuffer(ab);
                 const isResource = (labels[i] || "").toLowerCase() === "resource";
                 if(isResource && ab instanceof ArrayBuffer) resourcePdfBuffer = ab;
                 const isQuestions = (labels[i] || "").toLowerCase() === "questions";
@@ -13865,7 +13900,7 @@ const admin = {
         }
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
-            const pdf = await window.pdfjsLib.getDocument(app._pdfGetDocumentFromBuffer(ab)).promise;
+            const pdf = await app._pdfTryGetDocumentFromBuffer(ab);
             const pagesToUse = c2SectionBAllPages ? null : (pages && pages.length ? pages : null);
             const byPage = {};
             for(let p = 1; p <= pdf.numPages; p++) {
@@ -13936,7 +13971,7 @@ const admin = {
         }
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
-            const pdf = await window.pdfjsLib.getDocument(app._pdfGetDocumentFromBuffer(ab)).promise;
+            const pdf = await app._pdfTryGetDocumentFromBuffer(ab);
             const texts = [];
             for(const p of pages) {
                 const page = await pdf.getPage(p);
@@ -13969,7 +14004,7 @@ const admin = {
         const pages = admin.getResourcePageSpec();
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
-            const pdf = await window.pdfjsLib.getDocument(app._pdfGetDocumentFromBuffer(ab)).promise;
+            const pdf = await app._pdfTryGetDocumentFromBuffer(ab);
             let pagesToUse = pages && pages.length ? pages : null;
             if(pagesToUse && pagesToUse.length) {
                 const clamped = admin.clampPageSpecToPdf(pagesToUse, pdf.numPages);
@@ -14062,7 +14097,7 @@ const admin = {
         const pages = admin.getMarkSchemePageSpec();
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
-            const pdf = await window.pdfjsLib.getDocument(app._pdfGetDocumentFromBuffer(ab)).promise;
+            const pdf = await app._pdfTryGetDocumentFromBuffer(ab);
             const pagesToUse = pages && pages.length ? pages : null;
             const texts = [];
             for(let p = 1; p <= pdf.numPages; p++) {
