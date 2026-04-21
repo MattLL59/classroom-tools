@@ -4674,13 +4674,48 @@ const app = {
                 return;
             }
             const n0 = row.n != null && Number.isFinite(row.n) ? row.n : (out.length ? out[out.length - 1].n + 1 : 1);
-            parts.forEach(function(p, j) {
+            /** Consecutive duplicate long lines from PDF/HTML (e.g. doubled &lt;br&gt;, merged-row recovery) become two identical booklet rows — drop the repeat. Short repeats (dialogue) kept. */
+            const DUP_MIN = 48;
+            let j = 0;
+            let prevPartNorm = null;
+            parts.forEach(function(p) {
+                const norm = p.replace(/\s+/g, " ").trim();
+                if(!norm.length) return;
+                if(norm.length >= DUP_MIN && prevPartNorm === norm) return;
+                prevPartNorm = norm;
                 const piece = { n: n0 + j, text: p };
                 if(j === 0 && row.html != null && String(row.html).trim() !== "") piece.html = row.html;
                 out.push(piece);
+                j++;
             });
         });
         return out;
+    },
+    /**
+     * After expanding structured passage rows, drop consecutive rows whose plain text is identical (length ≥ minLen).
+     * Fixes doubled lines from storage/import without merging distinct booklet lines that only rhyme.
+     */
+    _dedupeConsecutiveLongIdenticalPassageRows: function(rows, minLen) {
+        minLen = minLen == null ? 48 : Math.max(12, Math.round(Number(minLen)) || 48);
+        if(!rows || rows.length < 2) return rows;
+        const norm = function(t) { return String(t || "").replace(/\s+/g, " ").trim(); };
+        const out = [];
+        rows.forEach(function(row) {
+            const t = norm(row.text);
+            if(!t.length) return;
+            if(out.length) {
+                const prev = norm(out[out.length - 1].text);
+                if(t.length >= minLen && prev.length >= minLen && t === prev) return;
+            }
+            out.push(row);
+        });
+        if(out.length === rows.length) return rows;
+        const base0 = out[0].n != null && Number.isFinite(out[0].n) ? out[0].n : 1;
+        return out.map(function(row, i) {
+            const o = { n: base0 + i, text: row.text };
+            if(row.html != null && String(row.html).trim() !== "") o.html = row.html;
+            return o;
+        });
     },
     /** PDF import often preserves booklet indices (1, 6, 12…) on merged rows; renumber to 1…N and strip stray leading refs in plain bodies. */
     normalizeStructuredPassageV2Sequential: function(o) {
@@ -5018,10 +5053,12 @@ const app = {
             if(!t) return;
             const rowStart = row.n != null && Number.isFinite(Number(row.n)) ? Number(row.n) : (nextBooklet != null ? nextBooklet : base);
             const segs = t.length <= mc ? [t] : app.splitPlainIntoVisualLinesByCh(t, mc);
+            /** Rich row.html is for the whole stored row. Width-splitting into several visual lines used to attach that full HTML only to segment 0, which duplicated paragraph-wide bold or italic in the first cell. When segs.length > 1, omit html so each line is plain; keep html when one visual line equals one stored row. */
+            const oneVisualLine = segs.length === 1;
             segs.forEach(function(c, j) {
                 const chunk = String(c || "").trim();
                 if(!chunk) return;
-                pieces.push({ text: chunk, html: j === 0 ? row.html : undefined, n: rowStart + j });
+                pieces.push({ text: chunk, html: (oneVisualLine && j === 0) ? row.html : undefined, n: rowStart + j });
             });
             const lastN = rowStart + Math.max(0, segs.length - 1);
             nextBooklet = lastN + 1;
@@ -5080,6 +5117,7 @@ const app = {
                 return o;
             });
         }
+        expanded = app._dedupeConsecutiveLongIdenticalPassageRows(expanded, 48);
         return app.splitLongRowsForBookletLineGutter(expanded);
     },
     formatStructuredPassageHtml: function(o) {
