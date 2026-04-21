@@ -4674,8 +4674,8 @@ const app = {
                 return;
             }
             const n0 = row.n != null && Number.isFinite(row.n) ? row.n : (out.length ? out[out.length - 1].n + 1 : 1);
-            /** Consecutive duplicate long lines from PDF/HTML (e.g. doubled &lt;br&gt;, merged-row recovery) become two identical booklet rows — drop the repeat. Short repeats (dialogue) kept. */
-            const DUP_MIN = 48;
+            /** Consecutive duplicate lines from PDF/HTML (e.g. doubled &lt;br&gt;) — drop the repeat. Threshold ≥12 chars so short dialogue (“No.”) can repeat. */
+            const DUP_MIN = 12;
             let j = 0;
             let prevPartNorm = null;
             parts.forEach(function(p) {
@@ -4693,10 +4693,10 @@ const app = {
     },
     /**
      * After expanding structured passage rows, drop consecutive rows whose plain text is identical (length ≥ minLen).
-     * Fixes doubled lines from storage/import without merging distinct booklet lines that only rhyme.
+     * Default 12 so phrases like “Lucy Faulkner was” are not left doubled (booklet reflow used 48 and missed them).
      */
     _dedupeConsecutiveLongIdenticalPassageRows: function(rows, minLen) {
-        minLen = minLen == null ? 48 : Math.max(12, Math.round(Number(minLen)) || 48);
+        minLen = minLen == null ? 12 : Math.max(8, Math.round(Number(minLen)) || 12);
         if(!rows || rows.length < 2) return rows;
         const norm = function(t) { return String(t || "").replace(/\s+/g, " ").trim(); };
         const out = [];
@@ -4716,6 +4716,64 @@ const app = {
             if(row.html != null && String(row.html).trim() !== "") o.html = row.html;
             return o;
         });
+    },
+    /** True if collapsed selection is at the first character of visible text in `el` (for gutter `.source-line-text`). */
+    _caretAtFirstTextInSourceCell: function(sel, el) {
+        if(!sel || !el || !sel.rangeCount || !sel.isCollapsed) return false;
+        const r = sel.getRangeAt(0);
+        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        const first = w.nextNode();
+        if(!first) return r.startContainer === el && r.startOffset === 0;
+        return r.startContainer === first && r.startOffset === 0;
+    },
+    _setCaretCharOffsetInNode: function(root, charOffset) {
+        if(!root) return;
+        const sel = window.getSelection();
+        const range = document.createRange();
+        let seen = 0;
+        const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+        let n;
+        while((n = tw.nextNode())) {
+            const len = n.length;
+            if(seen + len >= charOffset) {
+                range.setStart(n, Math.max(0, charOffset - seen));
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                return;
+            }
+            seen += len;
+        }
+        range.selectNodeContents(root);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    },
+    /**
+     * Merge this `.source-line-text` row with the previous `.source-line-row` (Backspace at line start). Returns false if no previous row.
+     */
+    _mergeSourceLineTextWithPreviousRow: function(hostEl, cell) {
+        try {
+            const row = cell.closest && cell.closest(".source-line-row");
+            if(!row || !hostEl.contains(row)) return false;
+            const prev = row.previousElementSibling;
+            if(!prev || !prev.classList || !prev.classList.contains("source-line-row")) return false;
+            const prevCell = prev.querySelector(".source-line-text");
+            if(!prevCell) return false;
+            const prevLen = (prevCell.textContent || "").length;
+            const curHtml = String(cell.innerHTML || "").trim();
+            const prevHtml = String(prevCell.innerHTML || "").trim();
+            const needSep = !!(prevLen && (cell.textContent || "").trim().length);
+            const sep = needSep ? " " : "";
+            prevCell.innerHTML = (prevHtml ? prevHtml + sep : "") + curHtml;
+            const caretAt = prevLen + (needSep ? 1 : 0);
+            row.parentNode.removeChild(row);
+            hostEl.focus();
+            app._setCaretCharOffsetInNode(prevCell, caretAt);
+            return true;
+        } catch(eM) {
+            return false;
+        }
     },
     /** PDF import often preserves booklet indices (1, 6, 12…) on merged rows; renumber to 1…N and strip stray leading refs in plain bodies. */
     normalizeStructuredPassageV2Sequential: function(o) {
@@ -4768,7 +4826,32 @@ const app = {
                 break;
             }
         }
-        return app.normalizeStructuredPassageV2MergeOrphanRows(x);
+        const merged = app.normalizeStructuredPassageV2MergeOrphanRows(x);
+        return app.normalizeStructuredPassageV2DedupeConsecutivePlainLines(merged);
+    },
+    /**
+     * On load: merge consecutive v2 rows whose plain text is identical (≥12 chars). Repairs lessons corrupted by repeated reflow/booklet edits.
+     */
+    normalizeStructuredPassageV2DedupeConsecutivePlainLines: function(o) {
+        if(!o || !Array.isArray(o.lines) || o.lines.length < 2) return o;
+        const minLen = 12;
+        const plain = function(L) {
+            return app.htmlFragmentToPlainText(L.html || "").replace(/\s+/g, " ").trim();
+        };
+        const kept = [];
+        for(let i = 0; i < o.lines.length; i++) {
+            const t = plain(o.lines[i]);
+            if(kept.length && t.length >= minLen && plain(kept[kept.length - 1]) === t) continue;
+            kept.push(o.lines[i]);
+        }
+        if(kept.length === o.lines.length) return o;
+        return {
+            v: o.v,
+            lines: kept.map(function(L, idx) {
+                return { n: idx + 1, html: String(L.html != null ? L.html : "") };
+            }),
+            examMargin: o.examMargin
+        };
     },
     parseStructuredPassageSource: function(s) {
         try {
@@ -5117,7 +5200,7 @@ const app = {
                 return o;
             });
         }
-        expanded = app._dedupeConsecutiveLongIdenticalPassageRows(expanded, 48);
+        expanded = app._dedupeConsecutiveLongIdenticalPassageRows(expanded, 12);
         return app.splitLongRowsForBookletLineGutter(expanded);
     },
     formatStructuredPassageHtml: function(o) {
@@ -17507,6 +17590,36 @@ const admin = {
         if(sourceEditor && sourceEditor.getAttribute("contenteditable") === "true") {
             sourceEditor.addEventListener("keydown", (e) => {
                 const key = e.key || "";
+                /** Booklet gutter rows are separate flex lines; browser Backspace won’t merge them — merge previous row when caret is at the start of a `.source-line-text`. */
+                if(key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    const h0 = sourceEditor.innerHTML || "";
+                    if(/source-with-line-numbers[\s\S]*source-line-row/i.test(h0)) {
+                        const sel = window.getSelection();
+                        if(sel.rangeCount && sel.isCollapsed) {
+                            let node = sel.anchorNode;
+                            if(node.nodeType === 3) node = node.parentNode;
+                            const cell = node && node.closest && node.closest(".source-line-text");
+                            if(cell && sourceEditor.contains(cell) && app._caretAtFirstTextInSourceCell && app._caretAtFirstTextInSourceCell(sel, cell)) {
+                                if(app._mergeSourceLineTextWithPreviousRow && app._mergeSourceLineTextWithPreviousRow(sourceEditor, cell)) {
+                                    e.preventDefault();
+                                    try {
+                                        sourceEditor.dispatchEvent(new Event("input", { bubbles: true }));
+                                    } catch(eIn) {}
+                                    try {
+                                        if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
+                                    } catch(eF) {}
+                                    try {
+                                        if(typeof ui !== "undefined" && ui.refreshSourceDisplay && appData && typeof appData.sourceText === "string") ui.refreshSourceDisplay(appData.sourceText);
+                                    } catch(eR) {}
+                                    try {
+                                        if(typeof app.save === "function") app.save();
+                                    } catch(eS) {}
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
                 if((key === "Enter" || key === "\n") && !e.ctrlKey && !e.metaKey && !e.altKey) {
                     const h = sourceEditor.innerHTML || "";
                     if(/source-with-line-numbers[\s\S]*source-line-row/i.test(h)) {
