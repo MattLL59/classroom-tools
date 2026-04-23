@@ -381,6 +381,7 @@
 /** ARCHITECT v4.5 (Fanfare Edition) **/
 
 /* --- DEFAULT DATA --- */
+/*__DEFAULT_DATA_START__*/
 const defaultData = {
     meta: { title: "Demo Lesson", author: "System", version: "4.5" },
     sourceText: "The sky was a bruised purple...",
@@ -409,11 +410,13 @@ const defaultData = {
     ],
     isStandalone: false // Default to false
 };
+/*__DEFAULT_DATA_END__*/
 
 let appData = null;
 let userState = { score: 0, level: 1, essay: "", completed: [], completedLevels: [], filter: "all", showDone: false };
 let currentBankKey = null;
 let saveTimeout = null;
+const isStandaloneMode = () => !!(appData && appData.isStandalone);
 
 /* --- APP LOGIC --- */
 const app = {
@@ -421,12 +424,15 @@ const app = {
         window.onerror = function() { document.getElementById('emergency-reset').style.display = 'block'; };
 
         // 1. Determine if we are in STANDALONE mode
-        if(typeof defaultData !== 'undefined' && defaultData.isStandalone) {
+        const standalone = typeof defaultData !== 'undefined' && defaultData.isStandalone;
+        if(standalone) {
             // FORCE load defaultData (ignore any old local storage lesson data)
             appData = app.repair(defaultData);
             // Hide admin button
             const btn = document.getElementById('btn-admin');
             if(btn) btn.style.display = 'none';
+            const adminModal = document.getElementById('modal-admin');
+            if(adminModal) adminModal.classList.add('hidden');
         } else {
             // Normal mode: check local storage
             const d = localStorage.getItem('tsa_v4_5_data');
@@ -669,9 +675,15 @@ const ui = {
         document.getElementById("nav-"+v).classList.add("active");
     },
 
-    openModal: (id) => document.getElementById(id).classList.add("open"),
+    openModal: (id) => {
+        if(id === 'modal-admin' && isStandaloneMode()) return;
+        const modal = document.getElementById(id);
+        if(modal) modal.classList.add("open");
+    },
     closeModal: (id) => {
-        document.getElementById(id).classList.remove("open");
+        const modal = document.getElementById(id);
+        if(!modal) return;
+        modal.classList.remove("open");
         if(id === 'modal-admin') {
             ui.renderLab();
             if(ui.activeQuoteId) {
@@ -682,6 +694,7 @@ const ui = {
     },
     
     openAdmin: () => {
+        if(isStandaloneMode()) return;
         admin.renderAll(); 
         if(localStorage.getItem('tsa_unlocked')==='true') { ui.openModal("modal-admin"); }
         else if(prompt("Password (1234)")==="1234") { ui.openModal("modal-admin"); }
@@ -1034,7 +1047,8 @@ Output ONLY valid JSON.`;
         exportData.isStandalone = true; 
 
         let h = document.documentElement.outerHTML;
-        h = h.replace(/const defaultData = \{[\s\S]*?\}\};/, `const defaultData = ${JSON.stringify(exportData)};`);
+        const dataBlock = `/*__DEFAULT_DATA_START__*/\nconst defaultData = ${JSON.stringify(exportData)};\n/*__DEFAULT_DATA_END__*/`;
+        h = h.replace(/\/\*__DEFAULT_DATA_START__\*\/[\s\S]*?\/\*__DEFAULT_DATA_END__\*\//, dataBlock);
         const b = new Blob([h], {type:'text/html'});
         const a = document.createElement('a'); a.href=URL.createObjectURL(b); a.download='StudentApp.html'; a.click();
     },
