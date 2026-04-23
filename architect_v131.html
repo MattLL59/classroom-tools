@@ -127,6 +127,33 @@
     }
     #modal-admin #ai-input.source-editor .architect-passage-head-prose { margin: 0 0 12px 0; }
     #modal-admin #ai-input.source-editor .architect-passage-tail-prose { margin: 12px 0 0 0; }
+    /* Lab / Quote Select: intro is NOT part of the gutter column — pin to full host width so long titles wrap instead of behaving like clipped margin rows; separate visually from booklet body. */
+    #source-inline.guide-content > .architect-passage-head-prose,
+    #source-inline-select.guide-content > .architect-passage-head-prose,
+    #intro-text.architect-passage-line-mode > .architect-passage-head-prose,
+    #intro-text > .architect-passage-head-prose {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+        padding-bottom: 10px !important;
+        margin-bottom: 12px !important;
+        border-bottom: 1px dashed rgba(0, 150, 136, 0.28) !important;
+        box-sizing: border-box !important;
+    }
+    #source-inline.guide-content > .architect-passage-tail-prose,
+    #source-inline-select.guide-content > .architect-passage-tail-prose {
+        display: block !important;
+        width: 100% !important;
+        margin-top: 14px !important;
+        padding-top: 10px !important;
+        border-top: 1px dashed rgba(0, 150, 136, 0.28) !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+        box-sizing: border-box !important;
+    }
     /* Gutter digits: readable on var(--bg); z-index above .reader-window (2) so WJEC ticks stay visible when the highlight band overlaps the passage. */
     #source-inline .source-with-line-numbers .source-line-num,
     #source-inline-select .source-with-line-numbers .source-line-num,
@@ -4011,11 +4038,37 @@ const app = {
         }
         return (el.innerText || el.textContent || el.innerHTML || "").trim();
     },
+    /**
+     * Head/tail wrappers belong in the merged lesson string once — never duplicate inside #ai-input (paste/sync bug) or hoist/save double-counts lines and Lab layout fights the header.
+     */
+    _stripEmbeddedPassageChromeFromAiInputHtml: function(html) {
+        try {
+            const d = document.createElement("div");
+            d.innerHTML = String(html || "").trim();
+            const rm = d.querySelectorAll(".architect-passage-head-prose, .architect-passage-tail-prose");
+            if(!rm.length) return String(html || "").trim();
+            rm.forEach(function(n) {
+                if(n.parentNode) n.parentNode.removeChild(n);
+            });
+            return (d.innerHTML || "").trim();
+        } catch(e) {
+            return String(html || "").trim();
+        }
+    },
     /** Merge optional two-line intro (#c1-passage-intro-line1/2) + #ai-input into one HTML string for v2 serialization (same shape as a single editor with .architect-passage-head-prose). */
     mergeC1IntroHeaderAndAiInputHtml: function() {
         const ai = document.getElementById("ai-input");
         if(!ai || ai.getAttribute("contenteditable") !== "true") return "";
-        const body = (ai.innerHTML || "").trim();
+        let body = (ai.innerHTML || "").trim();
+        if(typeof app._stripEmbeddedPassageChromeFromAiInputHtml === "function") {
+            const stripped = app._stripEmbeddedPassageChromeFromAiInputHtml(body);
+            if(stripped !== body) {
+                try {
+                    ai.innerHTML = stripped;
+                } catch(eDom) {}
+                body = stripped;
+            }
+        }
         const headInner = typeof app.mergeC1IntroLineEditorsToHeadInner === "function" ? app.mergeC1IntroLineEditorsToHeadInner() : "";
         if(!headInner) return body;
         return '<div class="architect-passage-head-prose">' + headInner + "</div>" + body;
@@ -6022,10 +6075,10 @@ const app = {
         return app.splitLongRowsForBookletLineGutter(expanded);
     },
     formatStructuredPassageHtml: function(o) {
-        if(!o || !Array.isArray(o.lines) || !o.lines.length) return "Source text not provided.";
-        const expanded = app.expandStructuredPassageLineEntries(o);
+        if(!o || !Array.isArray(o.lines)) return "Source text not provided.";
         const hasHead = o.headHtml != null && String(o.headHtml).trim();
         const hasTail = o.tailHtml != null && String(o.tailHtml).trim();
+        const expanded = app.expandStructuredPassageLineEntries(o);
         if(!expanded.length && !hasHead && !hasTail) return "Source text not provided.";
         /** Student/Lab gutter: WJEC **5, 10, 15…** booklet ticks; use stored row HTML for &lt;b&gt;/&lt;i&gt;/&lt;u&gt; (plain-only cells were forcing “only italic seemed to work”). Editing Suite uses {@link structuredPassageToEditorHtml}. */
         let core = "";
