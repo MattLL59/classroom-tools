@@ -84,24 +84,12 @@
         width: 100% !important;
         max-width: 100% !important;
     }
-    /* Lab / Quote Select: auto-scroll reader band (.reader-window, z-index:2) was painting over the whole passage, hiding gutter digits. Start the band after the margin column. */
-    #source-lab-wrap:has(.source-with-line-numbers) .reader-window {
-        left: calc(8px + 2.5em + 0.75em + 8px);
-    }
-    #source-inline-select-wrap:has(.source-with-line-numbers) .reader-window {
-        left: calc(12px + 2.5em + 0.75em + 8px);
-    }
+    /* Line-numbered passages: .reader-window left/width is set in JS from the first .source-line-row (gutter + insert text) so the band runs under WJEC margin ticks; ticks stay above (z-index:3 on .source-line-num). */
     /* Class toggled in JS when passage uses line gutters — avoids relying on :has() and beats inline white-space:pre-wrap on the host. */
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select,
     #source-lab-wrap.architect-passage-line-mode #source-inline,
     #intro-text.architect-passage-line-mode {
         white-space: normal !important;
-    }
-    #source-inline-select-wrap.architect-passage-line-mode .reader-window {
-        left: calc(12px + 2.5em + 0.75em + 8px);
-    }
-    #source-lab-wrap.architect-passage-line-mode .reader-window {
-        left: calc(8px + 2.5em + 0.75em + 8px);
     }
     /* Exam column: cap body width so browser wraps nearer to printed booklet line breaks (with gutter column outside). */
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers .source-line-text,
@@ -540,6 +528,7 @@
     #c1-passage-intro-lines .intro-head-line .source-line-num { display: none !important; }
     #c1-passage-intro-lines .intro-head-line .source-line-text { border-right: none !important; max-width: none !important; padding-right: 0 !important; flex: none !important; }
     #c1-passage-intro-lines .intro-head-line .source-with-line-numbers { display: block !important; border: none !important; background: transparent !important; white-space: pre-wrap !important; }
+    /* z-index 2: band can span gutter + text; WJEC tick digits are z-index:3 and stay on top. */
     .reader-window { position: absolute; left: 8px; right: 8px; top: 8px; height: var(--reader-window-height); border: 2px solid var(--reader-highlight-border); border-radius: 8px; background: var(--reader-highlight); pointer-events: none; z-index: 2; }
     .reader-window-line { display:none; }
     .stage-tag { background: rgba(0,0,0,0.04); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
@@ -1257,6 +1246,7 @@
                     <label>Prompt (lesson + quote selection)</label>
                     <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
                         <button class="btn btn-primary btn-small" onclick="admin.generateUnifiedPrompt()">Generate Prompt</button>
+                        <button type="button" class="btn btn-outline btn-small" title="Clear the box and build a new prompt from current focus questions, level bank, and AI toggles. Does not change the passage or sourceText." onclick="admin.regenerateUnifiedPromptFromSettings()">Regenerate from settings</button>
                         <button class="btn btn-outline btn-small" onclick="admin.copyUnifiedPrompt()">Copy Prompt</button>
                         <button class="btn btn-outline btn-small" onclick="admin.pasteUnifiedJson()">Paste JSON</button>
                         <button class="btn btn-success btn-small" onclick="admin.loadUnifiedJson()">Load JSON</button>
@@ -4124,6 +4114,39 @@ const app = {
             line2.innerHTML = "";
         }
     },
+    /**
+     * When bold was toggled in another intro line, Chrome can leave &lt;b&gt;…&lt;/b&gt; whose only child is &lt;i&gt;/&lt;em&gt; — Lab shows **bold+italic** while the box looks italic only.
+     * Unwrap the redundant bold wrapper (same run as the italic) so the stored head matches the teacher intent.
+     */
+    unwrapSpuriousBoldAroundItalic: function(html) {
+        if(!html || typeof html !== "string" || !html.trim()) return html;
+        if(!/<(?:b|strong)\b/i.test(html) || !/<(?:i|em)\b/i.test(html)) return html;
+        try {
+            const d = document.createElement("div");
+            d.innerHTML = html;
+            for(let pass = 0; pass < 6; pass++) {
+                const list = [].slice.call(d.querySelectorAll("b, strong"));
+                let did = false;
+                list.forEach((b) => {
+                    if(!b.parentNode || b.querySelector("b, strong")) return;
+                    if(b.childNodes.length !== 1) return;
+                    const only = b.firstChild;
+                    if(!only || only.nodeType !== 1) return;
+                    const t = (only.tagName || "").toUpperCase();
+                    if(t !== "I" && t !== "EM") return;
+                    if(String(b.textContent || "").replace(/\u00a0/g, " ").trim() !== String(only.textContent || "").replace(/\u00a0/g, " ").trim()) return;
+                    const p = b.parentNode;
+                    p.insertBefore(only, b);
+                    p.removeChild(b);
+                    did = true;
+                });
+                if(!did) break;
+            }
+            return d.innerHTML;
+        } catch(e) {
+            return html;
+        }
+    },
     /** Merge line 1 + line 2 rich fragments into passage head inner HTML (each non-empty line becomes its own &lt;p&gt;). */
     mergeC1IntroLineEditorsToHeadInner: function() {
         const line1 = document.getElementById("c1-passage-intro-line1");
@@ -4152,6 +4175,13 @@ const app = {
                 } catch(eU) {
                     break;
                 }
+            }
+            if(typeof app.unwrapSpuriousBoldAroundItalic === "function") {
+                const u = app.unwrapSpuriousBoldAroundItalic(h);
+                if(typeof u === "string" && u.length) h = u;
+            }
+            if(/<\/(?:b|strong|i|em)><(?:b|strong|i|em)\b/i.test(h)) {
+                h = h.replace(/<\/(b|strong|i|em)><(b|strong|i|em)\b/gi, "</$1> <$2>");
             }
             return h;
         }
@@ -4932,6 +4962,9 @@ const app = {
         const rngEl = document.getElementById("c1-passage-insert-width-range");
         if(rngEl && document.activeElement !== rngEl) rngEl.value = String(ch);
         if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
+        if(typeof ui !== "undefined" && ui.positionReaderWindow) {
+            requestAnimationFrame(() => { if(ui && ui.positionReaderWindow) ui.positionReaderWindow(); });
+        }
     },
     /** Updates the Insert width hint next to #c1-passage-insert-width-ch (passage dashed edge + booklet reflow use this value). */
     updateInsertWidthGuideLabel: function() {
@@ -6469,10 +6502,20 @@ const app = {
                 const ho = app.hoistBlockElementsOutOfInlineFormatting(wrap);
                 if(typeof ho === "string" && ho.trim()) wrap = ho;
             }
-            return app.sanitizeSourceHtml(wrap, { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+            let inner = app.sanitizeSourceHtml(wrap, { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+            if(typeof app.unwrapSpuriousBoldAroundItalic === "function") {
+                const u = app.unwrapSpuriousBoldAroundItalic(inner);
+                if(typeof u === "string") inner = u;
+            }
+            return inner;
         } catch(eP) {
             try {
-                return app.sanitizeSourceHtml("<div>" + String(html).trim() + "</div>", { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+                let inner2 = app.sanitizeSourceHtml("<div>" + String(html).trim() + "</div>", { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+                if(typeof app.unwrapSpuriousBoldAroundItalic === "function") {
+                    const u2 = app.unwrapSpuriousBoldAroundItalic(inner2);
+                    if(typeof u2 === "string") inner2 = u2;
+                }
+                return inner2;
             } catch(e2) {
                 return "";
             }
@@ -9925,6 +9968,9 @@ const ui = {
         const has = !!(html && /source-with-line-numbers/i.test(html));
         if(wrapEl) wrapEl.classList.toggle("architect-passage-line-mode", has);
         if(hostEl) hostEl.classList.toggle("architect-passage-line-mode", has);
+        if(typeof ui !== "undefined" && ui.positionReaderWindow) {
+            requestAnimationFrame(() => { if(ui.positionReaderWindow) ui.positionReaderWindow(); });
+        }
     },
     refreshSourceDisplay: function(overrideContent) {
         try {
@@ -10346,10 +10392,37 @@ const ui = {
         }
     },
     positionReaderWindow: function() {
-        ["reader-window-lab", "reader-window-select"].forEach(id => {
-            const win = document.getElementById(id);
-            if(win) win.style.top = "8px";
-        });
+        const place = (winId, wrapId, contentId) => {
+            const win = document.getElementById(winId);
+            if(!win) return;
+            const wrap = document.getElementById(wrapId);
+            const content = document.getElementById(contentId);
+            if(!wrap || !content) {
+                win.style.top = "8px";
+                return;
+            }
+            const firstRow = content.querySelector(".source-line-row");
+            const ref = firstRow || content.querySelector(".source-line-text");
+            if(ref) {
+                const tr = ref.getBoundingClientRect();
+                const wr = wrap.getBoundingClientRect();
+                if(tr.width > 1 && tr.height > 0) {
+                    const left = Math.max(0, Math.round(tr.left - wr.left));
+                    const w = Math.max(0, Math.round(tr.width));
+                    win.style.left = left + "px";
+                    win.style.width = w + "px";
+                    win.style.right = "auto";
+                    win.style.top = "8px";
+                    return;
+                }
+            }
+            win.style.left = "";
+            win.style.width = "";
+            win.style.right = "";
+            win.style.top = "8px";
+        };
+        place("reader-window-lab", "source-lab-wrap", "source-inline");
+        place("reader-window-select", "source-inline-select-wrap", "source-inline-select");
     },
     applyReaderZoom: function(value) {
         const pct = Math.max(80, Math.min(180, parseInt(value, 10) || 110));
@@ -16855,8 +16928,12 @@ const admin = {
                     if(pt && /^\d{1,4}\s*[.)]\s/.test(pt)) return;
                 } catch(eP) {}
             }
-            const fixed = app.sanitizeSourceHtml(raw2, { skipHoistRepair: true });
-            if(typeof fixed === "string" && fixed.length && fixed !== raw2) el.innerHTML = fixed;
+            let fixed = app.sanitizeSourceHtml(raw2, { skipHoistRepair: true });
+            if(el.classList && el.classList.contains("intro-head-line") && typeof app.unwrapSpuriousBoldAroundItalic === "function" && typeof fixed === "string") {
+                const u = app.unwrapSpuriousBoldAroundItalic(fixed);
+                if(typeof u === "string") fixed = u;
+            }
+            if(typeof fixed === "string" && fixed.length && fixed !== (el.innerHTML || "").trim()) el.innerHTML = fixed;
         } catch(e) {}
     },
     /** After stacked &lt;i&gt;/&lt;b&gt; from bad toggles, flatten nesting then sanitize (same box as toolbar). */
@@ -18784,6 +18861,8 @@ const admin = {
             if(ev) ev.preventDefault();
         } catch(e) {}
         if(admin._flushSourceSelectionMemoryNow) admin._flushSourceSelectionMemoryNow();
+        const line1 = document.getElementById("c1-passage-intro-line1");
+        const line2 = document.getElementById("c1-passage-intro-line2");
         const ai = document.getElementById("ai-input");
         const c2 = document.getElementById("c2-pooled-editor");
         const now = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
@@ -18794,7 +18873,9 @@ const admin = {
             if(!r0.collapsed) {
                 let n = r0.commonAncestorContainer;
                 if(n.nodeType === Node.TEXT_NODE) n = n.parentNode;
-                const el = (ai && n && ai.contains(n) && ai.getAttribute("contenteditable") === "true") ? ai
+                const el = (line1 && n && line1.contains(n) && line1.getAttribute("contenteditable") === "true") ? line1
+                    : (line2 && n && line2.contains(n) && line2.getAttribute("contenteditable") === "true") ? line2
+                    : (ai && n && ai.contains(n) && ai.getAttribute("contenteditable") === "true") ? ai
                     : (c2 && n && c2.contains(n) && c2.getAttribute("contenteditable") === "true") ? c2 : null;
                 if(el && el.contains(r0.startContainer) && el.contains(r0.endContainer)) {
                     try {
@@ -18806,7 +18887,11 @@ const admin = {
         if(!rUse) {
             const mem = admin._lastGoodSourceSel;
             if(mem && (now - mem.at < 8000)) {
-                const root = mem.elId === "c2-pooled-editor" ? c2 : ai;
+                const root = mem.elId === "c2-pooled-editor" ? c2
+                    : mem.elId === "c1-passage-intro-line1" ? line1
+                    : mem.elId === "c1-passage-intro-line2" ? line2
+                    : mem.elId === "ai-input" ? ai
+                    : null;
                 if(root && root.getAttribute("contenteditable") === "true") {
                     rUse = admin._rangeFromPlainOffsets(root, mem.startPlain, mem.endPlain);
                 }
@@ -18823,10 +18908,10 @@ const admin = {
             if(ed.nodeType === Node.TEXT_NODE) ed = ed.parentElement;
             while(ed && ed.nodeType === 1 && ed !== document.body) {
                 const eid = ed.id;
-                if(eid === "ai-input" || eid === "c2-pooled-editor") break;
+                if(eid === "ai-input" || eid === "c2-pooled-editor" || eid === "c1-passage-intro-line1" || eid === "c1-passage-intro-line2") break;
                 ed = ed.parentElement;
             }
-            if(ed && (ed.id === "ai-input" || ed.id === "c2-pooled-editor") && ed.getAttribute("contenteditable") === "true") {
+            if(ed && (ed.id === "ai-input" || ed.id === "c2-pooled-editor" || ed.id === "c1-passage-intro-line1" || ed.id === "c1-passage-intro-line2") && ed.getAttribute("contenteditable") === "true") {
                 const lo = admin._plainTextOffsetBeforeBoundary(ed, rUse.startContainer, rUse.startOffset);
                 const hi = admin._plainTextOffsetBeforeBoundary(ed, rUse.endContainer, rUse.endOffset);
                 const lo2 = Math.min(lo, hi);
@@ -18969,6 +19054,7 @@ const admin = {
         admin.generateSelectionPrompt();
     },
     generateUnifiedPrompt: () => {
+        if(typeof admin.syncQuestionsFromList === "function") admin.syncQuestionsFromList();
         const fullText = (() => {
             const fromAi = (app.getAiInputValue() || "").trim();
             if(fromAi) return fromAi;
@@ -19001,7 +19087,30 @@ const admin = {
         };
         const q = prompts.length > 1 ? "Questions (q01→q05): " + prompts.map((p, i) => qWithLineRef(p, i)).join(" | ") : (prompts[0] || "How does the writer use language?");
         if(!fullText.trim()) return alert("Paste source text first.");
-        const activeLevels = app.getActiveLevels();
+        const activeLevels = (appData.settings && appData.settings.aiPromptAllLevels)
+            ? Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => i + 1)
+            : app.getActiveLevels();
+        const levelBank = app.getLevelBank();
+        const aiDevices = app.getAiDevices();
+        const deviceLabels = { language: "Language", tone: "Tone", structure: "Structure" };
+        const analysisTypesLine = Object.keys(aiDevices).filter(k => aiDevices[k]).map(k => deviceLabels[k] || k).join(", ");
+        const levelBankConfigBlock = activeLevels.map(n => {
+            const e = levelBank[n] || {};
+            const ids = (e.questionIds && e.questionIds.length) ? e.questionIds.join(", ") : "q1";
+            const tapText = e.freeSelectFromText === true ? "tap-from-text" : "pre-made quote bank (MC)";
+            const complexity = e.complexity || (e.languageTier === "low" ? "simple" : e.languageTier === "advanced" ? "advanced" : "medium");
+            const qT = e.quoteTarget != null ? e.quoteTarget : 4;
+            const dC = e.distractorCount != null ? e.distractorCount : 4;
+            return "L" + n + ": " + complexity + "; questions [" + ids + "]; " + tapText + "; quoteTarget " + qT + ", distractor quotes " + dC;
+        }).join("\n");
+        const unifiedAppSettingsBlock = `
+
+CURRENT APP SETTINGS (re-read from the app — your lesson JSON must match these; do not assume a stale configuration from an earlier edit):
+- Item analysis types: ${analysisTypesLine}
+- Levels: [${activeLevels.join(", ")}]${(appData.settings && appData.settings.aiPromptAllLevels) ? " (all 10 levels: \"Include all 10 levels in prompt\" is on)" : ""}
+- Per level, lesson.settings.levelBank must match:
+${levelBankConfigBlock}
+`;
         const c2Dual = !!(appData && appData.component === 2)
             || !!(appData && admin.hasC2DualSource && admin.hasC2DualSource())
             || !!(appData && appData.component2Layout && String(appData.component2Layout.resourcePaperText || "").trim() && String(appData.component2Layout.questionPaperPage3Text || "").trim());
@@ -19030,6 +19139,7 @@ Source:
 """${text}"""
 Focus: "${q}"
 ${c2OrderBlock}
+${unifiedAppSettingsBlock}
 ${(function(){
     const ms = appData && appData.markScheme;
     if(!ms || !Object.keys(ms).length) return "";
@@ -19087,6 +19197,12 @@ activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questio
 Reply with raw JSON only. First character {, last character }. No lesson plan, no explanation.`;
         const out = document.getElementById("unified-prompt-out");
         if(out) out.value = prompt;
+    },
+    /** Clear the visible unified JSON prompt, then build a new one from current app settings (source text / #ai-input unchanged). */
+    regenerateUnifiedPromptFromSettings: () => {
+        const out = document.getElementById("unified-prompt-out");
+        if(out) out.value = "";
+        admin.generateUnifiedPrompt();
     },
     copyUnifiedPrompt: async () => {
         const out = document.getElementById("unified-prompt-out");
