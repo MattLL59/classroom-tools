@@ -143,6 +143,15 @@
         max-width: var(--exam-passage-max-width);
         padding-right: 4px;
         box-sizing: border-box;
+        /**
+         * One booklet row = one simulated printed line. Global rules above used `white-space: pre-wrap` on `.source-line-text`,
+         * so the browser could wrap **again** inside the cell after {@link splitPlainIntoVisualLinesByCh} — a second visual line
+         * appeared **without** a gutter digit (“missing tick”). nowrap keeps each `.source-line-row` to a single display line;
+         * rare overflow is handled by `#ai-input` / host `overflow-x: auto` and insert-width reflow.
+         */
+        white-space: nowrap !important;
+        word-break: normal !important;
+        overflow-wrap: normal !important;
     }
     /* Leading / trailing prose outside booklet gutters (WJEC body anchors); same column cap as counted lines. */
     #source-inline .architect-passage-head-prose,
@@ -1301,7 +1310,7 @@
                             <span style="font-size:0.72rem; white-space:nowrap; opacity:0.85;" title="Narrow-column width for Lab / Quote Select (CSS ch). PDF import sets this from measured geometry (median). Edit to match the paper if wrapping is off.">Insert width</span>
                             <input type="number" id="c1-passage-insert-width-ch" min="36" max="150" value="96" title="Passage column width (ch), 36–150. While you adjust, structured passages flush and #ai-input + Lab rebuild rows from JSON (debounced) — same pipeline, not CSS-only." style="width:50px;padding:2px 4px;font-size:0.8rem;" oninput="if(typeof app.applyExamPassageInsertWidthCh==='function')app.applyExamPassageInsertWidthCh();if(typeof app.schedulePassageInsertWidthRelayout==='function')app.schedulePassageInsertWidthRelayout()" onchange="if(typeof app.applyPassageInsertWidthChFromInput==='function')app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true })">
                             <span style="font-size:0.72rem; opacity:0.85;">ch</span>
-                            <input type="range" id="c1-passage-insert-width-range" min="36" max="150" value="96" title="36–150ch. Editor + Lab rows reflow together while dragging (debounced). Then use Reflow body (natural wrap) so stored lines match this width." style="width:120px;vertical-align:middle;margin:0 4px;" oninput="(function(){var n=document.getElementById('c1-passage-insert-width-ch');if(n)n.value=document.getElementById('c1-passage-insert-width-range').value;if(typeof app.syncPdfInsertWidthChFromDomInput==='function')app.syncPdfInsertWidthChFromDomInput();if(typeof app.applyExamPassageInsertWidthCh==='function')app.applyExamPassageInsertWidthCh();if(typeof app.schedulePassageInsertWidthRelayout==='function')app.schedulePassageInsertWidthRelayout();})()" onchange="if(typeof app.applyPassageInsertWidthChFromInput==='function')app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true })">
+                            <input type="range" id="c1-passage-insert-width-range" min="36" max="150" value="96" title="36–150ch. Editor + Lab rows reflow together while dragging (debounced). Then click **Sync passage layout** (or Reflow body natural wrap) so stored lines match this width." style="width:120px;vertical-align:middle;margin:0 4px;" oninput="(function(){var n=document.getElementById('c1-passage-insert-width-ch');if(n)n.value=document.getElementById('c1-passage-insert-width-range').value;if(typeof app.syncPdfInsertWidthChFromDomInput==='function')app.syncPdfInsertWidthChFromDomInput();if(typeof app.applyExamPassageInsertWidthCh==='function')app.applyExamPassageInsertWidthCh();if(typeof app.schedulePassageInsertWidthRelayout==='function')app.schedulePassageInsertWidthRelayout();})()" onchange="if(typeof app.applyPassageInsertWidthChFromInput==='function')app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true })">
                             <span id="arch-passage-insert-width-live" title="Matches Lab / Quote Select passage column (--exam-passage-max-width)." style="font-size:0.68rem; opacity:0.82; margin-left:6px; flex:1 1 200px; min-width:120px;"></span>
                             <span style="font-size:0.72rem; margin-left:6px; white-space:nowrap; opacity:0.9;" title="Booklet line **printed on the exam paper** for your **first screen row** (after intro). Each row is numbered +1 from this (6, 7, 8…). The grey column only **displays** 5 / 10 / 15 like the real WJEC insert — so changing this by 1 moves **which row** shows those ticks in a pattern that repeats every 5 lines (not because the control skips numbers). Use ‘All line #s’ while lining up.">Booklet line 1 =</span>
                             <input type="number" id="c1-passage-booklet-first" min="1" max="500" value="1" title="First row’s booklet line number. Row 2 = this+1, etc. WJEC shows 5/10/15 only — use ‘All line #s’ to see every line move while you adjust. Updates while typing or using the spinner (not only after blur)." style="width:58px;padding:2px 4px;font-size:0.8rem;">
@@ -1313,8 +1322,9 @@
                             <input type="text" id="c1-passage-wjec-end-anchor" placeholder="ends after e.g. good earner" title="Passage plain text ending after this substring (last match). Use a phrase long enough to be unique." style="min-width:120px;max-width:200px;padding:2px 6px;font-size:0.78rem;">
                             <button type="button" class="btn btn-outline btn-small" onclick="if(typeof app.applyWJECBookletBodyAnchorsFromInputs==='function')app.applyWJECBookletBodyAnchorsFromInputs()" title="Splits intro / counted body / tail. Reformats cut regions as plain text — re-apply bold if needed.">Apply body anchors</button>
                             <button type="button" tabindex="-1" class="btn btn-outline btn-small" onpointerdown="admin.preserveSourceToolbarCaretSelection(event);" onmousedown="event.preventDefault();" onclick="admin.toggleParagraphStartAtCaret && admin.toggleParagraphStartAtCaret()" title="Mark/clear paragraph spacing on this row (Reflow keeps ¶ boundaries). Mid-line: Shift+Enter or Ctrl+Enter = split stored line here with a real paragraph (paragraphStart). Plain Enter = soft line break only inside the row — Reflow merges non-¶ rows into one block.">¶ Paragraph</button>
+                            <button type="button" class="btn btn-primary btn-small" onclick="try { app.syncC1PassageLayoutInsertWidthAndNaturalReflow(); } catch(eSyncBtn) { alert((eSyncBtn && eSyncBtn.message) ? eSyncBtn.message : String(eSyncBtn)); }" title="Commits Insert width (ch) from the box and slider into the lesson, flushes the editor to stored passage JSON, then runs natural wrap at that width — same end state as blurring the width field and clicking Reflow body (natural wrap). Use after Load JSON or when Lab and editor look misaligned. If nothing happens, hard-refresh the page (Ctrl+F5) so this button runs the latest script.">Sync passage layout</button>
                             <button type="button" class="btn btn-outline btn-small" onclick="if(typeof app.reflowC1PassageBodyToInsertWidthCh==='function')app.reflowC1PassageBodyToInsertWidthCh({ force: true, silent: false })" title="Repacks the **whole** passage body — selection does not scope reflow. Fixed row count per paragraph block; paragraph starts from ¶ or two-space indent. Strips inline bold/italic.">Reflow body (full pack)</button>
-                            <button type="button" class="btn btn-outline btn-small" onclick="if(typeof app.reflowC1PassageBodyToNaturalInsertWidthCh==='function')app.reflowC1PassageBodyToNaturalInsertWidthCh({ silent: false })" title="Repacks the **whole** passage body at Insert width (ch) — not only selected text. Paragraph boundaries come from ¶ / Shift+Enter; plain Enter (&lt;br&gt;) stays inside stored rows. Strips inline bold/italic. If Strict PDF left many stub rows and there is no ¶, merges exploded rows first.">Reflow body (natural wrap)</button>
+                            <button type="button" class="btn btn-outline btn-small" onclick="if(typeof app.reflowC1PassageBodyToNaturalInsertWidthCh==='function')app.reflowC1PassageBodyToNaturalInsertWidthCh({ silent: false })" title="Repacks the **whole** passage body at Insert width (ch) — not only selected text. Paragraph boundaries come from ¶ / Shift+Enter; plain Enter (&lt;br&gt;) stays inside stored rows. Strips inline bold/italic. If Strict PDF left many stub rows and there is no ¶, merges exploded rows first. Prefer **Sync passage layout** if width and Lab were out of sync.">Reflow body (natural wrap)</button>
                         </div>
                         <div id="ai-input" contenteditable="true" class="source-editor" data-placeholder="Paste text here… or use Import PDF for C1 inserts." style="min-height:80px; max-height:40vh; overflow:auto; width:100%; border:1px solid #ccc; padding:8px; line-height:1.6; font-family:'Aptos','Segoe UI',Calibri,sans-serif; outline:none;"></div>
                     </div>
@@ -1354,6 +1364,7 @@
                     </div>
                     <textarea id="unified-prompt-out" style="height:80px; width:100%; margin-bottom:6px;" readonly placeholder="Prompt will appear here..."></textarea>
                     <textarea id="unified-json-in" style="height:90px; width:100%;" placeholder="Paste JSON response here..."></textarea>
+                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;"><input type="checkbox" id="ai-json-preserve-passage" checked onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> Keep my passage layout (¶) and insert width when the JSON does not carry them (recommended for AI round-trips)</label>
                     <details style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
                         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">Compact AI — enrich existing quotes only</summary>
                         <p style="font-size:0.78rem; opacity:0.88; margin:8px 0; line-height:1.45;">Does <strong>not</strong> include the full reading passage — only your focus questions, a few mark-scheme bullets, and up to 16 <strong>good</strong> quotes (truncated). Use after <strong>Suggest quotes from mark scheme</strong> or hand-picked quotes. Paste the model’s <strong>JSON array</strong> back and merge — then run <strong>Merge from quotes again</strong> in Analysis Banks if needed.</p>
@@ -1451,7 +1462,7 @@
                     <details class="lobby-help-details">
                         <summary title="Worksheet and export help">?</summary>
                         <div class="lobby-help-body">
-                            <p>Worksheet tasks use <strong>WS</strong> focus questions and quotes with <strong>Include on worksheet</strong> ticked (off by default — choose after meanings/points are ready). Focus question text is cleaned for Word (stray marks/numbers). Near-duplicate quotes merge on export. For <strong>Component 1</strong> retrieval-style <strong>Q1</strong>, the optional fields under the <strong>first</strong> focus row (<strong>model short answer</strong> + <strong>distractors</strong>) add a <strong>Short answer practice</strong> block on the Word export whenever the model text is filled — <strong>you do not need WS ticked on Q1</strong> for that block (WS still controls which focus prompts and quotes appear in the main match/rubric sections).</p>
+                            <p>Worksheet tasks use <strong>WS</strong> focus questions and quotes with <strong>Include on worksheet</strong> ticked (off by default — choose after meanings/points are ready). Focus question text is cleaned for Word (stray marks/numbers). Near-duplicate quotes merge on export. You can export a <strong>minimal sheet</strong> with focus question(s) only (no quote match/rubric blocks) by leaving every quote’s <strong>Include on worksheet</strong> off — useful for students who work only from the booklet. For <strong>Component 1</strong> retrieval-style <strong>Q1</strong>, the optional fields under the <strong>first</strong> focus row (<strong>model short answer</strong> + <strong>distractors</strong>) add a <strong>Short answer practice</strong> block on the Word export whenever the model text is filled — <strong>you do not need WS ticked on Q1</strong> for that block (WS still controls which focus prompts and quotes appear in the main match/rubric sections).</p>
                             <details style="margin-top:10px; font-size:0.8rem; opacity:0.95;">
                                 <summary style="cursor:pointer; font-weight:600;">What the AI JSON supplies (worksheet + I&apos;m stuck)</summary>
                                 <ul style="margin:8px 0 0 1.1em; padding:0; line-height:1.45;">
@@ -1827,6 +1838,13 @@ const app = {
     },
     getEffectiveNoQuotes: function(level) {
         return !!(userState && userState.studentSynonymsHelp === true);
+    },
+    /**
+     * Teacher: Editing Suite → "Tap text & record answers". Full marks goal and one point per distinct highlight (like student tap mode),
+     * not the staged language/tone/structure cap. Does not force student freeSelectFromText — only affects goal/progress while authoring.
+     */
+    isTeacherTapRecordPassageMode: function() {
+        return !!(typeof appData !== "undefined" && appData && !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow === true);
     },
     /** Writing Desk draggable chips from Analysis Banks: on for teacher builds; standalone students only when they tick I'm stuck → sentence bank. */
     isDeskSentenceBankChipsEnabled: function() {
@@ -2278,7 +2296,7 @@ const app = {
         const lvl = parseInt(level, 10) || 1;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
-        const countAnyChosenTowardGoal = (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) || levelEntry.shortAnswersOnly === true || app.getEffectiveTapText(lvl);
+        const countAnyChosenTowardGoal = (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) || levelEntry.shortAnswersOnly === true || app.getEffectiveTapText(lvl) || app.isTeacherTapRecordPassageMode();
         const currentId = app.getCurrentQuestionIdForLevel(lvl);
         const sel = appData.selection;
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
@@ -3246,18 +3264,25 @@ const app = {
         const analyticalDims = app.getEnabledSelectionAnalyticalDimensionsCount();
         const fallbackMulti = shortAns ? 1 : (fromSelModes != null && !isNaN(fromSelModes) && fromSelModes >= 1 ? fromSelModes : analyticalDims);
         const fallbackSingle = shortAns ? 1 : (fromSelModes != null && !isNaN(fromSelModes) && fromSelModes >= 1 ? fromSelModes : analyticalDims);
+        let effFromQuestion = fromQuestionSum;
+        /* Teacher "tap & record": prompts may omit [n marks]; use Level Bank quote target instead of analytical-dimension fallback (often 2). */
+        if(!shortAns && ptsOverride == null && typeof app.isTeacherTapRecordPassageMode === "function" && app.isTeacherTapRecordPassageMode()
+            && (effFromQuestion == null || effFromQuestion < 1)) {
+            const qtRaw = parseInt(levelEntry.quoteTarget, 10);
+            effFromQuestion = (Number.isFinite(qtRaw) && qtRaw >= 1) ? qtRaw : (app.getQuoteTargetForLevel(lvl) || 4);
+        }
         return Math.max(1, usePerQuestionGoal
-            ? (ptsOverride != null ? ptsOverride : (fromQuestionSum != null ? fromQuestionSum : fallbackMulti))
-            : (ptsOverride != null ? ptsOverride : (fromQuestionSum != null ? fromQuestionSum : fallbackSingle)));
+            ? (ptsOverride != null ? ptsOverride : (effFromQuestion != null && effFromQuestion >= 1 ? effFromQuestion : fallbackMulti))
+            : (ptsOverride != null ? ptsOverride : (effFromQuestion != null && effFromQuestion >= 1 ? effFromQuestion : fallbackSingle)));
     },
-    /** Compare to countSelectionEvidencePoints: staged flow caps at enabled language/tone/structure count; tap/short-answer uses full points goal. */
+    /** Compare to countSelectionEvidencePoints: staged flow caps at enabled language/tone/structure count; tap/short-answer / teacher record uses full points goal. */
     getSelectionEvidenceGoalForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
         let c2 = false;
         try { c2 = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)); } catch(e) {}
-        const tapHighlight = c2 || levelEntry.shortAnswersOnly === true || app.getEffectiveTapText(lvl);
+        const tapHighlight = c2 || levelEntry.shortAnswersOnly === true || app.getEffectiveTapText(lvl) || app.isTeacherTapRecordPassageMode();
         const pointsGoal = app.getSelectionPointsGoalForLevel(lvl);
         if(tapHighlight) return pointsGoal;
         return Math.min(pointsGoal, app.getEnabledSelectionAnalyticalDimensionsCount());
@@ -4523,7 +4548,13 @@ const app = {
          */
         if(opts.force && !app._suppressAdminInputFlushOnce && typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
         if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta();
-        if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh();
+        /**
+         * JSON / template import sets {@link appData.meta.pdfInsertWidthCh} before #ai-input exists or while slider still shows the **previous** lesson.
+         * {@link syncPdfInsertWidthChFromDomInput} runs inside {@link applyExamPassageInsertWidthCh} by default and would **overwrite** imported meta with stale DOM — saved width looked lost and Lab vs Editing Suite split math disagreed until the teacher touched the slider.
+         */
+        if(app.applyExamPassageInsertWidthCh) {
+            app.applyExamPassageInsertWidthCh(app._suppressAdminInputFlushOnce ? { skipDomSync: true } : {});
+        }
         let raw = "";
         try {
             const canon = (appData && typeof appData.sourceText === "string") ? appData.sourceText.trim() : "";
@@ -4608,7 +4639,7 @@ const app = {
      * Callers must not replace this with “every input: editorPassageToStoredCanonical + syncLessonSourceCanonical” — that was arch131.10 and destroyed gutters while the DOM was mid-edit.
      */
     /**
-     * @param {{ skipAutomaticReflow?: boolean }} [opts] — set by insert-width / snap paths so {@link maybeReflowC1CanonicalShortFirstLineAfterHead} does not rewrite the JSON while the teacher is only changing `ch` (it used to fight width + Lab row count).
+     * @param {{ applyShortHeadReflow?: boolean }} [opts] — when **true** only, runs {@link maybeReflowC1CanonicalShortFirstLineAfterHead}, which repacks the body at insert width as **plain** lines and **strips** bold/italic and other inline markup. Must not run on routine blur/Save JSON/export (teachers lost long formatting sessions). Omit or leave false (default).
      */
     flushAiInputToLessonSourceIfEditable: function(opts) {
         opts = opts || {};
@@ -4625,7 +4656,7 @@ const app = {
             return;
         }
         var toSync = canon;
-        if(!opts.skipAutomaticReflow && typeof app.maybeReflowC1CanonicalShortFirstLineAfterHead === "function") {
+        if(opts.applyShortHeadReflow === true && typeof app.maybeReflowC1CanonicalShortFirstLineAfterHead === "function") {
             const r = app.maybeReflowC1CanonicalShortFirstLineAfterHead(canon);
             if(r) toSync = r;
         }
@@ -5048,7 +5079,7 @@ const app = {
      * 4) **Gutter HTML** must never pass through full-document `sanitizeSourceHtml` (strips `.source-line-row`). `cleanupSourceEditorBoldHtml` skips full sanitize when gutters are present; flatten inlines only inside `.source-line-text`.
      * 5) **Persist**: prefer v2 JSON from {@link editorPassageToStoredCanonical}; if round-trip would drop gutters, flush keeps live HTML (see flush body).
      * 6) **Line count / Lab sync**: one **layout** row per simulated printed line at current insert width; Lab uses {@link formatStructuredPassageHtml} / {@link expandStructuredPassageLineEntries} from the same JSON as #ai-input after flush. Paragraph spacing uses real stored boundaries (`paragraphStart` / ¶), not blank gutter rows.
-     * 7) **Teacher controls** should compose without hidden cross-talk: (a) **Insert width** slider/box — meta `pdfInsertWidthCh` + CSS `--exam-passage-max-width` only; flush uses `{ skipAutomaticReflow }`, resync uses `{ skipRepair }` so insert-width passes do not merge segments or run intro auto-reflow. (b) **¶ Paragraph** — toggles `paragraphStart` / structural split (stored segments). (c) **Enter / Backspace** — soft vs Shift+Enter paragraph split; Backspace merges rows at line start. (d) **Reflow (natural wrap)** after width changes repacks stored lines — not {@link repairBakedPassageInLessonStorage} unless the teacher runs an explicit repair path.
+     * 7) **Teacher controls** should compose without hidden cross-talk: (a) **Insert width** slider/box — meta `pdfInsertWidthCh` + CSS `--exam-passage-max-width` only; {@link flushAiInputToLessonSourceIfEditable} does **not** run intro short-line reflow unless `applyShortHeadReflow: true` (that reflow strips inline markup). Resync uses `{ skipRepair }` so insert-width passes do not merge segments. (b) **¶ Paragraph** — toggles `paragraphStart` / structural split (stored segments). (c) **Enter / Backspace** — soft vs Shift+Enter paragraph split; Backspace merges rows at line start. (d) **Reflow (natural wrap)** after width changes repacks stored lines — not {@link repairBakedPassageInLessonStorage} unless the teacher runs an explicit repair path.
      */
     PASSAGE_STRUCTURE_VERSION: 2,
     /** Exam-style gutter column: show line id every N booklet lines (WJEC-style: 5, 10, 15…). */
@@ -5222,6 +5253,7 @@ const app = {
      * Persist #c1-passage-insert-width-ch into meta before layout. Teachers often change ch then click Booklet line without blurring the field — onchange never ran, meta stayed stale, reflow used the wrong width and applyExamPassageInsertWidthCh overwrote the input from meta.
      */
     syncPdfInsertWidthChFromDomInput: function() {
+        if(typeof app._suppressAdminInputFlushOnce !== "undefined" && app._suppressAdminInputFlushOnce) return;
         const el = document.getElementById("c1-passage-insert-width-ch");
         const rngEl = document.getElementById("c1-passage-insert-width-range");
         if(!el || !appData) return;
@@ -5328,7 +5360,11 @@ const app = {
     /** Column width (ch) for simulating printed lines: must match {@link applyExamPassageInsertWidthCh} so gutters split at the same width as `--exam-passage-max-width`. */
     getPassageColumnWidthChForLayout: function() {
         try {
-            if(typeof app.syncPdfInsertWidthChFromDomInput === "function") app.syncPdfInsertWidthChFromDomInput();
+            /**
+             * Do **not** call {@link syncPdfInsertWidthChFromDomInput} here — {@link ui.renderLab} runs **before** {@link syncAdminAiInputFromLesson} during {@link ui.init}.
+             * Default `value="96"` on #c1-passage-insert-width-ch then overwrote imported {@link appData.meta.pdfInsertWidthCh} (e.g. 77) with 96, the box showed 96 after Load JSON, and WJEC ticks / reflow used the wrong ch until the teacher nudged the control.
+             * Sliders/inputs commit meta via {@link applyExamPassageInsertWidthCh} / {@link syncPdfInsertWidthChFromDomInput} on interaction.
+             */
             let ch = 96;
             const m = appData && appData.meta;
             if(m && m.pdfInsertWidthCh != null && Number.isFinite(Number(m.pdfInsertWidthCh))) {
@@ -5368,6 +5404,10 @@ const app = {
     EXAM_SPLIT_VS_INSERT_CH_FRAC: 1,
     /** Characters subtracted after `frac * ch`. Zero lets simulated lines fill the dashed column; a small pad only helped rare proportional-font double-wraps and made rows look systematically short vs Insert width. */
     EXAM_SPLIT_COLUMN_PAD_CHARS: 0,
+    /** Shrink canvas px budget vs CSS `Nch` so nowrap rows rarely spill past the dashed insert. Too low = large gap between text end and dashed line while width looks “wide”. */
+    EXAM_CANVAS_WRAP_INNER_PX_FRAC: 0.985,
+    /** If a whole word is only slightly wider than the inner px budget (measurement drift), keep the word on one row instead of {@link splitLongToken} letter-splitting (“t” | “he”). */
+    EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE: 1.1,
     /** Width of one `ch` unit (digit “0”) for `element`’s computed font — maps measured px ↔ Insert width box. */
     measurePassageChPxFromElement: function(el) {
         if(!el || !el.ownerDocument) return 8;
@@ -5591,6 +5631,25 @@ const app = {
         if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
     },
     /**
+     * After Load JSON / unified paste: sync Insert width controls + `--exam-passage-max-width` from {@link appData.meta}, then rebuild C1 booklet HTML from canonical so row splits match saved **pdfInsertWidthCh** (avoids dashed line at Nch while rows were wrapped tighter, and makes slider changes affect layout again via {@link resyncC1PassageEditorWithInsertWidth}).
+     */
+    finishC1PassageLayoutAfterLessonLoad: function() {
+        if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
+        if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+        if(typeof appData === "undefined" || !appData) return;
+        const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
+        if(appData.component === 2) {
+            if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st);
+            return;
+        }
+        if(st.trim() && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st)) {
+            if(typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
+        } else if(st.trim() && typeof app.setAiInputValue === "function") {
+            app.setAiInputValue(st);
+        }
+        if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+    },
+    /**
      * Debounced: flush #ai-input → canonical, {@link repairBakedPassageInLessonStorage}, {@link setAiInputValue}, {@link ui.refreshSourceDisplay} so Insert width drags re-split booklet rows in **both** editor and Lab (same path as blur {@link applyPassageInsertWidthChFromInput}).
      */
     schedulePassageInsertWidthRelayout: function() {
@@ -5604,7 +5663,7 @@ const app = {
                 if(typeof appData.sourceText !== "string" || !app.isStructuredPassageSource(appData.sourceText)) return;
                 const ai = document.getElementById("ai-input");
                 if(!ai || !/source-with-line-numbers[\s\S]*source-line-row/i.test(ai.innerHTML || "")) return;
-                if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable({ skipAutomaticReflow: true });
+                if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
                 if(typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
                 if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
                 if(typeof ui !== "undefined" && ui.refreshSourceDisplay && typeof appData.sourceText === "string") ui.refreshSourceDisplay(appData.sourceText);
@@ -5639,10 +5698,11 @@ const app = {
         appData.meta.pdfInsertWidthCh = v;
         app.applyExamPassageInsertWidthCh();
         try {
-            if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable({ skipAutomaticReflow: true });
+            if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
             if(opts.skipEditorRebuild) {
                 const widthChanged = prevMetaCh == null || Math.round(prevMetaCh) !== Math.round(v);
-                if(widthChanged && typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
+                const forceRelayout = opts.forceRelayout === true;
+                if((widthChanged || forceRelayout) && typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
                 if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
                 if(typeof ui !== "undefined" && ui.refreshSourceDisplay && typeof appData.sourceText === "string") ui.refreshSourceDisplay(appData.sourceText);
                 if(typeof app.save === "function") app.save();
@@ -5793,6 +5853,35 @@ const app = {
             if(!changed) break;
         }
         return typeof app._mergeCollocationHanglineParts === "function" ? app._mergeCollocationHanglineParts(out) : out;
+    },
+    /**
+     * {@link _mergeOrphanSoftBreakParts} runs **after** insert-width wrapping and can glue several segments into **one** string
+     * that still exceeds the dashed column — {@link splitPlainIntoVisualLinesByCh} then emitted multiple lines, merge undid that,
+     * and nowrap on `.source-line-text` showed one horizontal “mile-long” row (often the **next** paragraph after a clean one).
+     * Re-run width split on each merged segment so every layout row stays within budget.
+     */
+    _resplitBookletSegmentsIfOrphanMergeOverflow: function(parts, splitMc) {
+        if(!parts || !parts.length) return parts || [];
+        const mc = typeof splitMc === "number" && Number.isFinite(splitMc) && splitMc > 0
+            ? splitMc
+            : (typeof app.getPassageReflowTargetChars === "function" ? app.getPassageReflowTargetChars() : 72);
+        const splitFn = typeof app.splitPlainIntoVisualLinesByCh === "function" ? app.splitPlainIntoVisualLinesByCh : null;
+        if(!splitFn) return parts;
+        const out = [];
+        parts.forEach(function(p) {
+            const s = String(p || "").replace(/\s+/g, " ").trim();
+            if(!s.length) return;
+            const sub = splitFn(s, mc);
+            if(sub && sub.length > 1) {
+                sub.forEach(function(l) {
+                    const t = String(l || "").trim();
+                    if(t) out.push(t);
+                });
+            } else {
+                out.push(s);
+            }
+        });
+        return out.length ? out : parts;
     },
     /**
      * After expand/newlines, two **adjacent** layout rows can still be one sentence (“work on” | “the land …”) split across
@@ -6153,9 +6242,10 @@ const app = {
     },
     /**
      * Many tiny v2 rows + low median length ⇒ insert-width splits were flushed into storage (often after narrowing ch). True even when meta.sourceLineBasis is still "pdfImport" — real PDF extracts rarely produce 40+ rows each &lt; ~25 chars with no full-width line.
+     * Short excerpts (8–21 rows) used to never match: the minimum row count was 14 but rules then required ≥20 rows, so teacher-saved JSON with ~11 flushed gutter rows reloaded as mid-word/orphan lines.
      */
     _passageV2LooksLikeBakedWidthFragments: function(o) {
-        if(!o || !Array.isArray(o.lines) || o.lines.length < 14) return false;
+        if(!o || !Array.isArray(o.lines) || o.lines.length < 8) return false;
         const lens = [];
         for(let i = 0; i < o.lines.length; i++) {
             const n = app.htmlFragmentToPlainText(o.lines[i].html || "").replace(/\s+/g, " ").trim().length;
@@ -6168,6 +6258,18 @@ const app = {
         const shortCut = Math.max(36, Math.round(maxCh * 0.52));
         const shortRows = lens.filter(function(len) { return len <= shortCut; }).length;
         const ratioShort = shortRows / lens.length;
+        /** ≤13 rows: teacher flush often yields short counts — old minimum was 14 with no matching rule. */
+        if(o.lines.length >= 8 && o.lines.length <= 13) {
+            if(median <= 22 && ratioShort >= 0.62 && maxLen <= Math.round(maxCh * 1.15)) return true;
+            if(o.lines.length >= 10 && median <= 24 && ratioShort >= 0.72 && maxLen <= Math.round(maxCh * 1.12)) return true;
+            return false;
+        }
+        /** 14–19 rows: fell between “min 14 lines” and rules that required ≥20 stored rows — never collapsed before. */
+        if(o.lines.length >= 14 && o.lines.length <= 19) {
+            if(median <= 22 && ratioShort >= 0.62 && maxLen <= Math.round(maxCh * 1.15)) return true;
+            if(median <= 24 && ratioShort >= 0.68 && maxLen <= Math.round(maxCh * 1.15)) return true;
+            return false;
+        }
         if(o.lines.length >= 20 && ratioShort >= 0.78 && median <= 24) return true;
         if(o.lines.length >= 28 && median <= 16 && maxLen <= Math.max(48, Math.round(maxCh * 0.78))) return true;
         /** Some “long” glitch rows (~half a printed line) mix with one-word rows; median + ratio still indicate baked gutters. */
@@ -6310,7 +6412,7 @@ const app = {
     },
     /** On parse / ifNeeded: collapse when {@link _passageV2CollapseWidthBakeLikely} — same criteria as save path (includes PDF width-bake). */
     normalizeStructuredPassageV2HealBakedWidthFragments: function(o) {
-        if(!o || !Array.isArray(o.lines) || o.lines.length < 14) return o;
+        if(!o || !Array.isArray(o.lines) || o.lines.length < 8) return o;
         if(typeof app._passageV2CollapseWidthBakeLikely !== "function" || !app._passageV2CollapseWidthBakeLikely(o)) return o;
         return app.normalizeStructuredPassageV2CollapseExamVisualRowsToOneLine(o);
     },
@@ -6322,10 +6424,14 @@ const app = {
             const ver = o && (typeof o.v === "number" ? o.v : parseInt(String(o.v), 10));
             if(!o || !Number.isFinite(ver) || ver !== app.PASSAGE_STRUCTURE_VERSION || !Array.isArray(o.lines) || !o.lines.length) return null;
             for(let i = 0; i < o.lines.length; i++) {
-                const L = o.lines[i];
-                if(!L) return null;
-                const n = typeof L.n === "number" ? L.n : parseInt(String(L.n), 10);
-                if(!Number.isFinite(n)) return null;
+                let L = o.lines[i];
+                if(!L || typeof L !== "object") {
+                    o.lines[i] = { n: i + 1, html: "" };
+                    continue;
+                }
+                let n = typeof L.n === "number" ? L.n : parseInt(String(L.n), 10);
+                if(!Number.isFinite(n)) L.n = i + 1;
+                else L.n = n;
                 if(typeof L.html !== "string") L.html = L.html == null ? "" : String(L.html);
             }
             return app.normalizeStructuredPassageV2IfNeeded(o);
@@ -6337,13 +6443,52 @@ const app = {
         return !!app.parseStructuredPassageSource(s);
     },
     /**
+     * When lesson JSON is reloaded, {@link app.repair} used to treat any `sourceText` containing `&lt;` as “HTML” and run {@link sanitizeSourceHtml} on the **whole** string. Passage v2 is JSON whose `lines[].html` fields contain `&lt;b&gt;`… — the browser parsed those tags and **destroyed** the JSON, so the passage became one plain block. This path coerces a passage-shaped object/string into a strict v2 string without document-level sanitization.
+     */
+    coerceStructuredPassageSourceStringForRepair: function(s) {
+        try {
+            let o = s;
+            if(typeof o === "string") {
+                const t = String(o || "").replace(/^\uFEFF/, "").trim();
+                if(!t.startsWith("{") || !/"lines"\s*:\s*\[/i.test(t)) return null;
+                o = JSON.parse(t);
+            }
+            if(!o || typeof o !== "object" || !Array.isArray(o.lines) || !o.lines.length) return null;
+            const ver = typeof o.v === "number" && Number.isFinite(o.v) ? o.v : parseInt(String(o.v), 10);
+            if(!Number.isFinite(ver) || ver !== app.PASSAGE_STRUCTURE_VERSION) return null;
+            const lines = [];
+            for(let i = 0; i < o.lines.length; i++) {
+                const L = o.lines[i];
+                if(!L || typeof L !== "object") {
+                    lines.push({ n: i + 1, html: "" });
+                    continue;
+                }
+                let n = typeof L.n === "number" ? L.n : parseInt(String(L.n), 10);
+                if(!Number.isFinite(n)) n = i + 1;
+                let html = L.html;
+                if(typeof html !== "string") html = html == null ? "" : String(html);
+                const row = { n: n, html: html };
+                if(L.paragraphStart) row.paragraphStart = true;
+                lines.push(row);
+            }
+            const fixed = { v: app.PASSAGE_STRUCTURE_VERSION, lines: lines, examMargin: !!o.examMargin };
+            if(o.headHtml != null && String(o.headHtml).trim()) fixed.headHtml = String(o.headHtml).trim();
+            if(o.tailHtml != null && String(o.tailHtml).trim()) fixed.tailHtml = String(o.tailHtml).trim();
+            const sequential = typeof app.normalizeStructuredPassageV2Sequential === "function" ? app.normalizeStructuredPassageV2Sequential(fixed) : fixed;
+            const normalized = typeof app.normalizeStructuredPassageV2IfNeeded === "function" ? app.normalizeStructuredPassageV2IfNeeded(sequential) : sequential;
+            return typeof app.serializeStructuredPassageV2 === "function" ? app.serializeStructuredPassageV2(normalized) : null;
+        } catch(eC) {
+            return null;
+        }
+    },
+    /**
      * Count of passage rows after expand/split — layout units for PDF alignment and quoting. Lab and Editing Suite margins both use WJEC 5/10/15 ticks on `data-src-line` booklet indices.
      * Same expansion as Lab / `formatStructuredPassageHtml`. For non-JSON plain text, falls back to counting non-empty newline-separated chunks.
      */
     countStoredPassageSegments: function(stored) {
         const o = app.parseStructuredPassageSource(stored);
         if(o && Array.isArray(o.lines) && o.lines.length && typeof app.expandStructuredPassageLineEntries === "function") {
-            const exp = app.expandStructuredPassageLineEntries(o);
+            const exp = app.expandStructuredPassageLineEntries(o, { forceInsertWidthSplitForEditor: true });
             if(exp && exp.length) return exp.length;
         }
         const s = String(stored || "").trim();
@@ -6611,11 +6756,12 @@ const app = {
     },
     /**
      * Single expansion + gutter HTML path for Lab and Editing Suite — avoids drifting opts ({@link useStoredPassageRichHtml} vs {@link editorPassageMode} alone) producing different `.source-line-row` sets.
-     * @param {boolean} editorPassageMode — gutter digits `contenteditable=false` in admin editor only.
+     * **Always** passes `{ forceInsertWidthSplitForEditor: true }` into {@link expandStructuredPassageLineEntries} so Lab and teacher see the **same** insert-width row count (otherwise Lab kept PDF-strict / skip-split paths and one stored paragraph became one `.source-line-row` — a “mile-long” line vs the Editing Suite).
+     * @param {boolean} editorPassageMode — gutter digits `contenteditable=false` in admin editor only; “All line #s” only when this is true and meta says so.
      */
     _buildStructuredPassageLineBlocksHtml: function(o, editorPassageMode) {
         if(!o || !Array.isArray(o.lines)) return "";
-        const expanded = app.expandStructuredPassageLineEntries(o, editorPassageMode ? { forceInsertWidthSplitForEditor: true } : undefined);
+        const expanded = app.expandStructuredPassageLineEntries(o, { forceInsertWidthSplitForEditor: true });
         if(!expanded.length) return "";
         const m = appData && appData.meta;
         const showEveryBookletLineInTeacherEditor = !!(editorPassageMode && m && m.passageShowAllBookletLinesInEditor);
@@ -6629,7 +6775,7 @@ const app = {
             bookletIndependentStrip: true
         });
     },
-    /** Editing Suite: same WJEC margin as Lab (**5, 10, 15…**). Unlike student Lab, the teacher editor **always** runs insert-width split ({@link expandStructuredPassageLineEntries} `forceInsertWidthSplitForEditor`) so **each grey number ≈ one simulated printed line** — Strict PDF “one stored row per print line” is not skipped here (otherwise one long row soft-wraps under a single tick). Rich text in `.source-line-text`; gutter nums contenteditable=false. */
+    /** Editing Suite: same WJEC margin as Lab (**5, 10, 15…**). Both use insert-width split ({@link expandStructuredPassageLineEntries} `forceInsertWidthSplitForEditor`) so **each grey number ≈ one simulated printed line**. Rich text in `.source-line-text`; gutter nums contenteditable=false in admin. */
     structuredPassageToEditorHtml: function(o, opts) {
         opts = opts || {};
         if(!o || !Array.isArray(o.lines)) return "";
@@ -6662,7 +6808,10 @@ const app = {
      * Sample `.source-line-text` in the editor for canvas wrap math ({@link splitPlainIntoVisualLinesByCh}).
      */
     _getBookletSourceLineTextMetricsForWrap: function() {
-        const cell = document.querySelector("#modal-admin #ai-input.source-editor .source-line-text")
+        /** Lab behind the modal must drive `ch` px — editor-first sampling made breaks/Lab disagree and tiny innerPx → {@link splitLongToken} split “the” into single letters. */
+        const cell = document.querySelector("#source-lab-wrap #source-inline .source-line-text")
+            || document.querySelector("#source-inline .source-line-text")
+            || document.querySelector("#modal-admin #ai-input.source-editor .source-line-text")
             || document.querySelector("#ai-input .source-line-text")
             || document.querySelector(".source-with-line-numbers .source-line-text");
         if(!cell || !cell.ownerDocument || !cell.ownerDocument.defaultView) return null;
@@ -6688,7 +6837,9 @@ const app = {
         const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
         const max = Math.max(12, Math.min(wCap, Math.round(Number(maxCh))));
         const borderBoxPx = max * m.chPx;
-        return Math.max(24, borderBoxPx - m.bl - m.br - m.pl - m.pr);
+        const inner = Math.max(24, borderBoxPx - m.bl - m.br - m.pl - m.pr);
+        const frac = typeof app.EXAM_CANVAS_WRAP_INNER_PX_FRAC === "number" ? app.EXAM_CANVAS_WRAP_INNER_PX_FRAC : 0.985;
+        return Math.max(24, Math.floor(inner * Math.min(1, Math.max(0.78, frac))));
     },
     /**
      * Split plain text into simulated **printed** lines matching browser wrap at `maxCh` **CSS ch** (glyph widths via canvas), not raw character counts — Latin prose often fits ~3–8% more letters per line than `maxCh` characters, which looked like “text stops short of the dashed edge.”
@@ -6714,6 +6865,7 @@ const app = {
         const max = Math.max(12, Math.min(wCap, Math.round(maxCh)));
         const metrics = typeof app._getBookletSourceLineTextMetricsForWrap === "function" ? app._getBookletSourceLineTextMetricsForWrap() : null;
         const innerPx = metrics && typeof app._bookletInnerMaxPxForInsertCh === "function" ? app._bookletInnerMaxPxForInsertCh(max, metrics) : null;
+        const wordTol = typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 1.1;
         if(innerPx != null && typeof document !== "undefined") {
             try {
                 const canvas = document.createElement("canvas");
@@ -6725,7 +6877,13 @@ const app = {
                     };
                     const splitLongToken = function(tok) {
                         const out = [];
-                        let rest = String(tok || "");
+                        let rest = String(tok || "").trim();
+                        if(!rest.length) return out;
+                        /** Avoid one-letter rows when the whole token is only slightly over budget (rounding / font mismatch). */
+                        if(measure(rest) <= innerPx * wordTol && rest.length <= 96) {
+                            out.push(rest);
+                            return out;
+                        }
                         while(rest.length) {
                             if(measure(rest) <= innerPx) {
                                 out.push(rest);
@@ -6739,23 +6897,34 @@ const app = {
                                 }
                             }
                             if(cut < 1) cut = 1;
+                            /** Prefer ≥2 chars per chunk when more remains — stops “t” + “he” for normal English words. */
+                            if(cut === 1 && rest.length > 2 && measure(rest.slice(0, 2)) <= innerPx * 1.15) cut = 2;
                             out.push(rest.slice(0, cut));
-                            rest = rest.slice(cut);
+                            rest = rest.slice(cut).trim();
                         }
                         return out;
                     };
-                    const words = text.split(" ");
+                    const words = text.split(/\s+/).filter(Boolean);
                     const lines = [];
                     let cur = "";
                     words.forEach(function(w) {
                         if(!w) return;
                         if(measure(w) > innerPx) {
+                            if(measure(w) <= innerPx * wordTol && w.length <= 96) {
+                                if(cur) {
+                                    lines.push(cur.trim());
+                                    cur = "";
+                                }
+                                lines.push(w);
+                                return;
+                            }
                             if(cur) {
                                 lines.push(cur.trim());
                                 cur = "";
                             }
                             splitLongToken(w).forEach(function(chunk) {
-                                lines.push(chunk.trim());
+                                const t = String(chunk || "").trim();
+                                if(t) lines.push(t);
                             });
                             return;
                         }
@@ -6771,8 +6940,8 @@ const app = {
                 }
             } catch(ePx) {}
         }
-        /** Fallback: legacy character budget (no DOM / canvas). */
-        const words = text.split(" ");
+        /** Fallback: legacy character budget (no DOM / canvas). Avoid slicing normal words mid-token unless the word is extremely long. */
+        const words = text.split(/\s+/).filter(Boolean);
         const lines = [];
         let cur = "";
         words.forEach(function(w) {
@@ -6782,7 +6951,12 @@ const app = {
                     lines.push(cur.trim());
                     cur = "";
                 }
-                for(let i = 0; i < w.length; i += max) lines.push(w.slice(i, i + max));
+                if(w.length <= 24) {
+                    lines.push(w);
+                    return;
+                }
+                const chunkSize = Math.max(12, max);
+                for(let i = 0; i < w.length; i += chunkSize) lines.push(w.slice(i, i + chunkSize));
                 return;
             }
             const cand = cur ? cur + " " + w : w;
@@ -6931,9 +7105,29 @@ const app = {
         return out;
     },
     /**
+     * Separator between adjacent **stored** row plains when building the prose stream for {@link reflowStructuredPassageV2BodyToNaturalInsertWidth}.
+     * A **space** keeps width-split fragments reflowable as one sentence. A **newline** yields separate {@link softChunks} so short tails stay isolated when the next row still looks like its own line (ends with sentence punctuation, or a tiny dialogue pronoun line such as “he” / “she”).
+     * Avoids both glued tails (“well-intentioned.” climbing onto the previous row) and newline-between-every-row stub storms.
+     */
+    _reflowNaturalJoinSeparatorBetweenRowPlains: function(prevPlain, nextPlain) {
+        const rawNext = String(nextPlain || "").replace(/\r\n/g, "\n");
+        const lines = rawNext.split("\n").map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
+        const tail = lines.length ? lines[lines.length - 1] : "";
+        if(!tail) return " ";
+        const endsWithSentencePunct = function(s) {
+            const t = String(s || "").replace(/\s+$/g, "").trim();
+            if(!t) return false;
+            return /[.!?…]['\u2019\u201D)\]]*\s*$/i.test(t) || /[.!?…]\s*$/i.test(t);
+        };
+        if(endsWithSentencePunct(tail)) return "\n";
+        const lastWc = tail.split(/\s+/).filter(Boolean).length;
+        if(lastWc === 1 && tail.length <= 5 && /^[a-z]{2,4}$/i.test(tail) && /^(he|she|we)$/i.test(tail)) return "\n";
+        return " ";
+    },
+    /**
      * Like {@link reflowStructuredPassageV2BodyToInsertWidth} but uses only {@link splitPlainIntoVisualLinesByCh} per paragraph — **row count can grow or shrink** with Insert width. Same ¶ boundaries and char budget as gutter split; strips inline markup (plain chunks).
-     * Does **not** run {@link _mergeOrphanSoftBreakParts} on wrapped segments — that pass reattached short lines to the previous row and made Reflow feel like **earlier** lines were rewritten or stubs **rejoined**.
-     * **Manual soft breaks:** plain Enter inserts &lt;br&gt; in stored HTML; {@link htmlFragmentToPlainForLineSplitting} yields embedded \\n **within** each row. Rows are joined with spaces for reflow; embedded \\n still yield separate {@link softChunks}. Joining **between** every stored v2 row with newline caused stub fragmentation after width-split saves.
+     * After canvas wrap, runs {@link _mergeOrphanSoftBreakParts} **per soft chunk** (each chunk is one &lt;br&gt;-bounded slice — same as gutter split). A single merge across **all** chunks glued manual line breaks back together, dropped layout rows, and WJEC ticks stopped “re-numbering” cleanly after ¶ / dialogue breaks.
+     * **Manual soft breaks:** plain Enter inserts &lt;br&gt; in stored HTML; {@link htmlFragmentToPlainForLineSplitting} yields embedded \\n **within** each row. Between stored rows, {@link _reflowNaturalJoinSeparatorBetweenRowPlains} picks space vs newline so width-split lines can merge while punctuated or tiny-pronoun tails stay on their own chunk. Joining **every** row with only spaces glued isolated lines; joining **every** row with newlines caused stub storms.
      * **Strict PDF “explosion”:** when stats look like one word per stored row and **no** stored line has {@link paragraphStart} (Shift+Enter / ¶), we clear indent-derived ¶ flags for one pass so lines can pack. If **any** stored row already has `paragraphStart: true`, we **do not** coalesce — teachers’ paragraph breaks survive reflow.
      */
     reflowStructuredPassageV2BodyToNaturalInsertWidth: function(structured, splitMaxChars) {
@@ -6998,10 +7192,21 @@ const app = {
                 linePlains.push(pl);
             }
             /**
-             * Join rows with **spaces** so insert-width width-split fragments reflow as **one prose stream** — newline-between-rows made **every** flushed gutter row a hard chunk (“stub storm”: “life but”, “re him…” mid-word).
-             * Teacher **plain Enter** (`<br>`) lives **inside** {@link htmlFragmentToPlainForLineSplitting} as embedded \\n within **one** row’s string — those \\n are preserved **before** join and split out as {@link softChunks}.
+             * Join adjacent stored rows with {@link _reflowNaturalJoinSeparatorBetweenRowPlains} — spaces for mid-sentence width splits; newlines when the **next** row’s last line ends a sentence or is an isolated “he”/“she”/“we” tail so “well-intentioned.” and “he?” do not fight reflow.
+             * Embedded \\n from **within** a row (plain Enter / &lt;br&gt;) stay in each chunk and still split out as {@link softChunks}.
              */
-            let mergedRun = linePlains.map(function(s) { return String(s || "").replace(/\r\n/g, "\n"); }).join(" ");
+            let mergedParts = [];
+            for(let ji = 0; ji < linePlains.length; ji++) {
+                const chunk = String(linePlains[ji] || "").replace(/\r\n/g, "\n");
+                if(ji === 0) mergedParts.push(chunk);
+                else {
+                    const sep = typeof app._reflowNaturalJoinSeparatorBetweenRowPlains === "function"
+                        ? app._reflowNaturalJoinSeparatorBetweenRowPlains(linePlains[ji - 1], linePlains[ji])
+                        : " ";
+                    mergedParts.push(sep + chunk);
+                }
+            }
+            let mergedRun = mergedParts.join("");
             mergedRun = mergedRun.replace(/\n[ \t\u00a0]*\n+/g, "\n").replace(/\n{2,}/g, "\n").trim();
             const softChunks = mergedRun.split(/\n/).map(function(seg) {
                 return seg.replace(/[ \t\u00a0]+/g, " ").trim();
@@ -7020,7 +7225,10 @@ const app = {
                 const chunk = softChunks[sci];
                 let segs = typeof app.splitPlainIntoVisualLinesByCh === "function" ? app.splitPlainIntoVisualLinesByCh(chunk, ch) : null;
                 if(!segs || !segs.length) return null;
-                /** Do **not** {@link _mergeOrphanSoftBreakParts} here — same failure mode as teacher gutters: short outliers (“asked.”, dialogue tails) were glued onto the previous simulated line and teachers saw **earlier** lines shift / stubs **rejoin** on Reflow. Trust canvas/word wrap only. */
+                if(segs.length > 1 && typeof app._mergeOrphanSoftBreakParts === "function")
+                    segs = app._mergeOrphanSoftBreakParts(segs);
+                if(typeof app._resplitBookletSegmentsIfOrphanMergeOverflow === "function")
+                    segs = app._resplitBookletSegmentsIfOrphanMergeOverflow(segs, ch);
                 for(let sj = 0; sj < segs.length; sj++) newParts.push(segs[sj]);
             }
             if(!newParts.length) return null;
@@ -7152,9 +7360,54 @@ const app = {
         if(typeof app.save === "function") app.save();
     },
     /**
+     * One-click workflow: {@link applyPassageInsertWidthChFromInput} (commits #c1-passage-insert-width-ch to meta + flush + optional resync) + {@link reflowC1PassageBodyToNaturalInsertWidthCh}.
+     * Uses {@link applyPassageInsertWidthChFromInput} instead of {@link syncPdfInsertWidthChFromDomInput} so Insert width still saves when {@link app._suppressAdminInputFlushOnce} is set after JSON load (syncPdf short-circuits and meta/CSS stayed stale — reflow looked like a no-op).
+     * @param {{ silent?: boolean }} [opts] — pass `{ silent: true }` to suppress alerts (rare).
+     */
+    syncC1PassageLayoutInsertWidthAndNaturalReflow: function(opts) {
+        opts = opts || {};
+        const silent = !!opts.silent;
+        if(typeof appData === "undefined" || !appData || appData.component === 2) {
+            if(!silent) alert("Use this in Component 1 (single passage).");
+            return;
+        }
+        try {
+            if(app._passageInsertRelayoutTimer) {
+                clearTimeout(app._passageInsertRelayoutTimer);
+                app._passageInsertRelayoutTimer = null;
+            }
+        } catch(eT) {}
+        const prevFlushSuppress = app._suppressAdminInputFlushOnce;
+        try {
+            app._suppressAdminInputFlushOnce = false;
+            if(typeof app.applyPassageInsertWidthChFromInput === "function") {
+                app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true });
+            } else {
+                if(typeof app.syncPdfInsertWidthChFromDomInput === "function") app.syncPdfInsertWidthChFromDomInput();
+                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+                if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
+            }
+            if(typeof app.reflowC1PassageBodyToNaturalInsertWidthCh === "function") {
+                app.reflowC1PassageBodyToNaturalInsertWidthCh({ silent: silent });
+            } else if(!silent) {
+                alert("Reflow is not available — reload the page (hard refresh) so architect_v131 includes the latest script.");
+            }
+            /** Reflow already refreshes; repeat with explicit canonical + renderLab so Evidence Lab #source-inline cannot stay on stale selection HTML. */
+            const stCanon = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay(stCanon);
+            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+        } catch(eSync) {
+            if(!silent) alert("Sync passage layout failed: " + (eSync && eSync.message ? eSync.message : String(eSync)));
+        } finally {
+            try {
+                app._suppressAdminInputFlushOnce = prevFlushSuppress;
+            } catch(eFs) {}
+        }
+    },
+    /**
      * Expand stored rows into one layout row per **simulated printed line** at insert width (ch). PDF-import merges become many rows so each line gets a booklet index and WJEC ticks track screen lines.
      * @param {number} [maxChars] — omit to use {@link getPassageColumnWidthChForLayout} (same as Lab column).
-     * @param {{skipOrphanSegmentMerge?: boolean}} [gutterOpts] — teacher Editing Suite passes `{ skipOrphanSegmentMerge: true }` so {@link _mergeOrphanSoftBreakParts} does not **remove** ch-split segments and desync margin ticks.
+     * @param {{skipOrphanSegmentMerge?: boolean}} [gutterOpts] — set `skipOrphanSegmentMerge: true` to keep every canvas segment (rare); default runs {@link _mergeOrphanSoftBreakParts} so one-word hang lines rejoin and WJEC numbers stay aligned with readable lines.
      */
     splitLongRowsForBookletLineGutter: function(rows, maxChars, gutterOpts) {
         if(!rows || !rows.length) return rows || [];
@@ -7184,9 +7437,14 @@ const app = {
             const rowStart = nextBooklet != null ? Math.max(fallbackStart, nextBooklet) : fallbackStart;
             let segs = [];
             hardParts.forEach(function(part) {
-                let partSegs = part.length <= splitMc ? [part] : app.splitPlainIntoVisualLinesByCh(part, splitMc);
+                /** Always run {@link splitPlainIntoVisualLinesByCh} (canvas width), not a raw char-length shortcut. A segment can be **under** `splitMc` characters yet still exceed the inner pixel budget — skipping wrap forced one wide line where the insert would wrap twice (PDF had two lines; booklet numbers trailed by one). */
+                let partSegs = typeof app.splitPlainIntoVisualLinesByCh === "function"
+                    ? app.splitPlainIntoVisualLinesByCh(part, splitMc)
+                    : (part.length <= splitMc ? [part] : null);
                 if(!partSegs || !partSegs.length) return;
                 if(partSegs.length > 1 && typeof app._mergeOrphanSoftBreakParts === "function" && !(gutterOpts && gutterOpts.skipOrphanSegmentMerge)) partSegs = app._mergeOrphanSoftBreakParts(partSegs);
+                if(typeof app._resplitBookletSegmentsIfOrphanMergeOverflow === "function")
+                    partSegs = app._resplitBookletSegmentsIfOrphanMergeOverflow(partSegs, splitMc);
                 partSegs.forEach(function(s) { segs.push(s); });
             });
             /** Orphan merge runs **per** hard chunk only — never across embedded \\n (teacher soft breaks). */
@@ -7295,7 +7553,7 @@ const app = {
             var finishEd = typeof app.applyPassageBookletDisplayOffsetToRows === "function"
                 ? function(rows) { return app.applyPassageBookletDisplayOffsetToRows(rows); }
                 : function(rows) { return rows; };
-            return finishEd(app.splitLongRowsForBookletLineGutter(expanded, undefined, { skipOrphanSegmentMerge: true }));
+            return finishEd(app.splitLongRowsForBookletLineGutter(expanded, undefined));
         }
         /**
          * PDF imports: prefer **one layout row per stored print line** (skip split). Heuristic uses **layout indices** only (always 1…N consecutive before {@link applyPassageBookletDisplayOffsetToRows}) — never {@link getPassageBookletFirstLine}, so coarse ticks / booklet offset cannot flip split vs no-split.
@@ -7354,7 +7612,7 @@ const app = {
             ? app._buildStructuredPassageLineBlocksHtml(o, false)
             : "";
         if(!core && !hasHead && !hasTail) return "Source text not provided.";
-        /** Student/Lab gutter: same `.source-line-row` pipeline as {@link structuredPassageToEditorHtml} via {@link _buildStructuredPassageLineBlocksHtml} (`editorPassageMode` false). */
+        /** Student/Lab gutter: same `.source-line-row` pipeline as {@link structuredPassageToEditorHtml} via {@link _buildStructuredPassageLineBlocksHtml} (`editorPassageMode` false — sparse WJEC ticks unless teacher-only meta). */
         const bits = [];
         if(o.headHtml != null && String(o.headHtml).trim()) {
             const h = typeof app.sanitizePassageProseFragmentForDisplay === "function"
@@ -7790,7 +8048,7 @@ const app = {
         out = domNormalize(out);
         out = app.collapseEmptyParagraphsInAdminSource(out);
         out = domNormalize(out);
-        out = out.replace(/<\/?(?!p\b|br\b|b\b|strong\b|i\b|em\b|u\b)[^>]+>/gi, "");
+        out = out.replace(/<\/?(?!p\b|br\b|b\b|strong\b|i\b|em\b|u\b|mark\b|small\b|sup\b|sub\b)[^>]+>/gi, "");
         out = domNormalize(out);
         /* Drop attributes so <p style="font-weight:700"> or styled spans converted to p cannot bold a whole paragraph in the game. */
         out = out.replace(/<p\b[^>]*>/gi, "<p>");
@@ -7800,6 +8058,10 @@ const app = {
         out = out.replace(/<i\b[^>]*>/gi, "<i>");
         out = out.replace(/<em\b[^>]*>/gi, "<em>");
         out = out.replace(/<u\b[^>]*>/gi, "<u>");
+        out = out.replace(/<mark\b[^>]*>/gi, "<mark>");
+        out = out.replace(/<small\b[^>]*>/gi, "<small>");
+        out = out.replace(/<sup\b[^>]*>/gi, "<sup>");
+        out = out.replace(/<sub\b[^>]*>/gi, "<sub>");
         out = domNormalize(out);
         out = out.replace(/&nbsp;/gi, " ").trim();
         var prev = "";
@@ -10549,6 +10811,12 @@ const app = {
     /** Plain source resolution (no Component 2 dual-text / level-bank C2 mode). */
     getSourceTextNonC2: function() {
         const saved = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+        /** Canonical v2 JSON in `sourceText` must win — do not merge with `selection.text.source` length / “prefer selection” heuristics or Shift+Enter / ¶ edits look “out of sync” with Quote Select / Lab after save fixes left stale quote blobs. */
+        const savedTrim = typeof saved === "string" ? saved.trim() : "";
+        if(savedTrim && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(savedTrim)) {
+            const o = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(savedTrim) : null;
+            if(o && typeof app.structuredPassageToPlain === "function") return app.structuredPassageToPlain(o);
+        }
         const selText = appData && appData.selection && appData.selection.text && appData.selection.text.source
             ? appData.selection.text.source
             : "";
@@ -10580,9 +10848,22 @@ const app = {
      */
     getSourceTextNonC2Raw: function() {
         const saved = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
-        /** Always prefer canonical v2 JSON for display resolution. Otherwise longer(sel, saved) or selection-first heuristics can return gutter HTML or plain — formatSourceHtml then misses the structured branch and tryPhysicalPdfLineNumberedEntries collapses rows (only 5/10 ticks). */
-        if(saved && typeof app.parseStructuredPassageSource === "function" && app.parseStructuredPassageSource(saved.trim())) {
-            return saved.trim();
+        const savedTrim = typeof saved === "string" ? String(saved).replace(/^\uFEFF/, "").trim() : "";
+        /**
+         * Always prefer canonical passage storage for Lab / Quote Select. When JSON.parse fails (rare: smart quotes, truncation),
+         * we must **not** fall through to `selection.text.source` — that blob is often **stale gutter HTML** from an older lesson state.
+         * Lab then used raw HTML (mile-long `.source-line-row`s) while Editing Suite / reflow used v2 JSON → “Sync does nothing” / widths never aligned.
+         */
+        if(savedTrim && typeof app.parseStructuredPassageSource === "function") {
+            const parsedOk = app.parseStructuredPassageSource(savedTrim);
+            if(parsedOk) return savedTrim;
+            if(/^\s*\{/.test(savedTrim)) {
+                const coerced = typeof app.coerceStructuredPassageSourceStringForRepair === "function"
+                    ? app.coerceStructuredPassageSourceStringForRepair(savedTrim)
+                    : null;
+                if(coerced && String(coerced).trim()) return String(coerced).trim();
+                if(/"lines"\s*:\s*\[/i.test(savedTrim)) return savedTrim;
+            }
         }
         const selText = appData && appData.selection && appData.selection.text && appData.selection.text.source
             ? appData.selection.text.source
@@ -10605,6 +10886,9 @@ const app = {
         if(c0 && String(c0).trim()) chosen = (r0 && String(r0).trim()) ? String(r0).trim() : "";
         else if(c1 && String(c1).trim()) chosen = (r1 && String(r1).trim()) ? String(r1).trim() : "";
         else if(c2 && String(c2).trim()) chosen = (aiText && String(aiText).trim()) ? String(aiText).trim() : "";
+        /** Last resort: never prefer selection HTML when `sourceText` still looks like passage v2 JSON (see block above). */
+        if(chosen && savedTrim && /^\s*\{/.test(savedTrim) && /"lines"\s*:\s*\[/i.test(savedTrim) && chosen !== savedTrim)
+            return savedTrim;
         app._sourceWarn = !!preferSelection && !appData.isStandalone;
         if(!chosen) return "";
         if(appData && (!appData.sourceText || !appData.sourceText.trim()) && chosen) {
@@ -11087,9 +11371,29 @@ const app = {
             if(!Number.isFinite(pc) || pc < 36 || pc > pHi) delete safe.meta.pdfInsertWidthCh;
             else safe.meta.pdfInsertWidthCh = Math.max(36, Math.min(pHi, Math.round(pc)));
         }
-        let rawSource = typeof safe.sourceText === 'string' ? safe.sourceText : (defaultData.sourceText || "");
-        if(rawSource && app.isStructuredPassageSource && app.isStructuredPassageSource(rawSource)) {
-            safe.sourceText = String(rawSource).trim();
+        let rawSource = safe.sourceText != null ? safe.sourceText : (defaultData.sourceText || "");
+        if(typeof rawSource === "object" && rawSource !== null && Array.isArray(rawSource.lines) && typeof app.serializeStructuredPassageV2 === "function") {
+            try {
+                rawSource = app.serializeStructuredPassageV2(rawSource);
+            } catch(eObjSt) {
+                rawSource = "";
+            }
+        }
+        if(typeof rawSource !== "string") rawSource = defaultData.sourceText || "";
+        if(rawSource && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(rawSource)) {
+            try {
+                const oNorm = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(rawSource) : null;
+                if(oNorm && typeof app.serializeStructuredPassageV2 === "function") {
+                    safe.sourceText = String(app.serializeStructuredPassageV2(oNorm) || "").trim();
+                } else {
+                    safe.sourceText = String(rawSource).trim();
+                }
+            } catch(eNormSrc) {
+                safe.sourceText = String(rawSource).trim();
+            }
+        } else if(typeof rawSource === "string" && rawSource.trim().startsWith("{") && /"lines"\s*:\s*\[/i.test(rawSource)) {
+            const coerced = typeof app.coerceStructuredPassageSourceStringForRepair === "function" ? app.coerceStructuredPassageSourceStringForRepair(rawSource) : null;
+            safe.sourceText = (coerced && String(coerced).trim()) ? String(coerced).trim() : String(rawSource).trim();
         } else {
             if(rawSource && /source-with-line-numbers|source-line-(row|num|text)/i.test(rawSource)) rawSource = app.normalizeSourceText(rawSource);
             const hasHtml = rawSource && /<[a-z][a-z0-9]*[\s>]/i.test(rawSource);
@@ -11467,9 +11771,18 @@ const app = {
             });
         }
         safe.selection = app.repairSelection(safe.selection, { activeLevels: safe.settings.activeLevels, lessonItems: safe.items });
-        /* C1 only: merged selection passage is canonical; avoids stale short sourceText vs long selection.text.source after PDF import / older saves. */
+        /**
+         * C1: only pull from `selection.text.source` when `sourceText` is empty, or when the root passage is not structured but selection holds a valid v2 string.
+         * Blind overwrite used to replace a good loaded `sourceText` (booklet JSON) with a stale **plain** selection copy — after reload the passage became one undifferentiated text block.
+         */
         if(safe.component !== 2 && safe.selection && safe.selection.text && typeof safe.selection.text.source === "string" && safe.selection.text.source.trim()) {
-            safe.sourceText = safe.selection.text.source;
+            const st = typeof safe.sourceText === "string" ? safe.sourceText.trim() : "";
+            const sel = safe.selection.text.source.trim();
+            if(!st) {
+                safe.sourceText = safe.selection.text.source;
+            } else if(typeof app.isStructuredPassageSource === "function" && !app.isStructuredPassageSource(st) && app.isStructuredPassageSource(sel)) {
+                safe.sourceText = safe.selection.text.source;
+            }
         }
         safe.selection.items = safe.items;
         if(safe.settings.modulesActive && safe.settings.modulesActive.selection) safe.selection.enabled = true;
@@ -12765,6 +13078,9 @@ const ui = {
         const modal = document.getElementById(id);
         if(modal) modal.classList.add("open");
         if(id === "modal-source") { /* modal removed – no-op */ }
+        if(id === "modal-admin" && typeof app.applyExamPassageInsertWidthCh === "function") {
+            app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+        }
         if(id === "modal-admin" && typeof admin !== "undefined" && admin.syncSourceEditorMode) admin.syncSourceEditorMode();
         if(id === "modal-admin" && typeof admin !== "undefined" && admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
         if(id === "modal-admin" && typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
@@ -14062,7 +14378,7 @@ const ui = {
                 app.save();
             }
         }
-        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.getEffectiveNoQuotes(level) || c2ShortAnswer);
+        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.getEffectiveNoQuotes(level) || c2ShortAnswer || app.isTeacherTapRecordPassageMode());
         if((!sel.items.length || sel.items.length < 2) && !(tapSelectOnly && hasSourceEarly)) {
             if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
             const tPanel = document.getElementById("selection-top-panel");
@@ -14096,7 +14412,7 @@ const ui = {
         if(hasMultipleQuestions && !currentQId && questions.length) currentQId = questions[0].id || "q1";
         const usePerQuestionGoal = hasMultipleQuestions;
         const pointsGoal = app.getSelectionPointsGoalForLevel(level);
-        const tapHighlightEvidenceMode = c2ShortAnswer || (levelEntry && levelEntry.shortAnswersOnly === true) || app.getEffectiveTapText(level);
+        const tapHighlightEvidenceMode = c2ShortAnswer || (levelEntry && levelEntry.shortAnswersOnly === true) || app.getEffectiveTapText(level) || app.isTeacherTapRecordPassageMode();
         const evidenceGoalForUi = app.getSelectionEvidenceGoalForLevel(level);
         const distractorTarget = Math.max(0, parseInt(levelEntry.distractorCount, 10) || 0);
         const optionCount = Math.max(2, Math.min(20, pointsGoal + distractorTarget));
@@ -14262,7 +14578,7 @@ const ui = {
         })();
         correctItems = correctItems.filter(i => !chosenSet.has(app.quoteKey(getQuote(i))));
         correctItems = correctItems.filter((i, idx, arr) => arr.findIndex(x => app.quoteKey(getQuote(x)) === app.quoteKey(getQuote(i))) === idx);
-        const canPickFromText = (app.getEffectiveTapText(level) || app.getEffectiveNoQuotes(level) || c2ShortAnswer) && hasSource;
+        const canPickFromText = (app.getEffectiveTapText(level) || app.getEffectiveNoQuotes(level) || c2ShortAnswer || app.isTeacherTapRecordPassageMode()) && hasSource;
         const questionTextGlobal = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : app.getQuestionForLevel(level);
         const topPanel = document.getElementById("selection-top-panel");
         const noQuotesTopPanel = app.getEffectiveNoQuotes(level) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
@@ -17492,10 +17808,27 @@ const admin = {
         }
         if(!Array.isArray(appData.items)) appData.items = [];
         if(!Array.isArray(appData.selection.items) || appData.selection.items !== appData.items) appData.selection.items = appData.items;
-        if((appData.sourceText && appData.sourceText.trim()) && appData.selection && (!appData.selection.text || !appData.selection.text.source || !String(appData.selection.text.source).trim())) {
+        if(appData.sourceText && String(appData.sourceText).trim() && appData.selection) {
             if(!appData.selection.text) appData.selection.text = {};
-            appData.selection.text.source = appData.sourceText;
-            app.save();
+            const st = String(appData.sourceText).trim();
+            const sel = String(appData.selection.text.source || "").trim();
+            const stOk = typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st);
+            const selOk = sel && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(sel);
+            let needsSync = !sel || (stOk && !selOk);
+            if(!needsSync && stOk && selOk && st !== sel) {
+                try {
+                    const oSt = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(st) : null;
+                    const oSel = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(sel) : null;
+                    const ser = typeof app.serializeStructuredPassageV2 === "function" ? app.serializeStructuredPassageV2 : null;
+                    if(oSt && oSel && ser && ser(oSt) !== ser(oSel)) needsSync = true;
+                } catch(eSelCmp) {
+                    needsSync = true;
+                }
+            }
+            if(needsSync) {
+                appData.selection.text.source = appData.sourceText;
+                if(typeof app.save === "function") app.save();
+            }
         }
         const bank = app.getLevelBank();
         const anyFreeSelect = bank && Object.keys(bank).some(function(lvl) { return bank[lvl] && bank[lvl].freeSelectFromText === true; });
@@ -17726,6 +18059,66 @@ const admin = {
         t = app.repairKnownPdfWordJoins(t);
         return app.c2PooledHtmlFromRepairedPlain(t) || "";
     },
+    /** Raw lesson.sourceText may be a string or structured v2 object — normalize for import comparisons. */
+    incomingLessonSourceTextForCompare: function(lesson) {
+        if(!lesson || lesson.sourceText == null) return "";
+        const st = lesson.sourceText;
+        if(typeof st === "string") return st;
+        if(typeof st === "object" && st !== null && Array.isArray(st.lines) && typeof app.serializeStructuredPassageV2 === "function") {
+            try { return String(app.serializeStructuredPassageV2(st) || "").trim(); } catch(e) { return ""; }
+        }
+        return "";
+    },
+    /** Count stored rows with paragraphStart (for detecting AI JSON that dropped ¶ boundaries). */
+    countStructuredParagraphStarts: function(src) {
+        if(!src || typeof app.parseStructuredPassageSource !== "function") return 0;
+        try {
+            const o = app.parseStructuredPassageSource(String(src));
+            if(!o || !Array.isArray(o.lines)) return 0;
+            let n = 0;
+            for(let i = 0; i < o.lines.length; i++) {
+                const L = o.lines[i];
+                if(L && L.paragraphStart === true) n++;
+            }
+            return n;
+        } catch(e) {
+            return 0;
+        }
+    },
+    /** True if prev.sourceText holds v2 JSON, booklet gutter HTML, or another canonical layout — worth merging against AI output. */
+    passageWorthPreservingFromPrev: function(prev) {
+        if(!prev || typeof prev.sourceText !== "string" || !prev.sourceText.trim()) return false;
+        const s = prev.sourceText;
+        if(typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(s)) return true;
+        if(typeof app._storedCanonKeepsPassageLayout === "function" && app._storedCanonKeepsPassageLayout(s)) return true;
+        return false;
+    },
+    /** Rough layout richness: v2 line count or booklet gutter rows (for detecting AI-merged rows). */
+    getPassageLayoutLineRichness: function(src) {
+        if(src == null || src === "") return 0;
+        const t = String(src);
+        if(typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(t)) {
+            const o = app.parseStructuredPassageSource(t);
+            return o && Array.isArray(o.lines) ? o.lines.length : 0;
+        }
+        const m = t.match(/source-line-row/gi);
+        return m ? m.length : 0;
+    },
+    /** Incoming AI passage dropped soft rows / ¶ vs teacher snapshot (both structured, or incoming not structured). */
+    incomingPassageLosesC1Layout: function(prevSrc, incStr) {
+        const inc = String(incStr || "").trim();
+        const prev = String(prevSrc || "").trim();
+        if(!prev) return false;
+        const incOk = inc && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(inc);
+        if(!incOk) return true;
+        const rp = admin.getPassageLayoutLineRichness(prev);
+        const ri = admin.getPassageLayoutLineRichness(inc);
+        if(rp >= 3 && ri < rp) return true;
+        const np = admin.countStructuredParagraphStarts(prev);
+        const ni = admin.countStructuredParagraphStarts(inc);
+        if(np >= 1 && ni < np) return true;
+        return false;
+    },
     /**
      * After Load JSON / unified load: keep teacher-edited C2 passages when the model returns a flat sourceText only;
      * when sourceText uses —— Text —— / --- delimiters, split into 21st + 19th layout (fixes wrong pooled order).
@@ -17746,6 +18139,26 @@ const admin = {
         const copy = (v) => JSON.parse(JSON.stringify(v));
         const incLayout = incoming.component2Layout && typeof incoming.component2Layout === "object" ? incoming.component2Layout : {};
         const incomingHasPassages = !!(String(incLayout.resourcePaperText || "").trim() || String(incLayout.questionPaperPage3Text || "").trim());
+        /* C1: Keep teacher passage when AI flattens rows/¶, merges lines, or sends non-v2 text — not only when prev was strict JSON. */
+        let preservePassage = true;
+        try {
+            const elPres = document.getElementById("ai-json-preserve-passage");
+            if(elPres) preservePassage = !!elPres.checked;
+            else {
+                const vs = localStorage.getItem("architect.preservePassageOnAiJsonImport");
+                preservePassage = !(vs === "0" || vs === "false");
+            }
+        } catch(ePres) {}
+        if(preservePassage && prev && appData && appData.component !== 2 && prev.component !== 2) {
+            const prevSrc = typeof prev.sourceText === "string" ? prev.sourceText : "";
+            if(admin.passageWorthPreservingFromPrev(prev)) {
+                const incStr = admin.incomingLessonSourceTextForCompare(incoming);
+                if(admin.incomingPassageLosesC1Layout(prevSrc, incStr)) {
+                    appData.sourceText = prevSrc;
+                    if(appData.selection && appData.selection.text) appData.selection.text.source = appData.sourceText;
+                }
+            }
+        }
         const rawIncoming = typeof incoming.sourceText === "string" ? incoming.sourceText : "";
         const rawHasDelim = /\n\n——\s*Text\s*——\s*\n\n/.test(rawIncoming) || /\n\n——\n\n/.test(rawIncoming) || /\n\n---\n\n/.test(rawIncoming);
         const st = String(appData.sourceText || "").trim();
@@ -17773,7 +18186,9 @@ const admin = {
             }
             return;
         }
-        if(hasDelim && blobForSplit) {
+        const incomingExplicitC2 = incoming.component === 2 || incomingHasPassages;
+        const skipDelimSplitForC1Preserve = preservePassage && prev && prev.component !== 2 && admin.passageWorthPreservingFromPrev(prev) && !incomingExplicitC2;
+        if(hasDelim && blobForSplit && !skipDelimSplitForC1Preserve) {
             let parts = null;
             if(/\n\n——\s*Text\s*——\s*\n\n/.test(blobForSplit)) {
                 parts = blobForSplit.split(/\n\n——\s*Text\s*——\s*\n\n/).map(x => x.trim()).filter(Boolean);
@@ -21940,6 +22355,18 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             target.settings.startView = prevSettings.selectionStartsFirst ? "select" : "lab";
         }
         if(typeof prevSettings.strictMode === "boolean") target.settings.strictMode = prevSettings.strictMode;
+        /* When imported JSON omits meta.pdfInsertWidthCh, keep the teacher’s insert width (AI prompts rarely echo local layout). */
+        const rawMeta = raw && raw.meta && typeof raw.meta === "object" ? raw.meta : {};
+        const pm = prev.meta && typeof prev.meta === "object" ? prev.meta : {};
+        if(rawMeta.pdfInsertWidthCh == null || rawMeta.pdfInsertWidthCh === "") {
+            if(pm.pdfInsertWidthCh != null && Number.isFinite(Number(pm.pdfInsertWidthCh))) {
+                target.meta = target.meta || {};
+                const cPrev = typeof app.clampPassageInsertWidthCh === "function"
+                    ? app.clampPassageInsertWidthCh(pm.pdfInsertWidthCh)
+                    : Number(pm.pdfInsertWidthCh);
+                if(cPrev != null) target.meta.pdfInsertWidthCh = cPrev;
+            }
+        }
     },
     /** Derive pointsRequired for each level from question marks [n] when missing. Ensures points flow correctly after load. */
     derivePointsFromQuestions: () => {
@@ -22123,9 +22550,8 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 userState.selectionEliminated = [];
                 userState.selectionChosen = [];
                 appData.selection.items = appData.items;
-            } else if(lesson) {
-                admin.ensureSelectionData();
             }
+            if(lesson) admin.ensureSelectionData();
             admin.syncLevelBankForPastPaperQuestions();
             admin.autoAssignSelectionLevels(false);
             admin.autoFillDistractors();
@@ -22146,11 +22572,14 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             } finally {
                 app._suppressAdminInputFlushOnce = false;
             }
-            if(appData.sourceText && appData.sourceText.trim()) {
+            if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+            else if(appData.sourceText && appData.sourceText.trim()) {
                 app.setAiInputValue(appData.sourceText);
+                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
             }
             admin.renderAll();
             if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON.";
             alert("Invalid JSON: " + msg);
@@ -22173,6 +22602,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
         const isHidden = step2.classList.contains("hidden");
         step2.classList.toggle("hidden", !isHidden);
         localStorage.setItem("tsa_ai_step2", isHidden ? "true" : "false");
+        if(isHidden) admin.ensureAiStepVisible();
     },
     ensureAiStepVisible: () => {
         const step2 = document.getElementById("ai-step2");
@@ -22183,6 +22613,14 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
         const aiJsonIn = document.getElementById("ai-json-in");
         const hasJson = (jsonIn && jsonIn.value && jsonIn.value.trim()) || (aiJsonIn && aiJsonIn.value && aiJsonIn.value.trim());
         if(hasPrompt || hasJson) step2.classList.remove("hidden");
+        const pc = document.getElementById("ai-json-preserve-passage");
+        if(pc) {
+            try {
+                const v = localStorage.getItem("architect.preservePassageOnAiJsonImport");
+                if(v === "0" || v === "false") pc.checked = false;
+                else if(v === "1" || v === "true") pc.checked = true;
+            } catch(e) {}
+        }
     },
     getAiSettings: () => {
         const levelBank = app.getLevelBank();
@@ -24690,10 +25128,10 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         if(!Number.isFinite(maxWorksheetQuotes) || maxWorksheetQuotes < 1) maxWorksheetQuotes = 8;
         if(maxWorksheetQuotes > 50) maxWorksheetQuotes = 50;
         const included = dedupedWsItems.slice(0, maxWorksheetQuotes);
-        if(!included.length) {
-            alert("No quotes match this worksheet. Tick WS on your focus question(s) (Editing Suite → Level Bank or Load & AI), then tick Include on worksheet on each quote you want (Quote bank). Quotes must link to that question (or a level whose Level Bank uses it). Use All good → worksheet to select every good quote quickly.");
-            return;
-        }
+        const worksheetHasQuotes = included.length > 0;
+        const wsKeyEl = document.getElementById("worksheet-include-answer-key");
+        const includeKeyWs = appData.settings.worksheetIncludeAnswerKey === true && (!wsKeyEl || wsKeyEl.checked);
+        let answerKeyHtml = "";
         content += `<h1>${app.escapeHtml(appData.meta.title || "Worksheet")}</h1>`;
         content += `<p class="tag" style="margin:0 0 4px 0;">Use your <strong>exam source booklet</strong> for the passage. Write your answers for the question(s) below.</p>`;
         const wsQclean = (p) => (app.cleanQuestionPromptForWorksheet ? app.cleanQuestionPromptForWorksheet(p) : String(p || "").trim()) || String(p || "").trim();
@@ -24740,6 +25178,11 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             }
         })();
         content += `<div class="questions-section">`;
+        if(!worksheetHasQuotes) {
+            content += `<h3>1. Your response <span style="font-size:8.5pt; font-weight:400; opacity:0.85;">(no suggested quotes — booklet only)</span></h3>`;
+            content += `<p style="margin:0 0 8px 0; font-size:8.5pt; opacity:0.9;">This export has <strong>no</strong> pre-chosen quotations or match tasks — use your <strong>exam source booklet</strong> and the focus question(s) above. Add quotes to the bank and tick <strong>Include on worksheet</strong> when you want the full match / rubric version.</p>`;
+            content += `<div class="dotted" style="min-height:200px; line-height:1.35;">&nbsp;</div>`;
+        } else {
         const matchSelect = document.getElementById("worksheet-match-mode");
         const matchMode = (appData.settings && appData.settings.worksheetMatchMode)
             || (matchSelect ? matchSelect.value : "jumbled");
@@ -24816,8 +25259,6 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const scaffoldSelect = document.getElementById("worksheet-scaffold-mode");
         const scaffoldMode = (appData.settings && appData.settings.worksheetScaffoldMode)
             || (scaffoldSelect ? scaffoldSelect.value : "guided");
-        const keyEl = document.getElementById("worksheet-include-answer-key");
-        const includeKey = appData.settings.worksheetIncludeAnswerKey === true && (!keyEl || keyEl.checked);
 
         const isValidSlot = (slot) => {
             if(!slot) return false;
@@ -24893,7 +25334,6 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         content += `<h3>${rubricSectionNum}. Rubric — fill each sentence element (Level ${level})</h3>`;
         content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Blue boxes show the <strong>full model wording</strong> saved on each quote (same slots as Sentence Structure). Optional chips are that quote’s distractors only. Empty slots are a single line for students to write.</p>`;
 
-        let answerKeyHtml = "";
         let wsSeq = 0;
         included.forEach((item) => {
             wsSeq++;
@@ -24905,7 +25345,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
 
             if(itemIsShortAnswerEvidence(item)) {
                 content += `<div class="dotted" style="min-height:32px; line-height:1.2;">&nbsp;</div></div>`;
-                if(includeKey) {
+                if(includeKeyWs) {
                     const parts = [];
                     const skQh = app.quoteDisplayHtml(item.original || item.quote || "");
                     if(skQh) parts.push(skQh);
@@ -24962,7 +25402,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 content += `<table class="sentence-table">${colgroup}<tr>${header}</tr><tr>${writingRow}</tr></table></div>`;
             }
 
-            if(includeKey) {
+            if(includeKeyWs) {
                 const sm = admin.parseModelAnswer(item.modelAnswer || "");
                 const parts = [];
                 const keyQh = app.quoteDisplayHtml(item.original || item.quote || "");
@@ -25007,10 +25447,11 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 content += `</table>`;
             }
         }
+        }
 
         const worksheetAnswerKeyPlainLen = (html) => String(html || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim().length;
         const mergedAnswerKey = worksheetInferenceKeyHtml + answerKeyHtml;
-        if(includeKey && (worksheetAnswerKeyPlainLen(mergedAnswerKey) >= 12 || worksheetInferenceKeyHtml)) {
+        if(includeKeyWs && (worksheetAnswerKeyPlainLen(mergedAnswerKey) >= 12 || worksheetInferenceKeyHtml)) {
             content += `<div class="teacher-key"><h3 style="font-size:11pt;margin:0 0 4px 0;">Teacher answer key</h3><p style="font-size:8.5pt;margin:0 0 6px 0;">For teacher use — remove before sharing with students if you prefer a separate key.</p>${mergedAnswerKey}</div>`;
         }
 
@@ -25045,6 +25486,12 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 return alert("No lesson data to export yet.");
             }
         }
+        /** Snapshot live C1 passage (gutters + &lt;b&gt;/&lt;i&gt; in v2) into `appData` before clone — otherwise export reused stale `sourceText` or `innerText` fallbacks that stripped markup. */
+        if(typeof app.flushAiInputToLessonSourceIfEditable === "function" && appData && appData.component !== 2) {
+            try {
+                app.flushAiInputToLessonSourceIfEditable();
+            } catch(eExFlush) {}
+        }
         // 1. Prepare data with lock
         const exportData = JSON.parse(JSON.stringify(appData));
         exportData.isStandalone = true;
@@ -25061,17 +25508,34 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         } else if(!exportData.sourceText || !String(exportData.sourceText).trim()) {
             const sourceInline = document.getElementById("source-inline");
             const sourceInlineSelect = document.getElementById("source-inline-select");
-            const candidates = [
-                app.getAiInputValue(),
-                sourceInline && sourceInline.innerText,
-                sourceInlineSelect && sourceInlineSelect.innerText
-            ].map(v => (v || "").trim()).filter(Boolean);
-            if(candidates.length) exportData.sourceText = app.cleanSourceText(candidates[0]);
+            const aiHtml = typeof app.getAiInputValue === "function" ? app.getAiInputValue() : "";
+            const wrapH = function(el) { return el && String(el.innerHTML || "").trim() || ""; };
+            const richCandidates = [String(aiHtml || "").trim(), wrapH(sourceInline), wrapH(sourceInlineSelect)].filter(Boolean);
+            let sn = "";
+            if(richCandidates.length && typeof app.editorPassageToStoredCanonical === "function" && /source-with-line-numbers|source-line-row/i.test(richCandidates[0])) {
+                sn = String(app.editorPassageToStoredCanonical(richCandidates[0]) || "").trim();
+            }
+            if(!sn) {
+                const plainCandidates = [
+                    sourceInline && String(sourceInline.innerText || sourceInline.textContent || "").trim(),
+                    sourceInlineSelect && String(sourceInlineSelect.innerText || sourceInlineSelect.textContent || "").trim(),
+                    String(aiHtml || "").trim()
+                ].filter(Boolean);
+                if(plainCandidates.length && typeof app.cleanSourceText === "function")
+                    sn = String(app.cleanSourceText(plainCandidates[0]) || "").trim();
+            }
+            if(sn) exportData.sourceText = sn;
         }
         if(!exportData.sourceText || !String(exportData.sourceText).trim()) {
             const selText = exportData.selection && exportData.selection.text && exportData.selection.text.source;
             if(selText && String(selText).trim()) {
-                exportData.sourceText = app.cleanSourceText(selText);
+                const st = String(selText).trim();
+                if(typeof app.editorPassageToStoredCanonical === "function" && /source-with-line-numbers|source-line-row/i.test(st))
+                    exportData.sourceText = String(app.editorPassageToStoredCanonical(st) || "").trim() || st;
+                else if(typeof app.cleanSourceText === "function")
+                    exportData.sourceText = app.cleanSourceText(st);
+                else
+                    exportData.sourceText = st;
             }
         }
         if(exportData.selection) {
@@ -25136,11 +25600,24 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const a = document.createElement('a'); a.href=URL.createObjectURL(b); a.download='StudentApp.html'; a.click();
     },
     saveConfig: () => {
-        const aiText = app.getAiInputValue();
-        if(aiText && aiText.trim() && !app.isLikelyJson(aiText.trim())) {
-            app.syncLessonSourceCanonical(app.editorPassageToStoredCanonical(aiText.trim()));
-            app.save();
+        /**
+         * Commit Insert width from the slider/box into {@link appData.meta.pdfInsertWidthCh} before serializing — Save JSON used to miss ch when teachers clicked Save without blurring the control or when range/box disagreed slightly.
+         */
+        if(typeof app.syncPdfInsertWidthChFromDomInput === "function") app.syncPdfInsertWidthChFromDomInput();
+        /**
+         * Use the same path as automatic flush ({@link flushAiInputToLessonSourceIfEditable}), not only {@link editorPassageToStoredCanonical}.
+         * When canonical conversion would drop exam gutters or strip rich rows to numbered plain, flush falls back to live gutter HTML so booklet layout + &lt;b&gt;/&lt;i&gt survive; the previous Save JSON path always synced the lossy canonical string — backups looked “plain” after reload.
+         */
+        if(typeof app.flushAiInputToLessonSourceIfEditable === "function")
+            app.flushAiInputToLessonSourceIfEditable();
+        if(appData && appData.component === 2) {
+            const aiText = typeof app.getAiInputValue === "function" ? app.getAiInputValue() : "";
+            if(aiText && String(aiText).trim() && !(app.isLikelyJson && app.isLikelyJson(String(aiText).trim()))) {
+                if(typeof app.syncLessonSourceCanonical === "function" && typeof app.editorPassageToStoredCanonical === "function")
+                    app.syncLessonSourceCanonical(app.editorPassageToStoredCanonical(String(aiText).trim()));
+            }
         }
+        if(typeof app.save === "function") app.save();
         const b = new Blob([JSON.stringify(appData)], {type:'application/json'});
         const a = document.createElement('a'); a.href=URL.createObjectURL(b); a.download='config.json'; a.click();
     },
@@ -25324,11 +25801,14 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 admin.autoFillDistractors && admin.autoFillDistractors();
                 admin.autoAssignLevelsByLineRangeIfApplicable && admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
                 if(typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
-                if(appData.sourceText && appData.sourceText.trim()) {
+                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+                else if(appData.sourceText && appData.sourceText.trim()) {
                     app.setAiInputValue(appData.sourceText);
+                    if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
                 }
                 admin.renderAll();
                 if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+                if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
                 input.value = "";
             } catch(err) {
                 const cleaned = app.cleanSourceText(text);
