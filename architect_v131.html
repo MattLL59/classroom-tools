@@ -1963,8 +1963,14 @@ const app = {
         const def = defaultData.settings.levelBank && defaultData.settings.levelBank[lvl];
         return !(def && def.freeSelectFromText === false);
     },
-    getEffectiveNoQuotes: function(level) {
+    /** Synonym suggestions (I'm stuck) — must not be confused with Q1 / tap-only flows (formerly leaked via misnamed getEffectiveNoQuotes). */
+    isStudentSynonymsHelp: function() {
         return !!(userState && userState.studentSynonymsHelp === true);
+    },
+    /** Legacy name: was synonym-help only and hid paraphrase inputs. Keep returning false; use {@link isStudentSynonymsHelp} or {@link isLevelUsingFirstQuestion} instead. */
+    getEffectiveNoQuotes: function(level) {
+        void level;
+        return false;
     },
     /**
      * Teacher: Editing Suite → "Tap text & record answers". Full marks goal and one point per distinct highlight (like student tap mode),
@@ -11163,6 +11169,12 @@ const app = {
             const to = parseInt(m[2], 10);
             if(from >= 1 && to >= from && to <= 999) return { from, to };
         }
+        const bare = s.match(/^\s*(\d+)\s*[-–—]\s*(\d+)\s*$/);
+        if(bare) {
+            const from = parseInt(bare[1], 10);
+            const to = parseInt(bare[2], 10);
+            if(from >= 1 && to >= from && to <= 999) return { from, to };
+        }
         const single = s.match(/\b(?:line|lines)\s+(\d+)\b/i);
         if(single) {
             const n = parseInt(single[1], 10);
@@ -11170,17 +11182,14 @@ const app = {
         }
         return null;
     },
-    /** Return 1-based line number where quote appears in source, or null. Uses explicit line numbers (e.g. "1. text") or line order. */
-    getLineNumberForQuote: function(quote, sourceText) {
-        const q = String(quote || "").trim();
+    /** Split exam-style numbered passage into margin line numbers + body text (WJEC “gutter” rows). */
+    parseWJECStyleBookletRows: function(sourceText) {
         let s = String(sourceText || "").trim();
         if(/<[^>]+>/.test(s) || (app.isStructuredPassageSource && app.isStructuredPassageSource(s))) s = app.cleanSourceText(s);
-        if(!q || !s) return null;
-        const normalize = (str) => str.toLowerCase().replace(/[""'']/g, "").replace(/\s+/g, " ").trim();
-        const nq = normalize(q);
-        if(!nq) return null;
+        if(!s) return [];
         const lines = s.split(/\n/);
         const hasNumbered = lines.some(l => /^\s*\d+[.)]?\s/.test(l) || /^\s*\d+[.)]?\s*$/.test(l));
+        const rows = [];
         let lineNumByIndex = 1;
         for(let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -11192,11 +11201,37 @@ const app = {
             const m = hasNumbered ? line.match(/^\s*(\d+)[.)]?\s*(.*)$/s) : null;
             const lineNum = m ? parseInt(m[1], 10) : lineNumByIndex;
             const text = m ? m[2] : line;
-            const ntext = normalize(text);
-            if(ntext && ntext.includes(nq)) return lineNum;
-            if(!hasNumbered && normalize(line).includes(nq)) return i + 1;
+            rows.push({ num: lineNum, body: text });
             if(!hasNumbered) lineNumByIndex = i + 2;
         }
+        return rows;
+    },
+    /** Booklet line span where {@link quote} appears (handles quotes split across two margin lines). */
+    getQuoteBookletLineSpan: function(quote, sourceText) {
+        const q = String(quote || "").trim();
+        if(!q) return null;
+        const normalize = (str) => str.toLowerCase().replace(/[""'']/g, "").replace(/\s+/g, " ").trim();
+        const nq = normalize(q);
+        if(!nq) return null;
+        const rows = app.parseWJECStyleBookletRows(sourceText);
+        if(rows.length) {
+            for(let i = 0; i < rows.length; i++) {
+                const nt = normalize(rows[i].body);
+                if(nt && nt.includes(nq)) return { start: rows[i].num, end: rows[i].num };
+            }
+            const maxW = Math.min(6, rows.length);
+            for(let w = 2; w <= maxW; w++) {
+                for(let i = 0; i <= rows.length - w; i++) {
+                    const joint = normalize(rows.slice(i, i + w).map(r => r.body).join(" "));
+                    if(joint.includes(nq)) {
+                        const nums = rows.slice(i, i + w).map(r => r.num);
+                        return { start: Math.min(...nums), end: Math.max(...nums) };
+                    }
+                }
+            }
+        }
+        let s = String(sourceText || "").trim();
+        if(/<[^>]+>/.test(s) || (app.isStructuredPassageSource && app.isStructuredPassageSource(s))) s = app.cleanSourceText(s);
         if(normalize(s).includes(nq)) {
             const words = nq.split(/\s+/).filter(w => w.length >= 3).slice(0, 5);
             const search = words.length ? words.join(" ") : nq.slice(0, 30);
@@ -11204,16 +11239,21 @@ const app = {
             const idx = lower.indexOf(search.replace(/\s+/g, " "));
             if(idx >= 0) {
                 const lineNum = (s.slice(0, idx).match(/\n/g) || []).length + 1;
-                return lineNum;
+                return { start: lineNum, end: lineNum };
             }
         }
         return null;
     },
+    /** Return 1-based line number where quote appears in source, or null. Uses explicit line numbers (e.g. "1. text") or line order. */
+    getLineNumberForQuote: function(quote, sourceText) {
+        const span = app.getQuoteBookletLineSpan(quote, sourceText);
+        return span ? span.start : null;
+    },
     quoteInLineRange: function(quote, sourceText, range) {
         if(!range || typeof range.from !== "number" || typeof range.to !== "number") return true;
-        const line = app.getLineNumberForQuote(quote, sourceText);
-        if(line == null) return false;
-        return line >= range.from && line <= range.to;
+        const span = app.getQuoteBookletLineSpan(quote, sourceText);
+        if(!span) return false;
+        return span.end >= range.from && span.start <= range.to;
     },
     getDefaultSentenceConfig: function(level) {
         if(level === 1) return ["starter", "quote", "link_l1", "point"];
@@ -13678,7 +13718,7 @@ const ui = {
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
         const fromDeskQueue = Array.isArray(userState.deskQueue) && userState.deskQueue.length > 0 && userState.deskQueue.some(q => app.quoteKey(q) === app.quoteKey(item.original));
-        const noQuotesMode = !!(app.getEffectiveNoQuotes(level) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const noQuotesMode = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
         if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) {
             if(!Array.isArray(userState.deskQueue) || userState.deskQueue.length === 0) {
                 const raw = item.original && (typeof item.original === "object" && "quote" in item.original ? item.original.quote : item.original);
@@ -13752,14 +13792,14 @@ const ui = {
                     app.checkLevelCompletion();
                 };
             }
-            if(synPanel && app.getEffectiveNoQuotes(level)) synPanel.classList.remove("hidden");
+            if(synPanel && app.isStudentSynonymsHelp()) synPanel.classList.remove("hidden");
             const synBtn = document.getElementById("btn-suggest-synonyms");
             const synResults = document.getElementById("synonym-results");
             if(synBtn && synResults) synBtn.onclick = () => ui.fetchSynonymsForText(item.original || "", synResults);
             return;
         }
         if(synPanel) {
-            if(app.getEffectiveNoQuotes(level)) {
+            if(app.isStudentSynonymsHelp()) {
                 synPanel.classList.remove("hidden");
                 const btn = document.getElementById("btn-suggest-synonyms");
                 const results = document.getElementById("synonym-results");
@@ -14573,7 +14613,7 @@ const ui = {
                 app.save();
             }
         }
-        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.getEffectiveNoQuotes(level) || c2ShortAnswer || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || c2ShortAnswer || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
         if((!sel.items.length || sel.items.length < 2) && !(tapSelectOnly && hasSourceEarly)) {
             if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
             const tPanel = document.getElementById("selection-top-panel");
@@ -14630,7 +14670,12 @@ const ui = {
         const isInSource = (q) => hasSource ? app.quoteInSource(q, sourceText) : true;
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const questionTextGlobalEarly = app.getQuestionForLevel(level);
-        const lineRange = app.parseLineRangeFromQuestion ? app.parseLineRangeFromQuestion(questionTextGlobalEarly) : null;
+        let lineRange = app.parseLineRangeFromQuestion ? app.parseLineRangeFromQuestion(questionTextGlobalEarly) : null;
+        const cqRowForLineRange = currentQId ? findQById(currentQId) : null;
+        if(!lineRange && cqRowForLineRange && typeof cqRowForLineRange.lineRef === "string" && cqRowForLineRange.lineRef.trim()) {
+            const lrRef = app.parseLineRangeFromQuestion(cqRowForLineRange.lineRef.trim());
+            if(lrRef) lineRange = lrRef;
+        }
         const getQuote = (i) => (i && (i.quote || i.original)) || "";
         const quoteInRangeForLevel = (i) => !lineRange || !hasSource || (getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
         const hasLevelMatch = (i) => Array.isArray(i.levels) && i.levels.length > 0 && i.levels.includes(level);
@@ -14776,7 +14821,7 @@ const ui = {
         /** Treat Q1 / short-answer retrieval like tap-from-passage so “goal met” panels do not block highlight → examine before {@link ui._freeSelectPendingQuote} runs. */
         const canPickFromText = (
             app.getEffectiveTapText(level) ||
-            app.getEffectiveNoQuotes(level) ||
+            app.isStudentSynonymsHelp() ||
             c2ShortAnswer ||
             app.isTeacherTapRecordPassageMode() ||
             levelEntry.shortAnswersOnly === true ||
@@ -14784,7 +14829,7 @@ const ui = {
         ) && hasSource;
         const questionTextGlobal = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : app.getQuestionForLevel(level);
         const topPanel = document.getElementById("selection-top-panel");
-        const noQuotesTopPanel = app.getEffectiveNoQuotes(level) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+        const noQuotesTopPanel = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
         const updateTopAndQuestion = () => {
             const idxFound = (ids && ids.length > 1 && currentQId) ? ids.findIndex(qid => normId(qid) === normId(currentQId)) : -1;
             const qNum = idxFound >= 0 ? idxFound + 1 : 0;
@@ -14838,7 +14883,7 @@ const ui = {
         const studentWantsQuoteList = !!(userState && userState.studentQuoteListHelp === true);
         /* Short-answer questions: always use simple tap flow (no language/justify stages). Teacher "record" mode uses the same tap UI to save meaning/analysis to the lesson. */
         const teacherRecordMode = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
-        const tapPathActive = !!(app.getEffectiveTapText(level) || app.getEffectiveNoQuotes(level) || c2ShortAnswer || teacherRecordMode || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const tapPathActive = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || c2ShortAnswer || teacherRecordMode || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
         const questionText = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(app.getQuestionForLevel(level)) : app.getQuestionForLevel(level));
         /* Passage highlight → examine step must run even when "Give me quote choices" is on (that option only hides the tap *hint* card, not tapping itself). */
         const pendingQuotePassage = String(ui._freeSelectPendingQuote || "").trim();
@@ -14847,8 +14892,8 @@ const ui = {
             const tr = teacherRecordMode;
             const q1TapParaphrase = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
             const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
-            /* Hide optional justify only for true short-answer levels that are not Q1 retrieval; Q1 needs visible own-words even when "shortAnswersOnly" is on. */
-            const whyHidden = !tr && (((isShortAnswerMode && !q1TapParaphrase) || app.getEffectiveNoQuotes(level)));
+            /* Hide optional justify only for true short-answer levels that are not Q1 retrieval; Q1 needs visible own-words even when "shortAnswersOnly" is on. Synonym help must not hide this (legacy bug used synonym flag as “no quotes”). */
+            const whyHidden = !tr && (isShortAnswerMode && !q1TapParaphrase);
             const whyStyle = whyHidden ? "display:none;" : "";
             const trMeaningBlock = tr && !isShortAnswerMode ? `<div style="font-weight:700; margin-bottom:4px;">Meaning (gloss)</div>
                         <textarea id="teacher-record-translation" placeholder="Short paraphrase / meaning for worksheet match" style="width:100%; min-height:52px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>` : "";
@@ -14863,7 +14908,7 @@ const ui = {
                         <div style="font-weight:700; margin-bottom:4px;">Question</div>
                         <div style="margin-bottom:10px; opacity:0.9;">${app.escapeHtml(questionText) || "—"}</div>
                         ${trMeaningBlock}
-                        <div style="font-weight:700; margin-bottom:4px;">${isShortAnswerMode ? shortAnsLine : (q1TapParaphrase || app.getEffectiveNoQuotes(level) ? "Does this text answer the question? You will paraphrase it in the Writing Desk." : (tr ? "Comment / analysis (saved to lesson)" : "Does this quote support your answer? Why?"))}</div>
+                        <div style="font-weight:700; margin-bottom:4px;">${isShortAnswerMode ? shortAnsLine : (q1TapParaphrase ? "Does this text answer the question? You will paraphrase it in the Writing Desk." : (tr ? "Comment / analysis (saved to lesson)" : "Does this quote support your answer? Why?"))}</div>
                         <textarea id="free-select-why" placeholder="${whyPlaceholder}" style="width:100%; min-height:60px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem; ${whyStyle}"></textarea>
                         <div style="display:flex; gap:8px;">
                             <button class="btn btn-primary btn-small" id="free-select-use">${tr ? "Save to lesson & continue" : "Use this quote"}</button>
@@ -14908,8 +14953,8 @@ const ui = {
             };
             return;
         }
-        const tapTapHintDespiteQuoteList = !!(teacherRecordMode || c2ShortAnswer || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
-        if(tapPathActive && (!studentWantsQuoteList || tapTapHintDespiteQuoteList)) {
+        /* Tap-first card only when the student is not using "Give me quote choices" — otherwise Q1 / short-answer tap levels would return here and never build the MC grid. */
+        if(tapPathActive && !studentWantsQuoteList) {
             if(!hasSource) {
                 cont.innerHTML = `<div class="card" style="cursor:default;">
                     <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Source text needed</div>
@@ -14918,7 +14963,7 @@ const ui = {
                 </div>`;
                 return;
             }
-            const noQuotesFlow = app.getEffectiveNoQuotes(level) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+            const noQuotesFlow = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
             if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && uniqueChosenCount > 0 && !ui._initInProgress && !canPickFromText) {
                 (c2ShortAnswer ? ui.sendSelectionQuotesDirectToAnswer : ui.sendSelectionQuotesToBuilder)();
                 return;
@@ -14940,8 +14985,8 @@ const ui = {
             return;
         }
         const totalCorrect = correctItemsAll.length;
-        const inSourceCorrect = correctItemsAll.filter(i => isInSource(i.quote)).length;
-        const levelCorrect = correctItemsAll.filter(i => Array.isArray(i.levels) ? i.levels.includes(level) : false).length;
+        const inSourceCorrect = correctItemsAll.filter(i => isInSource(getQuote(i))).length;
+        const levelCorrect = correctItemsAll.filter(i => hasLevelMatch(i) || (!hasLevelMatch(i) && quoteInRangeForLevel(i))).length;
         const notChosenCorrect = correctItems.length;
         const debugLine = `<div style="font-size:0.8rem; opacity:0.7; margin-top:6px;">Debug: lvl=${level}, quoteTarget=${levelEntry.quoteTarget || ""}, distractors=${levelEntry.distractorCount || ""}, optionCount=${optionCount}, total=${totalCorrect}, inSource=${inSourceCorrect}, levelCorrect=${levelCorrect}, remaining=${notChosenCorrect}, chosen=${uniqueChosenCount}</div>`;
         /* Tap / short-answer flow: gate on having enough distinct correct quotes in the bank. Staged analytical flow: goal is angles (language/tone/structure), not quote count — do not block here. */
@@ -14990,7 +15035,8 @@ const ui = {
             }
         }
         const primaryCorrect = correctItems[0] || sel.items[0];
-        const validChosen = ui._selectionCorrectItem && correctItems.some(c => app.quoteKey(c.quote) === app.quoteKey(ui._selectionCorrectItem.quote));
+        const primaryQuoteText = getQuote(primaryCorrect);
+        const validChosen = ui._selectionCorrectItem && correctItems.some(c => app.quoteKey(getQuote(c)) === app.quoteKey(getQuote(ui._selectionCorrectItem)));
         const chosenCorrect = validChosen ? ui._selectionCorrectItem : primaryCorrect;
         if(!validChosen) { ui._selectionCorrectItem = null; ui._selectionQuote = null; }
         /* Aggregate distractors from all correct items for this level/question so we have enough options (e.g. 5 quotes + 2 distractors). */
@@ -15084,11 +15130,11 @@ const ui = {
                 ...fallbackIncorrect,
                 ...distractorPool,
                 ...lessonPool
-            ].filter(o => o && o.quote && o.quote !== primaryCorrect.quote)
+            ].filter(o => o && o.quote && o.quote !== primaryQuoteText)
             .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx);
             const scored = combined.map(o => ({
                 item: o,
-                score: overlapScore(primaryCorrect.quote, o.quote) + (similarLength(primaryCorrect.quote, o.quote) ? 1 : 0)
+                score: overlapScore(primaryQuoteText, o.quote) + (similarLength(primaryQuoteText, o.quote) ? 1 : 0)
             }));
             scored.sort((a, b) => b.score - a.score);
             const best = scored.filter(s => s.score > 0).map(s => s.item);
@@ -15096,17 +15142,42 @@ const ui = {
             return app.shuffle([...best, ...rest]);
         };
         const poolCandidates = buildPool();
-        const incorrectPool = [...primaryDistractorPool, ...fallbackIncorrect, ...otherDistractorPool, ...lessonPool]
-            .filter(o => o && o.quote && o.quote !== primaryCorrect.quote)
+        /* When the question pins a line window and at least one bank quote sits inside it, "Strong" only applies to those; lesson quotes outside the window are valid "Not strong" (retrieval hygiene), not falsely marked Strong. */
+        const strictlyInRangeCorrect = (!lineRange || !hasSource)
+            ? correctItems.slice()
+            : correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
+        const hasExamWindow = !!(lineRange && hasSource && strictlyInRangeCorrect.length > 0);
+        const lessonQuotesOutsideExamWindow = hasExamWindow
+            ? correctItems.filter(i => getQuote(i) && !app.quoteInLineRange(getQuote(i), sourceText, lineRange))
+            : [];
+        const noiseFromLessonOutsideExam = lessonQuotesOutsideExamWindow.map(i => ({
+            quote: getQuote(i),
+            correct: false,
+            item: i
+        }));
+        if(lessonQuotesOutsideExamWindow.length && lineRange && hasSource) {
+            const span = lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`;
+            lessonQuotesOutsideExamWindow.forEach(i => {
+                const q = getQuote(i);
+                if(q) reasonMap.set(app.quoteKey(q), `Not from the ${span} you were asked to use — mark as Not strong.`);
+            });
+        }
+        const correctItemsInRangeMain = (!lineRange || !hasSource)
+            ? correctItems.slice()
+            : (strictlyInRangeCorrect.length > 0
+                ? strictlyInRangeCorrect
+                : (usedFallbackCorrect ? correctItems.slice() : strictlyInRangeCorrect));
+        const incorrectPoolInRange = [...primaryDistractorPool, ...fallbackIncorrect, ...otherDistractorPool, ...lessonPool]
+            .filter(o => o && o.quote && o.quote !== primaryQuoteText)
             .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx)
             .filter(o => !levelCorrectKeys.has(app.quoteKey(o.quote)))
             .filter(o => !eliminatedSet.has(app.quoteKey(o.quote)))
             .filter(o => !correctForOtherQuestionOnLevel.has(app.quoteKey(o.quote)))
             .filter(o => !lineRange || !hasSource || app.quoteInLineRange(o.quote, sourceText, lineRange));
-        /* Only treat as correct quotes that are in the question's line range. */
-        const correctItemsInRangeMain = lineRange && hasSource
-            ? correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange))
-            : correctItems;
+        const incorrectPool = [...incorrectPoolInRange, ...noiseFromLessonOutsideExam]
+            .filter(o => o && o.quote && o.quote !== primaryQuoteText)
+            .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx);
+        /* Strong options respect the exam line window whenever we could align the bank to it; only when nothing matches inside do we fall back (usedFallbackCorrect) so the MC is not empty. */
         const correctToShow = Math.min(pointsGoal, correctItemsInRangeMain.length);
         const incorrectToShow = Math.min(distractorTarget || Math.max(1, optionCount - correctToShow), incorrectPool.length);
         const correctOpts = correctItemsInRangeMain.slice(0, correctToShow).map(i => ({ quote: getQuote(i), correct: true, item: i }));
@@ -15177,7 +15248,7 @@ const ui = {
             return;
         }
         if(stageKey === "discriminate") {
-            const correctKeysForLevel = new Set((usedFallbackCorrect ? correctItems : correctItemsInRangeMain).map(i => app.quoteKey(getQuote(i))));
+            const correctKeysForLevel = new Set(correctItemsInRangeMain.map(i => app.quoteKey(getQuote(i))).filter(Boolean));
             const lessonPoolForDiscriminate = (appData.items || [])
                 .filter(i => i && i.original && i.correct === false)
                 .filter(i => Array.isArray(i.levels) && i.levels.includes(level))
@@ -15194,17 +15265,13 @@ const ui = {
             [...lessonPoolForDiscriminate, ...otherLevelQuotes].forEach(o => {
                 if(o.item && o.quote && typeof o.item.dismissPhrase === "string" && o.item.dismissPhrase.trim()) reasonMap.set(app.quoteKey(o.quote), o.item.dismissPhrase.trim());
             });
-            const incorrectPool = [...primaryDistractorPool, ...fallbackIncorrect.map(i => ({ quote: i.quote, correct: false, item: i.item || i })), ...otherDistractorPool, ...lessonPoolForDiscriminate, ...otherLevelQuotes]
+            const incorrectPool = [...primaryDistractorPool, ...fallbackIncorrect.map(i => ({ quote: i.quote, correct: false, item: i.item || i })), ...otherDistractorPool, ...lessonPoolForDiscriminate, ...otherLevelQuotes, ...noiseFromLessonOutsideExam]
                 .filter(o => o && o.quote)
                 .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx)
                 .filter(o => !correctKeysForLevel.has(app.quoteKey(o.quote)));
-            const correctToShow = Math.min(pointsGoal, correctItems.length);
+            const correctToShow = Math.min(pointsGoal, correctItemsInRangeMain.length);
             const incorrectToShow = Math.min(distractorTarget || optionCount - correctToShow, incorrectPool.length);
-            /* When we used fallback, correct items may be outside line range; still show them so Strong options appear. */
-            const correctItemsInRange = (usedFallbackCorrect || !lineRange || !hasSource)
-                ? correctItems
-                : correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
-            const correctOpts = app.shuffle(correctItemsInRange.map(i => ({ quote: getQuote(i), correct: true, item: i })).filter(o => o.quote)).slice(0, correctToShow);
+            const correctOpts = app.shuffle(correctItemsInRangeMain.map(i => ({ quote: getQuote(i), correct: true, item: i })).filter(o => o.quote)).slice(0, correctToShow);
             const incorrectOpts = app.shuffle(incorrectPool).slice(0, incorrectToShow);
             const alreadyRejected = userState.selectionProgress.discriminate || {};
             const seenPoolKeys = new Set();
@@ -15283,7 +15350,9 @@ const ui = {
                         card.classList.remove("quote-dim", "card-choice-incorrect");
                         card.classList.add("card-choice-correct");
                     } else {
-                        meta.textContent = `⚠️ Not strong — ${reason}`;
+                        const expectedLab = correct === "analysis" ? "Strong" : "Not strong";
+                        const chosenLab = choice === "analysis" ? "Strong" : "Not strong";
+                        meta.textContent = `⚠️ For this card, "${expectedLab}" fits better (you chose ${chosenLab}). ${reason}`;
                         card.classList.remove("quote-dim", "card-choice-correct");
                         card.classList.add("card-choice-incorrect");
                         userState.selectionEliminated = Array.from(new Set([...(userState.selectionEliminated || []), o.quote]));
@@ -15581,7 +15650,7 @@ const ui = {
                 grid.appendChild(btn);
             });
             body.querySelector("#selection-reveal").onclick = () => {
-                ui._selectionQuote = primaryCorrect.quote;
+                ui._selectionQuote = primaryQuoteText;
                 ui._selectionCorrectItem = primaryCorrect;
                 userState.selectionStage = stageIndex + 1;
                 app.save();
