@@ -1,9 +1,10 @@
+
  <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-07T00:30:00">
+<meta name="architect-build" content="2026-05-06T20:45:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -277,6 +278,32 @@
         white-space: pre-wrap !important;
         word-break: break-word !important;
         overflow-wrap: anywhere !important;
+    }
+    /* Level Bank “Show line window”: same insert ch-cap + min track as Quote Select so {@link splitPlainIntoVisualLinesByCh} measures the same px budget as the student excerpt (not a wide modal column). */
+    #teacher-passage-preview-output.architect-passage-line-wrap {
+        font-size: var(--reader-zoom);
+        overflow-x: auto;
+    }
+    #teacher-passage-preview-output.architect-passage-line-wrap .source-with-line-numbers {
+        white-space: normal !important;
+        display: flex !important;
+        flex-direction: column !important;
+        min-width: calc(2.5em + var(--exam-passage-max-width) + 6px);
+    }
+    #teacher-passage-preview-output.architect-passage-line-wrap .source-with-line-numbers .source-line-text {
+        position: relative;
+        z-index: 2;
+        max-width: var(--exam-passage-max-width);
+        padding-right: 4px;
+        box-sizing: border-box;
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+    }
+    #teacher-passage-preview-output.architect-passage-line-wrap .source-with-line-numbers .source-line-row {
+        display: flex !important;
+        align-items: flex-start !important;
+        width: 100% !important;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
@@ -1289,10 +1316,15 @@
                     <details class="admin-section" style="margin-top:14px;">
                         <summary class="admin-h">Quote bank (optional)</summary>
                         <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Add or edit quotes here. If you add at least 2, students can use &quot;I'm stuck — give me quote choices to pick from&quot; to see multiple-choice rounds <em>as well as</em> tapping the passage when Tap is on for that level. <strong>Wrong quotes</strong> are <em>only alternate quotations</em> for the quote multiple-choice grid (one line per quote — no justifications). Use <strong>+ Add bad quote</strong> for weak lines, or <strong>Copy AI prompt for wrong quotes</strong> to draft near-miss lines from the passage. For plausible <em>wrong explanations</em> about the <em>same</em> quote (worksheet chips / justify stage), use <strong>Distractor points</strong> and <strong>Copy AI prompt for distractor points</strong>.</div>
-                        <div style="font-size:0.78rem; opacity:0.88; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(33,150,243,0.06); line-height:1.45;"><strong>Hybrid workflow (shorter AI):</strong> (1) Import past paper and run <strong>Extract text</strong> (includes <strong>mark scheme</strong> PDF) so indicative bullets are in the lesson. (2) <strong>Suggest quotes from mark scheme</strong> — local match of bullets to the passage (no AI). (3) AI tab → <strong>Compact enrich prompt</strong> — small prompt with questions + bullets + your quotes only; merge JSON to fill meanings, <code>modelAnswer</code>, and wrong-quote fields (<code>distractors</code> in JSON). Full unified prompt is optional if you need the model to invent every quote.</div>
+                        <div style="font-size:0.78rem; opacity:0.88; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(33,150,243,0.06); line-height:1.45;"><strong>Hybrid workflow (shorter AI):</strong> (1) Import past paper and run <strong>Extract text</strong> (includes <strong>mark scheme</strong> PDF) so indicative bullets are in the lesson. (2) <strong>Suggest quotes from mark scheme</strong> — local match of bullets to the passage (no AI). Use <strong>Fill empty answer passages from mark scheme</strong> (or each row’s <strong>Fill from mark scheme</strong>) to paste those matches into focus questions for the student “right part” check. (3) AI tab → <strong>Compact enrich prompt</strong> — small prompt with questions + bullets + your quotes only; merge JSON to fill meanings, <code>modelAnswer</code>, and wrong-quote fields (<code>distractors</code> in JSON). Full unified prompt is optional if you need the model to invent every quote.</div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
                             <button type="button" class="btn btn-primary btn-small" onclick="admin.suggestQuotesFromMarkScheme()" title="Match mark scheme indicative points to sentences in the source text (local — no AI)">Suggest quotes from mark scheme</button>
                             <span style="font-size:0.78rem; opacity:0.8;">Needs extracted mark scheme + source text. Skips quotes already in the bank.</span>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.suggestAnswerPassagesFromMarkScheme({ onlyEmpty: true })" title="For each focus question, paste passage sentences that match that part’s mark scheme bullets into the Answer passage field (only rows that are still empty)">Fill empty answer passages from mark scheme</button>
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.suggestAnswerPassagesFromMarkScheme({ onlyEmpty: false })" title="Overwrites every focus question’s Answer passage field when the mark scheme yields matches">Replace all answer passages…</button>
+                            <span style="font-size:0.78rem; opacity:0.8;">Same local matcher as quote suggest; uses each row’s Lines / prompt window when set. Edit the text after if needed.</span>
                         </div>
                         <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
                             <span style="font-size:0.9rem; font-weight:600;">Show:</span>
@@ -2393,16 +2425,33 @@ const app = {
         if(/=\s*["'][^"']{0,200}["']\s*$/i.test(s) && /[;=]/.test(s) && s.length < 120) return true;
         return false;
     },
-    /** Find candidate quotes in source text that match mark scheme indicative content (exact token overlap only — substring overlap caused false pairs e.g. “may” inside “awarded”). */
-    findQuoteCandidatesFromMarkScheme: function(questionId, sourceText, markScheme, lineRange) {
+    /** Find candidate quotes in source text that match mark scheme indicative content (exact token overlap only — substring overlap caused false pairs e.g. “may” inside “awarded”). @param {number} [level] Booklet row layout for {@link slicePlainByExamLineRange} when <code>lineRange</code> is set. */
+    findQuoteCandidatesFromMarkScheme: function(questionId, sourceText, markScheme, lineRange, level) {
         if(!sourceText || typeof sourceText !== "string" || !markScheme || typeof markScheme !== "object") return [];
         const qId = String(questionId || "q1").replace(/^q/, "");
         const entry = markScheme["q" + qId] || markScheme["0" + qId] || null;
         if(!entry || !entry.indicativeContent || !entry.indicativeContent.length) return [];
-        const raw = String(sourceText).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        let segments = raw.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length >= 12 && s.length <= 400);
-        if(lineRange && typeof lineRange.from === "number" && typeof lineRange.to === "number" && app.quoteInLineRange) {
-            segments = segments.filter(seg => app.quoteInLineRange(seg.trim(), sourceText, lineRange));
+        /** Sentence chunks must come from **reader plain** — splitting raw HTML/JSON passage yields junk segments and nothing matches mark scheme bullets. */
+        let segPlain = String(sourceText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        if(/<[^>]+>/.test(segPlain) || (app.isStructuredPassageSource && app.isStructuredPassageSource(segPlain))) {
+            segPlain = app.cleanSourceText ? app.cleanSourceText(segPlain) : segPlain;
+        }
+        const splitIntoSegments = (blob) => String(blob || "").split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length >= 12 && s.length <= 400);
+        let segments = splitIntoSegments(segPlain);
+        let winPlain = "";
+        if(lineRange && typeof lineRange.from === "number" && typeof lineRange.to === "number" && app.slicePlainByExamLineRange) {
+            /** Same excerpt plain as the student line-window. */
+            winPlain = app.slicePlainByExamLineRange(sourceText, lineRange, level) || "";
+            if(winPlain && String(winPlain).trim().length >= 12) {
+                segments = segments.filter(seg => {
+                    const t = String(seg || "").trim();
+                    if(t.length < 12) return false;
+                    if(winPlain.includes(t)) return true;
+                    return app.quoteInSource(t, winPlain);
+                });
+                /** Full-source splits often miss every sentence in a narrow HTML row window — fall back to splitting the window text only. */
+                if(!segments.length) segments = splitIntoSegments(winPlain);
+            }
         }
         const normalize = (str) => str.toLowerCase().replace(/[""'']/g, "").replace(/\s+/g, " ").trim();
         const MS_STOP = new Set(("the and for are but not you all can had her him his she was one our out has have been were they this that with from into about when which their there would could should " +
@@ -2478,7 +2527,9 @@ const app = {
                 if(seen.has(key)) continue;
                 if(!segmentContainsAnchors(seg, bullet)) continue;
                 const { n, strong } = countExactOverlap(bullet, segTokenSets[si]);
-                const ok = n >= 2 && (longSig.length === 0 || strong >= minStrongForLong);
+                let ok = n >= 2 && (longSig.length === 0 || strong >= minStrongForLong);
+                /** Short retrieval bullets (e.g. Q1 “list five things”) often have few mark-scheme tokens — allow one strong overlap when the bullet is small. */
+                if(!ok && sigB.length <= 5 && n >= 1 && strong >= 1) ok = true;
                 if(!ok) continue;
                 const score = n * 10 + strong;
                 if(score > best.score || (score === best.score && seg.length > best.quote.length)) {
@@ -4339,6 +4390,7 @@ const app = {
                 prompt: (q && typeof q.prompt === "string") ? q.prompt : "",
                 lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined
             };
+            if(q && typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) out.answerPassageExcerpt = q.answerPassageExcerpt.trim();
             if(q && typeof q.marks === "number" && q.marks >= 1) out.marks = q.marks;
             return out;
         }).filter(q => q.id && q.prompt);
@@ -4349,6 +4401,7 @@ const app = {
                     prompt: (q && typeof q.prompt === "string") ? q.prompt : "",
                     lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined
                 };
+                if(q && typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) out.answerPassageExcerpt = q.answerPassageExcerpt.trim();
                 if(q && typeof q.marks === "number" && q.marks >= 1) out.marks = q.marks;
                 return out;
             });
@@ -5593,6 +5646,7 @@ const app = {
      */
     applyExamPassageInsertWidthCh: function(opts) {
         opts = opts || {};
+        if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         if(!opts.skipDomSync && typeof app.syncPdfInsertWidthChFromDomInput === "function") app.syncPdfInsertWidthChFromDomInput();
         let ch = 96;
         const m = appData && appData.meta;
@@ -5697,6 +5751,7 @@ const app = {
                 }
             }
             if(!longest.length) return null;
+            if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
             const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 36) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
             const loMin = (typeof app.PASSAGE_INSERT_WIDTH_CH_MIN === "number" && app.PASSAGE_INSERT_WIDTH_CH_MIN > 0) ? app.PASSAGE_INSERT_WIDTH_CH_MIN : 36;
             let lo = loMin;
@@ -5967,6 +6022,32 @@ const app = {
         } catch(eM) {
             return parts.join(" ");
         }
+    },
+    /**
+     * When collapsing many v2 rows into one stored row per paragraph, **space-only** joins are right for strict PDF + width-bake micro-rows
+     * (one prose stream to re-wrap). For shorter runs or teacher-shaped lines, **space** erased real line breaks — “Children weren’t allowed”
+     * was glued after “Lake.'” and Sync put both on one insert line. Use {@link mergePassageHtmlFragmentsWithSpaces} with
+     * `{ useBrBetweenChunks: true }` unless **pdfImport + strict physical lines + {@link _passageV2LooksLikeBakedWidthFragments}** on this run (≥8 lines).
+     */
+    _mergePassageCollapseRunChunks: function(chunks, o, runLines) {
+        if(!chunks || !chunks.length) return "";
+        const parts = chunks.map(function(c) { return String(c || "").trim(); }).filter(function(s) { return s.length; });
+        if(!parts.length) return "";
+        if(parts.length === 1) return parts[0];
+        const pdfImp = !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+        const strictPhys = !!(appData && appData.meta && appData.meta.pdfStrictPhysicalLines);
+        let bakedRun = false;
+        if(runLines && runLines.length >= 8 && o && typeof app._passageV2LooksLikeBakedWidthFragments === "function") {
+            try {
+                bakedRun = !!app._passageV2LooksLikeBakedWidthFragments({ v: o.v, lines: runLines, examMargin: !!o.examMargin });
+            } catch(eBr) {
+                bakedRun = false;
+            }
+        }
+        const useSpaceJoin = !!(pdfImp && strictPhys && bakedRun);
+        if(typeof app.mergePassageHtmlFragmentsWithSpaces !== "function")
+            return useSpaceJoin ? parts.join(" ") : parts.join("<br>");
+        return app.mergePassageHtmlFragmentsWithSpaces(parts, useSpaceJoin ? {} : { useBrBetweenChunks: true });
     },
     /** Lazy-built ~650-token set for {@link _repairLongGluedLowercaseRun} (greedy longest-prefix word segmentation). */
     _EXAM_GLUE_WORD_SET_CACHE: null,
@@ -7128,6 +7209,7 @@ const app = {
     /**
      * When {@link normalizeStructuredPassageV2CollapseExamVisualRowsToOneLine} would skip the single-blob merge due to ¶ boundaries, merge **within** each paragraph run instead (same paragraph = same soft-wrap source). {@link expandStructuredPassageLineEntries} + {@link splitLongRowsForBookletLineGutter} then re-wrap **all** lines at the current Insert width, not only rows that were still “long” in storage.
      * Strict PDF import without a width-bake fingerprint: leave rows unchanged (real print lines per paragraph).
+     * Row merge uses {@link _mergePassageCollapseRunChunks} so teacher line breaks are not flattened with spaces-only glue.
      */
     normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns: function(o, opts) {
         opts = opts || {};
@@ -7169,9 +7251,9 @@ const app = {
                     newLines.push({ n: newLines.length + 1, html: "", paragraphStart: r > 0 });
                     continue;
                 }
-                let mergedHtml = typeof app.mergePassageHtmlFragmentsWithSpaces === "function"
-                    ? app.mergePassageHtmlFragmentsWithSpaces(chunks)
-                    : chunks.join(" ");
+                let mergedHtml = typeof app._mergePassageCollapseRunChunks === "function"
+                    ? app._mergePassageCollapseRunChunks(chunks, o, run)
+                    : (typeof app.mergePassageHtmlFragmentsWithSpaces === "function" ? app.mergePassageHtmlFragmentsWithSpaces(chunks) : chunks.join(" "));
                 try {
                     mergedHtml = app.sanitizeSourceHtml("<p>" + mergedHtml + "</p>", { skipHoistRepair: true }).replace(/^<p\s*>/i, "").replace(/<\/p\s*>$/i, "").trim();
                 } catch(eM) {}
@@ -7191,7 +7273,7 @@ const app = {
     /**
      * Insert-width layout rows are display-only (splitLongRowsForBookletLineGutter). Saving one v2 row per .source-line-row “bakes in” narrow reflow — widening meta no longer merges one-word lines. Collapse gutter-derived rows into one logical line so expand+split always reflects current Insert width (ch).
      * opts.force — set when serializing from {@link editorLineLayoutHtmlToStructuredV2} / gutter DOM so PDF imports still store one prose blob (margin layout is recomputed), not hundreds of flushed visual rows.
-     * **Merge with {@link mergePassageHtmlFragmentsWithSpaces} (spaces between fragments) only** — joining collapsed chunks with &lt;br&gt; broke PDF re-expand (missing spaces between words, wrong WJEC ticks).
+     * Fragment join uses {@link _mergePassageCollapseRunChunks} — spaces only for strict PDF + width-bake runs; otherwise `&lt;br&gt;` so teacher row breaks survive flush/Sync.
      */
     normalizeStructuredPassageV2CollapseExamVisualRowsToOneLine: function(o, opts) {
         opts = opts || {};
@@ -7216,9 +7298,9 @@ const app = {
             if(h) chunks.push(h);
         }
         if(chunks.length <= 1) return o;
-        let mergedHtml = typeof app.mergePassageHtmlFragmentsWithSpaces === "function"
-            ? app.mergePassageHtmlFragmentsWithSpaces(chunks)
-            : chunks.join(" ");
+        let mergedHtml = typeof app._mergePassageCollapseRunChunks === "function"
+            ? app._mergePassageCollapseRunChunks(chunks, o, o.lines)
+            : (typeof app.mergePassageHtmlFragmentsWithSpaces === "function" ? app.mergePassageHtmlFragmentsWithSpaces(chunks) : chunks.join(" "));
         try {
             mergedHtml = app.sanitizeSourceHtml("<p>" + mergedHtml + "</p>", { skipHoistRepair: true }).replace(/^<p\s*>/i, "").replace(/<\/p\s*>$/i, "").trim();
         } catch(eM) {}
@@ -7727,13 +7809,25 @@ const app = {
         }
     },
     /**
+     * Incremented when insert width / CSS column changes or a new booklet-wrap batch starts so {@link _narrowestBookletWrapMetricsAndInnerPx}
+     * and {@link _getBookletSourceLineTextMetricsForWrap} do not reuse stale DOM measurements across reflows.
+     */
+    bumpBookletWrapDomMetricsEpoch: function() {
+        app._bookletWrapDomMetricsEpoch = (app._bookletWrapDomMetricsEpoch || 0) + 1;
+    },
+    /**
      * Sample `.source-line-text` in the editor for canvas wrap math ({@link splitPlainIntoVisualLinesByCh}).
      */
     _getBookletSourceLineTextMetricsForWrap: function() {
+        const epoch = app._bookletWrapDomMetricsEpoch || 0;
+        const prevCell = app._getBookletWrapCellMemo;
+        if(prevCell && prevCell.epoch === epoch && Object.prototype.hasOwnProperty.call(prevCell, "val")) return prevCell.val;
         const sels = [
             "#modal-admin #ai-input.source-editor .source-line-text",
-            "#source-lab-wrap #source-inline .source-line-text",
+            "#source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-line-text",
+            "#source-lab-wrap.architect-passage-line-mode #source-inline .source-line-text",
             "#source-inline .source-line-text",
+            "#teacher-passage-preview-output.architect-passage-line-wrap .source-line-text",
             "#ai-input .source-line-text",
             ".source-with-line-numbers .source-line-text"
         ];
@@ -7749,9 +7843,12 @@ const app = {
                 const pr = parseFloat(st.paddingRight) || 0;
                 const bl = parseFloat(st.borderLeftWidth) || 0;
                 const br = parseFloat(st.borderRightWidth) || 0;
-                return { cell, chPx, font, pl, pr, bl, br };
+                const val = { cell, chPx, font, pl, pr, bl, br };
+                app._getBookletWrapCellMemo = { epoch: epoch, val: val };
+                return val;
             } catch(eM) {}
         }
+        app._getBookletWrapCellMemo = { epoch: epoch, val: null };
         return null;
     },
     /**
@@ -7781,6 +7878,9 @@ const app = {
     _narrowestBookletWrapMetricsAndInnerPx: function(maxChRounded) {
         const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
         const max = Math.max(12, Math.min(wCap, Math.round(Number(maxChRounded))));
+        const epoch = app._bookletWrapDomMetricsEpoch || 0;
+        const prevN = app._narrowBookletDomMemo;
+        if(prevN && prevN.epoch === epoch && prevN.max === max && Object.prototype.hasOwnProperty.call(prevN, "val")) return prevN.val;
         const cells = [];
         const seen = new Set();
         const pushSel = function(sel) {
@@ -7792,7 +7892,9 @@ const app = {
             }
         };
         pushSel("#modal-admin #ai-input.source-editor .source-line-text");
-        pushSel("#source-lab-wrap #source-inline .source-line-text");
+        pushSel("#source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-line-text");
+        pushSel("#source-lab-wrap.architect-passage-line-mode #source-inline .source-line-text");
+        pushSel("#teacher-passage-preview-output.architect-passage-line-wrap .source-line-text");
         if(!cells.length) return null;
         let bestInner = Infinity;
         let bestM = null;
@@ -7819,7 +7921,9 @@ const app = {
                 bestM = m;
             }
         });
-        return bestM ? { metrics: bestM, innerPx: bestInner } : null;
+        const val = bestM ? { metrics: bestM, innerPx: bestInner } : null;
+        app._narrowBookletDomMemo = { epoch: epoch, max: max, val: val };
+        return val;
     },
     /**
      * Split plain text into simulated **printed** lines matching browser wrap at `maxCh` **CSS ch** (glyph widths via canvas), not raw character counts — Latin prose often fits ~3–8% more letters per line than `maxCh` characters, which looked like “text stops short of the dashed edge.”
@@ -8117,9 +8221,10 @@ const app = {
         }
     },
     /**
-     * **Reflow body (full pack)** when {@link passageMergeOrphanHangSegments} is off: run {@link splitPlainIntoVisualLinesByCh} **per stored row**
-     * (and per embedded `\\n` slice), then concatenate segments. Older builds joined all rows with spaces into one `fullPlain` first — that erased
-     * teacher row boundaries and drove {@link distributePlainWordsToFixedLineCount}, gluing overhang-style tails onto prior lines.
+     * **Sync / natural reflow** and **full pack** when {@link passageMergeOrphanHangSegments} is off: run {@link splitPlainIntoVisualLinesByCh}
+     * **per stored row** (and per embedded `\\n` from `&lt;br&gt;`), then concatenate segments. Avoids joining all `linePlains` into one string
+     * (and `mergedRun` newline normalization) so teacher row boundaries and mid-row soft breaks never get pooled into one wrap chunk
+     * (“reprimanded” + “he said…” on one line).
      */
     _segmentStoredRowPlainsForFullPackReflow: function(linePlains, ch, mergeOrphans) {
         const splitFn = typeof app.splitPlainIntoVisualLinesByCh === "function" ? app.splitPlainIntoVisualLinesByCh : null;
@@ -8165,6 +8270,7 @@ const app = {
     reflowStructuredPassageV2BodyToInsertWidth: function(structured, splitMaxChars, reflowOpts) {
         reflowOpts = reflowOpts || {};
         if(!structured || !Array.isArray(structured.lines) || !structured.lines.length) return null;
+        if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         const mergeOrphans = !!(reflowOpts.mergeOrphanHangSegments === true)
             || !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
         const srcLines = structured.lines.map(function(L, idx) {
@@ -8335,10 +8441,12 @@ const app = {
      * **Manual soft breaks:** plain Enter inserts &lt;br&gt; in stored HTML; {@link htmlFragmentToPlainForLineSplitting} yields embedded \\n **within** each row. Between stored rows, {@link _reflowNaturalJoinSeparatorBetweenRowPlains} picks space vs newline. Natural reflow rebuilds the **whole** passage body each time, so line wrapping earlier in the text can shift until orphan words / compounds stop splitting across soft chunks.
      * **Strict PDF “explosion”:** when stats look like one word per stored row and **no** stored line has {@link paragraphStart} (Shift+Enter / ¶), we clear indent-derived ¶ flags for one pass so lines can pack. If **any** stored row already has `paragraphStart: true`, we **do not** coalesce — teachers’ paragraph breaks survive reflow.
      * **Orphan merge:** unless {@link appData.meta.passageMergeOrphanHangSegments} or `reflowOpts.mergeOrphanHangSegments`, {@link _mergeOrphanSoftBreakParts} is **skipped** so Sync/reflow match raw canvas segments (stable booklet row counts vs “overhanger” glue).
+     * With merge **off**, {@link _segmentStoredRowPlainsForFullPackReflow} wraps **each stored row** separately — no single `mergedRun` string, so internal `\\n` from `&lt;br&gt;` never shares a normalization pass with **inter-row** `\\n` joins (that used to let Sync glue “reprimanded” + “he said…” back into one wrap chunk).
      */
     reflowStructuredPassageV2BodyToNaturalInsertWidth: function(structured, splitMaxChars, reflowOpts) {
         reflowOpts = reflowOpts || {};
         if(!structured || !Array.isArray(structured.lines) || !structured.lines.length) return null;
+        if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         const mergeOrphans = !!(reflowOpts.mergeOrphanHangSegments === true)
             || !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
         let anyStoredParagraphBreak = false;
@@ -8400,34 +8508,51 @@ const app = {
                     : app.htmlFragmentToPlainText(rawH).replace(/\s+/g, " ").trim();
                 linePlains.push(pl);
             }
-            /**
-             * Join adjacent **stored** rows before canvas wrap. When {@link passageMergeOrphanHangSegments} / orphan merge is **off** (default),
-             * use a **newline between every row** so each v2 segment becomes its own {@link softChunks} slice — Sync/reflow no longer pools
-             * mid-sentence rows into one string (smart separators often used **space**), which erased manual splits like “hasn’t” | “he?” and
-             * pulled short tails back onto the previous simulated line. With orphan merge **on**, keep {@link _reflowNaturalJoinSeparatorBetweenRowPlains}
-             * for legacy PDF glue.
-             * Embedded \\n from **within** a row (plain Enter / &lt;br&gt;) stay in each chunk and still split out as {@link softChunks}.
-             */
-            let mergedParts = [];
-            for(let ji = 0; ji < linePlains.length; ji++) {
-                const chunk = String(linePlains[ji] || "").replace(/\r\n/g, "\n");
-                if(ji === 0) mergedParts.push(chunk);
-                else {
-                    let sep = "\n";
-                    if(mergeOrphans) {
-                        sep = typeof app._reflowNaturalJoinSeparatorBetweenRowPlains === "function"
+            let newParts = [];
+            if(!mergeOrphans && typeof app._segmentStoredRowPlainsForFullPackReflow === "function") {
+                newParts = app._segmentStoredRowPlainsForFullPackReflow(linePlains, ch, false) || [];
+            } else {
+                /**
+                 * Join adjacent **stored** rows before canvas wrap (orphan merge **on** / PDF glue). {@link _reflowNaturalJoinSeparatorBetweenRowPlains}
+                 * picks space vs newline between rows; embedded `\\n` from `&lt;br&gt;` stay inside chunks.
+                 */
+                let mergedParts = [];
+                for(let ji = 0; ji < linePlains.length; ji++) {
+                    const chunk = String(linePlains[ji] || "").replace(/\r\n/g, "\n");
+                    if(ji === 0) mergedParts.push(chunk);
+                    else {
+                        const sep = typeof app._reflowNaturalJoinSeparatorBetweenRowPlains === "function"
                             ? app._reflowNaturalJoinSeparatorBetweenRowPlains(linePlains[ji - 1], linePlains[ji])
                             : " ";
+                        mergedParts.push(sep + chunk);
                     }
-                    mergedParts.push(sep + chunk);
+                }
+                let mergedRun = mergedParts.join("");
+                mergedRun = mergedRun.replace(/\n[ \t\u00a0]*\n+/g, "\n").replace(/\n{2,}/g, "\n").trim();
+                const softChunks = mergedRun.split(/\n/).map(function(seg) {
+                    return seg.replace(/[ \t\u00a0]+/g, " ").trim();
+                }).filter(function(seg) { return seg.length > 0; });
+                if(!softChunks.length) {
+                    for(let k = 0; k < nRun; k++) {
+                        const gi = from + k;
+                        const row = { html: "" };
+                        if(srcLines[gi] && srcLines[gi].paragraphStart) row.paragraphStart = true;
+                        built.push(row);
+                    }
+                    continue;
+                }
+                for(let sci = 0; sci < softChunks.length; sci++) {
+                    const chunk = softChunks[sci];
+                    let segs = typeof app.splitPlainIntoVisualLinesByCh === "function" ? app.splitPlainIntoVisualLinesByCh(chunk, ch) : null;
+                    if(!segs || !segs.length) return null;
+                    if(segs.length > 1 && mergeOrphans && typeof app._mergeOrphanSoftBreakParts === "function")
+                        segs = app._mergeOrphanSoftBreakParts(segs);
+                    if(mergeOrphans && typeof app._resplitBookletSegmentsIfOrphanMergeOverflow === "function")
+                        segs = app._resplitBookletSegmentsIfOrphanMergeOverflow(segs, ch);
+                    for(let sj = 0; sj < segs.length; sj++) newParts.push(segs[sj]);
                 }
             }
-            let mergedRun = mergedParts.join("");
-            mergedRun = mergedRun.replace(/\n[ \t\u00a0]*\n+/g, "\n").replace(/\n{2,}/g, "\n").trim();
-            const softChunks = mergedRun.split(/\n/).map(function(seg) {
-                return seg.replace(/[ \t\u00a0]+/g, " ").trim();
-            }).filter(function(seg) { return seg.length > 0; });
-            if(!softChunks.length) {
+            if(!newParts.length) {
                 for(let k = 0; k < nRun; k++) {
                     const gi = from + k;
                     const row = { html: "" };
@@ -8436,18 +8561,6 @@ const app = {
                 }
                 continue;
             }
-            let newParts = [];
-            for(let sci = 0; sci < softChunks.length; sci++) {
-                const chunk = softChunks[sci];
-                let segs = typeof app.splitPlainIntoVisualLinesByCh === "function" ? app.splitPlainIntoVisualLinesByCh(chunk, ch) : null;
-                if(!segs || !segs.length) return null;
-                if(segs.length > 1 && mergeOrphans && typeof app._mergeOrphanSoftBreakParts === "function")
-                    segs = app._mergeOrphanSoftBreakParts(segs);
-                if(mergeOrphans && typeof app._resplitBookletSegmentsIfOrphanMergeOverflow === "function")
-                    segs = app._resplitBookletSegmentsIfOrphanMergeOverflow(segs, ch);
-                for(let sj = 0; sj < segs.length; sj++) newParts.push(segs[sj]);
-            }
-            if(!newParts.length) return null;
             for(let k = 0; k < newParts.length; k++) {
                 const part = newParts[k] || "";
                 const p = (typeof app.plainChunkToPassageHtml === "function" ? app.plainChunkToPassageHtml(part) : app.escapeHtml(part)) || "";
@@ -8644,6 +8757,7 @@ const app = {
      */
     splitLongRowsForBookletLineGutter: function(rows, maxChars, gutterOpts) {
         if(!rows || !rows.length) return rows || [];
+        if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         gutterOpts = gutterOpts || {};
         let mc = maxChars;
         if(mc == null || !Number.isFinite(mc)) {
@@ -12255,9 +12369,14 @@ const app = {
         }
         return chosen;
     },
-    /** Passage string for Lab / Quote Select (preserves inline formatting when stored as HTML). */
-    getSourceTextForDisplay: function() {
-        const level = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
+    /**
+     * Passage string for Lab / Quote Select (preserves inline formatting when stored as HTML).
+     * @param {number} [levelOverride] When set and the lesson has dual C2 passages, uses {@link app.getSourceTextForLevel}(levelOverride) so Level Bank preview matches that level without changing the header level.
+     */
+    getSourceTextForDisplay: function(levelOverride) {
+        const level = (levelOverride != null && levelOverride !== "")
+            ? (parseInt(levelOverride, 10) || 1)
+            : (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1));
         if(admin.hasC2DualSource && admin.hasC2DualSource()) {
             return app.getSourceTextForLevel(level);
         }
@@ -12356,27 +12475,78 @@ const app = {
         }
         return ns.includes(nq);
     },
+    /**
+     * Share of “significant” words from the official answer-box excerpt that also appear in the student’s highlight (used for soft mismatch warnings).
+     * @returns {number} in [0, 1]
+     */
+    answerPassageWordOverlapScore: function(studentSel, officialExcerpt) {
+        const stop = new Set(["the","and","a","an","or","but","in","on","at","to","for","of","is","was","were","be","been","are","am","as","it","its","with","from","that","this","these","those","by","not","no","so","if","we","you","he","she","they","them","their","there","than","then","had","have","has","did","do","does","done","will","would","could","should","may","might","must","can","cannot","into","about","over","out","up","down","all","each","every","any","some","such","more","most","less","very","just","only","also","even","like","one","two","first","last"]);
+        const words = (s) => (String(s || "").toLowerCase().match(/[a-z0-9']+/g) || []);
+        const sig = (s) => {
+            const out = [];
+            for(const w of words(s)) {
+                if(w.length >= 3 && !stop.has(w)) out.push(w);
+            }
+            return out;
+        };
+        const aList = sig(officialExcerpt);
+        if(!aList.length) return 1;
+        const bSet = new Set(sig(studentSel));
+        if(!bSet.size) return 0;
+        let hit = 0;
+        for(const w of aList) {
+            if(bSet.has(w)) hit++;
+        }
+        return hit / aList.length;
+    },
+    /** Official “answer box” passage excerpt for the question tied to this level (Editing Suite → focus row). */
+    getAnswerPassageExcerptForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const win = app.resolveQuoteSelectLineWindow(lvl);
+        const qid = win && win.currentQId;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [{ id: "q1", prompt: appData.question || "" }];
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const findQById = (id) => (id ? questions.find(qq => qq && (qq.id === id || normQid(qq.id) === normQid(id))) : null);
+        const row = findQById(qid) || questions[0];
+        if(!row || typeof row.answerPassageExcerpt !== "string") return "";
+        return String(row.answerPassageExcerpt).trim();
+    },
+    /**
+     * When teachers store the exact passage span students should work from, warn if the highlight looks like a different part of the text (non-blocking).
+     */
+    shouldWarnAnswerPassageMismatch: function(studentText, officialExcerpt, sourceText) {
+        const off = String(officialExcerpt || "").trim();
+        const stu = String(studentText || "").trim();
+        if(off.length < 12 || !stu) return false;
+        if(app.quoteInSource(off, stu) || app.quoteInSource(stu, off)) return false;
+        const score = app.answerPassageWordOverlapScore(stu, off);
+        return score < 0.28;
+    },
     /** Parse "lines 1-5" or "Read lines 1-5" from question text. Returns { from: 1, to: 5 } or null. */
     parseLineRangeFromQuestion: function(questionText) {
         if(!questionText || typeof questionText !== "string") return null;
         const s = String(questionText).trim();
         const m = s.match(/\blines?\s+(\d+)\s*[-–—−]\s*(\d+)\b/i) || s.match(/\blines?\s+(\d+)\s+to\s+(\d+)\b/i);
         if(m) {
-            const from = parseInt(m[1], 10);
+            let from = parseInt(m[1], 10);
             const to = parseInt(m[2], 10);
+            /** Past-paper / OCR “lines 0–13” — treat line 0 as line 1 so a window still parses. */
+            if(from === 0 && to >= 1) from = 1;
             if(from >= 1 && to >= from && to <= 999) return { from, to };
         }
         const bare = s.match(/^\s*(\d+)\s*[-–—−]\s*(\d+)\s*$/);
         if(bare) {
-            const from = parseInt(bare[1], 10);
+            let from = parseInt(bare[1], 10);
             const to = parseInt(bare[2], 10);
+            if(from === 0 && to >= 1) from = 1;
             if(from >= 1 && to >= from && to <= 999) return { from, to };
         }
         /** "1-5" or "3–7" embedded (Focus lines box often pasted without the word "lines") */
         const loose = s.match(/(?:^|\s)(\d+)\s*[-–—−]\s*(\d+)(?:\s|$)/);
         if(loose) {
-            const from = parseInt(loose[1], 10);
+            let from = parseInt(loose[1], 10);
             const to = parseInt(loose[2], 10);
+            if(from === 0 && to >= 1) from = 1;
             if(from >= 1 && to >= from && to <= 999 && s.length <= 40) return { from, to };
         }
         const single = s.match(/\b(?:line|lines)\s+(\d+)\b/i);
@@ -12384,12 +12554,19 @@ const app = {
             const n = parseInt(single[1], 10);
             if(n >= 1 && n <= 999) return { from: n, to: n };
         }
+        /** Booklet lines box: a lone `9` or `4` = that single insert line (not “fall through to prompt”). */
+        const lone = s.match(/^\s*(\d{1,3})\s*$/);
+        if(lone) {
+            const n = parseInt(lone[1], 10);
+            if(n >= 1 && n <= 999) return { from: n, to: n };
+        }
         return null;
     },
     /**
-     * Resolves passage line window for Quote Select: **Level Bank → Question** assignment(s) first, then student nav current question, then prompt text.
-     * Order matters: `getCurrentQuestionIdForLevel` can still point at q1 while the bank assigns q2 with Lines **1–5**; another row can keep stale **1–15** and wrongly win if tried first.
-     * @returns {{ lineRange: {from:number,to:number}|null, currentQId: string|null, windowSource: string }}
+     * Resolves passage line window for Quote Select: Level Bank question ids (current navigated question’s Lines box first, then siblings in bank order), then prompt text.
+     * @returns {{ lineRange: {from:number,to:number}|null, displayLineRange: {from:number,to:number}|null, currentQId: string|null, windowSource: string }}
+     * `lineRange` = technical window (Lines box first, then prompt) for excerpt slicing / quote-in-window checks.
+     * `displayLineRange` = span to show students (prompt “Read lines 8–12…” first when present, else same as `lineRange`).
      */
     resolveQuoteSelectLineWindow: function(level) {
         const lvl = parseInt(level, 10) || 1;
@@ -12417,8 +12594,18 @@ const app = {
             return false;
         };
         if(ids && ids.length) {
-            for(let i = 0; i < ids.length; i++) {
-                if(applyLineRef(findQById(ids[i]), "lineRef:")) break;
+            /** Prefer the **navigated** focus question’s Lines box, then other Level Bank ids — avoids a sibling row’s stale line ref winning while the prompt / affirm text come from {@link getCurrentQuestionIdForLevel}. */
+            const orderedIds = ids.slice();
+            if(currentQId) {
+                const curN = normQid(currentQId);
+                const ix = orderedIds.findIndex(id => id && normQid(id) === curN);
+                if(ix > 0) {
+                    const picked = orderedIds.splice(ix, 1)[0];
+                    orderedIds.unshift(picked);
+                }
+            }
+            for(let i = 0; i < orderedIds.length; i++) {
+                if(applyLineRef(findQById(orderedIds[i]), "lineRef:")) break;
             }
         }
         if(!lineRange) applyLineRef(findQById(currentQId), "lineRef:");
@@ -12426,7 +12613,9 @@ const app = {
             lineRange = app.parseLineRangeFromQuestion(promptText) || null;
             if(lineRange) windowSource = "question_prompt";
         }
-        return { lineRange, currentQId: currentQId || null, windowSource };
+        const displayFromPrompt = app.parseLineRangeFromQuestion(promptText) || null;
+        const displayLineRange = displayFromPrompt || lineRange || null;
+        return { lineRange, displayLineRange, currentQId: currentQId || null, windowSource };
     },
     /**
      * One row per `.source-line-row` in stored passage HTML — fixes slicing when {@link cleanSourceText} collapses the insert to few newlines.
@@ -12444,7 +12633,12 @@ const app = {
                 const numEl = rowEl.querySelector(".source-line-num");
                 const txtEl = rowEl.querySelector(".source-line-text");
                 let num = 0;
-                if(numEl) {
+                const ds = rowEl.getAttribute && rowEl.getAttribute("data-src-line");
+                if(ds != null && String(ds).trim() !== "") {
+                    const dn = parseInt(String(ds).trim().replace(/^L/i, ""), 10);
+                    if(Number.isFinite(dn) && dn >= -500 && dn <= 9999) num = dn;
+                }
+                if(num < 1 && numEl) {
                     const mt = (numEl.textContent || "").match(/\d+/);
                     if(mt) num = parseInt(mt[0], 10);
                 }
@@ -12482,27 +12676,59 @@ const app = {
         return rows;
     },
     /**
+     * Rows `{ num, body }[]` for line-window slicing: same **layout** as {@link app.formatStructuredPassageHtml} / Lab
+     * (insert-width splits, booklet indices), not coarse stored HTML / paragraph rows alone.
+     */
+    getDomRowsForExamLineSlicing: function(sourceText, level) {
+        const lvl = (level != null && level !== "") ? parseInt(level, 10) : NaN;
+        const L = Number.isFinite(lvl) && lvl >= 1 ? lvl : ((typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1);
+        let raw = String(sourceText || "").trim();
+        if(!raw) return [];
+        let sp = null;
+        if(app.parseStructuredPassageSource) {
+            const cand = (appData && appData.component !== 2 && typeof appData.sourceText === "string")
+                ? String(appData.sourceText).replace(/^\uFEFF/, "").trim() : "";
+            if(cand && cand.startsWith("{") && /"lines"\s*:\s*\[/i.test(cand))
+                sp = app.parseStructuredPassageSource(cand);
+            if(!sp)
+                sp = app.parseStructuredPassageSource(raw);
+        }
+        if(sp && app.formatStructuredPassageHtml) {
+            const bank = app.getLevelBank ? app.getLevelBank() : {};
+            const ent = bank[L] || {};
+            const dense = !!(ent.passageQuoteSelectEveryLineNumber === true || ent.passageQuoteSelectEveryLineNumber === "true");
+            const html = (dense && app.formatStructuredPassageHtmlDenseMargins)
+                ? app.formatStructuredPassageHtmlDenseMargins(sp)
+                : app.formatStructuredPassageHtml(sp);
+            const domRows = app.parseExamPassageRowsFromDomHtml(html);
+            if(domRows.length) return domRows;
+        }
+        const domRows2 = app.parseExamPassageRowsFromDomHtml(raw);
+        if(domRows2.length) return domRows2;
+        let s0 = raw;
+        if(/<[^>]+>/.test(s0) || (app.isStructuredPassageSource && app.isStructuredPassageSource(s0))) s0 = app.cleanSourceText(s0) || "";
+        return app.parseWJECStyleBookletRows(s0);
+    },
+    /**
      * Plain text for booklet lines `range.from`–`range.to` (WJEC gutter numbers when present), else raw 1-based source lines after cleanSourceText.
      * Used when students see an excerpt-only passage (mobile / exam-style line window) without booklet DOM.
+     * @param {number} [level] When set, structured passages use the same layout rows as Lab for this level.
      */
-    slicePlainByExamLineRange: function(sourceText, range) {
+    slicePlainByExamLineRange: function(sourceText, range, level) {
         if(!range || typeof range.from !== "number" || typeof range.to !== "number") return "";
         const from = Math.min(range.from, range.to);
         const to = Math.max(range.from, range.to);
         const s0 = String(sourceText || "").trim();
         if(!s0) return "";
-        const domRows = app.parseExamPassageRowsFromDomHtml(s0);
-        let rows = domRows.length ? domRows : app.parseWJECStyleBookletRows(s0);
+        const L = (level != null && level !== "") ? parseInt(level, 10) : ((typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1);
+        const rows = app.getDomRowsForExamLineSlicing(s0, L);
         if(rows.length) {
             let slice = [];
-            if(domRows.length) {
-                /** Booklet HTML: “lines 1–5” means the 1st–5th insert rows, not margin tick digits (often 5, 10, 15…). */
-                if(from >= 1 && from <= rows.length) {
-                    slice = rows.slice(from - 1, Math.min(to, rows.length));
-                }
-            } else {
-                slice = rows.filter(r => r && r.num >= from && r.num <= to);
-                if(!slice.length && from >= 1 && from <= rows.length) {
+            const byBooklet = rows.filter(r => r && typeof r.num === "number" && r.num >= from && r.num <= to);
+            if(byBooklet.length) slice = byBooklet;
+            else {
+                const anyBookletNum = rows.some(r => r && typeof r.num === "number" && Number.isFinite(r.num) && r.num >= 1);
+                if(!anyBookletNum && from >= 1 && from <= rows.length) {
                     slice = rows.slice(from - 1, Math.min(to, rows.length));
                 }
             }
@@ -12520,25 +12746,24 @@ const app = {
     },
     /**
      * Same row selection as {@link slicePlainByExamLineRange} but returns `{ num, body }[]` for sectional HTML (one row per booklet line, `data-src-line` = insert line).
+     * @param {number} [level] Same as {@link slicePlainByExamLineRange}.
      * @returns {Array<{num?: number, body: string}>}
      */
-    sliceExamLineRangeRows: function(sourceText, range) {
+    sliceExamLineRangeRows: function(sourceText, range, level) {
         if(!range || typeof range.from !== "number" || typeof range.to !== "number") return [];
         const from = Math.min(range.from, range.to);
         const to = Math.max(range.from, range.to);
         const s0 = String(sourceText || "").trim();
         if(!s0) return [];
-        const domRows = app.parseExamPassageRowsFromDomHtml(s0);
-        let rows = domRows.length ? domRows : app.parseWJECStyleBookletRows(s0);
+        const L = (level != null && level !== "") ? parseInt(level, 10) : ((typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1);
+        const rows = app.getDomRowsForExamLineSlicing(s0, L);
         if(rows.length) {
             let slice = [];
-            if(domRows.length) {
-                if(from >= 1 && from <= rows.length) {
-                    slice = rows.slice(from - 1, Math.min(to, rows.length));
-                }
-            } else {
-                slice = rows.filter(r => r && r.num >= from && r.num <= to);
-                if(!slice.length && from >= 1 && from <= rows.length) {
+            const byBooklet = rows.filter(r => r && typeof r.num === "number" && r.num >= from && r.num <= to);
+            if(byBooklet.length) slice = byBooklet;
+            else {
+                const anyBookletNum = rows.some(r => r && typeof r.num === "number" && Number.isFinite(r.num) && r.num >= 1);
+                if(!anyBookletNum && from >= 1 && from <= rows.length) {
                     slice = rows.slice(from - 1, Math.min(to, rows.length));
                 }
             }
@@ -12557,9 +12782,9 @@ const app = {
         }
         return out;
     },
-    /** Quote Select excerpt: `.source-with-line-numbers` rows, explicit insert line nums (no coarse-only ticks misread on a short window). */
-    formatSourceHtmlExamLineWindow: function(sourceText, range) {
-        const sliceRows = app.sliceExamLineRangeRows(sourceText, range);
+    /** Quote Select excerpt: `.source-with-line-numbers` rows, explicit insert line nums (no coarse-only ticks misread on a short window). @param {number} [level] Same as {@link sliceExamLineRangeRows}. */
+    formatSourceHtmlExamLineWindow: function(sourceText, range, level) {
+        const sliceRows = app.sliceExamLineRangeRows(sourceText, range, level);
         if(!sliceRows || !sliceRows.length) return "";
         let ord = 0;
         const entries = sliceRows.map(function(r) {
@@ -12583,7 +12808,7 @@ const app = {
      * Shared Lab / Quote Select / refresh passage HTML: **whole** insert vs **focused** line-window excerpt for the current level.
      * @param {number} level
      * @param {string} sourceText
-     * @param {{ warnHtml?: string, scope?: string, lineRange?: {from:number,to:number}|null }} [opts]
+     * @param {{ warnHtml?: string, scope?: string, lineRange?: {from:number,to:number}|null, displayLineRange?: {from:number,to:number}|null }} [opts]
      */
     buildPassagePaneHtmlForLevel: function(level, sourceText, opts) {
         opts = opts || {};
@@ -12595,25 +12820,27 @@ const app = {
         const everyLineMargin = !!(levelEntry.passageQuoteSelectEveryLineNumber === true || levelEntry.passageQuoteSelectEveryLineNumber === "true");
         const fullPassageFmtOpts = everyLineMargin ? { passageQuoteSelectDenseLines: true } : {};
         let lineRange = null;
-        if(Object.prototype.hasOwnProperty.call(opts, "lineRange")) lineRange = opts.lineRange;
-        else lineRange = app.resolveQuoteSelectLineWindow(lvl).lineRange;
+        const lineWinResolved = app.resolveQuoteSelectLineWindow(lvl);
+        if(Object.prototype.hasOwnProperty.call(opts, "lineRange") && opts.lineRange !== undefined) lineRange = opts.lineRange;
+        else lineRange = lineWinResolved.lineRange;
+        const labelRange = (Object.prototype.hasOwnProperty.call(opts, "displayLineRange") && opts.displayLineRange !== undefined ? opts.displayLineRange : null) || lineWinResolved.displayLineRange || lineRange;
         let excerptSliceFailed = false;
         let useExcerpt = false;
         let selPassageHtml = warnHtml + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         if(scope === "focused" && lineRange) {
-            const ex = app.slicePlainByExamLineRange(sourceText, lineRange);
+            const ex = app.slicePlainByExamLineRange(sourceText, lineRange, lvl);
             if(ex && ex.trim()) {
                 useExcerpt = true;
-                const spanLab = lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`;
-                const banner = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;opacity:0.9;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--primary);background:rgba(0,150,136,0.08);">Exam-style window: <strong>${spanLab}</strong> — one row per booklet line with the insert line number in the margin. Evidence is still checked against the full passage.</div>`;
-                let excerptBody = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(sourceText, lineRange) : "";
+                const spanLab = labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
+                const banner = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;opacity:0.9;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--primary);background:rgba(0,150,136,0.08);">Exam-style window: <strong>${spanLab}</strong> — rows whose stored insert line (<code>data-src-line</code> / margin) falls in that range when possible; otherwise the first N passage <strong>rows</strong> (each row may be a whole paragraph). Evidence is still checked against the full passage.</div>`;
+                let excerptBody = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(sourceText, lineRange, lvl) : "";
                 if(!excerptBody || !String(excerptBody).trim())
                     excerptBody = app.formatSourceHtml(ex.trim(), { skipStoredStructuredFallback: true, excerptProse: true });
                 selPassageHtml = warnHtml + banner + excerptBody;
             } else {
                 excerptSliceFailed = true;
-                const spanLab = lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`;
-                selPassageHtml = warnHtml + `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. Check line numbers (try <strong>1–5</strong> for the first five insert rows). Showing full passage below.</div>` + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
+                const spanLab = labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
+                selPassageHtml = warnHtml + `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. Check line numbers match stored insert lines (<code>data-src-line</code>) or try <strong>1–5</strong> for the first five passage rows. Showing full passage below.</div>` + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -13024,6 +13251,7 @@ const app = {
                 const c2Source = (q.c2Source === "21st" || q.c2Source === "19th" || q.c2Source === "both") ? q.c2Source : undefined;
                 const o = { id: (q.id && typeof q.id === "string") ? q.id : "q" + (i + 1), prompt: typeof q.prompt === "string" ? q.prompt : "", lineRef };
                 if(c2Source) o.c2Source = c2Source;
+                if(typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) o.answerPassageExcerpt = q.answerPassageExcerpt.trim();
                 if(q.includeInWorksheet === false) o.includeInWorksheet = false;
                 if(typeof q.worksheetInferenceModel === "string" && q.worksheetInferenceModel.trim()) o.worksheetInferenceModel = q.worksheetInferenceModel.trim();
                 if(Array.isArray(q.worksheetInferenceDistractors)) {
@@ -13921,8 +14149,14 @@ const ui = {
         } else {
             const strSrc = (typeof src === "string" ? src : "") || "";
             const warnOnly = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
+            const lineWinRf = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levRefresh) : null;
+            const paneOptsRf = { warnHtml: warnOnly, scope: scopeRefresh };
+            if(lineWinRf) {
+                paneOptsRf.lineRange = lineWinRf.lineRange;
+                paneOptsRf.displayLineRange = lineWinRf.displayLineRange;
+            }
             bundleForShell = typeof app.buildPassagePaneHtmlForLevel === "function"
-                ? app.buildPassagePaneHtmlForLevel(levRefresh, strSrc, { warnHtml: warnOnly, scope: scopeRefresh })
+                ? app.buildPassagePaneHtmlForLevel(levRefresh, strSrc, paneOptsRf)
                 : null;
             html = bundleForShell ? bundleForShell.html : app.formatSourceHtml(strSrc);
         }
@@ -14049,7 +14283,13 @@ const ui = {
         let dispBundleInit = null;
         let dispPassageHtml = app.formatSourceHtml(sourceForDisplay);
         if(typeof sourceForDisplay === "string" && typeof app.buildPassagePaneHtmlForLevel === "function") {
-            dispBundleInit = app.buildPassagePaneHtmlForLevel(levInitDisp, sourceForDisplay, { warnHtml: "", scope: scopeInitDisp });
+            const lineWinInit = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levInitDisp) : null;
+            const paneOptsInit = { warnHtml: "", scope: scopeInitDisp };
+            if(lineWinInit) {
+                paneOptsInit.lineRange = lineWinInit.lineRange;
+                paneOptsInit.displayLineRange = lineWinInit.displayLineRange;
+            }
+            dispBundleInit = app.buildPassagePaneHtmlForLevel(levInitDisp, sourceForDisplay, paneOptsInit);
             dispPassageHtml = dispBundleInit.html;
         }
         const inline = document.getElementById("source-inline");
@@ -14587,8 +14827,14 @@ const ui = {
             const levLab = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
             const scopeLab = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
             const strSrc = typeof src === "string" ? src : "";
+            const lineWinLab = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levLab) : null;
+            const paneOptsLab = { warnHtml: warn, scope: scopeLab };
+            if(lineWinLab) {
+                paneOptsLab.lineRange = lineWinLab.lineRange;
+                paneOptsLab.displayLineRange = lineWinLab.displayLineRange;
+            }
             const bundleLab = typeof app.buildPassagePaneHtmlForLevel === "function"
-                ? app.buildPassagePaneHtmlForLevel(levLab, strSrc, { warnHtml: warn, scope: scopeLab })
+                ? app.buildPassagePaneHtmlForLevel(levLab, strSrc, paneOptsLab)
                 : null;
             const labH = bundleLab ? bundleLab.html : warn + app.formatSourceHtml(src);
             inline.innerHTML = labH;
@@ -16096,7 +16342,7 @@ const ui = {
         if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
         const lblLevelSelect = document.getElementById("lbl-level-select");
         if(lblLevelSelect) lblLevelSelect.textContent = String(level);
-        const sourceTextEarly = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
+        const sourceTextEarly = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText();
         const hasSourceEarly = !!(sourceTextEarly && String(sourceTextEarly).trim());
         const helpWrap = document.getElementById("selection-student-help-wrap");
         if(helpWrap) {
@@ -16140,6 +16386,7 @@ const ui = {
         const lineWinEarly = app.resolveQuoteSelectLineWindow(level);
         let currentQId = lineWinEarly.currentQId;
         let lineRange = lineWinEarly.lineRange;
+        const displayLineRange = lineWinEarly.displayLineRange || lineRange;
         const usePerQuestionGoal = hasMultipleQuestions;
         const pointsGoal = app.getSelectionPointsGoalForLevel(level);
         const tapHighlightEvidenceMode = c2ShortAnswer || (levelEntry && levelEntry.shortAnswersOnly === true) || app.getEffectiveTapText(level) || app.isTeacherTapRecordPassageMode();
@@ -16148,7 +16395,7 @@ const ui = {
         const optionCount = Math.max(2, Math.min(20, pointsGoal + distractorTarget));
         const correctItemsAll = sel.items.filter(i => i.correct)
             .filter(i => !i.device || selectionDevices[i.device] !== false);
-        const sourceText = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
+        const sourceText = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText();
         const hasSource = !!(sourceText && String(sourceText).trim());
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         let excerptSliceFailed = false;
@@ -16159,7 +16406,7 @@ const ui = {
                 const warn = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
                 const scopeSel = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
                 const bundle = typeof app.buildPassagePaneHtmlForLevel === "function"
-                    ? app.buildPassagePaneHtmlForLevel(level, sourceText, { warnHtml: warn, scope: scopeSel, lineRange: lineRange })
+                    ? app.buildPassagePaneHtmlForLevel(level, sourceText, { warnHtml: warn, scope: scopeSel, lineRange: lineRange, displayLineRange: lineWinEarly.displayLineRange })
                     : null;
                 excerptSliceFailed = !!(bundle && bundle.excerptSliceFailed);
                 const selPassageHtml = bundle ? bundle.html : warn + app.formatSourceHtml(sourceText);
@@ -16202,17 +16449,17 @@ const ui = {
             }
         }
         const affirmTeacherPreview = !!(userState && userState.teacherPreviewAffirmStep);
-        if((appData.isStandalone || affirmTeacherPreview) && lineRange && hasSource && (levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true")) {
+        if((appData.isStandalone || affirmTeacherPreview) && displayLineRange && hasSource && (levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true")) {
             if(!userState.passageExamAckMap || typeof userState.passageExamAckMap !== "object") userState.passageExamAckMap = {};
-            const spanAck = lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`;
-            const ackKey = `L${level}_q:${normId(currentQId || "")}_${lineRange.from}-${lineRange.to}`;
+            const spanAck = displayLineRange.from === displayLineRange.to ? `line ${displayLineRange.from}` : `lines ${displayLineRange.from}–${displayLineRange.to}`;
+            const ackKey = `L${level}_q:${normId(currentQId || "")}_affirm:${displayLineRange.from}-${displayLineRange.to}`;
             if(!userState.passageExamAckMap[ackKey]) {
                 const tPanelEarly = document.getElementById("selection-top-panel");
                 if(tPanelEarly) tPanelEarly.innerHTML = "";
                 cont.innerHTML = `<div class="card" style="cursor:default;">
                     <div style="font-weight:800; font-size:1.05rem; margin-bottom:10px;">Working from the right lines</div>
                     <p style="opacity:0.92; line-height:1.45; margin:0 0 12px 0;">The question asks you to use <strong>${spanAck}</strong>. Read the passage in the window above and make sure you understand which part of the text you must use before you highlight or choose quotes.</p>
-                    <p style="opacity:0.85; font-size:0.85rem; margin:0 0 14px 0;">Tip: in the exam you would mark those lines in your head (or lightly in the booklet) before you write — this step practises that discipline.</p>
+                    <p style="opacity:0.85; font-size:0.85rem; margin:0 0 14px 0;">Tip: the numbers above match the <strong>line range in the question</strong> when it says “Read lines …”. The passage window may show a narrower technical slice if your lesson uses the Lines box for row-based excerpting.</p>
                     <button type="button" class="btn btn-primary" id="selection-passage-line-ack-btn">Continue — I am working from ${spanAck}</button>
                 </div>`;
                 const ackBtn = document.getElementById("selection-passage-line-ack-btn");
@@ -16439,6 +16686,13 @@ const ui = {
         if(tapPathActive && hasSource && pendingQuotePassage) {
             const pendingQuote = pendingQuotePassage;
             const tr = teacherRecordMode;
+            const officialAnswerPassage = (!tr && app.getAnswerPassageExcerptForLevel) ? app.getAnswerPassageExcerptForLevel(level) : "";
+            const passageMismatchWarn = (!tr && officialAnswerPassage && app.shouldWarnAnswerPassageMismatch(pendingQuote, officialAnswerPassage, sourceText))
+                ? `<div class="card" style="margin-bottom:10px;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.09);font-size:0.86rem;line-height:1.45;">
+                    <div style="font-weight:700;margin-bottom:4px;">Check you are on the right part of the passage</div>
+                    <div style="opacity:0.95;">Your highlight does not closely match the <strong>answer passage</strong> your teacher set for this question. You can still continue if you are sure — in the exam you must work from the lines the question gives you.</div>
+                </div>`
+                : "";
             const q1TapParaphrase = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
             const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
             /* Hide optional justify only for true short-answer levels that are not Q1 retrieval; Q1 needs visible own-words even when "shortAnswersOnly" is on. Synonym help must not hide this (legacy bug used synonym flag as “no quotes”). */
@@ -16451,6 +16705,7 @@ const ui = {
                 : "";
             cont.innerHTML = `
                     <div class="section-header">${tr ? "Teacher: record this quote" : "Examine your quote"}</div>
+                    ${passageMismatchWarn}
                     <div class="card" style="margin-bottom:10px;">
                         <div style="font-weight:700; margin-bottom:6px;">Selected quote</div>
                         <div style="font-style:italic; margin-bottom:10px; padding:8px; background:var(--bg); border-radius:6px;">${app.quoteDisplayHtml(pendingQuote || "")}</div>
@@ -16705,7 +16960,7 @@ const ui = {
             item: i
         }));
         if(lessonQuotesOutsideExamWindow.length && lineRange && hasSource) {
-            const span = lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`;
+            const span = displayLineRange && displayLineRange.from === displayLineRange.to ? `line ${displayLineRange.from}` : (displayLineRange ? `lines ${displayLineRange.from}–${displayLineRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
             lessonQuotesOutsideExamWindow.forEach(i => {
                 const q = getQuote(i);
                 if(q) reasonMap.set(app.quoteKey(q), `Not from the ${span} you were asked to use — mark as Not strong.`);
@@ -22150,6 +22405,36 @@ const admin = {
         row.appendChild(wsWrap);
         row.appendChild(removeBtn);
         outer.appendChild(row);
+        const excerptWrap = document.createElement("div");
+        excerptWrap.className = "question-answer-passage-excerpt-wrap";
+        excerptWrap.style.cssText = "width:100%; margin-top:6px;";
+        const excerptLab = document.createElement("div");
+        excerptLab.style.cssText = "font-size:0.78rem; opacity:0.88; margin-bottom:4px; line-height:1.35;";
+        excerptLab.textContent = "Answer passage (optional) — paste the exact lines from the insert students should box / highlight for this question. Used for a soft warning if their selection looks like a different part of the text.";
+        const excerptActions = document.createElement("div");
+        excerptActions.style.cssText = "display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:6px;";
+        const msFillBtn = document.createElement("button");
+        msFillBtn.type = "button";
+        msFillBtn.className = "btn btn-outline btn-small";
+        msFillBtn.textContent = "Fill from mark scheme";
+        msFillBtn.title = "Run the same local match as “Suggest quotes from mark scheme” for this question only, and paste matched passage sentences here (confirms if this box already has text).";
+        msFillBtn.onclick = () => admin.fillAnswerPassageFromMarkSchemeForQuestionIndex(i);
+        excerptActions.appendChild(msFillBtn);
+        const excerptTa = document.createElement("textarea");
+        excerptTa.className = "question-answer-passage-excerpt";
+        excerptTa.rows = 2;
+        excerptTa.placeholder = "Paste the relevant passage lines here (leave empty to turn off the check)…";
+        excerptTa.value = (q && typeof q.answerPassageExcerpt === "string") ? q.answerPassageExcerpt : "";
+        excerptTa.style.cssText = "width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.82rem; resize:vertical; min-height:44px;";
+        excerptTa.addEventListener("input", (e) => {
+            const preferredMount = e.target && e.target.closest(".questions-list-mount");
+            admin.syncQuestionsFromListCore(preferredMount ? { preferredMount } : undefined);
+        });
+        excerptTa.addEventListener("change", (e) => admin.syncQuestionsFromList(false, e.target));
+        excerptWrap.appendChild(excerptLab);
+        excerptWrap.appendChild(excerptActions);
+        excerptWrap.appendChild(excerptTa);
+        outer.appendChild(excerptWrap);
         if(i === 0 && appData && appData.component !== 2) {
             const inf = document.createElement("div");
             inf.className = "question-ws-inference-block";
@@ -22254,6 +22539,9 @@ const admin = {
                 const sid = srcRow.querySelector("textarea.question-ws-inference-distractors");
                 const did = dstRow.querySelector("textarea.question-ws-inference-distractors");
                 if(sid && did && did.value !== sid.value) did.value = sid.value;
+                const sae = srcRow.querySelector("textarea.question-answer-passage-excerpt");
+                const dae = dstRow.querySelector("textarea.question-answer-passage-excerpt");
+                if(sae && dae && dae.value !== sae.value) dae.value = sae.value;
             });
         });
     },
@@ -22274,6 +22562,7 @@ const admin = {
             const lineRefEl = row.querySelector("input.question-line-ref-input");
             const sel = row.querySelector("select.question-c2-source-select");
             const ws = row.querySelector("input.question-include-ws");
+            const excerptEl = row.querySelector("textarea.question-answer-passage-excerpt");
             let raw = inp ? String(inp.value || "").trim() : "";
             if(sanitize && app.sanitizeFocusQuestionPrompt) {
                 const san = app.sanitizeFocusQuestionPrompt(raw);
@@ -22288,6 +22577,7 @@ const admin = {
                 c2Source: sel ? String(sel.value || "").trim() : null,
                 hasWsCb: !!ws,
                 includeWS: ws ? !!ws.checked : null,
+                excerptRaw: excerptEl ? String(excerptEl.value || "").trim() : "",
                 _rowEl: row
             };
         });
@@ -22302,6 +22592,8 @@ const admin = {
             const lrTrim = r.lineRefRaw != null ? String(r.lineRefRaw).trim() : "";
             if(lrTrim) o.lineRef = lrTrim;
             else if(old && old.lineRef) delete o.lineRef;
+            const exTrim = r.excerptRaw != null ? String(r.excerptRaw).trim() : "";
+            if(exTrim) o.answerPassageExcerpt = exTrim;
             if(r.hasWsCb && r.includeWS !== null) o.includeInWorksheet = !!r.includeWS;
             else if(old) o.includeInWorksheet = !!old.includeInWorksheet;
             else o.includeInWorksheet = false;
@@ -22939,29 +23231,113 @@ const admin = {
         wrap.innerHTML = f === "bad" ? badSection : (goodSection + badSection) || "<div style='opacity:0.7;'>No quotes match the filter.</div>";
         if(document.getElementById("quotes-filter-all")) { ["all","good","bad"].forEach(function(id){ var b=document.getElementById("quotes-filter-"+id); if(b){ var active=(id==="all"&&f==="all")||(id==="good"&&f==="good")||(id==="bad"&&f==="bad"); b.classList.toggle("btn-primary",active); b.classList.toggle("btn-outline",!active); } }); }
     },
-    suggestQuotesFromMarkScheme: () => {
-        admin.ensureSelectionData();
+    /** Parse `component2Layout.markSchemeText` into `appData.markScheme` when the object is still empty (same as quote suggest). */
+    ensureMarkSchemeParsedFromLayout: function() {
         let ms = appData.markScheme;
+        if(ms && typeof ms === "object" && Object.keys(ms).length) return ms;
         const rawSources = [
             appData.component2Layout && appData.component2Layout.markSchemeText
         ].filter(Boolean).map(s => String(s).trim()).filter(s => s.length > 20);
         for(const raw of rawSources) {
-            if(!ms || !Object.keys(ms).length) {
-                ms = app.parseMarkSchemeFromText(raw);
-                if(ms && Object.keys(ms).length) {
-                    appData.markScheme = ms;
-                    app.save();
-                    break;
-                }
+            ms = app.parseMarkSchemeFromText(raw);
+            if(ms && typeof ms === "object" && Object.keys(ms).length) {
+                appData.markScheme = ms;
+                app.save();
+                return ms;
             }
         }
-        if(!ms || !Object.keys(ms).length) return alert("Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text.");
+        return null;
+    },
+    /** Passage string used for mark-scheme ↔ source matching (same rules as {@link admin.suggestQuotesFromMarkScheme}). */
+    getSourceTextForMarkSchemeQuoteMatch: function() {
         let sourceText = (appData.selection && appData.selection.text && appData.selection.text.source) ? appData.selection.text.source : (appData.sourceText || "");
-        if(!sourceText.trim() && admin.isComponent2SourceEditing && admin.isComponent2SourceEditing()) {
+        if(!String(sourceText).trim() && admin.isComponent2SourceEditing && admin.isComponent2SourceEditing()) {
             const r = (appData.component2Layout.resourcePaperText || "").trim();
             const q = (appData.component2Layout.questionPaperPage3Text || "").trim();
             sourceText = r ? (q ? r + "\n\n---\n\n" + q : r) : q;
         }
+        return sourceText || "";
+    },
+    /**
+     * Paste {@link app.findQuoteCandidatesFromMarkScheme} results into one focus question’s <code>answerPassageExcerpt</code> (student “right part” soft check).
+     * @param {number} index Row index in <code>appData.questions</code>
+     */
+    fillAnswerPassageFromMarkSchemeForQuestionIndex: function(index) {
+        const arr = appData.questions;
+        if(!Array.isArray(arr) || index < 0 || index >= arr.length) return;
+        const q = arr[index];
+        if(!q || !q.id) return;
+        const had = typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim();
+        if(had && !confirm("Replace the current answer passage for this question with mark-scheme matches?")) return;
+        const ms = admin.ensureMarkSchemeParsedFromLayout();
+        if(!ms || !Object.keys(ms).length) {
+            alert("No mark scheme in the lesson. Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text (or paste mark scheme text).");
+            return;
+        }
+        const sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
+        if(!String(sourceText).trim()) {
+            alert("Add source text (resource passage) first.");
+            return;
+        }
+        const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
+        const lr = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(q.prompt)) || null);
+        const msEntry = app.getMarkSchemeEntryForQuestionId ? app.getMarkSchemeEntryForQuestionId(q.id) : null;
+        if(!msEntry || !Array.isArray(msEntry.indicativeContent) || !msEntry.indicativeContent.length) {
+            alert("This lesson has no parsed mark-scheme indicative bullets for " + String(q.id || "this question") + ". Re-run Extract text on the mark scheme PDF (WJEC-style blocks usually start with \"0 1\", \"0 2\" …). If your board formats differently, paste the indicative list by hand or use Suggest quotes from mark scheme after fixing the scheme text.");
+            return;
+        }
+        const cands = app.findQuoteCandidatesFromMarkScheme(q.id, sourceText, ms, lr, (typeof userState !== "undefined" && userState && userState.level) || (typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || 1);
+        if(!cands.length) {
+            alert("No passage sentences matched those mark scheme bullets closely enough inside the current line window (Lines box / prompt). Try widening or clearing the Lines box for this row, or paste the answer passage by hand.");
+            return;
+        }
+        const body = cands.slice(0, 8).map(c => String(c.quote || "").trim()).filter(Boolean).join("\n\n").slice(0, 12000);
+        if(!body) return;
+        q.answerPassageExcerpt = body;
+        app.save();
+        admin.refreshQuestionsList();
+    },
+    /**
+     * Bulk-fill <code>answerPassageExcerpt</code> on focus questions from mark scheme (same matcher as quote bank suggest).
+     * @param {{ onlyEmpty?: boolean }} [opts] when <code>onlyEmpty</code> is false, overwrites existing excerpts (after confirm).
+     */
+    suggestAnswerPassagesFromMarkScheme: function(opts) {
+        opts = opts || {};
+        const onlyEmpty = opts.onlyEmpty !== false;
+        if(!onlyEmpty && !confirm("Replace answer passages on every focus question where matches exist? Rows with no mark-scheme match are left unchanged.")) return;
+        const ms = admin.ensureMarkSchemeParsedFromLayout();
+        if(!ms || !Object.keys(ms).length) {
+            alert("No mark scheme in the lesson. Upload the mark scheme PDF, run Extract text, or paste mark scheme text.");
+            return;
+        }
+        const sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
+        if(!String(sourceText).trim()) {
+            alert("Add source text (resource passage) first.");
+            return;
+        }
+        const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        let n = 0;
+        questions.forEach((q) => {
+            if(!q || !q.id) return;
+            if(onlyEmpty && typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) return;
+            const lr = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(q.prompt)) || null);
+            const cands = app.findQuoteCandidatesFromMarkScheme(q.id, sourceText, ms, lr, (typeof userState !== "undefined" && userState && userState.level) || (typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || 1);
+            if(!cands.length) return;
+            const body = cands.slice(0, 8).map(c => String(c.quote || "").trim()).filter(Boolean).join("\n\n").slice(0, 12000);
+            if(!body) return;
+            q.answerPassageExcerpt = body;
+            n++;
+        });
+        app.save();
+        admin.refreshQuestionsList();
+        alert(n ? `Updated answer passage on ${n} focus question(s). Review and trim each box in Editing Suite as needed.` : (onlyEmpty ? "Nothing to add — either every row already has an answer passage, or no mark-scheme bullets matched the source." : "No mark-scheme matches found for any question."));
+    },
+    suggestQuotesFromMarkScheme: () => {
+        admin.ensureSelectionData();
+        const ms = admin.ensureMarkSchemeParsedFromLayout();
+        if(!ms || !Object.keys(ms).length) return alert("Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text.");
+        let sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
         if(!sourceText.trim()) return alert("Add source text (resource passage) first.");
         const levelBank = app.getLevelBank();
         const activeLevels = app.getActiveLevels();
@@ -22977,8 +23353,8 @@ const admin = {
             const q = findQ(qId);
             const prompt = q && typeof q.prompt === "string" ? q.prompt : "";
             const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
-            const lineRange = isC2 ? null : (app.parseLineRangeFromQuestion ? app.parseLineRangeFromQuestion(prompt) : null);
-            const candidates = app.findQuoteCandidatesFromMarkScheme(qId, sourceText, ms, lineRange);
+            const lineRange = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(prompt)) || null);
+            const candidates = app.findQuoteCandidatesFromMarkScheme(qId, sourceText, ms, lineRange, lvl);
             for(const c of candidates) {
                 const key = app.quoteKey(c.quote);
                 if(existingKeys.has(key)) continue;
@@ -26681,7 +27057,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             </div>
             ${!appData.isStandalone ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:1px dashed var(--border);border-radius:8px;background:rgba(0,150,136,0.06);">
                 <div style="font-weight:700;margin-bottom:6px;">Quote Select — line window &amp; preview</div>
-                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;"><strong>Booklet lines</strong> matches <strong>Focus questions → Lines</strong> for the question picked in the row. With <strong>excerpt</strong> on, Quote Select shows <strong>one row per line</strong> in the window with the real insert line numbers (same as this preview). Tick <strong>every #</strong> in the grid to show <strong>every</strong> line number on the <em>full</em> passage instead of only 5/10/15 ticks. Re-export <strong>Student App</strong> after changing these so the bundled lesson matches.</p>
+                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;"><strong>Booklet lines</strong> matches <strong>Focus questions → Lines</strong> for the question picked in the row. With <strong>excerpt</strong> on, Quote Select shows <strong>one row per line</strong> in the window with the real insert line numbers (same as this preview). Tick <strong>every #</strong> in the grid to show <strong>every</strong> line number on the <em>full</em> passage instead of only 5/10/15 ticks. Use the header <strong>Whole insert / Question-focused</strong> radios so this preview matches the Lab and Quote Select passage. Re-export <strong>Student App</strong> after changing these so the bundled lesson matches.</p>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
                     <label style="font-size:0.85rem;">Level <select id="teacher-passage-preview-level">${Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => `<option value="${i + 1}">L${i + 1}</option>`).join("")}</select></label>
                     <label style="font-size:0.85rem;display:flex;align-items:center;gap:6px;">Booklet lines <input type="text" id="teacher-passage-preview-line-window-input" autocomplete="off" style="width:7em;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:0.85rem;"></label>
@@ -26689,7 +27065,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.openTeacherQuoteSelectPreview()">Open Quote Select</button>
                     <label style="font-size:0.8rem;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="teacher-preview-affirm-cb" ${userState && userState.teacherPreviewAffirmStep ? "checked" : ""} onchange="admin.setTeacherAffirmPreview(this.checked)"> Preview affirm step</label>
                 </div>
-                <div id="teacher-passage-preview-output" style="max-height:240px;overflow:auto;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:0.88rem;line-height:1.5;"></div>
+                <div id="teacher-passage-preview-output" class="architect-passage-line-wrap" style="max-height:240px;overflow:auto;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);line-height:1.5;"></div>
             </div>` : ""}
         `;
         const pvLvl = document.getElementById("teacher-passage-preview-level");
@@ -26857,10 +27233,11 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const out = document.getElementById("teacher-passage-preview-output");
         const sel = document.getElementById("teacher-passage-preview-level");
         if(!out) return;
+        out.classList.add("architect-passage-line-wrap");
         const lvl = sel ? parseInt(sel.value, 10) || 1 : 1;
         const bank = app.getLevelBank();
         const ent = bank[lvl] || {};
-        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
+        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : app.getSourceText();
         const win = app.resolveQuoteSelectLineWindow(lvl);
         if(!src || !String(src).trim()) {
             out.innerHTML = "<span style=\"color:var(--error)\">No source text loaded.</span>";
@@ -26870,15 +27247,24 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             out.innerHTML = "<span style=\"color:var(--error)\">No line window — set <strong>Booklet lines</strong> in the Level Bank preview panel (e.g. <code>1-5</code>) or the same <strong>Lines</strong> box next to the Focus question, or type <code>Read lines 1–5</code> in the question text. Pick that question in the level row’s <strong>Question</strong> column.</span>";
             return;
         }
-        const ex = app.slicePlainByExamLineRange(src, win.lineRange);
-        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\">Resolved <strong>" + win.lineRange.from + "–" + win.lineRange.to + "</strong> · " + app.escapeHtml(win.windowSource || "—") + " · student Quote Select excerpt: " + (ent.passageExamExcerpt === true || ent.passageExamExcerpt === "true" ? "<strong>on</strong> (passage trimmed)" : "<span style=\"color:#e65100\"><strong>off</strong> — tick <strong>excerpt</strong> in this level’s row so phones match this preview</span>") + "</div>";
-        if(!ex || !String(ex).trim()) {
+        const scopePrev = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+        const disp = win.displayLineRange;
+        let rangeNote = "Slice <strong>" + win.lineRange.from + "–" + win.lineRange.to + "</strong>";
+        if(disp && (disp.from !== win.lineRange.from || disp.to !== win.lineRange.to)) {
+            rangeNote += " · Student-facing <strong>" + disp.from + "–" + disp.to + "</strong> (from question text)";
+        }
+        rangeNote += " · View: <strong>" + (scopePrev === "focused" ? "Question-focused (excerpt)" : "Whole insert") + "</strong> (same as Lab / Quote Select header radios)";
+        const hdrLevel = typeof app.getEffectiveLevel === "function" ? app.getEffectiveLevel() : (userState.level || 1);
+        const lvlWarn = lvl !== hdrLevel ? " · <span style=\"color:#e65100\">Preview level <strong>L" + lvl + "</strong> ≠ header level <strong>L" + hdrLevel + "</strong> — passage layout / C2 text can differ.</span>" : "";
+        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\">" + rangeNote + lvlWarn + " · " + app.escapeHtml(win.windowSource || "—") + " · student Quote Select excerpt: " + (ent.passageExamExcerpt === true || ent.passageExamExcerpt === "true" ? "<strong>on</strong> (passage trimmed)" : "<span style=\"color:#e65100\"><strong>off</strong> — tick <strong>excerpt</strong> in this level’s row so phones match this preview</span>") + "</div>";
+        const bundle = typeof app.buildPassagePaneHtmlForLevel === "function"
+            ? app.buildPassagePaneHtmlForLevel(lvl, src, { warnHtml: "", scope: scopePrev, lineRange: win.lineRange, displayLineRange: win.displayLineRange })
+            : null;
+        const body = bundle && bundle.html ? bundle.html : (app.formatSourceHtml ? app.formatSourceHtml(src) : "");
+        if(scopePrev === "focused" && bundle && bundle.excerptSliceFailed) {
             out.innerHTML = meta + "<span style=\"color:#e65100\">Slice empty — try <strong>1–5</strong> for the first five passage rows, or use exact margin line numbers.</span>";
             return;
         }
-        let body = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(src, win.lineRange) : "";
-        if(!body || !String(body).trim())
-            body = app.formatSourceHtml(ex.trim(), { skipStoredStructuredFallback: true, excerptProse: true });
         out.innerHTML = meta + body;
     },
     openTeacherQuoteSelectPreview: function() {
