@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-06T20:45:00">
+<meta name="architect-build" content="2026-05-07T18:22:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -988,7 +988,7 @@
             </div>
             <div style="margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;">
                 <div style="font-size:0.85rem; font-weight:600; color:var(--primary);">Source passage</div>
-                <div class="tsa-passage-scope-controls" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:0.78rem;" title="Whole insert vs line window from Focus question / Lines box (stored per question).">
+                <div class="tsa-passage-scope-controls" id="tsa-passage-scope-select-controls" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:0.78rem; flex-shrink:0; min-width:min-content;" title="Whole insert vs line window from Focus question / Lines box (stored per question).">
                     <span style="opacity:0.85;">Show</span>
                     <label><input type="radio" name="tsa-passage-scope-select" class="tsa-passage-scope-radio" value="whole"> Whole passage</label>
                     <label><input type="radio" name="tsa-passage-scope-select" class="tsa-passage-scope-radio" value="focused"> Question-focused</label>
@@ -7809,6 +7809,51 @@ const app = {
         }
     },
     /**
+     * One off-screen span per {@link splitPlainIntoVisualLinesByCh} call — {@link _measureBookletPlainWidthPxDom} used to create/destroy a span
+     * on **every** substring measure (main-thread stalls on long passages).
+     */
+    _prepareBookletPlainWidthDomProbe: function(cell) {
+        if(!cell || !cell.isConnected || !cell.ownerDocument) return null;
+        const doc = cell.ownerDocument;
+        const win = doc.defaultView;
+        if(!win) return null;
+        try {
+            const cs = win.getComputedStyle(cell);
+            const span = doc.createElement("span");
+            span.setAttribute("aria-hidden", "true");
+            span.style.cssText = "position:absolute;left:-9999px;top:0;white-space:nowrap;visibility:hidden;pointer-events:none;margin:0;padding:0;border:0;";
+            span.style.font = cs.font;
+            span.style.fontSize = cs.fontSize;
+            span.style.fontFamily = cs.fontFamily;
+            span.style.fontWeight = cs.fontWeight;
+            span.style.fontStyle = cs.fontStyle;
+            span.style.letterSpacing = cs.letterSpacing;
+            span.style.fontStretch = cs.fontStretch;
+            span.style.fontVariant = cs.fontVariant;
+            doc.body.appendChild(span);
+            return span;
+        } catch(eP) {
+            return null;
+        }
+    },
+    _measureBookletPlainWidthOnProbe: function(span, text) {
+        if(!span) return null;
+        const s = String(text != null ? text : "");
+        if(!s.length) return 0;
+        try {
+            span.textContent = s;
+            const w = span.getBoundingClientRect().width || span.offsetWidth;
+            return Number.isFinite(w) ? w : null;
+        } catch(eM) {
+            return null;
+        }
+    },
+    _releaseBookletPlainWidthDomProbe: function(span) {
+        if(span && span.parentNode) try {
+            span.parentNode.removeChild(span);
+        } catch(eR) {}
+    },
+    /**
      * Incremented when insert width / CSS column changes or a new booklet-wrap batch starts so {@link _narrowestBookletWrapMetricsAndInnerPx}
      * and {@link _getBookletSourceLineTextMetricsForWrap} do not reuse stale DOM measurements across reflows.
      */
@@ -7957,16 +8002,18 @@ const app = {
             : (metrics && typeof app._bookletInnerMaxPxForInsertCh === "function" ? app._bookletInnerMaxPxForInsertCh(max, metrics) : null);
         const wordTol = typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 1;
         if(innerPx != null && typeof document !== "undefined" && metrics) {
+            let domProbe = null;
             try {
-                const useDomMeasure = !!(metrics.cell && typeof app._measureBookletPlainWidthPxDom === "function");
+                const useDomProbe = !!(metrics.cell && typeof app._prepareBookletPlainWidthDomProbe === "function");
+                if(useDomProbe) domProbe = app._prepareBookletPlainWidthDomProbe(metrics.cell);
                 const canvas = document.createElement("canvas");
                 const ctx = canvas.getContext("2d");
                 if(ctx && metrics.font) ctx.font = metrics.font;
-                if(useDomMeasure || (ctx && metrics.font)) {
+                if(domProbe || (ctx && metrics.font)) {
                     const measure = function(s) {
                         const str = String(s || "");
-                        if(useDomMeasure) {
-                            const dw = app._measureBookletPlainWidthPxDom(str, metrics.cell);
+                        if(domProbe && typeof app._measureBookletPlainWidthOnProbe === "function") {
+                            const dw = app._measureBookletPlainWidthOnProbe(domProbe, str);
                             if(dw != null && Number.isFinite(dw)) return dw;
                         }
                         if(ctx && metrics.font) return ctx.measureText(str).width || 0;
@@ -8040,7 +8087,10 @@ const app = {
                         return lines;
                     }
                 }
-            } catch(ePx) {}
+            } catch(ePx) {
+            } finally {
+                if(domProbe && typeof app._releaseBookletPlainWidthDomProbe === "function") app._releaseBookletPlainWidthDomProbe(domProbe);
+            }
         }
         /** Fallback: legacy character budget (no DOM / canvas). Avoid slicing normal words mid-token unless the word is extremely long. */
         const words = text.split(/\s+/).filter(Boolean);
@@ -12686,10 +12736,14 @@ const app = {
         if(!raw) return [];
         let sp = null;
         if(app.parseStructuredPassageSource) {
-            const cand = (appData && appData.component !== 2 && typeof appData.sourceText === "string")
+            const cand = (appData && typeof appData.sourceText === "string")
                 ? String(appData.sourceText).replace(/^\uFEFF/, "").trim() : "";
-            if(cand && cand.startsWith("{") && /"lines"\s*:\s*\[/i.test(cand))
+            const dualC2 = !!(typeof admin !== "undefined" && admin.hasC2DualSource && admin.hasC2DualSource());
+            /** Same idea as {@link formatSourceHtml} stored v2 fallback (C1): when the display string is HTML, slice from canonical JSON in `appData.sourceText`. C2 single-blob was excluded (`component === 2`) so {@link formatSourceHtmlExamLineWindow} saw no `.source-line-row` rows and fell back to {@link formatSourceHtmlLoosePlainSkim} (“paragraph numbers”). Omit when true dual passages — pooled canonical may not match this level’s passage. */
+            const allowCand = appData && (appData.component !== 2 || (appData.component === 2 && !dualC2));
+            if(allowCand && cand && cand.startsWith("{") && /"lines"\s*:\s*\[/i.test(cand) && !raw.startsWith("{")) {
                 sp = app.parseStructuredPassageSource(cand);
+            }
             if(!sp)
                 sp = app.parseStructuredPassageSource(raw);
         }
@@ -12827,7 +12881,10 @@ const app = {
         let excerptSliceFailed = false;
         let useExcerpt = false;
         let selPassageHtml = warnHtml + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
-        if(scope === "focused" && lineRange) {
+        if(scope === "focused" && !lineRange) {
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> (Focus questions → <strong>Lines</strong> box, or text like “Read lines 1–8” in the question). None is set in this lesson yet — showing the <strong>whole passage</strong>.</div>`;
+            selPassageHtml = warnHtml + noWin + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
+        } else if(scope === "focused" && lineRange) {
             const ex = app.slicePlainByExamLineRange(sourceText, lineRange, lvl);
             if(ex && ex.trim()) {
                 useExcerpt = true;
@@ -13097,7 +13154,6 @@ const app = {
 
         if(!appData.settings) appData.settings = {};
         if(appData.isStandalone) app.applyStandaloneMutableLessonOverlay();
-        if(typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
 
         const s = localStorage.getItem(app.getStateKey());
         if(s) {
@@ -13129,6 +13185,8 @@ const app = {
         if(!userState.teacherMarksByLevel || typeof userState.teacherMarksByLevel !== "object") userState.teacherMarksByLevel = {};
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         if(typeof userState.view !== "string") userState.view = "";
+
+        if(typeof ui !== "undefined" && ui.applyPassageScopeAfterUserStateHydrate) ui.applyPassageScopeAfterUserStateHydrate();
 
         try {
             if(app.mergeQuestionsFromBackupIfMissing) app.mergeQuestionsFromBackupIfMissing(appData);
@@ -14090,11 +14148,44 @@ const ui = {
     },
     /** Persisted: show full insert vs line-window excerpt in Lab, Quote Select, and intro (student + teacher preview). */
     PASSAGE_SCOPE_STORAGE_KEY: "tsa_passage_display_scope",
+    /**
+     * After {@link userState} is loaded from localStorage: standalone lessons restore passage scope from saved student choice,
+     * else from {@link appData.meta.passageDisplayScope} (embedded at export). Teacher mode applies meta via {@link applyPassageScopeFromLessonMeta}.
+     */
+    applyPassageScopeAfterUserStateHydrate: function() {
+        if(!appData) return;
+        if(appData.isStandalone) {
+            const us = userState && (userState.passageDisplayScope === "focused" || userState.passageDisplayScope === "whole")
+                ? userState.passageDisplayScope
+                : null;
+            if(us) {
+                try {
+                    localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, us);
+                } catch(eLs) {}
+                return;
+            }
+            const ps = appData.meta && appData.meta.passageDisplayScope;
+            if(ps === "focused" || ps === "whole") {
+                userState.passageDisplayScope = ps;
+                try {
+                    localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, ps);
+                } catch(eLs2) {}
+            }
+        } else if(typeof ui.applyPassageScopeFromLessonMeta === "function") {
+            ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
+        }
+    },
     getPassageDisplayScope: function() {
+        if(appData && appData.isStandalone) {
+            const us = userState && userState.passageDisplayScope;
+            if(us === "focused" || us === "whole") return us;
+        }
         try {
             const v = localStorage.getItem(ui.PASSAGE_SCOPE_STORAGE_KEY);
             if(v === "focused" || v === "whole") return v;
         } catch(eSc) {}
+        const ps = appData && appData.meta && appData.meta.passageDisplayScope;
+        if(ps === "focused" || ps === "whole") return ps;
         return "whole";
     },
     setPassageDisplayScope: function(scope, opts) {
@@ -14102,6 +14193,10 @@ const ui = {
         try {
             localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, s);
         } catch(eS) {}
+        if(appData && appData.isStandalone) {
+            userState.passageDisplayScope = s;
+            if(typeof app.save === "function") app.save();
+        }
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         opts = opts || {};
         if(opts.skipRefresh) return;
@@ -14122,14 +14217,16 @@ const ui = {
         ui.setPassageDisplayScope(ps, { skipRefresh: !!o.skipRefresh });
     },
     bindPassageScopeControls: function() {
-        document.querySelectorAll(".tsa-passage-scope-radio").forEach(function(el) {
-            if(el.dataset.tsaPassageScopeBound) return;
-            el.dataset.tsaPassageScopeBound = "1";
-            el.addEventListener("change", function() {
-                if(el.checked && typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope(el.value);
+        if(!ui._passageScopeChangeDelegated) {
+            ui._passageScopeChangeDelegated = true;
+            document.addEventListener("change", function(ev) {
+                const t = ev && ev.target;
+                if(!t || t.tagName !== "INPUT" || t.type !== "radio" || !t.classList || !t.classList.contains("tsa-passage-scope-radio")) return;
+                if(!t.checked) return;
+                if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope(t.value);
             });
-        });
-        ui.syncPassageScopeControls();
+        }
+        if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
     },
     refreshSourceDisplay: function(overrideContent) {
         try {
@@ -16316,6 +16413,7 @@ const ui = {
         }
         app.syncSelectionQuestionFromLevel();
         if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
+        if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         const sel = appData.selection;
         if(!sel || !sel.enabled) {
             const levelEarly = app.getEffectiveLevel();
@@ -27963,6 +28061,15 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 app.flushAiInputToLessonSourceIfEditable();
             } catch(eExFlush) {}
         }
+        if(typeof app.syncPdfInsertWidthChFromDomInput === "function" && appData && appData.component !== 2) {
+            try {
+                app.syncPdfInsertWidthChFromDomInput();
+            } catch(eChSync) {}
+        }
+        if(appData) {
+            appData.meta = appData.meta && typeof appData.meta === "object" ? appData.meta : {};
+            if(typeof ui !== "undefined" && ui.getPassageDisplayScope) appData.meta.passageDisplayScope = ui.getPassageDisplayScope();
+        }
         // 1. Prepare data with lock
         const exportData = JSON.parse(JSON.stringify(appData));
         exportData.isStandalone = true;
@@ -28009,9 +28116,13 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     exportData.sourceText = st;
             }
         }
-        if(exportData.sourceText && appData && appData.component !== 2 && typeof app.lessonExportNormalizeStructuredPassage === "function" && String(exportData.sourceText).trim().startsWith("{")) {
-            exportData.sourceText = app.lessonExportNormalizeStructuredPassage(exportData.sourceText);
-        }
+        /**
+         * **Do not** run {@link lessonExportNormalizeStructuredPassage} on the bundled lesson. That pass collapses insert-width–split
+         * `lines[]` to one row per teacher paragraph for compact Save JSON — correct for backups, but the standalone app has no live
+         * #ai-input DOM to re-expand, so {@link sliceExamLineRangeRows} / {@link formatSourceHtmlExamLineWindow} only saw a few rows
+         * (margin 1,2,3…) instead of each simulated printed line (lines 1–8…). Students now get the same v2 row grid as the teacher
+         * Quote Select / Lab after flush.
+         */
         if(exportData.selection) {
             exportData.selection.text = exportData.selection.text || {};
             exportData.selection.text.source = exportData.sourceText || "";
