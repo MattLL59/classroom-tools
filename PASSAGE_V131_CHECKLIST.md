@@ -2,7 +2,24 @@
 
 Reference: **`Architect_044.html`** (simple reader/editor split) vs **`architect_v130.html`** (~19.6k lines, PDF + gutter + repair stack). Working file: **`architect_v131.html`** (~20.7k lines; v130 unchanged).
 
-**Last updated:** 2026-04-29 — **Phase 3.2** (margin repair, 2026-04-26) + new appendix **§ Strict PDF, C1 scope & limits — design log** (PDF bounds, repair-kit resources, don’t-discard rich text).
+**Last updated:** 2026-05-14 — Roadmap refresh: **Worksheet track (3a/3b)**, **Phase 3 close-out or freeze**, **modularity / Classroom Tools interop** (see § *Master roadmap* and § *Modularity*). Earlier baseline: **Phase 3.2** (margin repair, 2026-04-26) + appendix **§ Strict PDF, C1 scope & limits — design log**.
+
+---
+
+## Master roadmap (execution order) — *May 2026*
+
+Use this section when the older phase numbers and the worksheet work could otherwise sound like the same “Phase 3.”
+
+| Order | Track | What it is | Gate |
+|------:|--------|------------|------|
+| **A** | **Passage — Phase 3 close-out** | PDF import pipeline in this file (§3.6): remaining **3.1** guards / trim clarity, **3.3** tooltips and bad-result copy, **manual regression** on two reference PDFs — **or** a dated **freeze** note (“good enough until …”) if you consciously stop here. | Close-out **or** explicit freeze recorded in *Next steps*. |
+| **B** | **Worksheet 3a** | **Inside** `architect_v131.html`: deepen existing worksheet-style features (rubrics, jumble/match, AO-tagged starters) using current lesson data. Small surface, low coupling. | Does not block passage freeze; avoid large refactors in the same commit series as fragile PDF paths. |
+| **C** | **Worksheet 3b** | **Separate** HTML app in *Classroom Tools* + link from `index.html`; **versioned lesson-context payload** from Architect (see `Answer_Architect_Instruction_Manual.md` §8). | First shippable: read payload + one activity type; grow activity set later. |
+| **D** | **Passage — Phase 4** | C1 vs C2 parity (`getActiveSourceEditorEl`, `refreshSourceDisplay`, same `sourceText` story where applicable). | After A is frozen or stable enough that C2 changes do not fight open PDF work. |
+| **E** | **Passage — Phase 5a (logic cleanup)** | Dead `if (false)` branches, duplicate repair paths, obvious clutter **before** a big visual redesign. | Prefer after A freeze and after the riskiest worksheet hooks land (so you delete code that is truly obsolete). |
+| **F** | **Passage — Phase 5b (UI/CSS)** | Cohesive typography, spacing, cards — **after** inner logic and dead-code pass so design is not painting over unstable behaviour. | Optional script split (§ Phase 5) can precede or follow 5b depending on appetite. |
+
+**Worksheet 3a / 3b** are **named 3a/3b for conversation only**; they are **not** subsections of PDF **§ Phase 3** in this document — that avoids two different meanings of “Phase 3.”
 
 ---
 
@@ -11,7 +28,9 @@ Reference: **`Architect_044.html`** (simple reader/editor split) vs **`architect
 - **Primary learning goal (passage):** students practice **aligning questions with line numbers**; the existing margin + `data-src-line` + line-range behaviour is **good enough for now**.
 - **Not the near-term focus:** a full **“one printed line → one stored row everywhere”** model. That remains **optional / later** unless a new explicit requirement appears.
 - **Near-term focus instead:** a **generally cleaner, less cluttered** product; the app should work **reliably in both components**; it should work as a **tool to structure practice and trainer-style questions** on any suitable text, **including pre–past-paper level** work — not only WJEC import perfection.
-- **Implication for the checklist:** Phase 1–2 items may still be improved **in passing**; **Phase 3 (PDF and import pipeline)** is the **deliberate next deep planning / execution** track below. **Phase 4 (C1 vs C2 parity)** stays the next **cross-cutting** product gate after or alongside Phase 3, depending on resourcing (see *Next steps* at the end).
+- **Worksheets (3a/3b):** strengthen **lesson-grounded** practice sheets — basic generation **in** Answer Architect (**3a**) and a **linked specialist** tool (**3b**) so relevance comes from shared **lesson context**, not from one overloaded file.
+- **Modularity (horizon):** treat **Answer Architect** as the **hub** for lesson data; other *Classroom Tools* apps consume a **small, versioned contract** (payload or hand-off file) where it makes sense — **not** a single merged mega-app (see § *Modularity & Classroom Tools interop*).
+- **Implication for the checklist:** **Passage Phase 3** in §3 below remains the **PDF/import** deep track — **close out or freeze** per *Master roadmap* **A**. **Phase 4** (C1/C2 parity) and **Phase 5** (cleanup then UI) follow the table. **Worksheet 3a/3b** run as **parallel tracks B/C** so PDF work and worksheet work do not steal each other’s numbering.
 
 ---
 
@@ -199,8 +218,17 @@ This is **mostly (B) part of the plan**, with **(A) a recurring expectation/tech
 
 ## Phase 5 — Cleanup
 
+Split intentionally so **logic** is stabilised before a heavy **visual** pass (see *Master roadmap* **E** / **F**).
+
+### Phase 5a — Logic and file hygiene
+
 - [ ] Remove dead **`if (false)`** branches, duplicate repair regexes, and commented-out glue fixers once behaviour is stable.
 - [ ] Optional: extract **`passage-pipeline.js`** (or second `<script>` file) so **`architect_v131.html`** drops below ~15k lines over time.
+
+### Phase 5b — UI / CSS cohesion (after 5a)
+
+- [ ] One coherent design pass (typography, spacing, cards, focus states) on **`architect_v131.html`** once passage + worksheet hooks are no longer churning weekly.
+- [ ] Reconcile **global `<style>`** vs string-embedded styles where Phase 1 already flagged a single preferred approach.
 
 ---
 
@@ -236,14 +264,21 @@ This is **mostly (B) part of the plan**, with **(A) a recurring expectation/tech
 
 ---
 
-## Next steps (recommended order) — *aligned with 2026-04 priority*
+## Next steps (recommended order) — *May 2026 (supersedes 2026-04 list where they differ)*
 
-1. **Phase 3 (this release track):** follow **§3.6 Suggested implementation order** — audit → extraction/trim (3.1) → repair (3.2) → UI copy/tooltips (3.3) → re-run manual regression on two PDFs.  
-2. **Phase 4:** C1/C2 editor, `getActiveSourceEditorEl`, `refreshSourceDisplay` — *same `sourceText` story in both components*; schedule as soon as PDF path is “good enough” or in parallel on a second thread if you have one.  
-3. **Phase 1 / 2 in passing:** only when touching the same code — no hard gate.  
-4. **Phase 5** when the product is stable: dead `if (false)` / duplicate regex; optional script split.  
-5. Keep **`Architect_044.html`** next to v131 for diff when tuning reader vs editor.  
-6. **Optional:** tag **`architect_v130.html`** / working branch (Phase 0) for safer diffs — still a good idea before large PDF refactors.
+Follow **§ Master roadmap** for the big picture. Ordered execution:
+
+1. **Passage Phase 3 — close-out or freeze (track A):** run **§3.6** (inventory audit → 3.1 → 3.2 → 3.3) **or** record a **freeze date** and acceptance notes if you stop earlier; re-run **§ Regression tests** on your two reference PDFs after any PDF-path change.  
+2. **Worksheet 3a (track B):** extend **in-app** worksheet-style features that already fit Architect’s data model (rubrics, jumble/match, AO-scaffolded prompts). Keep diffs small and testable.  
+3. **Worksheet 3b (track C):** add a **separate** specialist HTML tool in the repo; **`index.html`** entry; first implementation of **lesson-context import** (version field + minimal fields — full schema in `Answer_Architect_Instruction_Manual.md` §8 when implemented).  
+4. **Passage Phase 4 (track D):** C1/C2 parity — `getActiveSourceEditorEl`, `refreshSourceDisplay`, shared editor/display rules where the product promises the same story.  
+5. **Passage Phase 5a (track E):** dead code, duplicate repair paths, optional script split — **before** large CSS redesign.  
+6. **Passage Phase 5b (track F):** UI/CSS cohesion pass on v131 once logic is calm.  
+7. **Phase 1 / 2 in passing:** only when touching the same code — no hard gate.  
+8. Keep **`Architect_044.html`** next to v131 for diff when tuning reader vs editor.  
+9. **Optional (Phase 0):** tag **`architect_v130.html`** / baseline branch for safer diffs before large PDF or extraction refactors.
+
+**Older 2026-04 “next steps” items** not listed above are **rolled into** track **A** (PDF) and **E/F** (cleanup / UI) unless explicitly deferred in a freeze note.
 
 ---
 
@@ -310,3 +345,29 @@ Record chosen thresholds here when agreed.
 ---
 
 **Last appended:** 2026-04-29 — Strict PDF limits, repair-kit resources, C1/C2 tick scope, rationale for keeping rich-text paths cautious.
+
+---
+
+## Modularity & Classroom Tools interop *(design horizon — May 2026)*
+
+**Ambition (yes, but bounded):** other apps in *Classroom Tools* (`index.html` — Story Architect, Sting Op, reading skills, comma trainer, future Worksheet Lab, etc.) can **feel like one ecosystem** without merging them into one executable.
+
+**Principles**
+
+1. **Hub, not monolith:** Answer Architect remains the **authoritative lesson object** (passage, levels, questions, mark scheme, export). Other tools are **consumers** or **sidecars** when useful.  
+2. **Small public contract:** define a **versioned** hand-off (JSON file, clipboard blob, or short URL + id) — fields TBD in code, high-level list in `Answer_Architect_Instruction_Manual.md` §8.2. **Breaking changes bump the version.**  
+3. **Progressive adoption:** first link is **one** consumer (e.g. Worksheet **3b**); add Story Wheel / others only when there is a **clear** data gift (prompt text, AO, character list) worth the coupling.  
+4. **No required network:** hand-offs should work **offline** (file drop, paste) for classroom reality.  
+5. **Index as map:** `index.html` stays the human-facing **directory**; deep links describe **which app + which mode**, not hidden magic.
+
+**What to avoid (until there is a strong reason)**
+
+- Forcing every tool into **one** giant HTML file.  
+- Implicit coupling (scraping another app’s `localStorage` keys).  
+- Huge lesson blobs in query strings.
+
+**Optional later:** shared **`classroom-handoff-v1.json`** schema used by multiple apps; shared tiny **`classroom-tools.css`** for card buttons only — only if duplication actually hurts maintenance.
+
+---
+
+**Last appended:** 2026-05-14 — Master roadmap (A–F), worksheet 3a/3b naming, Phase 5a/5b split, modularity / interop principles.
