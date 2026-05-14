@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-07T18:22:00">
+<meta name="architect-build" content="2026-05-13T20:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -12736,14 +12736,15 @@ const app = {
         if(!raw) return [];
         let sp = null;
         if(app.parseStructuredPassageSource) {
-            const cand = (appData && typeof appData.sourceText === "string")
+            const rawTrim = raw.replace(/^\uFEFF/, "").trim();
+            const st = (appData && typeof appData.sourceText === "string")
                 ? String(appData.sourceText).replace(/^\uFEFF/, "").trim() : "";
-            const dualC2 = !!(typeof admin !== "undefined" && admin.hasC2DualSource && admin.hasC2DualSource());
-            /** Same idea as {@link formatSourceHtml} stored v2 fallback (C1): when the display string is HTML, slice from canonical JSON in `appData.sourceText`. C2 single-blob was excluded (`component === 2`) so {@link formatSourceHtmlExamLineWindow} saw no `.source-line-row` rows and fell back to {@link formatSourceHtmlLoosePlainSkim} (“paragraph numbers”). Omit when true dual passages — pooled canonical may not match this level’s passage. */
-            const allowCand = appData && (appData.component !== 2 || (appData.component === 2 && !dualC2));
-            if(allowCand && cand && cand.startsWith("{") && /"lines"\s*:\s*\[/i.test(cand) && !raw.startsWith("{")) {
-                sp = app.parseStructuredPassageSource(cand);
-            }
+            const dualC2 = typeof admin !== "undefined" && admin.hasC2DualSource && admin.hasC2DualSource();
+            /** Same rule as {@link app.formatSourceHtml} stored JSON fallback: when display `raw` is not v2 JSON, slice from canonical `appData.sourceText` so margins match. Skip for true dual C2 (pooled `sourceText` may not match the active level’s passage). */
+            const useCanon = st && st.startsWith("{") && /"lines"\s*:\s*\[/i.test(st) && !rawTrim.startsWith("{") &&
+                !(appData && appData.component === 2 && dualC2);
+            if(useCanon)
+                sp = app.parseStructuredPassageSource(st);
             if(!sp)
                 sp = app.parseStructuredPassageSource(raw);
         }
@@ -13185,7 +13186,6 @@ const app = {
         if(!userState.teacherMarksByLevel || typeof userState.teacherMarksByLevel !== "object") userState.teacherMarksByLevel = {};
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         if(typeof userState.view !== "string") userState.view = "";
-
         if(typeof ui !== "undefined" && ui.applyPassageScopeAfterUserStateHydrate) ui.applyPassageScopeAfterUserStateHydrate();
 
         try {
@@ -14148,33 +14148,6 @@ const ui = {
     },
     /** Persisted: show full insert vs line-window excerpt in Lab, Quote Select, and intro (student + teacher preview). */
     PASSAGE_SCOPE_STORAGE_KEY: "tsa_passage_display_scope",
-    /**
-     * After {@link userState} is loaded from localStorage: standalone lessons restore passage scope from saved student choice,
-     * else from {@link appData.meta.passageDisplayScope} (embedded at export). Teacher mode applies meta via {@link applyPassageScopeFromLessonMeta}.
-     */
-    applyPassageScopeAfterUserStateHydrate: function() {
-        if(!appData) return;
-        if(appData.isStandalone) {
-            const us = userState && (userState.passageDisplayScope === "focused" || userState.passageDisplayScope === "whole")
-                ? userState.passageDisplayScope
-                : null;
-            if(us) {
-                try {
-                    localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, us);
-                } catch(eLs) {}
-                return;
-            }
-            const ps = appData.meta && appData.meta.passageDisplayScope;
-            if(ps === "focused" || ps === "whole") {
-                userState.passageDisplayScope = ps;
-                try {
-                    localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, ps);
-                } catch(eLs2) {}
-            }
-        } else if(typeof ui.applyPassageScopeFromLessonMeta === "function") {
-            ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
-        }
-    },
     getPassageDisplayScope: function() {
         if(appData && appData.isStandalone) {
             const us = userState && userState.passageDisplayScope;
@@ -14215,6 +14188,35 @@ const ui = {
         const ps = appData && appData.meta && appData.meta.passageDisplayScope;
         if(ps !== "focused" && ps !== "whole") return;
         ui.setPassageDisplayScope(ps, { skipRefresh: !!o.skipRefresh });
+    },
+    /**
+     * After {@link userState} is loaded from localStorage: standalone lessons restore passage scope from saved student choice,
+     * else from {@link appData.meta.passageDisplayScope} (embedded at export). Teacher mode applies meta via {@link applyPassageScopeFromLessonMeta}.
+     */
+    applyPassageScopeAfterUserStateHydrate: function() {
+        if(!appData) return;
+        if(appData.isStandalone) {
+            const us = userState && (userState.passageDisplayScope === "focused" || userState.passageDisplayScope === "whole")
+                ? userState.passageDisplayScope
+                : null;
+            if(us) {
+                try {
+                    localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, us);
+                } catch(eLs) {}
+                if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
+                return;
+            }
+            const ps = appData.meta && appData.meta.passageDisplayScope;
+            if(ps === "focused" || ps === "whole") {
+                userState.passageDisplayScope = ps;
+                try {
+                    localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, ps);
+                } catch(eLs2) {}
+                if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
+            }
+        } else if(typeof ui.applyPassageScopeFromLessonMeta === "function") {
+            ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
+        }
     },
     bindPassageScopeControls: function() {
         if(!ui._passageScopeChangeDelegated) {
