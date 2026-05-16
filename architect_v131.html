@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-13T20:00:00">
+<meta name="architect-build" content="2026-05-16T12:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -1221,6 +1221,8 @@
                                 <button type="button" tabindex="-1" class="btn btn-outline btn-small" onpointerdown="admin.preserveSourceToolbarSelection(event);" onmousedown="event.preventDefault();" onclick="admin.sourceFormat('paragraph')" title="New paragraph">¶</button>
                                 <button type="button" class="btn btn-outline btn-small" onclick="admin.removeAllBoldTagsInActiveSourceEditor()" title="Remove every bold tag in this passage box">Remove all bold</button>
                                 <button type="button" class="btn btn-outline btn-small" onclick="admin.repairStackedInlineMarkupInActiveSourceEditor()" title="Flatten nested &lt;i&gt;/&lt;b&gt;/&lt;u&gt; when Chrome stacked many wrappers (fixes broken toggles)">Fix nested B/I/U</button>
+                                <span style="width:1px; background:var(--border); margin:0 4px;"></span>
+                                <button type="button" class="btn btn-outline btn-small" onclick="admin.tightenActiveC2PassageLayoutFromEditor()" title="Collapse blank gaps from PDF figures and reflow one-line-per-row extract into normal paragraphs. Use on 21st or 19th passage after import.">Tighten layout</button>
                             </div>
                             <div id="c2-pooled-editor" contenteditable="true" class="source-editor" data-placeholder="Paste or type passage…" style="min-height:180px; max-height:42vh; overflow:auto; width:100%; border:1px solid var(--border); border-radius:4px; padding:8px; line-height:1.6; font-family:'Aptos','Segoe UI',Calibri,sans-serif; outline:none;"></div>
                             <p style="font-size:0.75rem; opacity:0.75; margin:8px 0 0 0;">Same as the student <strong>21st C / 19th C</strong> source toggle (header or Quote Select). Changes save into the lesson layout.</p>
@@ -9806,10 +9808,67 @@ const app = {
         glues.forEach(function(p) { t = t.replace(p[0], p[1]); });
         return t;
     },
+    /**
+     * Phase 4A: PDF layout leaves vertical holes and one-line-per-row text around figures.
+     * Collapse blank runs and, when lines look like PDF row splits, reflow into paragraphs.
+     */
+    collapseC2LayoutGhostsInPlain: function(plain, opts) {
+        opts = opts || {};
+        if(plain == null || typeof plain !== "string") return "";
+        let t = String(plain).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        t = t.replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n");
+        t = t.replace(/\n{3,}/g, "\n\n");
+        const lines = t.split("\n");
+        const nonEmpty = lines.filter(function(l) { return String(l || "").trim(); });
+        if(opts.joinPdfLines !== false && nonEmpty.length >= 10) {
+            const avg = nonEmpty.reduce(function(s, l) { return s + String(l).trim().length; }, 0) / nonEmpty.length;
+            if(avg < 90 && typeof app.joinC2PdfLineBreaksToProse === "function") t = app.joinC2PdfLineBreaksToProse(lines);
+        }
+        const parts = t.split(/\n\s*\n+/).map(function(p) {
+            return String(p).replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+        }).filter(function(p) { return p.length > 0; });
+        return parts.join("\n\n");
+    },
+    /** Merge one-line-per-row PDF extract into paragraph blocks (heuristic). */
+    joinC2PdfLineBreaksToProse: function(lines) {
+        if(!lines || !lines.length) return "";
+        const out = [];
+        let buf = [];
+        const flush = function() {
+            if(!buf.length) return;
+            out.push(buf.join(" ").replace(/\s+/g, " ").trim());
+            buf = [];
+        };
+        const endsSentence = function(l) {
+            return /[.!?…][\s"'’”)\]]*$/.test(String(l || "").trim());
+        };
+        const startsNewPara = function(l) {
+            return /^[\u201c\u2018"'(A-Z0-9]/.test(String(l || "").trim());
+        };
+        for(let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if(!String(line || "").trim()) {
+                flush();
+                continue;
+            }
+            if(buf.length && endsSentence(buf[buf.length - 1]) && startsNewPara(line)) flush();
+            buf.push(String(line).trim());
+        }
+        flush();
+        return out.join("\n\n");
+    },
+    /** Remove empty &lt;p&gt; left after figure-gap tidy (stored C2 HTML). */
+    collapseC2LayoutGhostsInHtml: function(html) {
+        if(!html || typeof html !== "string") return "";
+        return String(html).replace(/<p\b[^>]*>\s*(?:&nbsp;|\u00a0|<br\s*\/?>)*\s*<\/p>/gi, "");
+    },
     /** C2 main passage: paragraph HTML only, no C1 line-number / gutter rows (skimming/scanning). */
-    c2PooledHtmlFromRepairedPlain: function(plain) {
+    c2PooledHtmlFromRepairedPlain: function(plain, opts) {
+        opts = opts || {};
         if(!plain || typeof plain !== "string") return "";
         let c = app.cleanSourceText(plain) || "";
+        if(typeof app.collapseC2LayoutGhostsInPlain === "function" && opts.skipCollapse !== true)
+            c = app.collapseC2LayoutGhostsInPlain(c, opts);
         if(typeof admin !== "undefined" && admin.stripC2PassageLedeAndBoilerplate) c = admin.stripC2PassageLedeAndBoilerplate(c);
         if(!c.trim()) return "";
         if(typeof app.formatSourceHtmlLoosePlainSkim === "function") return app.formatSourceHtmlLoosePlainSkim(c) || "";
@@ -11905,7 +11964,7 @@ const app = {
         c = c.replace(/^\s*\d{1,4}[.)]\s+/gm, "");
         c = c.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
         if(!c) return "Source text not provided.";
-        let parts = c.split(/\n\s*\n/);
+        let parts = c.split(/\n\s*\n/).map(function(p) { return String(p).trim(); }).filter(function(p) { return p.length > 0; });
         if(parts.length === 1 && c.length > 300) {
             const sentences = c.split(/(?<=[.!?])\s+(?=[A-Z\u00C0-\u024F])/);
             if(sentences.length >= 3) {
@@ -20245,11 +20304,38 @@ const admin = {
     normalizedPassageHtmlForC2Layout: function(raw) {
         if(!raw || typeof raw !== "string") return "";
         let t = app.cleanSourceText(raw);
+        if(typeof app.collapseC2LayoutGhostsInPlain === "function") t = app.collapseC2LayoutGhostsInPlain(t);
         t = admin.stripC2PassageLedeAndBoilerplate(t);
         t = admin.stripExamLineNumberPrefixes(t);
         t = app.repairExamMarginDigitArtifacts(t);
         t = app.repairKnownPdfWordJoins(t);
-        return app.c2PooledHtmlFromRepairedPlain(t) || "";
+        return app.c2PooledHtmlFromRepairedPlain(t, { skipCollapse: true }) || "";
+    },
+    /**
+     * Phase 4A: teacher **Tighten layout** on the active 21st/19th passage in Editing Suite.
+     * Collapses figure gaps and rebuilds paragraph HTML; saves layout + refreshes student view.
+     */
+    tightenActiveC2PassageLayoutFromEditor: function() {
+        const el = document.getElementById("c2-pooled-editor");
+        if(!el || el.getAttribute("contenteditable") !== "true") {
+            alert("Open Editing Suite → Component 2 — passages and select 21st or 19th.");
+            return;
+        }
+        if(!appData || !appData.component2Layout) return;
+        let html = el.innerHTML || "";
+        if(typeof app.collapseC2LayoutGhostsInHtml === "function") html = app.collapseC2LayoutGhostsInHtml(html);
+        let plain = "";
+        if(typeof app.passageSafeHtmlToPlainForLineLayout === "function") plain = app.passageSafeHtmlToPlainForLineLayout(html) || "";
+        if(!plain.trim() && typeof app.normalizeSourceText === "function") plain = app.normalizeSourceText(html) || "";
+        if(!plain.trim()) plain = app.cleanSourceText(html) || "";
+        plain = typeof app.collapseC2LayoutGhostsInPlain === "function"
+            ? app.collapseC2LayoutGhostsInPlain(plain, { joinPdfLines: true }) : plain;
+        if(typeof admin.stripC2PassageLedeAndBoilerplate === "function") plain = admin.stripC2PassageLedeAndBoilerplate(plain);
+        const out = app.c2PooledHtmlFromRepairedPlain(plain, { skipCollapse: true }) || "";
+        el.innerHTML = out;
+        if(typeof admin.syncC2PooledDataFromEditor === "function") admin.syncC2PooledDataFromEditor();
+        if(typeof app.save === "function") app.save();
+        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
     },
     /** Raw lesson.sourceText may be a string or structured v2 object — normalize for import comparisons. */
     incomingLessonSourceTextForCompare: function(lesson) {
