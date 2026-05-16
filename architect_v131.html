@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-16T14:00:00">
+<meta name="architect-build" content="2026-05-16T18:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -9809,6 +9809,16 @@ const app = {
         glues.forEach(function(p) { t = t.replace(p[0], p[1]); });
         return t;
     },
+    /** True for PDF figure holes, caption stubs, or empty layout rows (common on 21st C resource pages). */
+    isC2FigureSpacerParagraph: function(text) {
+        const p = String(text || "").replace(/\s+/g, " ").trim();
+        if(!p) return true;
+        if(p.length <= 2) return true;
+        if(/^(?:figure|fig\.?|image|photo)\s*\d*\.?$/i.test(p)) return true;
+        if(!/[a-z]{4,}/i.test(p) && p.length < 80) return true;
+        if(p.length < 36 && !/[.!?…]["'”)\]]?$/.test(p)) return true;
+        return false;
+    },
     /**
      * Phase 4A: PDF layout leaves vertical holes and one-line-per-row text around figures.
      * Collapse blank runs and, when lines look like PDF row splits, reflow into paragraphs.
@@ -9818,16 +9828,33 @@ const app = {
         if(plain == null || typeof plain !== "string") return "";
         let t = String(plain).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
         t = t.replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n");
+        t = t.replace(/ {3,}/g, " ");
         t = t.replace(/\n{3,}/g, "\n\n");
         const lines = t.split("\n");
-        const nonEmpty = lines.filter(function(l) { return String(l || "").trim(); });
-        if(opts.joinPdfLines !== false && nonEmpty.length >= 10) {
+        const linesForJoin = lines.map(function(l) {
+            return app.isC2FigureSpacerParagraph(l) ? "" : l;
+        });
+        const nonEmpty = linesForJoin.filter(function(l) { return String(l || "").trim(); });
+        const minLines = opts.forceJoinPdfLines ? 6 : 10;
+        if(opts.joinPdfLines !== false && nonEmpty.length >= minLines) {
             const avg = nonEmpty.reduce(function(s, l) { return s + String(l).trim().length; }, 0) / nonEmpty.length;
-            if(avg < 90 && typeof app.joinC2PdfLineBreaksToProse === "function") t = app.joinC2PdfLineBreaksToProse(lines);
+            const maxAvg = opts.forceJoinPdfLines ? 140 : 90;
+            if(avg < maxAvg && typeof app.joinC2PdfLineBreaksToProse === "function") t = app.joinC2PdfLineBreaksToProse(linesForJoin);
         }
-        const parts = t.split(/\n\s*\n+/).map(function(p) {
+        let parts = t.split(/\n\s*\n+/).map(function(p) {
             return String(p).replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-        }).filter(function(p) { return p.length > 0; });
+        }).filter(function(p) { return p.length > 0 && !app.isC2FigureSpacerParagraph(p); });
+        if(parts.length === 1 && parts[0].length > 400 && opts.forceJoinPdfLines) {
+            const innerLines = parts[0].split(/\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+            if(innerLines.length >= 8) {
+                const innerAvg = innerLines.reduce(function(s, l) { return s + l.length; }, 0) / innerLines.length;
+                if(innerAvg < 120 && typeof app.joinC2PdfLineBreaksToProse === "function") {
+                    parts = app.joinC2PdfLineBreaksToProse(innerLines).split(/\n\s*\n+/).map(function(p) {
+                        return p.trim();
+                    }).filter(function(p) { return p.length > 0 && !app.isC2FigureSpacerParagraph(p); });
+                }
+            }
+        }
         return parts.join("\n\n");
     },
     /** Merge one-line-per-row PDF extract into paragraph blocks (heuristic). */
@@ -9858,10 +9885,17 @@ const app = {
         flush();
         return out.join("\n\n");
     },
-    /** Remove empty &lt;p&gt; left after figure-gap tidy (stored C2 HTML). */
+    /** Remove empty or spacer &lt;p&gt; left after figure-gap tidy (stored C2 HTML). */
     collapseC2LayoutGhostsInHtml: function(html) {
         if(!html || typeof html !== "string") return "";
-        return String(html).replace(/<p\b[^>]*>\s*(?:&nbsp;|\u00a0|<br\s*\/?>)*\s*<\/p>/gi, "");
+        let h = String(html);
+        h = h.replace(/<p\b[^>]*>\s*(?:&nbsp;|\u00a0|<br\s*\/?>)*\s*<\/p>/gi, "");
+        h = h.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, function(m, inner) {
+            const plain = String(inner || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+            return app.isC2FigureSpacerParagraph(plain) ? "" : m;
+        });
+        h = h.replace(/(<br\s*\/?>\s*){3,}/gi, "<br>");
+        return h;
     },
     /** C2 main passage: paragraph HTML only, no C1 line-number / gutter rows (skimming/scanning). */
     c2PooledHtmlFromRepairedPlain: function(plain, opts) {
@@ -20366,16 +20400,24 @@ const admin = {
             return;
         }
         if(!appData || !appData.component2Layout) return;
+        const v = architectC2SourceView || "21st";
+        const layoutKey = v === "19th" ? "questionPaperPage3Text" : "resourcePaperText";
         let html = el.innerHTML || "";
+        const stored = appData.component2Layout[layoutKey];
+        if(stored && String(stored).trim() && String(stored).length > String(html).length * 0.85)
+            html = String(stored);
         if(typeof app.collapseC2LayoutGhostsInHtml === "function") html = app.collapseC2LayoutGhostsInHtml(html);
         let plain = "";
         if(typeof app.passageSafeHtmlToPlainForLineLayout === "function") plain = app.passageSafeHtmlToPlainForLineLayout(html) || "";
         if(!plain.trim() && typeof app.normalizeSourceText === "function") plain = app.normalizeSourceText(html) || "";
         if(!plain.trim()) plain = app.cleanSourceText(html) || "";
+        const tightOpts = { joinPdfLines: true, forceJoinPdfLines: true };
         plain = typeof app.collapseC2LayoutGhostsInPlain === "function"
-            ? app.collapseC2LayoutGhostsInPlain(plain, { joinPdfLines: true }) : plain;
+            ? app.collapseC2LayoutGhostsInPlain(plain, tightOpts) : plain;
         if(typeof admin.stripC2PassageLedeAndBoilerplate === "function") plain = admin.stripC2PassageLedeAndBoilerplate(plain);
-        const out = app.c2PooledHtmlFromRepairedPlain(plain, { skipCollapse: true }) || "";
+        if(typeof app.repairExamMarginDigitArtifacts === "function") plain = app.repairExamMarginDigitArtifacts(plain);
+        if(typeof app.repairKnownPdfWordJoins === "function") plain = app.repairKnownPdfWordJoins(plain);
+        const out = app.c2PooledHtmlFromRepairedPlain(plain, tightOpts) || "";
         el.innerHTML = out;
         if(typeof admin.syncC2PooledDataFromEditor === "function") admin.syncC2PooledDataFromEditor();
         if(typeof app.save === "function") app.save();
