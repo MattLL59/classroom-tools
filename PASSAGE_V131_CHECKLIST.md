@@ -2,7 +2,7 @@
 
 Reference: **`Architect_044.html`** (simple reader/editor split) vs **`architect_v130.html`** (~19.6k lines, PDF + gutter + repair stack). Working file: **`architect_v131.html`** (~20.7k lines; v130 unchanged).
 
-**Last updated:** 2026-05-14 — Roadmap refresh: **Worksheet track (3a/3b)**, **Phase 3 close-out or freeze**, **modularity / Classroom Tools interop** (see § *Master roadmap* and § *Modularity*). Earlier baseline: **Phase 3.2** (margin repair, 2026-04-26) + appendix **§ Strict PDF, C1 scope & limits — design log**.
+**Last updated:** 2026-05-14 — **Phase 4 C2 passage (4A/4B/4C)**; roadmap: **Worksheet 3a/3b**, **Phase 3 close-out or freeze**, **modularity** (§ *Master roadmap*, § *Modularity*). Baseline: **Phase 3.2** (margin repair, 2026-04-26) + **§ Strict PDF, C1 scope & limits — design log**.
 
 ---
 
@@ -15,7 +15,7 @@ Use this section when the older phase numbers and the worksheet work could other
 | **A** | **Passage — Phase 3 close-out** | PDF import pipeline in this file (§3.6): remaining **3.1** guards / trim clarity, **3.3** tooltips and bad-result copy, **manual regression** on two reference PDFs — **or** a dated **freeze** note (“good enough until …”) if you consciously stop here. | Close-out **or** explicit freeze recorded in *Next steps*. |
 | **B** | **Worksheet 3a** | **Inside** `architect_v131.html`: deepen existing worksheet-style features (rubrics, jumble/match, AO-tagged starters) using current lesson data. Small surface, low coupling. | Does not block passage freeze; avoid large refactors in the same commit series as fragile PDF paths. |
 | **C** | **Worksheet 3b** | **Separate** HTML app in *Classroom Tools* + link from `index.html`; **versioned lesson-context payload** from Architect (see `Answer_Architect_Instruction_Manual.md` §8). | First shippable: read payload + one activity type; grow activity set later. |
-| **D** | **Passage — Phase 4** | C1 vs C2 parity (`getActiveSourceEditorEl`, `refreshSourceDisplay`, same `sourceText` story where applicable). | After A is frozen or stable enough that C2 changes do not fight open PDF work. |
+| **D** | **Passage — Phase 4** | **C2 passage first (4A → 4B)**, then **shared parity (4C)** — see § *Phase 4*. Not a copy of C1 booklet/reflow. | After track **A** is frozen or stable; **4A** before **5b** UI/CSS. |
 | **E** | **Passage — Phase 5a (logic cleanup)** | Dead `if (false)` branches, duplicate repair paths, obvious clutter **before** a big visual redesign. | Prefer after A freeze and after the riskiest worksheet hooks land (so you delete code that is truly obsolete). |
 | **F** | **Passage — Phase 5b (UI/CSS)** | Cohesive typography, spacing, cards — **after** inner logic and dead-code pass so design is not painting over unstable behaviour. | Optional script split (§ Phase 5) can precede or follow 5b depending on appetite. |
 
@@ -30,7 +30,8 @@ Use this section when the older phase numbers and the worksheet work could other
 - **Near-term focus instead:** a **generally cleaner, less cluttered** product; the app should work **reliably in both components**; it should work as a **tool to structure practice and trainer-style questions** on any suitable text, **including pre–past-paper level** work — not only WJEC import perfection.
 - **Worksheets (3a/3b):** strengthen **lesson-grounded** practice sheets — basic generation **in** Answer Architect (**3a**) and a **linked specialist** tool (**3b**) so relevance comes from shared **lesson context**, not from one overloaded file.
 - **Modularity (horizon):** treat **Answer Architect** as the **hub** for lesson data; other *Classroom Tools* apps consume a **small, versioned contract** (payload or hand-off file) where it makes sense — **not** a single merged mega-app (see § *Modularity & Classroom Tools interop*).
-- **Implication for the checklist:** **Passage Phase 3** in §3 below remains the **PDF/import** deep track — **close out or freeze** per *Master roadmap* **A**. **Phase 4** (C1/C2 parity) and **Phase 5** (cleanup then UI) follow the table. **Worksheet 3a/3b** run as **parallel tracks B/C** so PDF work and worksheet work do not steal each other’s numbering.
+- **Component 2 passage (urgent):** C2 does **not** need WJEC line numbers, but teachers need **column reflow** (unlike C1’s full toolbar today) and **PDF figure gaps** fixed — text still “steps around” where images were on the paper (layout ghosts from `extractPageTextWithLayout`). See **§ Phase 4 — 4A / 4B**.
+- **Implication for the checklist:** **Passage Phase 3** in §3 below remains the **C1 PDF/import** deep track — **close out or freeze** per *Master roadmap* **A**. **Phase 4** = **C2 layout/repair first**, then editor/display parity. **Phase 5** = cleanup then UI. **Worksheet 3a/3b** = parallel tracks **B/C**.
 
 ---
 
@@ -207,12 +208,46 @@ This is **mostly (B) part of the plan**, with **(A) a recurring expectation/tech
 
 ---
 
-## Phase 4 — C1 vs C2 parity
+## Phase 4 — Component 2 passage + C1/C2 parity
 
-- [ ] **`getActiveSourceEditorEl`**: same **formatSourceHtmlForEditor** / **setAiInputValue** / save path for C1 and C2 where applicable.
-- [~] **`refreshSourceDisplay`** used for Lab + Quote Select; C1 structured + plain paths updated — *full parity pass still open.*
+**Do not** port C1’s **booklet line 1**, margin ticks, or full reflow stack into C2. C2 is **prose columns** (`formatSourceHtmlForComponent2Reading`, `#c2-pooled-editor`, `component2Layout`). C1 reflow helpers often **no-op when `component === 2`** by design.
 
-**Acceptance:** switch Component 1 / 2; passage editor and student view behave the same way for the same `sourceText` shape.
+**When to start:** after **track A** (C1 PDF) is **closed or frozen** — you do **not** need perfect C1 PDF to begin **4A**. Do **4A/4B before track F** (big UI/CSS). Worksheets **B/C** can run in parallel if they avoid C2 import code.
+
+### Phase 4A — C2 “figure gap” / layout ghosts *(highest pain)*
+
+**Problem:** Resource / question-paper PDFs place text around **figures**. Extraction uses **y-position** (`extractPageTextWithLayout` → large vertical gaps become `\n\n` or extra breaks). Teachers may not need the images, but stored HTML still has **empty bands** where pictures sat.
+
+| Item | Detail |
+|------|--------|
+| **Post-import tidy** | After C2 extract (and on demand): collapse **excessive vertical whitespace** (e.g. 3+ newlines, whitespace-only “lines”). |
+| **Teacher control** | One plain-language action in **Editing Suite → Component 2 — passages** (e.g. **Tighten layout** / **Remove figure gaps**). |
+| **Extract path** | Optional C2-only pass on layout text before `normalizedPassageHtmlForC2Layout` — reduce holes when the text layer has no useful content in figure regions. |
+
+**Code areas:** `admin.extractPageTextWithLayout`, `admin.normalizedPassageHtmlForC2Layout`, `admin.stripC2PassageLedeAndBoilerplate`, past-paper paths that set `component2Layout.resourcePaperText` / `questionPaperPage3Text`.
+
+**Acceptance (4A):** on a **reference C2 PDF** you use regularly (e.g. standard resource + 19th C page), passage reads as **continuous columns** without large empty vertical gaps where photos were. *— manual*
+
+### Phase 4B — C2 reading column / reflow-lite *(not line numbering)*
+
+**Problem:** C1 has **Insert width (ch)**, **Sync passage layout**, **Reflow body (natural wrap)** under `#ai-input`. C2 has **no equivalent** on `#c2-pooled-editor` / student C2 panes.
+
+| Item | Detail |
+|------|--------|
+| **Passage width (ch)** | Per passage (21st / 19th): set reading column width; apply to **editor + student view** (CSS `--exam-passage-max-width` or C2-specific variable). |
+| **Reflow-lite** | **One** repack action: wrap **paragraphs** at that width — reuse **natural-wrap ideas**, **not** booklet row counts or `data-src-line` ticks. |
+| **UI placement** | Toolbar on **Editing Suite → C2 passages** (not only Load & AI). Mirror student display after save. |
+
+**Do not:** Booklet line 1, OCR margin, WJEC tick column, or structured v2 booklet rows for C2 unless product scope explicitly changes.
+
+**Acceptance (4B):** teacher changes width and runs **one sync/reflow**; **21st / 19th** editor matches what students see in Quote Select / Lab for that passage. *— manual*
+
+### Phase 4C — C1/C2 editor & display parity *(after 4A/4B usable)*
+
+- [ ] **`getActiveSourceEditorEl`**: same **formatSourceHtmlForEditor** / **setAiInputValue** / save path for C1 and C2 **where the product promises the same behaviour** (not identical chrome).
+- [~] **`refreshSourceDisplay`** used for Lab + Quote Select; C1 structured + plain paths updated — *C2 uses `formatSourceHtmlForComponent2Reading`; parity = consistent refresh/save, not identical HTML.*
+
+**Acceptance (4C):** switching component or C2 source (21st/19th/both) does not lose passage edits; student view updates predictably for the same stored `component2Layout` / `sourceText` shape.
 
 ---
 
@@ -249,6 +284,7 @@ Split intentionally so **logic** is stabilised before a heavy **visual** pass (s
 | 2 | **Numbered plain** `1 …` / `2 …` each line | No `1 1` double prefix; margin shows **5 / 10 / 15 …** on booklet multiples only. |
 | 3 | **PDF import** | Plain + layout OK; no stray margin digits mid-sentence after repair; alert row count sane. |
 | 4 | **Quote Select** highlight | Maps to `data-src-line` / plain offsets consistently. |
+| 5 | **C2 passage** after PDF extract + **Tighten layout** (when built) | No large vertical “figure holes”; width/reflow matches student pane (4B). |
 
 ---
 
@@ -260,6 +296,10 @@ Split intentionally so **logic** is stabilised before a heavy **visual** pass (s
 | `buildNumberedSourceLayoutHtml`, margin ticks | `examShowAllBookletLines`, `bookletLineIsMultipleOf` |
 | PDF + repair + gutter | `extractNumberedPlainFromPdfBuffer`, `repairExamMarginDigitArtifacts`, `formatSourceHtml`, `formatSourceHtmlForEditor` |
 | C1 PDF import UI | `handleC1PdfImportInput`, `importC1ResourcePdfFromFile`, `#c1-pdf-import-input` |
+| C1 reflow toolbar | `#c1-passage-insert-width-ch`, `syncC1PassageLayoutInsertWidthAndNaturalReflow`, `reflowC1PassageBodyToNaturalInsertWidthCh` |
+| C2 passages UI | `#admin-c2-passages-details`, `#c2-pooled-editor`, `#c2-passage-intro-line1`, `setArchitectC2SourceView` |
+| C2 display / storage | `formatSourceHtmlForComponent2Reading`, `normalizedPassageHtmlForC2Layout`, `component2Layout`, `stripC2PassageLedeAndBoilerplate` |
+| C2 PDF extract | `extractPageTextWithLayout`, `extractPastPaperText`, re-extract 19th / resource buttons |
 | 044 reference | `formatSourceHtml` / `formatSourceHtmlForEditor` (line numbers drift — use search) |
 
 ---
@@ -271,7 +311,7 @@ Follow **§ Master roadmap** for the big picture. Ordered execution:
 1. **Passage Phase 3 — close-out or freeze (track A):** run **§3.6** (inventory audit → 3.1 → 3.2 → 3.3) **or** record a **freeze date** and acceptance notes if you stop earlier; re-run **§ Regression tests** on your two reference PDFs after any PDF-path change.  
 2. **Worksheet 3a (track B):** extend **in-app** worksheet-style features that already fit Architect’s data model (rubrics, jumble/match, AO-scaffolded prompts). Keep diffs small and testable.  
 3. **Worksheet 3b (track C):** add a **separate** specialist HTML tool in the repo; **`index.html`** entry; first implementation of **lesson-context import** (version field + minimal fields — full schema in `Answer_Architect_Instruction_Manual.md` §8 when implemented).  
-4. **Passage Phase 4 (track D):** C1/C2 parity — `getActiveSourceEditorEl`, `refreshSourceDisplay`, shared editor/display rules where the product promises the same story.  
+4. **Passage Phase 4 (track D):** **4A** C2 figure-gap tidy → **4B** C2 passage width + reflow-lite → **4C** shared save/display parity (`getActiveSourceEditorEl`, `refreshSourceDisplay`). Do **not** clone C1 booklet controls into C2.  
 5. **Passage Phase 5a (track E):** dead code, duplicate repair paths, optional script split — **before** large CSS redesign.  
 6. **Passage Phase 5b (track F):** UI/CSS cohesion pass on v131 once logic is calm.  
 7. **Phase 1 / 2 in passing:** only when touching the same code — no hard gate.  
@@ -329,7 +369,7 @@ Keep these **first-class** for when Strict PDF hits limits — even if C1 only a
 ### Component roles (ticks vs no ticks)
 
 - **Component 1:** exam-style insert — **WJEC-style margin ticks**, `data-src-line`, booklet alignment; PDF import is the primary production path for past papers.
-- **Component 2:** passages **without** the same insert/tick metaphor — simpler blocks; parity with C1 is **Phase 4**, not identical chrome.
+- **Component 2:** passages **without** the same insert/tick metaphor — simpler blocks; needs **4A/4B** (gaps + column reflow), then **4C** parity — not identical chrome to C1.
 
 Focusing engineering **per component** avoids one editor trying to satisfy incompatible goals.
 
@@ -371,3 +411,5 @@ Record chosen thresholds here when agreed.
 ---
 
 **Last appended:** 2026-05-14 — Master roadmap (A–F), worksheet 3a/3b naming, Phase 5a/5b split, modularity / interop principles.
+
+**Last appended:** 2026-05-14 — **Phase 4A/4B/4C** (C2 figure gaps, reflow-lite, parity order); regression row 5; C2 file reference rows.
