@@ -105,6 +105,10 @@ Relevance comes from a **shared lesson context**, not from merging every feature
 
 The repository’s **`index.html`** is the teacher dashboard. New worksheet tools should appear there with clear labels, for example **Answer Architect** (core) and **Worksheet Lab** (specialist), once the second app exists.
 
+### 8.4 Modularity and other Classroom Tools apps
+
+Answer Architect can stay the **lesson hub** while other tools in the same repo stay **separate files**. Interop is optional and incremental: a **small, versioned hand-off** (JSON file, clipboard, or short link) so another app can open with **AO focus, excerpt, or prompt text** without merging everything into one program. See **`PASSAGE_V131_CHECKLIST.md`** (§ *Modularity & Classroom Tools interop*) for principles — avoid implicit coupling (for example reading another app’s `localStorage` keys) until a schema exists.
+
 ---
 
 ## 9. Git and GitHub — minimal routine for non-developers
