@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-16T12:00:00">
+<meta name="architect-build" content="2026-05-16T14:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -1223,6 +1223,7 @@
                                 <button type="button" class="btn btn-outline btn-small" onclick="admin.repairStackedInlineMarkupInActiveSourceEditor()" title="Flatten nested &lt;i&gt;/&lt;b&gt;/&lt;u&gt; when Chrome stacked many wrappers (fixes broken toggles)">Fix nested B/I/U</button>
                                 <span style="width:1px; background:var(--border); margin:0 4px;"></span>
                                 <button type="button" class="btn btn-outline btn-small" onclick="admin.tightenActiveC2PassageLayoutFromEditor()" title="Collapse blank gaps from PDF figures and reflow one-line-per-row extract into normal paragraphs. Use on 21st or 19th passage after import.">Tighten layout</button>
+                                <button type="button" class="btn btn-outline btn-small" onclick="admin.loadC2PassagesIntoEditor()" title="Copy the saved 21st / 19th passages from this lesson into the editor below (same idea as Load &amp; AI → Use saved text for Component 1).">Load from lesson</button>
                             </div>
                             <div id="c2-pooled-editor" contenteditable="true" class="source-editor" data-placeholder="Paste or type passage…" style="min-height:180px; max-height:42vh; overflow:auto; width:100%; border:1px solid var(--border); border-radius:4px; padding:8px; line-height:1.6; font-family:'Aptos','Segoe UI',Calibri,sans-serif; outline:none;"></div>
                             <p style="font-size:0.75rem; opacity:0.75; margin:8px 0 0 0;">Same as the student <strong>21st C / 19th C</strong> source toggle (header or Quote Select). Changes save into the lesson layout.</p>
@@ -1495,7 +1496,7 @@
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
                         <button class="btn btn-outline btn-small" onclick="admin.loadSavedSourceQuestion()">Use saved text + question</button>
-                        <div style="font-size:0.8rem; opacity:0.7; align-self:center;">Component 1: same source box as <strong>Editing Suite → Component 1 — source passage</strong> (moves with the tab). Component 2: passages under Editing Suite → Component 2.</div>
+                        <div style="font-size:0.8rem; opacity:0.7; align-self:center;">Component 1: <strong>Use saved text + question</strong> loads the passage here. Component 2: <strong>Lobby → Extract text</strong> saves passages in the lesson; open <strong>Editing Suite → Component 2 — passages</strong> and click <strong>Load from lesson</strong> if the editor looks empty.</div>
                     </div>
                     <div style="display:flex; gap:10px; margin-bottom:6px;">
                         <div style="flex:1"><label style="font-size:0.8rem">Mode</label><select id="ai-mode" style="width:100%; padding:5px;"><option value="replace">Replace All</option><option value="append">Append</option></select></div>
@@ -19654,8 +19655,10 @@ const admin = {
             const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
             alert("Past paper text loaded." + (qCount >= 2 ? " " + qCount + " Section A reading questions were detected and added to the question bank." : qCount === 1 ? " One focus question was detected (the app already retried the full extract and all Questions-PDF pages if needed). If you expected more parts, set the correct Section A reading page(s) (e.g. 1-2) and click Extract questions." : " No Section A reading questions were split — use Load & AI to paste prompts, set Section A reading page(s), click Extract questions, or use Load JSON.") + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : ""));
         } else {
-            alert("Extract text: PDFs cached; resource, questions-PDF layout text, and mark scheme updated." + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : " Click Extract questions to fill the question bank from the Questions PDF (Section A reading pages)."));
+            alert("Extract text: PDFs cached; resource, questions-PDF layout text, and mark scheme updated." + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : " Click Extract questions to fill the question bank from the Questions PDF (Section A reading pages).") + (loadAsComponent2 ? "\n\nOpen Editing Suite → Component 2 — passages to edit (or click Load from lesson there)." : ""));
         }
+        if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
+            admin.loadC2PassagesIntoEditor({ goToEditTab: false });
     },
     reExtractQuestionsFromPages: async function() {
         const f = admin.pastPaperFiles && admin.pastPaperFiles.questions;
@@ -20027,6 +20030,8 @@ const admin = {
             if(!buttons.length || !tabs.length) return;
             activate(key);
             if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+            if(key === "edit" && appData && appData.component === 2 && typeof admin.fillC2PooledEditorFromLayout === "function")
+                admin.fillC2PooledEditorFromLayout();
         };
         buttons.forEach(btn => {
             btn.addEventListener("click", () => {
@@ -20315,6 +20320,45 @@ const admin = {
      * Phase 4A: teacher **Tighten layout** on the active 21st/19th passage in Editing Suite.
      * Collapses figure gaps and rebuilds paragraph HTML; saves layout + refreshes student view.
      */
+    /**
+     * Fill Component 2 passage editor from saved lesson layout (21st / 19th).
+     * Lobby **Extract text** saves here; unlike C1 there is no shared #ai-input on Load &amp; AI.
+     */
+    loadC2PassagesIntoEditor: function(opts) {
+        opts = opts || {};
+        if(!appData) {
+            alert("No lesson loaded.");
+            return false;
+        }
+        const parts = admin.getC2ResourceParts && admin.getC2ResourceParts();
+        const has21 = parts && String(parts.twentyFirst || "").trim();
+        const has19 = parts && String(parts.nineteenth || "").trim();
+        if(!has21 && !has19) {
+            alert("No Component 2 passage text in this lesson yet.\n\n• Lobby → set Load as = Component 2 → Extract text (or Re-extract resource / 19th C), or\n• Paste into the passage boxes here.");
+            return false;
+        }
+        if(appData.component !== 2) {
+            if(opts.promoteIfNeeded !== false && typeof admin.promoteLessonToComponent2 === "function") {
+                admin.promoteLessonToComponent2();
+            } else {
+                appData.component = 2;
+                if(!appData.component2Layout || typeof appData.component2Layout !== "object")
+                    appData.component2Layout = JSON.parse(JSON.stringify((typeof defaultData !== "undefined" && defaultData && defaultData.component2Layout) ? defaultData.component2Layout : {}));
+            }
+        }
+        if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+        if(typeof admin.fillC2PooledEditorFromLayout === "function") admin.fillC2PooledEditorFromLayout();
+        if(opts.goToEditTab !== false && typeof admin.setTab === "function") {
+            admin.setTab("edit");
+            const d = document.getElementById("admin-c2-passages-details");
+            if(d) {
+                d.open = true;
+                try { d.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
+            }
+        }
+        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
+        return true;
+    },
     tightenActiveC2PassageLayoutFromEditor: function() {
         const el = document.getElementById("c2-pooled-editor");
         if(!el || el.getAttribute("contenteditable") !== "true") {
@@ -22059,7 +22103,13 @@ const admin = {
                 let phtml = (app.passageSafeHtmlToPlainForLineLayout && app.passageSafeHtmlToPlainForLineLayout(str)) || "";
                 phtml = app.repairExamMarginDigitArtifacts(phtml);
                 phtml = app.repairKnownPdfWordJoins(phtml);
-                el.innerHTML = app.c2PooledHtmlFromRepairedPlain(phtml) || (app.sanitizeSourceHtml(str) || str);
+                let rendered = app.c2PooledHtmlFromRepairedPlain(phtml, { skipCollapse: true }) || "";
+                if(!String(rendered).trim()) {
+                    const plainFb = app.normalizeSourceText(str) || app.cleanSourceText(str) || "";
+                    if(plainFb.trim()) rendered = app.c2PooledHtmlFromRepairedPlain(plainFb, { skipCollapse: true }) || "";
+                }
+                if(!String(rendered).trim()) rendered = app.sanitizeSourceHtml(str) || str;
+                el.innerHTML = rendered;
             } else {
                 const rep0 = app.repairExamMarginDigitArtifacts(str);
                 const rep = app.repairKnownPdfWordJoins(rep0);
@@ -24541,7 +24591,7 @@ const admin = {
     },
     loadSavedSourceQuestion: () => {
         if(appData && appData.component === 2) {
-            admin.syncSourceEditorMode();
+            admin.loadC2PassagesIntoEditor({ goToEditTab: false });
             admin.refreshQuestionsList();
             return;
         }
