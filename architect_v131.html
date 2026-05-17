@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T14:00:00">
+<meta name="architect-build" content="2026-05-17T15:30:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -18993,18 +18993,45 @@ const admin = {
         if(!L && S) return marginRepaired(S);
         return marginRepaired(layoutResult);
     },
+    /** Index of first exam sub-part (a) — (a), （a）, or a. before prose. */
+    indexOfFirstPartA: function(str) {
+        if(!str || typeof str !== "string") return -1;
+        const candidates = [/\(\s*a\s*\)\s/i, /（\s*a\s*）\s/i, /\ba\.\s+(?=[A-Za-z0-9“"'\u201c\u201d])/i];
+        let best = -1;
+        for(let ci = 0; ci < candidates.length; ci++) {
+            const m = candidates[ci].exec(str);
+            if(m && m.index != null && (best < 0 || m.index < best)) best = m.index;
+        }
+        return best;
+    },
+    /** Drop preamble before the first (a) in one question block. */
+    trimTextToFirstPartA: function(text) {
+        if(!text || typeof text !== "string") return text || "";
+        const ia = admin.indexOfFirstPartA(text);
+        if(ia < 0) return text;
+        const rest = text.slice(ia).trimStart();
+        return rest.length >= 8 ? rest : text;
+    },
+    /**
+     * When the next bank row(s) start with (b) [and (c)], the first row must start at (a) — strip header / resource preamble.
+     */
+    trimFirstQuestionWhenLetteredPartsFollow: function(parsed) {
+        if(!Array.isArray(parsed) || parsed.length < 2) return parsed;
+        const minLen = 8;
+        const p1 = String(parsed[1] || "").trim();
+        if(!/^\(?b\)\s/i.test(p1)) return parsed;
+        const p0 = String(parsed[0] || "");
+        if(/^\(?a\)\s/i.test(p0.trim())) return parsed;
+        const trimmed = admin.trimTextToFirstPartA(p0);
+        if(trimmed && trimmed.length >= minLen && /^\(?a\)\s/i.test(trimmed.trim())) parsed[0] = trimmed;
+        return parsed;
+    },
     /** Strip Section A header / resource blurb; start at first part (a) after boxed 1 1 (or first (a) after SECTION A if needed). */
     trimSectionAQuestionLead: function(s) {
         const minLen = 8;
         if(!s || typeof s !== "string" || s.length < minLen) return s;
-        const indexOfFirstPartA = (str) => {
-            const candidates = [/\(a\)\s/i, /（a）\s/i, /\ba\.\s+(?=[A-Za-z0-9“"'\u201c\u201d])/i];
-            let best = -1;
-            for(const re of candidates) {
-                const m = re.exec(str);
-                if(m && (best < 0 || m.index < best)) best = m.index;
-            }
-            return best;
+        const indexOfFirstPartA = function(str) {
+            return admin.indexOfFirstPartA(str);
         };
         const t = s
             .replace(/^\s*\d{1,2}\s+(?=SECTION\b)/i, "")
@@ -19068,25 +19095,39 @@ const admin = {
                 if(rest.length >= minLen) return rest;
             }
         }
+        let searchBody = body;
+        if(dickensRubricIdx >= 0 && dickensRubricIdx > 0) searchBody = body.slice(0, dickensRubricIdx);
+        if(/\(\s*b\s*\)\s/i.test(searchBody) && /\(\s*c\s*\)\s/i.test(searchBody)) {
+            const ia = indexOfFirstPartA(searchBody);
+            if(ia >= 0) {
+                const rest = searchBody.slice(ia).trimStart();
+                if(rest.length >= minLen) return rest;
+            }
+        }
         return s;
     },
     /** If page 1 split left header in row 1 and (b) in row 2, rejoin and trim so row 1 starts at (a). */
     repairFirstQuestionIfSplitAtB: function(parsed) {
         if(!Array.isArray(parsed) || parsed.length < 2) return parsed;
         const minLen = 8;
-        const p0 = parsed[0] || "";
+        const p0 = String(parsed[0] || "");
         const p1 = String(parsed[1] || "").trim();
-        if(!/SECTION\s+A|Resource\s+Material|Answer\s+all|The\s+separate\s+Resource/i.test(p0)) return parsed;
         if(!/^\(?b\)\s/i.test(p1)) return parsed;
-        const bundle = admin.trimSectionAQuestionLead(p0 + "\n\n" + p1);
-        if(!bundle || bundle.length < minLen || !/^\(?a\)\s/i.test(bundle)) return parsed;
-        const bPos = bundle.search(/\n\s*\(?b\)\s/i);
-        const bPos2 = bPos < 0 ? bundle.search(/\s\(?b\)\s/i) : bPos;
-        const cut = bPos >= 0 ? bPos : bPos2;
-        if(cut < 10) return parsed;
-        parsed[0] = bundle.slice(0, cut).trimEnd();
-        parsed[1] = bundle.slice(cut).trimStart();
-        return parsed;
+        if(/^\(?a\)\s/i.test(p0.trim())) return parsed;
+        if(/SECTION\s+A|Resource\s+Material|Answer\s+all|The\s+separate\s+Resource/i.test(p0)) {
+            const bundle = admin.trimSectionAQuestionLead(p0 + "\n\n" + p1);
+            if(bundle && bundle.length >= minLen && /^\(?a\)\s/i.test(bundle)) {
+                const bPos = bundle.search(/\n\s*\(?b\)\s/i);
+                const bPos2 = bPos < 0 ? bundle.search(/\s\(?b\)\s/i) : bPos;
+                const cut = bPos >= 0 ? bPos : bPos2;
+                if(cut >= 10) {
+                    parsed[0] = bundle.slice(0, cut).trimEnd();
+                    parsed[1] = bundle.slice(cut).trimStart();
+                    return parsed;
+                }
+            }
+        }
+        return admin.trimFirstQuestionWhenLetteredPartsFollow(parsed);
     },
     /** After main splits (e.g. four blocks 1 1–1 4): break (a)(b)(c) with [1]/[2] marks into separate rows; split final "both texts" rubric from the last question. */
     expandQuestionChunksSubparts: function(chunks) {
@@ -19210,11 +19251,16 @@ const admin = {
             if(z && z.length >= 8) p[0] = z;
         }
         admin.repairFirstQuestionIfSplitAtB(p);
+        admin.trimFirstQuestionWhenLetteredPartsFollow(p);
         p = admin.expandQuestionChunksSubparts(p);
         p = p.map(s => String(s || "").trim()).filter(s => s.length >= 8);
+        admin.repairFirstQuestionIfSplitAtB(p);
+        admin.trimFirstQuestionWhenLetteredPartsFollow(p);
         if(p[0]) {
             const z2 = admin.trimSectionAQuestionLead(p[0]);
             if(z2 && z2.length >= 8) p[0] = z2;
+            const z3 = admin.trimTextToFirstPartA(p[0]);
+            if(z3 && z3.length >= 8 && /^\(?a\)\s/i.test(z3.trim())) p[0] = z3;
         }
         return p;
     },
