@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T12:30:00">
+<meta name="architect-build" content="2026-05-17T14:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -9815,8 +9815,9 @@ const app = {
         if(!p) return true;
         if(p.length <= 2) return true;
         if(/^(?:figure|fig\.?|image|photo)\s*\d*\.?$/i.test(p)) return true;
-        if(!/[a-z]{4,}/i.test(p) && p.length < 80) return true;
-        if(p.length < 36 && !/[.!?…]["'”)\]]?$/.test(p)) return true;
+        /** Real prose (incl. short figure-column lines) must not be dropped — only non-prose stubs. */
+        if(/[a-z]{4,}/i.test(p)) return false;
+        if(p.length < 80) return true;
         return false;
     },
     /**
@@ -18928,13 +18929,13 @@ const admin = {
     /** Extract text from a PDF page preserving line breaks and paragraphing (using item positions). */
     extractPageTextWithLayout: async function(page) {
         const content = await page.getTextContent();
-        const items = (content.items || []).filter(it => it.str != null);
+        const items = (content.items || []).filter(it => it.str != null && String(it.str).trim());
         if(!items.length) return "";
         const simpleJoin = items.map(it => it.str).join(" ");
         const withPos = items.map(it => {
             const t = it.transform || [1,0,0,1,0,0];
-            return { str: it.str, x: t[4], y: t[5] };
-        });
+            return { str: String(it.str).trim(), x: t[4], y: t[5] };
+        }).filter(it => it.str);
         const ys = withPos.map(i => i.y).filter((v,i,a) => a.indexOf(v)===i).sort((a,b)=>b-a);
         const gaps = [];
         for(let i = 0; i < ys.length - 1; i++) gaps.push(ys[i] - ys[i + 1]);
@@ -18942,17 +18943,38 @@ const admin = {
         const lineHeight = Math.max(4, Math.min(20, medianGap));
         const paraGap = lineHeight * 2;
         withPos.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+        /** Cluster PDF glyphs into rows, then join left→right on each row (keeps text beside figures). */
+        const rowClusters = [];
+        let row = [];
+        let rowY = null;
+        for(let i = 0; i < withPos.length; i++) {
+            const it = withPos[i];
+            if(rowY === null || Math.abs(it.y - rowY) > lineHeight * 0.45) {
+                if(row.length) rowClusters.push(row);
+                row = [it];
+                rowY = it.y;
+            } else {
+                row.push(it);
+                rowY = (rowY + it.y) / 2;
+            }
+        }
+        if(row.length) rowClusters.push(row);
+        const lineTexts = rowClusters.map(function(cluster) {
+            cluster.sort(function(a, b) { return a.x - b.x; });
+            return cluster.map(function(c) { return c.str; }).join(" ").replace(/\s+/g, " ").trim();
+        }).filter(Boolean);
         let out = "";
         let lastY = null;
-        for(const it of withPos) {
-            const y = it.y;
+        for(let ri = 0; ri < rowClusters.length; ri++) {
+            const y = rowClusters[ri][0].y;
+            const line = lineTexts[ri];
+            if(!line) continue;
             if(lastY !== null) {
                 const dy = Math.abs(y - lastY);
                 if(dy > paraGap) out += "\n\n";
                 else if(dy > lineHeight * 0.3) out += "\n";
-                else out += " ";
             }
-            out += it.str;
+            out += line;
             lastY = y;
         }
         const marginRepaired = function(s) {
@@ -18960,9 +18982,14 @@ const admin = {
             return typeof app.repairExamMarginDigitArtifacts === "function" ? app.repairExamMarginDigitArtifacts(u) : u;
         };
         const layoutResult = app.cleanSourceText(out);
-        if(simpleJoin.length > layoutResult.length * 1.3) return marginRepaired(app.cleanSourceText(simpleJoin));
         const L = (layoutResult || "").trim();
         const S = app.cleanSourceText(simpleJoin).trim();
+        /** Prefer whichever variant retains more real words (layout can drop a side column on figure pages). */
+        const wordCount = function(s) {
+            return (String(s || "").match(/\b[a-z]{3,}\b/gi) || []).length;
+        };
+        if(S && (!L || wordCount(S) > wordCount(L) * 1.08)) return marginRepaired(S);
+        if(simpleJoin.length > layoutResult.length * 1.3) return marginRepaired(app.cleanSourceText(simpleJoin));
         if(!L && S) return marginRepaired(S);
         return marginRepaired(layoutResult);
     },
