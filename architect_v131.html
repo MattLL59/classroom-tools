@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-16T18:00:00">
+<meta name="architect-build" content="2026-05-17T12:30:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -9855,7 +9855,50 @@ const app = {
                 }
             }
         }
+        if(opts.mergeWrapParagraphs !== false && typeof app.mergeC2FigureWrapParagraphs === "function")
+            parts = app.mergeC2FigureWrapParagraphs(parts, opts);
         return parts.join("\n\n");
+    },
+    /**
+     * 21st C resource PDFs often store each partial-width line (around a figure) as its own paragraph.
+     * Merge those runs back into normal full-width prose blocks.
+     */
+    mergeC2FigureWrapParagraphs: function(parts, opts) {
+        opts = opts || {};
+        if(!parts || !parts.length) return [];
+        const maxChunk = opts.maxMergePartLen != null ? opts.maxMergePartLen : 200;
+        const out = [];
+        let buf = "";
+        const flush = function() {
+            const t = String(buf || "").replace(/\s+/g, " ").trim();
+            if(t && !app.isC2FigureSpacerParagraph(t)) out.push(t);
+            buf = "";
+        };
+        const endsSentence = function(s) {
+            return /[.!?…][\s"'’”)\]]*$/.test(String(s || "").trim());
+        };
+        const startsNewPara = function(s) {
+            return /^[\u201c\u2018"'(A-Z0-9]/.test(String(s || "").trim());
+        };
+        for(let i = 0; i < parts.length; i++) {
+            const p = String(parts[i] || "").replace(/\s+/g, " ").trim();
+            if(!p || app.isC2FigureSpacerParagraph(p)) continue;
+            if(!buf) {
+                buf = p;
+                continue;
+            }
+            const prevEnd = endsSentence(buf);
+            const nextStart = startsNewPara(p);
+            const shortRun = buf.length < maxChunk;
+            const shouldMerge = !prevEnd || (shortRun && !(prevEnd && nextStart && buf.length >= 50));
+            if(shouldMerge) buf = buf + " " + p;
+            else {
+                flush();
+                buf = p;
+            }
+        }
+        flush();
+        return out;
     },
     /** Merge one-line-per-row PDF extract into paragraph blocks (heuristic). */
     joinC2PdfLineBreaksToProse: function(lines) {
@@ -9885,11 +9928,51 @@ const app = {
         flush();
         return out.join("\n\n");
     },
-    /** Remove empty or spacer &lt;p&gt; left after figure-gap tidy (stored C2 HTML). */
-    collapseC2LayoutGhostsInHtml: function(html) {
+    /** True when stored C2 HTML has a run of short lines (typical 21st C figure column wrap). */
+    c2PassageHtmlLooksLikeFigureWrap: function(html) {
+        if(!html || typeof html !== "string") return false;
+        const paras = [];
+        String(html).replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, function(m, inner) {
+            const plain = String(inner || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+            if(plain && !app.isC2FigureSpacerParagraph(plain)) paras.push(plain);
+            return "";
+        });
+        if(paras.length < 5) return false;
+        let run = 0;
+        let maxRun = 0;
+        for(let i = 0; i < paras.length; i++) {
+            const p = paras[i];
+            const shortLine = p.length < 100 && !/[.!?…]["'”)\]]?$/.test(p);
+            if(shortLine) {
+                run++;
+                if(run > maxRun) maxRun = run;
+            } else run = 0;
+        }
+        return maxRun >= 4;
+    },
+    c2PassageLayoutTightenOpts: function() {
+        return { joinPdfLines: true, forceJoinPdfLines: true, mergeWrapParagraphs: true };
+    },
+    /** Remove empty or spacer &lt;p&gt;; optionally merge partial-width line paragraphs (figure wrap). */
+    collapseC2LayoutGhostsInHtml: function(html, opts) {
+        opts = opts || {};
         if(!html || typeof html !== "string") return "";
         let h = String(html);
         h = h.replace(/<p\b[^>]*>\s*(?:&nbsp;|\u00a0|<br\s*\/?>)*\s*<\/p>/gi, "");
+        const paras = [];
+        h.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, function(m, inner) {
+            const plain = String(inner || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+            if(plain && !app.isC2FigureSpacerParagraph(plain)) paras.push(plain);
+            return "";
+        });
+        let merged = paras;
+        if(opts.mergeWrapParagraphs !== false && typeof app.mergeC2FigureWrapParagraphs === "function")
+            merged = app.mergeC2FigureWrapParagraphs(paras, opts);
+        if(merged.length) {
+            return merged.map(function(p) {
+                return '<p style="margin:0 0 16px 0;">' + app.escapeHtml(p) + "</p>";
+            }).join("");
+        }
         h = h.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, function(m, inner) {
             const plain = String(inner || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
             return app.isC2FigureSpacerParagraph(plain) ? "" : m;
@@ -12026,6 +12109,10 @@ const app = {
         if(hm) {
             headBlock = (app.sanitizeSourceHtml(hm[1], { skipHoistRepair: true }) || hm[1]).trim();
             s = s.slice(hm[0].length).trim();
+        }
+        if(/<p\b/i.test(s) && typeof app.c2PassageHtmlLooksLikeFigureWrap === "function" && app.c2PassageHtmlLooksLikeFigureWrap(s) && typeof app.collapseC2LayoutGhostsInHtml === "function") {
+            const tightened = app.collapseC2LayoutGhostsInHtml(s, app.c2PassageLayoutTightenOpts ? app.c2PassageLayoutTightenOpts() : { mergeWrapParagraphs: true });
+            if(tightened && String(tightened).trim()) s = tightened;
         }
         if(/source-with-line-numbers[\s\S]*source-line-row/i.test(s)) {
             try {
@@ -20343,7 +20430,8 @@ const admin = {
     normalizedPassageHtmlForC2Layout: function(raw) {
         if(!raw || typeof raw !== "string") return "";
         let t = app.cleanSourceText(raw);
-        if(typeof app.collapseC2LayoutGhostsInPlain === "function") t = app.collapseC2LayoutGhostsInPlain(t);
+        const layoutOpts = typeof app.c2PassageLayoutTightenOpts === "function" ? app.c2PassageLayoutTightenOpts() : { mergeWrapParagraphs: true };
+        if(typeof app.collapseC2LayoutGhostsInPlain === "function") t = app.collapseC2LayoutGhostsInPlain(t, layoutOpts);
         t = admin.stripC2PassageLedeAndBoilerplate(t);
         t = admin.stripExamLineNumberPrefixes(t);
         t = app.repairExamMarginDigitArtifacts(t);
@@ -20406,12 +20494,15 @@ const admin = {
         const stored = appData.component2Layout[layoutKey];
         if(stored && String(stored).trim() && String(stored).length > String(html).length * 0.85)
             html = String(stored);
-        if(typeof app.collapseC2LayoutGhostsInHtml === "function") html = app.collapseC2LayoutGhostsInHtml(html);
+        const tightOpts = typeof app.c2PassageLayoutTightenOpts === "function" ? app.c2PassageLayoutTightenOpts() : { joinPdfLines: true, forceJoinPdfLines: true, mergeWrapParagraphs: true };
+        if(typeof app.collapseC2LayoutGhostsInHtml === "function") {
+            const mergedHtml = app.collapseC2LayoutGhostsInHtml(html, tightOpts);
+            if(mergedHtml && String(mergedHtml).trim()) html = mergedHtml;
+        }
         let plain = "";
         if(typeof app.passageSafeHtmlToPlainForLineLayout === "function") plain = app.passageSafeHtmlToPlainForLineLayout(html) || "";
         if(!plain.trim() && typeof app.normalizeSourceText === "function") plain = app.normalizeSourceText(html) || "";
         if(!plain.trim()) plain = app.cleanSourceText(html) || "";
-        const tightOpts = { joinPdfLines: true, forceJoinPdfLines: true };
         plain = typeof app.collapseC2LayoutGhostsInPlain === "function"
             ? app.collapseC2LayoutGhostsInPlain(plain, tightOpts) : plain;
         if(typeof admin.stripC2PassageLedeAndBoilerplate === "function") plain = admin.stripC2PassageLedeAndBoilerplate(plain);
@@ -22142,15 +22233,21 @@ const admin = {
             }
             const isHtml = /<(?:\/?(?:p|div|br|b|strong|i|em|u))[\s>]/i.test(str) || str.indexOf("</p>") !== -1 || str.indexOf("</div>") !== -1 || str.indexOf("<br") !== -1;
             if(isHtml) {
-                let phtml = (app.passageSafeHtmlToPlainForLineLayout && app.passageSafeHtmlToPlainForLineLayout(str)) || "";
+                let workHtml = str;
+                const layoutOpts = typeof app.c2PassageLayoutTightenOpts === "function" ? app.c2PassageLayoutTightenOpts() : { mergeWrapParagraphs: true };
+                if(typeof app.c2PassageHtmlLooksLikeFigureWrap === "function" && app.c2PassageHtmlLooksLikeFigureWrap(workHtml) && typeof app.collapseC2LayoutGhostsInHtml === "function") {
+                    const tightened = app.collapseC2LayoutGhostsInHtml(workHtml, layoutOpts);
+                    if(tightened && String(tightened).trim()) workHtml = tightened;
+                }
+                let phtml = (app.passageSafeHtmlToPlainForLineLayout && app.passageSafeHtmlToPlainForLineLayout(workHtml)) || "";
                 phtml = app.repairExamMarginDigitArtifacts(phtml);
                 phtml = app.repairKnownPdfWordJoins(phtml);
                 let rendered = app.c2PooledHtmlFromRepairedPlain(phtml, { skipCollapse: true }) || "";
                 if(!String(rendered).trim()) {
-                    const plainFb = app.normalizeSourceText(str) || app.cleanSourceText(str) || "";
+                    const plainFb = app.normalizeSourceText(workHtml) || app.cleanSourceText(workHtml) || "";
                     if(plainFb.trim()) rendered = app.c2PooledHtmlFromRepairedPlain(plainFb, { skipCollapse: true }) || "";
                 }
-                if(!String(rendered).trim()) rendered = app.sanitizeSourceHtml(str) || str;
+                if(!String(rendered).trim()) rendered = app.sanitizeSourceHtml(workHtml) || workHtml;
                 el.innerHTML = rendered;
             } else {
                 const rep0 = app.repairExamMarginDigitArtifacts(str);
