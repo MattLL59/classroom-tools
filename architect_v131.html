@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T15:30:00">
+<meta name="architect-build" content="2026-05-17T17:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3249,8 +3249,7 @@ const app = {
             const entry = bank && bank[level] ? bank[level] : {};
             if(entry.shortAnswersOnly === true) return true;
             if(entry.shortAnswersOnly === false) return false;
-            const isC2 = appData.component === 2 || (appData.component2Layout && ((appData.component2Layout.resourcePaperText || "").trim() || (appData.component2Layout.questionPaperPage3Text || "").trim()));
-            if(!isC2) {
+            if(appData.component !== 2) {
                 if(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) return true;
                 return false;
             }
@@ -12166,11 +12165,25 @@ const app = {
             if(alt.startsWith("{") && !raw.startsWith("{")) spFirst = app.parseStructuredPassageSource(alt);
         }
         if(spFirst) {
+            if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers()) {
+                const plainSp = app.structuredPassageToPlain(spFirst);
+                if(plainSp && plainSp.trim()) return app.formatSourceHtmlLoosePlainSkim(plainSp) || app.formatSourceHtmlLoosePlain(plainSp);
+            }
             if(passageQuoteSelectDenseLines && app.formatStructuredPassageHtmlDenseMargins) return app.formatStructuredPassageHtmlDenseMargins(spFirst);
             return app.formatStructuredPassageHtml(spFirst);
         }
         if(appData && appData.component === 2) {
             return app.formatSourceHtmlForComponent2Reading(raw);
+        }
+        if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers()) {
+            const useHtmlExtractC1 = app.passageHtmlLooksLikeMarkup(raw);
+            let basisC1 = raw;
+            if(useHtmlExtractC1) {
+                const roughC1 = app.passageSafeHtmlToPlainForLineLayout(raw);
+                if(roughC1 && roughC1.trim()) basisC1 = roughC1;
+            }
+            const cleanC1 = app.cleanSourceText(basisC1);
+            if(cleanC1 && cleanC1.trim()) return app.formatSourceHtmlLoosePlainSkim(cleanC1) || app.formatSourceHtmlLoosePlain(cleanC1);
         }
         /* PDF → C2 layout stores this markup via normalizedPassageHtmlForC2Layout; re-normalizing can strip gutters if serialize fails on very long HTML. */
         if(/source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
@@ -12753,6 +12766,19 @@ const app = {
         if(app.quoteInSource(off, stu) || app.quoteInSource(stu, off)) return false;
         const score = app.answerPassageWordOverlapScore(stu, off);
         return score < 0.28;
+    },
+    /** True when this lesson needs booklet line gutters / line-window UI (Component 1 only). */
+    lessonUsesBookletLineNumbers: function() {
+        if(!appData || appData.component === 2) return false;
+        const qs = Array.isArray(appData.questions) ? appData.questions : [];
+        for(let i = 0; i < qs.length; i++) {
+            const q = qs[i];
+            if(q && typeof q.lineRef === "string" && q.lineRef.trim() && app.parseLineRangeFromQuestion(q.lineRef.trim())) return true;
+            if(q && typeof q.prompt === "string" && app.parseLineRangeFromQuestion(q.prompt)) return true;
+        }
+        const leg = typeof appData.question === "string" ? appData.question : "";
+        if(app.parseLineRangeFromQuestion(leg)) return true;
+        return false;
     },
     /** Parse "lines 1-5" or "Read lines 1-5" from question text. Returns { from: 1, to: 5 } or null. */
     parseLineRangeFromQuestion: function(questionText) {
@@ -14344,7 +14370,8 @@ const ui = {
         return "whole";
     },
     setPassageDisplayScope: function(scope, opts) {
-        const s = scope === "focused" ? "focused" : "whole";
+        let s = scope === "focused" ? "focused" : "whole";
+        if(s === "focused" && appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers()) s = "whole";
         try {
             localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, s);
         } catch(eS) {}
@@ -14360,6 +14387,10 @@ const ui = {
     },
     syncPassageScopeControls: function() {
         const v = ui.getPassageDisplayScope();
+        const showLineScope = !(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+        document.querySelectorAll(".tsa-passage-scope-controls").forEach(function(wrap) {
+            wrap.style.display = showLineScope ? "" : "none";
+        });
         document.querySelectorAll(".tsa-passage-scope-radio").forEach(function(el) {
             el.checked = el.value === v;
         });
@@ -19243,6 +19274,65 @@ const admin = {
         /* Three real tasks can appear on one page (e.g. narrow Section A); still prefer 4+ for typical WJEC doubles. */
         return out.length >= 3 ? out : null;
     },
+    /** Glue broken PDF question wording (C1/C2). */
+    repairQuestionPromptPdfGlues: function(s) {
+        if(!s || typeof s !== "string") return "";
+        let t = String(s);
+        if(typeof app.repairKnownPdfWordJoins === "function") t = app.repairKnownPdfWordJoins(t);
+        t = t.replace(/([a-z])([A-Z])/g, "$1 $2");
+        t = t.replace(/(\])([A-Za-z])/g, "$1 $2");
+        t = t.replace(/([.!?…])([A-Z])/g, "$1 $2");
+        return t.replace(/\s{2,}/g, " ").trim();
+    },
+    /** AQA/OCR: separate glued "04 … 05 How" and normalise line-start 01–10 question numbers. */
+    preprocessPaddedExamQuestionNumbers: function(raw) {
+        if(!raw || typeof raw !== "string") return raw || "";
+        let t = String(raw).replace(/\r\n/g, "\n");
+        t = t.replace(/([.!?…\]"'”)\]]|\])\s*((?:0[1-9]|10))\s+(?=[A-Z"'(\[])/g, "$1\n\n$2 ");
+        t = t.replace(/(\[\s*\d{1,3}\s*\])\s*((?:0[1-9]|10))\s+(?=[A-Z"'(\[])/g, "$1\n\n$2 ");
+        return t;
+    },
+    trySplitByPaddedExamQuestionNumbers: function(raw, normalize, minLen) {
+        if(!raw || typeof raw !== "string") return null;
+        normalize = normalize || function(s) { return String(s || "").trim(); };
+        minLen = minLen != null ? minLen : 8;
+        const prep = admin.preprocessPaddedExamQuestionNumbers(raw);
+        if(!/(?:^|\n)\s*(?:0[1-9]|10)\s+(?=[A-Z"'(\[])/m.test(prep)) return null;
+        const parts = prep.split(/(?=(?:^|\n)\s*(?:0[1-9]|10)\s+(?=[A-Z"'(\[]))/m).map(normalize).filter(function(s) { return s.length >= minLen; });
+        if(parts.length < 2) return null;
+        const first = parts[0];
+        const startsNum = /^(?:0[1-9]|10)\s/i.test(first);
+        if(!startsNum && (first.length > 350 || /section\s*[aA]|instructions\s+to\s+candidates|answer\s+all\s+questions/i.test(first))) {
+            return parts.slice(1);
+        }
+        return parts;
+    },
+    splitChunksAtEmbeddedPaddedNumbers: function(chunks) {
+        if(!Array.isArray(chunks) || !chunks.length) return chunks;
+        const minLen = 8;
+        const out = [];
+        const embedRe = /\s((?:0[1-9]|10))\s+(?=[A-Z"'(])/;
+        chunks.forEach(function(ch) {
+            const t = String(ch || "").trim();
+            if(!t) return;
+            let cutAt = -1;
+            let m;
+            const re = new RegExp(embedRe.source, embedRe.flags + "g");
+            while((m = re.exec(t)) !== null) {
+                if(m.index >= 24) {
+                    cutAt = m.index;
+                    break;
+                }
+            }
+            if(cutAt >= 0) {
+                const a = t.slice(0, cutAt).trim();
+                const b = t.slice(cutAt).trim();
+                if(a.length >= minLen) out.push(a);
+                if(b.length >= minLen) out.push(b);
+            } else out.push(t);
+        });
+        return out;
+    },
     /** Normalise raw output from parseQuestionsFromText (trim Section A lead, repair splits, expand sub-parts). */
     finalizeExtractedQuestionPrompts: function(parsed) {
         let p = Array.isArray(parsed) ? parsed.slice() : [];
@@ -19253,7 +19343,11 @@ const admin = {
         admin.repairFirstQuestionIfSplitAtB(p);
         admin.trimFirstQuestionWhenLetteredPartsFollow(p);
         p = admin.expandQuestionChunksSubparts(p);
-        p = p.map(s => String(s || "").trim()).filter(s => s.length >= 8);
+        p = admin.splitChunksAtEmbeddedPaddedNumbers(p);
+        p = p.map(function(s) {
+            const t = admin.repairQuestionPromptPdfGlues(String(s || "").trim());
+            return t;
+        }).filter(function(s) { return s.length >= 8; });
         admin.repairFirstQuestionIfSplitAtB(p);
         admin.trimFirstQuestionWhenLetteredPartsFollow(p);
         if(p[0]) {
@@ -19287,6 +19381,9 @@ const admin = {
         const normalize = s => s.trim();
         const minLen = 8;
         raw = admin.trimSectionAQuestionLead(raw);
+        raw = admin.preprocessPaddedExamQuestionNumbers(raw);
+        const paddedEarly = admin.trySplitByPaddedExamQuestionNumbers(raw, normalize, minLen);
+        if(paddedEarly && paddedEarly.length >= 2) return paddedEarly;
         /* Eduqas grid: after a ] marks bracket, a new main question often begins [1][2] … [1][6]; force a break so 1·1 / 1·2 / 1·3 are not glued (PDF stream order). */
         raw = raw.replace(/(\])(\s*)(?=\[\s*1\s*\]\s*\[\s*[2-6]\s*\])/g, "$1\n\n$2");
         /* Prose main questions (no [1][2] box): after any ] allow space OR newline before How / What do you think / According / Both … (PDF.js often joins lines with a single space). */
@@ -19307,6 +19404,7 @@ const admin = {
             if(/\bRead\s+lines?\s+\d+/i.test(s)) return true;
             if(/Question\s+\d+/i.test(s)) return true;
             if(/^\s*\d{1,2}\s*[.)]\s+\S/.test(s)) return true;
+            if(/^(?:0[1-9]|10)\s+\S/m.test(s)) return true;
             if(/(?:^|[\r\n])(?:\d{1,2}\s+[1-6]|1[1-6])\s+a\)\s+/i.test(s)) return true;
             return false;
         };
@@ -22580,14 +22678,14 @@ const admin = {
         return { twentyFirst: r1 || "", nineteenth: r2 || "" };
     },
     hasC2DualSource: function() {
+        if(!appData || appData.component !== 2) return false;
         const p = admin.getC2ResourceParts();
         return !!(p.twentyFirst && p.nineteenth);
     },
-    /** Level Bank C2 column: show whenever C2 is in use, not only when both passages are detected (otherwise the control never appears). */
+    /** Level Bank C2 column: Component 2 only (never on single-text Component 1 lessons). */
     shouldShowLevelBankC2Column: function() {
+        if(!appData || appData.component !== 2) return false;
         if(admin.hasC2DualSource && admin.hasC2DualSource()) return true;
-        if(!appData) return false;
-        if(appData.component === 2) return true;
         const L = appData.component2Layout || {};
         if((L.resourcePaperText || "").trim() || (L.questionPaperPage3Text || "").trim()) return true;
         if((L.questionPaperPage2Text || "").trim()) return true;
@@ -22654,12 +22752,15 @@ const admin = {
         const split = admin.splitC2PooledSourceBlob ? admin.splitC2PooledSourceBlob(blob) : null;
         const hasSplitBlob = !!(split && split.twentyFirst && split.nineteenth);
         const dualParts = admin.hasC2DualSource && admin.hasC2DualSource();
-        const isC2 = !!(appData && (hasLayoutContent || hasSplitBlob || dualParts));
+        const isC2 = !!(appData && appData.component === 2 && (hasLayoutContent || hasSplitBlob || dualParts));
         const bar1 = document.getElementById("architect-c2-source-bar");
         const bar2 = document.getElementById("architect-c2-source-bar-select");
         const barHeader = document.getElementById("header-c2-source-bar");
         [bar1, bar2, barHeader].filter(Boolean).forEach(bar => {
             bar.classList.toggle("hidden", !isC2);
+        });
+        if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
+        [bar1, bar2, barHeader].filter(Boolean).forEach(bar => {
             const view = architectC2SourceView || "21st";
             bar.querySelectorAll("[data-c2view]").forEach(btn => {
                 btn.classList.toggle("active", (btn.dataset.c2view || "") === view);
@@ -22848,7 +22949,8 @@ const admin = {
         };
         row.appendChild(moveWrap);
         row.appendChild(input);
-        row.appendChild(lineRefInp);
+        const showLineRef = !(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+        if(showLineRef) row.appendChild(lineRefInp);
         if(c2Sel) row.appendChild(c2Sel);
         row.appendChild(wsWrap);
         row.appendChild(removeBtn);
