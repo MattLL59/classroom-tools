@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T17:00:00">
+<meta name="architect-build" content="2026-05-17T18:30:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3764,12 +3764,14 @@ const app = {
             }
         }
         app.maybeSplitConflatedDualTextQuestionRow(safe);
+        if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(safe);
         if(Array.isArray(safe.questions)) {
             safe.questions.forEach((q) => {
                 if(q && typeof q.prompt === "string" && q.prompt.trim()) q.prompt = app.sanitizeFocusQuestionPrompt(q.prompt);
             });
         }
         if(typeof safe.question === "string" && safe.question.trim()) safe.question = app.sanitizeFocusQuestionPrompt(safe.question);
+        if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(safe);
     },
     /**
      * When Qn and Qn+1 are pasted into one lesson row (common for C2 dual-text [4] + "Both of these texts…" [10]),
@@ -13076,7 +13078,7 @@ const app = {
     buildPassagePaneHtmlForLevel: function(level, sourceText, opts) {
         opts = opts || {};
         const warnHtml = opts.warnHtml || "";
-        const scope = opts.scope === "focused" ? "focused" : "whole";
+        let scope = opts.scope === "focused" ? "focused" : "whole";
         const lvl = parseInt(level, 10) || 1;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
@@ -13086,6 +13088,7 @@ const app = {
         const lineWinResolved = app.resolveQuoteSelectLineWindow(lvl);
         if(Object.prototype.hasOwnProperty.call(opts, "lineRange") && opts.lineRange !== undefined) lineRange = opts.lineRange;
         else lineRange = lineWinResolved.lineRange;
+        if(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers() && scope === "focused" && !lineRange) scope = "whole";
         const labelRange = (Object.prototype.hasOwnProperty.call(opts, "displayLineRange") && opts.displayLineRange !== undefined ? opts.displayLineRange : null) || lineWinResolved.displayLineRange || lineRange;
         let excerptSliceFailed = false;
         let useExcerpt = false;
@@ -16717,7 +16720,9 @@ const ui = {
         if(inlineSelect) {
             if(hasSource) {
                 const warn = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
-                const scopeSel = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+                let scopeSel = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+                const c1ProseNoLineWindowSel = !!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+                if(c1ProseNoLineWindowSel && scopeSel === "focused" && !lineRange) scopeSel = "whole";
                 const bundle = typeof app.buildPassagePaneHtmlForLevel === "function"
                     ? app.buildPassagePaneHtmlForLevel(level, sourceText, { warnHtml: warn, scope: scopeSel, lineRange: lineRange, displayLineRange: lineWinEarly.displayLineRange })
                     : null;
@@ -16738,8 +16743,9 @@ const ui = {
         }
         const passageHintEl = document.getElementById("selection-passage-window-hint");
         if(passageHintEl) {
-            const scopeFocusedHint = typeof ui.getPassageDisplayScope === "function" && ui.getPassageDisplayScope() === "focused";
-            const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
+            const c1ProseNoLineWindow = !!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+            const scopeFocusedHint = !c1ProseNoLineWindow && typeof ui.getPassageDisplayScope === "function" && ui.getPassageDisplayScope() === "focused";
+            const wantsPassageWindow = !c1ProseNoLineWindow && !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
             if(excerptSliceFailed && wantsPassageWindow && lineRange) {
                 passageHintEl.classList.remove("hidden");
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.08);font-size:0.86rem;line-height:1.45;">
@@ -19284,24 +19290,38 @@ const admin = {
         t = t.replace(/([.!?…])([A-Z])/g, "$1 $2");
         return t.replace(/\s{2,}/g, " ").trim();
     },
-    /** AQA/OCR: separate glued "04 … 05 How" and normalise line-start 01–10 question numbers. */
+    /** AQA/OCR: separate glued "04 … 05 How", "4 … 5 How", and normalise line-start question numbers. */
     preprocessPaddedExamQuestionNumbers: function(raw) {
         if(!raw || typeof raw !== "string") return raw || "";
         let t = String(raw).replace(/\r\n/g, "\n");
-        t = t.replace(/([.!?…\]"'”)\]]|\])\s*((?:0[1-9]|10))\s+(?=[A-Z"'(\[])/g, "$1\n\n$2 ");
-        t = t.replace(/(\[\s*\d{1,3}\s*\])\s*((?:0[1-9]|10))\s+(?=[A-Z"'(\[])/g, "$1\n\n$2 ");
+        const qNum = "(?:0[1-9]|10|[1-9])";
+        const qStart = "(?=[A-Z\"'(\u201c\u2018]|Read\\s|How\\s|What\\s|Why\\s|Explain\\s|Describe\\s|Comment\\s|Give\\s|Refer\\s|Identify\\s|Write\\s|Compare\\s|Evaluate\\s|Question\\s)";
+        t = t.replace(new RegExp("([.!?…\\]\"'”)\\]]|\\])\\s*(" + qNum + ")\\s+" + qStart, "g"), "$1\n\n$2 ");
+        t = t.replace(new RegExp("(\\[\\s*\\d{1,3}\\s*\\])\\s*(" + qNum + ")\\s+" + qStart, "g"), "$1\n\n$2 ");
+        t = t.replace(/(?:^|\n)\s*(0[1-9])([A-Z])/gm, "$1 $2");
+        t = t.replace(/(?:^|\n)\s*([1-9])([A-Z])/gm, "$1 $2");
+        t = t.replace(/(?:^|\n)\s*Question\s+(0[1-9]|10|[1-9])\s*([A-Z])/gim, "Question $1 $2");
         return t;
+    },
+    _examQuestionNumberLineStartRe: function() {
+        return /(?=(?:^|\n)\s*(?:(?:0[1-9]|10)\s+|(?:[1-9])\s+|Question\s+(?:0[1-9]|10|[1-9])\s*[.:)]?\s*))(?=[A-Z"'(\u201c\u2018]|Read\s|How\s|What\s|Why\s|Explain\s|Describe\s|Comment\s|Give\s|Refer\s|Identify\s|Write\s|Compare\s|Evaluate\s)/m;
+    },
+    _examQuestionNumberEmbeddedRe: function() {
+        return /(?<=[.!?…\]"'”)\]]|\])\s*(?=(?:0[1-9]|10|[1-9])\s+(?=[A-Z"'(\u201c\u2018]|Read\s|How\s|What\s|Explain\s|Describe\s))/i;
     },
     trySplitByPaddedExamQuestionNumbers: function(raw, normalize, minLen) {
         if(!raw || typeof raw !== "string") return null;
         normalize = normalize || function(s) { return String(s || "").trim(); };
         minLen = minLen != null ? minLen : 8;
         const prep = admin.preprocessPaddedExamQuestionNumbers(raw);
-        if(!/(?:^|\n)\s*(?:0[1-9]|10)\s+(?=[A-Z"'(\[])/m.test(prep)) return null;
-        const parts = prep.split(/(?=(?:^|\n)\s*(?:0[1-9]|10)\s+(?=[A-Z"'(\[]))/m).map(normalize).filter(function(s) { return s.length >= minLen; });
+        if(!admin._examQuestionNumberLineStartRe().test(prep) && !admin._examQuestionNumberEmbeddedRe().test(prep)) return null;
+        let parts = prep.split(admin._examQuestionNumberLineStartRe()).map(normalize).filter(function(s) { return s.length >= minLen; });
+        if(parts.length < 2 && admin._examQuestionNumberEmbeddedRe().test(prep)) {
+            parts = prep.split(admin._examQuestionNumberEmbeddedRe()).map(normalize).filter(function(s) { return s.length >= minLen; });
+        }
         if(parts.length < 2) return null;
         const first = parts[0];
-        const startsNum = /^(?:0[1-9]|10)\s/i.test(first);
+        const startsNum = /^(?:(?:0[1-9]|10)\s+|(?:[1-9])\s+|Question\s+)/i.test(first);
         if(!startsNum && (first.length > 350 || /section\s*[aA]|instructions\s+to\s+candidates|answer\s+all\s+questions/i.test(first))) {
             return parts.slice(1);
         }
@@ -19310,28 +19330,101 @@ const admin = {
     splitChunksAtEmbeddedPaddedNumbers: function(chunks) {
         if(!Array.isArray(chunks) || !chunks.length) return chunks;
         const minLen = 8;
-        const out = [];
-        const embedRe = /\s((?:0[1-9]|10))\s+(?=[A-Z"'(])/;
-        chunks.forEach(function(ch) {
-            const t = String(ch || "").trim();
-            if(!t) return;
-            let cutAt = -1;
-            let m;
-            const re = new RegExp(embedRe.source, embedRe.flags + "g");
-            while((m = re.exec(t)) !== null) {
-                if(m.index >= 24) {
-                    cutAt = m.index;
-                    break;
+        const embedRes = [
+            /\s(0[1-9])\s+(?=[A-Z"'(\u201c\u2018])/,
+            /\s(10)\s+(?=[A-Z"'(\u201c\u2018])/,
+            /\s([2-9])\s+(?=[A-Z"'(\u201c\u2018])/,
+            /\sQuestion\s+(0[1-9]|10|[2-9])\s*[.:)]?\s*(?=[A-Z"'(\u201c\u2018])/i,
+            admin._examQuestionNumberEmbeddedRe()
+        ];
+        let cur = chunks.slice();
+        for(let pass = 0; pass < 5; pass++) {
+            const out = [];
+            let changed = false;
+            cur.forEach(function(ch) {
+                const t = String(ch || "").trim();
+                if(!t) return;
+                let cutAt = -1;
+                for(let ri = 0; ri < embedRes.length; ri++) {
+                    const re = new RegExp(embedRes[ri].source, embedRes[ri].flags + "g");
+                    let m;
+                    while((m = re.exec(t)) !== null) {
+                        if(m.index >= 18) {
+                            cutAt = m.index;
+                            break;
+                        }
+                    }
+                    if(cutAt >= 0) break;
                 }
+                if(cutAt >= 0) {
+                    changed = true;
+                    const a = t.slice(0, cutAt).trim();
+                    const b = t.slice(cutAt).trim();
+                    if(a.length >= minLen) out.push(a);
+                    if(b.length >= minLen) out.push(b);
+                } else out.push(t);
+            });
+            cur = out;
+            if(!changed) break;
+        }
+        return cur;
+    },
+    /** Split one bank row that contains Qn and Qn+1 (e.g. "04 … 05 How" in a single prompt). */
+    maybeSplitConflatedExamNumberQuestionRow: function(safe) {
+        if(!safe || !Array.isArray(safe.questions)) return;
+        const qs = safe.questions;
+        const emptyish = function(t) { return !t || !String(t).trim() || String(t).trim().length < 12; };
+        const findNextRowIndex = function(excludeIdx, targetNum) {
+            for(let xidx = excludeIdx + 1; xidx < qs.length; xidx++) {
+                const x = qs[xidx];
+                if(x && app.orderNumFromQuestionId(x.id) === targetNum) return xidx;
             }
-            if(cutAt >= 0) {
-                const a = t.slice(0, cutAt).trim();
-                const b = t.slice(cutAt).trim();
-                if(a.length >= minLen) out.push(a);
-                if(b.length >= minLen) out.push(b);
-            } else out.push(t);
-        });
-        return out;
+            return qs.findIndex(function(x, xidx) { return xidx !== excludeIdx && x && app.orderNumFromQuestionId(x.id) === targetNum; });
+        };
+        const splitAtNextNum = function(s, curNum) {
+            if(!s || curNum == null || curNum < 1) return null;
+            const next = curNum + 1;
+            const pad = next < 10 ? "0" + next : String(next);
+            const patterns = [
+                new RegExp("\\s(?:" + pad + "|" + next + ")\\s+(?=[A-Z\"'(\u201c\u2018])"),
+                /\s(0[1-9]|10)\s+(?=[A-Z"'(\u201c\u2018])/
+            ];
+            for(let pi = 0; pi < patterns.length; pi++) {
+                const m = patterns[pi].exec(s);
+                if(m && m.index >= 16) return [s.slice(0, m.index).trim(), s.slice(m.index).trim()];
+            }
+            return null;
+        };
+        for(let i = 0; i < qs.length; i++) {
+            const q = qs[i];
+            if(!q || typeof q.prompt !== "string") continue;
+            const s = q.prompt.trim();
+            const curNum = app.orderNumFromQuestionId(q.id);
+            const dual = splitAtNextNum(s, curNum);
+            if(!dual) continue;
+            const p1 = dual[0];
+            const p2 = dual[1];
+            if(!p1 || !p2 || p1.length < 8 || p2.length < 8) continue;
+            const targetNum = curNum + 1;
+            const nextIdCanonical = app.nextSequentialQuestionId(q.id);
+            const j = findNextRowIndex(i, targetNum);
+            if(j >= 0) {
+                const nq = qs[j];
+                const np = nq && typeof nq.prompt === "string" ? nq.prompt.trim() : "";
+                if(emptyish(np) || np === s) {
+                    q.prompt = p1;
+                    nq.prompt = p2;
+                    app.assignSecondQuestionToNextLevelBankRow(safe, q.id, nq.id);
+                    i++;
+                }
+                continue;
+            }
+            if(qs.some(function(x, xidx) { return xidx !== i && x && app.orderNumFromQuestionId(x.id) === targetNum; })) continue;
+            q.prompt = p1;
+            qs.splice(i + 1, 0, { id: nextIdCanonical, prompt: p2 });
+            app.assignSecondQuestionToNextLevelBankRow(safe, q.id, nextIdCanonical);
+            i++;
+        }
     },
     /** Normalise raw output from parseQuestionsFromText (trim Section A lead, repair splits, expand sub-parts). */
     finalizeExtractedQuestionPrompts: function(parsed) {
