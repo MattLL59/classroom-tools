@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T19:00:00">
+<meta name="architect-build" content="2026-05-17T20:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3342,6 +3342,10 @@ const app = {
             if(currentQ && typeof currentQ.prompt === "string" && currentQ.prompt.trim()) return currentQ.prompt.trim();
             const firstAssigned = findQ(ids[0]);
             if(firstAssigned && typeof firstAssigned.prompt === "string" && firstAssigned.prompt.trim()) return firstAssigned.prompt.trim();
+            const byLvlId = findQ("q" + lvl);
+            if(byLvlId && typeof byLvlId.prompt === "string" && byLvlId.prompt.trim()) return ensureSingle(byLvlId.prompt.trim()) || byLvlId.prompt.trim();
+            const byIdx = questions[lvl - 1];
+            if(byIdx && typeof byIdx.prompt === "string" && String(byIdx.prompt).trim()) return ensureSingle(String(byIdx.prompt).trim()) || String(byIdx.prompt).trim();
             const globalPrompt = (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "";
             return ensureSingle(globalPrompt) || globalPrompt;
         }
@@ -7538,6 +7542,23 @@ const app = {
             const bookN = base + L.n - 1;
             return bookN + " " + app.htmlFragmentToPlainText(L.html || "");
         }).join("\n");
+    },
+    /** Plain prose for C1 skimming — no booklet line prefixes (used by {@link formatSourceHtml} prose mode). */
+    structuredPassageToProsePlain: function(o) {
+        if(!o || !Array.isArray(o.lines)) return "";
+        const paras = [];
+        let buf = [];
+        for(let i = 0; i < o.lines.length; i++) {
+            const L = o.lines[i];
+            const t = app.htmlFragmentToPlainText(L.html || "").replace(/\s+/g, " ").trim();
+            if(t) buf.push(t);
+            const endPara = !!(L.paragraphStart) || i === o.lines.length - 1;
+            if(endPara && buf.length) {
+                paras.push(buf.join(" "));
+                buf = [];
+            }
+        }
+        return paras.join("\n\n");
     },
     serializeStructuredPassageV2: function(o) {
         try {
@@ -12218,7 +12239,8 @@ const app = {
         }
         if(spFirst) {
             if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers()) {
-                const plainSp = app.structuredPassageToPlain(spFirst);
+                const plainSp = (app.structuredPassageToProsePlain && app.structuredPassageToProsePlain(spFirst))
+                    || app.structuredPassageToPlain(spFirst);
                 if(plainSp && plainSp.trim()) return app.formatSourceHtmlLoosePlainSkim(plainSp) || app.formatSourceHtmlLoosePlain(plainSp);
             }
             if(passageQuoteSelectDenseLines && app.formatStructuredPassageHtmlDenseMargins) return app.formatStructuredPassageHtmlDenseMargins(spFirst);
@@ -12238,6 +12260,12 @@ const app = {
             if(cleanC1 && cleanC1.trim()) return app.formatSourceHtmlLoosePlainSkim(cleanC1) || app.formatSourceHtmlLoosePlain(cleanC1);
         }
         /* PDF → C2 layout stores this markup via normalizedPassageHtmlForC2Layout; re-normalizing can strip gutters if serialize fails on very long HTML. */
+        if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers() && /source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
+            try {
+                const plainC1g = app.normalizeSourceText(raw) || app.cleanSourceText(raw);
+                if(plainC1g && plainC1g.trim()) return app.formatSourceHtmlLoosePlainSkim(plainC1g) || app.formatSourceHtmlLoosePlain(plainC1g);
+            } catch(eC1g) {}
+        }
         if(/source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
             try {
                 const plain = app.normalizeSourceText(raw);
@@ -12254,8 +12282,10 @@ const app = {
         }
         /* Numbered &lt;p&gt;/&lt;div&gt; from contenteditable (plain or rich); do not require B/I/U — Chrome often has no rich tags. */
         if(/<p\b|<div\b/i.test(raw)) {
-            const ghStyled = app.gutterLayoutHtmlFromNumberedEditorHtml(raw);
-            if(ghStyled) return ghStyled;
+            if(!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers())) {
+                const ghStyled = app.gutterLayoutHtmlFromNumberedEditorHtml(raw);
+                if(ghStyled) return ghStyled;
+            }
         }
         const useHtmlExtract = app.passageHtmlLooksLikeMarkup(raw);
         let basis = raw;
@@ -12265,6 +12295,10 @@ const app = {
         }
         const clean = app.cleanSourceText(basis);
         if(!clean) return useHtmlExtract ? (app.sanitizeSourceHtml(raw) || "Source text not provided.") : "Source text not provided.";
+        if(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers()) {
+            const skimC1 = app.formatSourceHtmlLoosePlainSkim(clean);
+            if(skimC1 && skimC1 !== "Source text not provided.") return skimC1;
+        }
         const ghtml = app.gutterLayoutHtmlFromCleanPlain(clean, denseGutterOverride);
         if(ghtml) return ghtml;
         if(useHtmlExtract) return app.sanitizeSourceHtml(raw) || "Source text not provided.";
@@ -12825,7 +12859,17 @@ const app = {
         const score = app.answerPassageWordOverlapScore(stu, off);
         return score < 0.28;
     },
-    /** True when this lesson needs booklet line gutters / line-window UI (Component 1 only). Prompt text like “Read lines 62–86” does **not** count — only Focus **Lines** box, level-bank “every line #”, or meta opt-in. */
+    /** True when any Focus row has an explicit **Lines** box value (excerpt slicing / affirm — not booklet gutter display). */
+    lessonHasExplicitFocusLineRef: function() {
+        if(!appData || appData.component === 2) return false;
+        const qs = Array.isArray(appData.questions) ? appData.questions : [];
+        for(let i = 0; i < qs.length; i++) {
+            const q = qs[i];
+            if(q && typeof q.lineRef === "string" && q.lineRef.trim() && app.parseLineRangeFromQuestion(q.lineRef.trim())) return true;
+        }
+        return false;
+    },
+    /** True when this lesson needs booklet line gutters / line-window UI (Component 1 only). “Read lines …” in the prompt and Focus **Lines** box do **not** enable gutters — only meta opt-in or level-bank **every line #**. */
     lessonUsesBookletLineNumbers: function() {
         if(!appData || appData.component === 2) return false;
         if(appData.meta && (appData.meta.passageUseBookletLines === true || appData.meta.passageUseBookletLines === "true")) return true;
@@ -12835,13 +12879,6 @@ const app = {
             const ent = bank[k];
             if(ent && (ent.passageQuoteSelectEveryLineNumber === true || ent.passageQuoteSelectEveryLineNumber === "true")) return true;
         }
-        const qs = Array.isArray(appData.questions) ? appData.questions : [];
-        for(let i = 0; i < qs.length; i++) {
-            const q = qs[i];
-            if(q && typeof q.lineRef === "string" && q.lineRef.trim() && app.parseLineRangeFromQuestion(q.lineRef.trim())) return true;
-        }
-        const leg = typeof appData.question === "string" ? appData.question.trim() : "";
-        if(leg && leg.length <= 40 && app.parseLineRangeFromQuestion(leg)) return true;
         return false;
     },
     /** Parse "lines 1-5" or "Read lines 1-5" from question text. Returns { from: 1, to: 5 } or null. */
@@ -16806,15 +16843,18 @@ const ui = {
         const passageHintEl = document.getElementById("selection-passage-window-hint");
         if(passageHintEl) {
             const c1ProseNoLineWindow = !!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+            const c1ExplicitLineRef = !!(appData && appData.component === 1 && typeof app.lessonHasExplicitFocusLineRef === "function" && app.lessonHasExplicitFocusLineRef());
             const scopeFocusedHint = !c1ProseNoLineWindow && typeof ui.getPassageDisplayScope === "function" && ui.getPassageDisplayScope() === "focused";
-            const wantsPassageWindow = !c1ProseNoLineWindow && !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
+            const excerptOrAffirmOn = !!(levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
+            const wantsPassageWindow = !c1ProseNoLineWindow && !!(scopeFocusedHint || excerptOrAffirmOn);
+            const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange && (appData.component !== 1 || c1ExplicitLineRef || !excerptOrAffirmOn);
             if(excerptSliceFailed && wantsPassageWindow && lineRange) {
                 passageHintEl.classList.remove("hidden");
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.08);font-size:0.86rem;line-height:1.45;">
                     <div style="font-weight:700;margin-bottom:4px;">Excerpt slice empty</div>
                     <div style="opacity:0.94;">Your line window parsed (${lineRange.from}–${lineRange.to}) but no text was extracted — usually margin numbers don’t match (e.g. exam ticks 5,10,15…). Try <strong>1–5</strong> in the Lines box for the <em>first five physical rows</em>, or use the exact margin numbers from your insert.</div>
                 </div>`;
-            } else if(wantsPassageWindow && hasSource && !lineRange) {
+            } else if(showMissingLineWindowHint) {
                 passageHintEl.classList.remove("hidden");
                 const isTeacher = !appData.isStandalone;
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:var(--error);background:rgba(244,67,54,0.07);font-size:0.86rem;line-height:1.45;">
