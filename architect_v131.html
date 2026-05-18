@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T18:30:00">
+<meta name="architect-build" content="2026-05-17T19:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -4725,7 +4725,7 @@ const app = {
                     app.applyIntroHeadInnerToLineEditors(headInner);
                     let bodyHtml = "";
                     try {
-                        bodyHtml = app.structuredPassageToEditorHtml(o, { omitHead: true }) || "";
+                        bodyHtml = (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(o, { omitHead: true })) || app.structuredPassageToEditorHtml(o, { omitHead: true }) || "";
                     } catch(eB) {
                         bodyHtml = "";
                     }
@@ -5003,7 +5003,7 @@ const app = {
                 el.value = app.structuredPassageToPlain(o);
                 return;
             }
-            const fullHtml = app.structuredPassageToEditorHtml(o) || "";
+            const fullHtml = (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(o)) || app.structuredPassageToEditorHtml(o) || "";
             if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(fullHtml);
             else el.innerHTML = fullHtml;
             return;
@@ -5024,12 +5024,19 @@ const app = {
             return;
         }
         const repairedPlain = app.repairExamMarginDigitArtifacts(plain);
+        const c1Prose = appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers();
+        if(c1Prose) {
+            const skim = app.formatSourceHtmlLoosePlainSkim(repairedPlain) || app.formatSourceHtmlForEditor(repairedPlain) || "";
+            if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(skim);
+            else el.innerHTML = skim;
+            return;
+        }
         const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
         let v2FromPlain = app.plainNumberedLinesToStructuredV2(repairedPlain, pdfImp, { sequentialLineNumbers: true });
         if(v2FromPlain && v2FromPlain.lines && v2FromPlain.lines.length >= 1) {
             let w = app.normalizeStructuredPassageV2MergeOrphanRows(v2FromPlain);
             w = app.normalizeStructuredPassageV2Sequential(w);
-            const mergedV2 = app.structuredPassageToEditorHtml(w) || "";
+            const mergedV2 = (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(w)) || app.structuredPassageToEditorHtml(w) || "";
             if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(mergedV2);
             else el.innerHTML = mergedV2;
             return;
@@ -7739,6 +7746,49 @@ const app = {
         }
         bits.push(core);
         if(o.tailHtml != null && String(o.tailHtml).trim()) {
+            const t = typeof app.sanitizePassageProseFragmentForDisplay === "function"
+                ? app.sanitizePassageProseFragmentForDisplay(String(o.tailHtml).trim())
+                : app.sanitizeSourceHtml("<div>" + String(o.tailHtml).trim() + "</div>", { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+            bits.push('<div class="architect-passage-tail-prose">' + t + "</div>");
+        }
+        return bits.join("");
+    },
+    /** Booklet gutters vs prose blocks for Editing Suite — respects {@link lessonUsesBookletLineNumbers}. */
+    structuredPassageToEditorHtmlForLesson: function(o, opts) {
+        if(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers())
+            return (app.structuredPassageToProseEditorHtml && app.structuredPassageToProseEditorHtml(o, opts)) || "";
+        return app.structuredPassageToEditorHtml(o, opts) || "";
+    },
+    /** Component 1 prose lessons: same head/tail shell as {@link structuredPassageToEditorHtml} but body is continuous &lt;p&gt; blocks (no WJEC margin rows). */
+    structuredPassageToProseEditorHtml: function(o, opts) {
+        opts = opts || {};
+        if(!o || !Array.isArray(o.lines)) return "";
+        const paras = [];
+        let buf = [];
+        for(let i = 0; i < o.lines.length; i++) {
+            const L = o.lines[i];
+            const t = app.htmlFragmentToPlainText(L.html || "").replace(/\s+/g, " ").trim();
+            if(t) buf.push(t);
+            const endPara = !!(L.paragraphStart) || i === o.lines.length - 1;
+            if(endPara && buf.length) {
+                paras.push(buf.join(" "));
+                buf = [];
+            }
+        }
+        const bodyPlain = paras.join("\n\n");
+        const bodyHtml = bodyPlain.trim() ? (app.formatSourceHtmlLoosePlainSkim(bodyPlain) || "") : "";
+        const hasHead = o.headHtml != null && String(o.headHtml).trim();
+        const hasTail = o.tailHtml != null && String(o.tailHtml).trim();
+        if(!bodyHtml && !hasHead && !hasTail) return "";
+        const bits = [];
+        if(!opts.omitHead && hasHead) {
+            const h = typeof app.sanitizePassageProseFragmentForDisplay === "function"
+                ? app.sanitizePassageProseFragmentForDisplay(String(o.headHtml).trim())
+                : app.sanitizeSourceHtml("<div>" + String(o.headHtml).trim() + "</div>", { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+            bits.push('<div class="architect-passage-head-prose">' + h + "</div>");
+        }
+        if(bodyHtml) bits.push(bodyHtml);
+        if(hasTail) {
             const t = typeof app.sanitizePassageProseFragmentForDisplay === "function"
                 ? app.sanitizePassageProseFragmentForDisplay(String(o.tailHtml).trim())
                 : app.sanitizeSourceHtml("<div>" + String(o.tailHtml).trim() + "</div>", { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
@@ -11973,7 +12023,7 @@ const app = {
         const c = canonical.trim();
         if(!c) return "";
         const spCanon = app.parseStructuredPassageSource(c);
-        if(spCanon) return app.structuredPassageToEditorHtml(spCanon) || "";
+        if(spCanon) return (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(spCanon)) || app.structuredPassageToEditorHtml(spCanon) || "";
         if(/source-with-line-numbers[\s\S]*source-line-row/i.test(c) && !/<style\b/i.test(c)) {
             try {
                 let plain = app.normalizeSourceText(c);
@@ -12271,8 +12321,9 @@ const app = {
         /** v2 JSON often embeds &lt;b&gt;/&lt;p&gt; inside "html" fields — do not treat the whole string as HTML or sanitizeSourceHtml mangles JSON and the editor loses exam gutters (PDF import looked like plain &lt;p&gt; blocks). */
         if(app.parseStructuredPassageSource) {
             const spEarly = app.parseStructuredPassageSource(raw);
-            if(spEarly && spEarly.lines && spEarly.lines.length && typeof app.structuredPassageToEditorHtml === "function") {
-                const edEarly = app.structuredPassageToEditorHtml(spEarly);
+            if(spEarly && spEarly.lines && spEarly.lines.length) {
+                const edEarly = (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(spEarly))
+                    || (typeof app.structuredPassageToEditorHtml === "function" ? app.structuredPassageToEditorHtml(spEarly) : "");
                 if(edEarly && String(edEarly).trim()) return edEarly;
             }
         }
@@ -12293,12 +12344,17 @@ const app = {
         const clean = app.cleanSourceText(raw);
         if(!clean) return "";
         const repaired = app.repairExamMarginDigitArtifacts(clean);
+        const c1ProseEd = appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers();
+        if(c1ProseEd) {
+            const skimEd = app.formatSourceHtmlLoosePlainSkim(repaired);
+            if(skimEd && String(skimEd).trim() && skimEd !== "Source text not provided.") return skimEd;
+        }
         const pdfImpEd = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
         let v2Ed = app.plainNumberedLinesToStructuredV2(repaired, pdfImpEd, { sequentialLineNumbers: true });
         if(v2Ed && v2Ed.lines && v2Ed.lines.length >= 1) {
             let wEd = app.normalizeStructuredPassageV2MergeOrphanRows(v2Ed);
             wEd = app.normalizeStructuredPassageV2Sequential(wEd);
-            const edHtml = app.structuredPassageToEditorHtml(wEd);
+            const edHtml = (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(wEd)) || app.structuredPassageToEditorHtml(wEd);
             if(edHtml && String(edHtml).trim()) return edHtml;
         }
         const strictNum = app.parseNumberedPlainSourceLines(repaired);
@@ -12769,17 +12825,23 @@ const app = {
         const score = app.answerPassageWordOverlapScore(stu, off);
         return score < 0.28;
     },
-    /** True when this lesson needs booklet line gutters / line-window UI (Component 1 only). */
+    /** True when this lesson needs booklet line gutters / line-window UI (Component 1 only). Prompt text like “Read lines 62–86” does **not** count — only Focus **Lines** box, level-bank “every line #”, or meta opt-in. */
     lessonUsesBookletLineNumbers: function() {
         if(!appData || appData.component === 2) return false;
+        if(appData.meta && (appData.meta.passageUseBookletLines === true || appData.meta.passageUseBookletLines === "true")) return true;
+        const bank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
+        for(const k in bank) {
+            if(!Object.prototype.hasOwnProperty.call(bank, k)) continue;
+            const ent = bank[k];
+            if(ent && (ent.passageQuoteSelectEveryLineNumber === true || ent.passageQuoteSelectEveryLineNumber === "true")) return true;
+        }
         const qs = Array.isArray(appData.questions) ? appData.questions : [];
         for(let i = 0; i < qs.length; i++) {
             const q = qs[i];
             if(q && typeof q.lineRef === "string" && q.lineRef.trim() && app.parseLineRangeFromQuestion(q.lineRef.trim())) return true;
-            if(q && typeof q.prompt === "string" && app.parseLineRangeFromQuestion(q.prompt)) return true;
         }
-        const leg = typeof appData.question === "string" ? appData.question : "";
-        if(app.parseLineRangeFromQuestion(leg)) return true;
+        const leg = typeof appData.question === "string" ? appData.question.trim() : "";
+        if(leg && leg.length <= 40 && app.parseLineRangeFromQuestion(leg)) return true;
         return false;
     },
     /** Parse "lines 1-5" or "Read lines 1-5" from question text. Returns { from: 1, to: 5 } or null. */
@@ -20108,6 +20170,7 @@ const admin = {
                 };
             } catch(eDbg) {}
             appData.questions = parsed.map((prompt, i) => ({ id: "q" + (i + 1), prompt: app.sanitizeFocusQuestionPrompt(String(prompt || "").trim()) }));
+            if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
             if(parsed.length >= 1) {
                 appData.question = appData.questions[0].prompt || appData.question;
                 if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
