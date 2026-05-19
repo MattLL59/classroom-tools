@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-18T20:00:00">
+<meta name="architect-build" content="2026-05-18T22:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -1446,7 +1446,7 @@
                     <h3 class="admin-h" style="color:#1565c0;">🤖 AI Lesson Generator</h3>
                     <div class="input-group">
                         <label>Focus questions (add multiple for past papers)</label>
-                        <p style="font-size:0.78rem; opacity:0.85; margin:0 0 4px 0;">Use the narrow <strong>Lines 1–5</strong> box for each row when you use Level Bank <strong>exam excerpt / affirm</strong> — or write <code style="font-size:0.76em;">Read lines 1–5</code> in the prompt. Export includes <strong>only</strong> rows where <strong>WS</strong> is ticked here (plus quote bank <strong>Include</strong>). Meanings and points export as <strong>jumbled</strong> match tasks. Language/Tone/Structure match appears only if <strong>two or more</strong> of those devices are on under Editing suite → Selection devices; quotes whose type is switched off are omitted.</p>
+                        <p style="font-size:0.78rem; opacity:0.85; margin:0 0 4px 0;">The narrow <strong>Lines</strong> box fills from <code style="font-size:0.76em;">Read lines 11–20</code> at the start of each question (trailing exam numbers like <code style="font-size:0.76em;">03 [5]</code> are stripped from display). Use Level Bank <strong>exam excerpt / affirm</strong> for Quote Select. Export includes <strong>only</strong> rows where <strong>WS</strong> is ticked (plus quote bank <strong>Include</strong>).</p>
                         <div id="questions-list" class="questions-list-mount"></div>
                         <button type="button" class="btn btn-outline btn-small" onclick="admin.addQuestionRow()" style="margin-top:6px;">+ Add question</button>
                     </div>
@@ -3107,8 +3107,86 @@ const app = {
         s = s.replace(/\b([A-Za-z]+)•/g, "$1 •");
         s = s.replace(/•([^\s•\n\r])/g, "• $1");
         s = s.replace(/[ \t]{2,}/g, " ").replace(/\s+\n/g, "\n").replace(/\n\s+/g, "\n").trim();
+        /** Trailing leaked sub-question number before the marks bracket: “…appropriate. 0 3 [5]” → “…appropriate. [5]”. */
+        s = s.replace(/\s+0?\s*\d{1,2}\s+(\[\s*\d{1,3}\s*\])\s*$/i, " $1");
         s = app.moveSingleBracketMarkToEnd(s);
         return s;
+    },
+    /** Booklet line window for the Lines box, e.g. `{ from: 11, to: 20 }` → `"11-20"`. */
+    formatLineRefFromRange: function(range) {
+        if(!range || !Number.isFinite(Number(range.from))) return "";
+        const from = Math.max(1, Math.min(999, Math.round(Number(range.from))));
+        const toRaw = range.to != null && Number.isFinite(Number(range.to)) ? Number(range.to) : from;
+        const to = Math.max(from, Math.min(999, Math.round(toRaw)));
+        return from === to ? String(from) : from + "-" + to;
+    },
+    /**
+     * Parse “Read lines 11–20 …” from the **start** of a focus question (avoids matching stray digits at the end).
+     * @param {string} questionText
+     * @param {number} [maxLeadChars]
+     */
+    parseLineRangeFromQuestionLead: function(questionText, maxLeadChars) {
+        if(!questionText || typeof questionText !== "string") return null;
+        const s = String(questionText).trim();
+        if(!s.length) return null;
+        const head = s.slice(0, Math.min(s.length, maxLeadChars != null && Number.isFinite(maxLeadChars) ? Math.max(24, maxLeadChars) : 140));
+        const tryRange = function(m) {
+            if(!m) return null;
+            let from = parseInt(m[1], 10);
+            const to = parseInt(m[2], 10);
+            if(from === 0 && to >= 1) from = 1;
+            if(from >= 1 && to >= from && to <= 999) return { from, to };
+            return null;
+        };
+        const patterns = [
+            /^\s*(?:\d{1,2}\s*[.)]\s*)?Read\s+lines?\s+(\d+)\s*[-–—−]\s*(\d+)\b/i,
+            /^\s*(?:\d{1,2}\s*[.)]\s*)?Read\s+lines?\s+(\d+)\s+to\s+(\d+)\b/i,
+            /^\s*(?:\d{1,2}\s*[.)]\s*)?lines?\s+(\d+)\s*[-–—−]\s*(\d+)\b/i,
+            /^\s*(?:\d{1,2}\s*[.)]\s*)?lines?\s+(\d+)\s+to\s+(\d+)\b/i
+        ];
+        for(let pi = 0; pi < patterns.length; pi++) {
+            const got = tryRange(head.match(patterns[pi]));
+            if(got) return got;
+        }
+        const single = head.match(/^\s*(?:\d{1,2}\s*[.)]\s*)?(?:Read\s+)?(?:line|lines)\s+(\d+)\b/i);
+        if(single) {
+            const n = parseInt(single[1], 10);
+            if(n >= 1 && n <= 999) return { from: n, to: n };
+        }
+        return null;
+    },
+    /** Infer Lines box text from a focus question prompt (lead “Read lines …” only). */
+    inferLineRefFromQuestionPrompt: function(prompt) {
+        if(typeof appData !== "undefined" && appData && appData.component === 2) return null;
+        const lead = typeof app.parseLineRangeFromQuestionLead === "function"
+            ? app.parseLineRangeFromQuestionLead(prompt)
+            : null;
+        if(lead && typeof app.formatLineRefFromRange === "function") return app.formatLineRefFromRange(lead);
+        return null;
+    },
+    /**
+     * Fill `lineRef` on a question object when the Lines box is empty and the prompt starts with a line range.
+     * @param {{ prompt?: string, lineRef?: string }} q
+     * @param {{ overwrite?: boolean }} [opts]
+     * @returns {boolean} true if lineRef was set
+     */
+    ensureQuestionLineRefFromPrompt: function(q, opts) {
+        opts = opts || {};
+        if(!q || typeof q.prompt !== "string" || !q.prompt.trim()) return false;
+        if(!opts.overwrite && q.lineRef && String(q.lineRef).trim()) return false;
+        const inf = typeof app.inferLineRefFromQuestionPrompt === "function" ? app.inferLineRefFromQuestionPrompt(q.prompt) : null;
+        if(!inf) return false;
+        q.lineRef = inf;
+        return true;
+    },
+    ensureAllQuestionLineRefsFromPrompts: function() {
+        if(typeof appData === "undefined" || !appData || appData.component === 2) return;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        let changed = false;
+        questions.forEach(function(q) {
+            if(app.ensureQuestionLineRefFromPrompt(q)) changed = true;
+        });
+        return changed;
     },
     /** Alias: normalize focus question for saving (same rules as display). */
     sanitizeFocusQuestionPrompt: function(text) {
@@ -8104,7 +8182,8 @@ const app = {
         if(m.cell && typeof app._measureBookletCellContentPx === "function") {
             const domInner = app._measureBookletCellContentPx(m.cell);
             if(domInner != null && Number.isFinite(domInner) && domInner > 8) {
-                px = Math.min(px, Math.floor(domInner * 0.99));
+                const domFrac = (typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) ? 1 : 0.99;
+                px = Math.min(px, Math.floor(domInner * domFrac));
             }
         }
         return px;
@@ -13767,6 +13846,7 @@ const app = {
         }
         safe.questions.forEach((q) => {
             if(q && typeof q.prompt === "string" && q.prompt.trim()) q.prompt = app.sanitizeFocusQuestionPrompt(q.prompt);
+            if(safe.component !== 2 && typeof app.ensureQuestionLineRefFromPrompt === "function") app.ensureQuestionLineRefFromPrompt(q);
         });
         safe.question = safe.questions[0] && safe.questions[0].prompt ? safe.questions[0].prompt : safe.question;
 
@@ -23210,8 +23290,13 @@ const admin = {
         lineRefInp.type = "text";
         lineRefInp.className = "question-line-ref-input";
         lineRefInp.placeholder = "Lines 1–5";
-        lineRefInp.title = "Exam line window for excerpt + affirm (Quote Select). Use booklet line numbers, e.g. 1-5 or lines 3–7 — or put Read lines 1–5 in the prompt above instead.";
-        lineRefInp.value = (q && typeof q.lineRef === "string") ? q.lineRef : "";
+        lineRefInp.title = "Exam line window for excerpt + affirm (Quote Select). Fills automatically from “Read lines 11–20” at the start of the question — edit if needed.";
+        let lineRefShow = (q && typeof q.lineRef === "string") ? q.lineRef : "";
+        if(!String(lineRefShow || "").trim() && typeof app.inferLineRefFromQuestionPrompt === "function" && q && q.prompt) {
+            const inferredShow = app.inferLineRefFromQuestionPrompt(q.prompt);
+            if(inferredShow) lineRefShow = inferredShow;
+        }
+        lineRefInp.value = lineRefShow;
         lineRefInp.style.cssText = "width:6.75em; min-width:68px; max-width:100%; padding:6px 6px; border:1px solid var(--border); border-radius:4px; font-size:0.8rem; flex-shrink:0;";
         lineRefInp.autocomplete = "off";
         lineRefInp.addEventListener("input", (e) => {
@@ -23222,6 +23307,10 @@ const admin = {
         input.addEventListener("change", (e) => admin.syncQuestionsFromList(true, e.target));
         input.addEventListener("input", (e) => {
             const preferredMount = e.target && e.target.closest(".questions-list-mount");
+            if(lineRefInp && !String(lineRefInp.value || "").trim() && typeof app.inferLineRefFromQuestionPrompt === "function") {
+                const inferredIn = app.inferLineRefFromQuestionPrompt(String(input.value || ""));
+                if(inferredIn) lineRefInp.value = inferredIn;
+            }
             admin.syncQuestionsFromListCore(preferredMount ? { preferredMount } : undefined);
         });
         let c2Sel = null;
@@ -23455,7 +23544,15 @@ const admin = {
             if(!id || !/^q[\w-]+$/i.test(id)) id = "q" + (i + 1);
             const old = prev.find(q => q && String(q.id) === id);
             const o = { id, prompt: r.prompt };
-            const lrTrim = r.lineRefRaw != null ? String(r.lineRefRaw).trim() : "";
+            let lrTrim = r.lineRefRaw != null ? String(r.lineRefRaw).trim() : "";
+            if(!lrTrim && appData && appData.component !== 2 && typeof app.inferLineRefFromQuestionPrompt === "function") {
+                const inferred = app.inferLineRefFromQuestionPrompt(r.prompt);
+                if(inferred) {
+                    lrTrim = inferred;
+                    const lrEl = r._rowEl && r._rowEl.querySelector ? r._rowEl.querySelector("input.question-line-ref-input") : null;
+                    if(lrEl) lrEl.value = inferred;
+                }
+            }
             if(lrTrim) o.lineRef = lrTrim;
             else if(old && old.lineRef) delete o.lineRef;
             const exTrim = r.excerptRaw != null ? String(r.excerptRaw).trim() : "";
@@ -28006,8 +28103,13 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const q = qid ? questions.find(qq => qq && normQid(qq.id) === normQid(qid)) : null;
         inp.disabled = !qid;
         inp.placeholder = qid ? "e.g. 1-5" : "Choose Question above first";
-        inp.value = (q && typeof q.lineRef === "string") ? q.lineRef : "";
-        inp.title = "Same value as Focus questions → narrow Lines box (exam booklet window for excerpt / affirm). Editing here updates that row everywhere.";
+        let previewLineRef = (q && typeof q.lineRef === "string") ? q.lineRef : "";
+        if(!String(previewLineRef || "").trim() && q && q.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") {
+            const infPv = app.inferLineRefFromQuestionPrompt(q.prompt);
+            if(infPv) previewLineRef = infPv;
+        }
+        inp.value = previewLineRef;
+        inp.title = "Same value as Focus questions → Lines box (auto-filled from “Read lines …” in the question). Editing here updates that row everywhere.";
     },
     /** Push saved lineRef from appData into Focus rows before sync (avoids sync clearing preview-only edits when DOM was empty). */
     _pushLineRefsFromAppDataToFocusInputs: function() {
