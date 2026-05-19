@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-18T22:00:00">
+<meta name="architect-build" content="2026-05-19T10:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -113,16 +113,10 @@
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor {
         overflow-x: auto;
     }
-    /* Insert column guides: solid = Sync/reflow word limit; hatched = safety margin; dashed = PDF insert edge (align slider here). */
-    #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers,
-    #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers,
-    #intro-text.architect-passage-line-mode .source-with-line-numbers,
+    /* Insert column guides (solid / hatched / dashed): **Editing Suite #ai-input only** — not Lab or Quote Select. */
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers {
         position: relative;
     }
-    #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers::before,
-    #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers::before,
-    #intro-text.architect-passage-line-mode .source-with-line-numbers::before,
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers::before {
         content: "";
         position: absolute;
@@ -135,9 +129,6 @@
         z-index: 1;
         box-sizing: border-box;
     }
-    html.architect-passage-wrap-margin-visible #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers::before,
-    html.architect-passage-wrap-margin-visible #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers::before,
-    html.architect-passage-wrap-margin-visible #intro-text.architect-passage-line-mode .source-with-line-numbers::before,
     html.architect-passage-wrap-margin-visible #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers::before {
         width: max(0px, calc(min(var(--exam-passage-max-width), (100% - 2.5em)) - min(var(--exam-passage-text-max-width), (100% - 2.5em))));
         background: repeating-linear-gradient(
@@ -147,9 +138,6 @@
         );
         border-left: 2px solid rgba(0, 150, 136, 0.55);
     }
-    #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers::after,
-    #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers::after,
-    #intro-text.architect-passage-line-mode .source-with-line-numbers::after,
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers::after {
         content: "";
         position: absolute;
@@ -161,6 +149,11 @@
         pointer-events: none;
         z-index: 1;
         box-sizing: border-box;
+    }
+    #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers,
+    #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers,
+    #intro-text.architect-passage-line-mode .source-with-line-numbers {
+        position: relative;
     }
     /* Exam column: cap body width; position/z-index keep ink above the ::after insert guide. */
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers .source-line-text,
@@ -13351,10 +13344,14 @@ const app = {
         }
         return out;
     },
-    /** Quote Select excerpt: `.source-with-line-numbers` rows, explicit insert line nums (no coarse-only ticks misread on a short window). @param {number} [level] Same as {@link sliceExamLineRangeRows}. */
+    /** Quote Select / Lab excerpt: booklet rows for the line window. WJEC **5 / 10 / 15…** unless Level Bank <strong>every #</strong> is on (same as whole passage). @param {number} [level] Same as {@link sliceExamLineRangeRows}. */
     formatSourceHtmlExamLineWindow: function(sourceText, range, level) {
         const sliceRows = app.sliceExamLineRangeRows(sourceText, range, level);
         if(!sliceRows || !sliceRows.length) return "";
+        const lvl = parseInt(level, 10) || 1;
+        const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
+        const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
+        const everyLineMargin = !!(levelEntry.passageQuoteSelectEveryLineNumber === true || levelEntry.passageQuoteSelectEveryLineNumber === "true");
         let ord = 0;
         const entries = sliceRows.map(function(r) {
             ord++;
@@ -13366,7 +13363,8 @@ const app = {
         }).filter(Boolean);
         if(!entries.length) return "";
         return app.buildNumberedSourceLayoutHtml(entries, {
-            examShowAllBookletLines: true,
+            examShowAllBookletLines: everyLineMargin,
+            denseEveryLineGutter: everyLineMargin,
             useExplicitBookletLineFromRow: true,
             alwaysUseCleanPlain: true,
             pdfPhysicalLines: false,
