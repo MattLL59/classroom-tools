@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-17T21:00:00">
+<meta name="architect-build" content="2026-05-18T12:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -1474,8 +1474,7 @@
                             <span id="arch-passage-insert-width-live" title="Matches Lab / Quote Select passage column (--exam-passage-max-width)." style="font-size:0.68rem; opacity:0.82; margin-left:6px; flex:1 1 200px; min-width:120px;"></span>
                             <span style="font-size:0.72rem; margin-left:6px; white-space:nowrap; opacity:0.9;" title="Booklet line **printed on the exam paper** for your **first screen row** (after intro). Each row is numbered +1 from this (6, 7, 8…). The grey column only **displays** 5 / 10 / 15 like the real WJEC insert — so changing this by 1 moves **which row** shows those ticks in a pattern that repeats every 5 lines (not because the control skips numbers). Use ‘All line #s’ while lining up.">Booklet line 1 =</span>
                             <input type="number" id="c1-passage-booklet-first" min="1" max="500" value="1" title="First row’s booklet line number. Row 2 = this+1, etc. WJEC shows 5/10/15 only — use ‘All line #s’ to see every line move while you adjust. Updates while typing or using the spinner (not only after blur)." style="width:58px;padding:2px 4px;font-size:0.8rem;">
-                            <label style="font-size:0.68rem; white-space:nowrap; margin-left:6px; opacity:0.88; cursor:pointer;" title="Off: grey column matches the exam (only 5, 10, 15…). On: show every booklet line number on each row **in this editor only** — makes small Booklet line 1 tweaks visible. Does not change Quote Select / student view (use Student exam lines for that)."><input type="checkbox" id="c1-passage-show-all-booklet-lines" style="vertical-align:middle;margin:0 4px 0 0;" onchange="if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox==='function')app.applyPassageShowAllBookletLinesInEditorFromCheckbox()">All line #s</label>
-                            <label style="font-size:0.68rem; white-space:nowrap; margin-left:4px; opacity:0.88; cursor:pointer;" title="When on, Lab and Quote Select show WJEC-style line gutters (5/10/15…). Default off: students see continuous prose. Level Bank “every #” only applies when this is on."><input type="checkbox" id="c1-passage-student-booklet-lines" style="vertical-align:middle;margin:0 4px 0 0;" onchange="if(typeof app.applyPassageUseBookletLinesFromCheckbox==='function')app.applyPassageUseBookletLinesFromCheckbox()">Student exam lines</label>
+                            <label style="font-size:0.68rem; white-space:nowrap; margin-left:6px; opacity:0.88; cursor:pointer;" title="Off: grey column matches the exam (only 5, 10, 15…). On: show every booklet line number on each row **in this editor only** — makes small Booklet line 1 tweaks visible. Lab/student view stays WJEC-sparse unless Level Bank ticks every # for that level."><input type="checkbox" id="c1-passage-show-all-booklet-lines" style="vertical-align:middle;margin:0 4px 0 0;" onchange="if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox==='function')app.applyPassageShowAllBookletLinesInEditorFromCheckbox()">All line #s</label>
                             <span style="width:1px; background:var(--border); margin:0 6px; align-self:stretch;"></span>
                             <span style="font-size:0.7rem; white-space:nowrap; opacity:0.88;" title="Plain-text anchors: the counted insert (dashed column + WJEC ticks) becomes only the middle section. Use exact phrases from your text.">WJEC body</span>
                             <input type="text" id="c1-passage-wjec-start-anchor" placeholder="starts at e.g. Lucy Faulkner was born" title="First characters of the insert on the paper (exact match). Leave blank to start counting at the beginning." style="min-width:140px;max-width:220px;padding:2px 6px;font-size:0.78rem;">
@@ -5037,13 +5036,6 @@ const app = {
             return;
         }
         const repairedPlain = app.repairExamMarginDigitArtifacts(plain);
-        const c1Prose = appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers();
-        if(c1Prose) {
-            const skim = app.formatSourceHtmlLoosePlainSkim(repairedPlain) || app.formatSourceHtmlForEditor(repairedPlain) || "";
-            if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(skim);
-            else el.innerHTML = skim;
-            return;
-        }
         const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
         let v2FromPlain = app.plainNumberedLinesToStructuredV2(repairedPlain, pdfImp, { sequentialLineNumbers: true });
         if(v2FromPlain && v2FromPlain.lines && v2FromPlain.lines.length >= 1) {
@@ -7569,48 +7561,6 @@ const app = {
         }
         return paras.join("\n\n");
     },
-    /** Component 1 (not dual C2): prose-first lessons unless {@link lessonUsesBookletLineNumbers}. */
-    isC1Lesson: function() {
-        return !!(appData && appData.component !== 2);
-    },
-    /**
-     * Single pipeline: v2 JSON, saved gutter HTML, or plain → continuous &lt;p&gt; blocks (no .source-with-line-numbers).
-     */
-    formatC1PassageAsProseHtml: function(text, opts) {
-        opts = opts || {};
-        const raw = String(text || "").trim();
-        if(!raw) return "";
-        let sp = app.parseStructuredPassageSource(raw);
-        if(!sp && !opts.skipStoredStructuredFallback && appData && typeof appData.sourceText === "string") {
-            const alt = String(appData.sourceText).replace(/^\uFEFF/, "").trim();
-            if(alt.startsWith("{") && !raw.startsWith("{")) sp = app.parseStructuredPassageSource(alt);
-        }
-        if(sp) {
-            const plain = (app.structuredPassageToProsePlain && app.structuredPassageToProsePlain(sp)) || "";
-            if(plain.trim()) {
-                const skim = app.formatSourceHtmlLoosePlainSkim(plain);
-                if(skim && skim !== "Source text not provided.") return skim;
-            }
-        }
-        if(/source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
-            try {
-                const plainG = app.normalizeSourceText(raw) || app.cleanSourceText(raw);
-                if(plainG && plainG.trim()) {
-                    const skimG = app.formatSourceHtmlLoosePlainSkim(plainG);
-                    if(skimG && skimG !== "Source text not provided.") return skimG;
-                }
-            } catch(ePg) {}
-        }
-        let basis = raw;
-        if(app.passageHtmlLooksLikeMarkup(raw)) {
-            const rough = app.passageSafeHtmlToPlainForLineLayout(raw);
-            if(rough && rough.trim()) basis = rough;
-        }
-        const clean = app.cleanSourceText(basis);
-        if(!clean || !clean.trim()) return "";
-        const skimEnd = app.formatSourceHtmlLoosePlainSkim(clean);
-        return (skimEnd && skimEnd !== "Source text not provided.") ? skimEnd : "";
-    },
     serializeStructuredPassageV2: function(o) {
         try {
             return JSON.stringify(o);
@@ -7825,10 +7775,9 @@ const app = {
         }
         return bits.join("");
     },
-    /** Booklet gutters vs prose blocks for Editing Suite — respects {@link lessonUsesBookletLineNumbers}. */
+    /** Component 1: WJEC booklet editor rows. Component 2 uses separate pooled editors. */
     structuredPassageToEditorHtmlForLesson: function(o, opts) {
-        if(app.isC1Lesson && app.isC1Lesson() && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers())
-            return (app.structuredPassageToProseEditorHtml && app.structuredPassageToProseEditorHtml(o, opts)) || "";
+        if(appData && appData.component === 2) return "";
         return app.structuredPassageToEditorHtml(o, opts) || "";
     },
     /** Component 1 prose lessons: same head/tail shell as {@link structuredPassageToEditorHtml} but body is continuous &lt;p&gt; blocks (no WJEC margin rows). */
@@ -12269,11 +12218,6 @@ const app = {
         const denseGutterOverride = passageQuoteSelectDenseLines ? { examShowAllBookletLines: true, examMarginMultiplesOf5Only: false, passageQuoteSelectDenseLines: true } : undefined;
         if(!text || typeof text !== "string") return "Source text not provided.";
         const raw = String(text).trim();
-        /** C1 default: continuous prose in Lab / Quote Select unless meta {@link passageUseBookletLines}. Level-bank “every #” only applies when booklet mode is on. */
-        if(!excerptProse && app.isC1Lesson && app.isC1Lesson() && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers() && typeof app.formatC1PassageAsProseHtml === "function") {
-            const c1ProseEarly = app.formatC1PassageAsProseHtml(raw, { skipStoredStructuredFallback: skipStoredStructuredFallback });
-            if(c1ProseEarly) return c1ProseEarly;
-        }
         /** Legacy fallback: continuous &lt;p&gt; prose when callers still pass pre-sliced plain only (no sectional rows). Prefer {@link formatSourceHtmlExamLineWindow} from Quote Select. */
         if(excerptProse) {
             if(!raw) return "Source text not provided.";
@@ -12294,34 +12238,13 @@ const app = {
             if(alt.startsWith("{") && !raw.startsWith("{")) spFirst = app.parseStructuredPassageSource(alt);
         }
         if(spFirst) {
-            if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers()) {
-                const plainSp = (app.structuredPassageToProsePlain && app.structuredPassageToProsePlain(spFirst))
-                    || app.structuredPassageToPlain(spFirst);
-                if(plainSp && plainSp.trim()) return app.formatSourceHtmlLoosePlainSkim(plainSp) || app.formatSourceHtmlLoosePlain(plainSp);
-            }
-            if(passageQuoteSelectDenseLines && app.lessonUsesBookletLineNumbers && app.lessonUsesBookletLineNumbers() && app.formatStructuredPassageHtmlDenseMargins) return app.formatStructuredPassageHtmlDenseMargins(spFirst);
+            if(passageQuoteSelectDenseLines && app.formatStructuredPassageHtmlDenseMargins) return app.formatStructuredPassageHtmlDenseMargins(spFirst);
             return app.formatStructuredPassageHtml(spFirst);
         }
         if(appData && appData.component === 2) {
             return app.formatSourceHtmlForComponent2Reading(raw);
         }
-        if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers()) {
-            const useHtmlExtractC1 = app.passageHtmlLooksLikeMarkup(raw);
-            let basisC1 = raw;
-            if(useHtmlExtractC1) {
-                const roughC1 = app.passageSafeHtmlToPlainForLineLayout(raw);
-                if(roughC1 && roughC1.trim()) basisC1 = roughC1;
-            }
-            const cleanC1 = app.cleanSourceText(basisC1);
-            if(cleanC1 && cleanC1.trim()) return app.formatSourceHtmlLoosePlainSkim(cleanC1) || app.formatSourceHtmlLoosePlain(cleanC1);
-        }
         /* PDF → C2 layout stores this markup via normalizedPassageHtmlForC2Layout; re-normalizing can strip gutters if serialize fails on very long HTML. */
-        if(appData && appData.component === 1 && !app.lessonUsesBookletLineNumbers() && /source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
-            try {
-                const plainC1g = app.normalizeSourceText(raw) || app.cleanSourceText(raw);
-                if(plainC1g && plainC1g.trim()) return app.formatSourceHtmlLoosePlainSkim(plainC1g) || app.formatSourceHtmlLoosePlain(plainC1g);
-            } catch(eC1g) {}
-        }
         if(/source-with-line-numbers[\s\S]*source-line-row/i.test(raw)) {
             try {
                 const plain = app.normalizeSourceText(raw);
@@ -12338,10 +12261,8 @@ const app = {
         }
         /* Numbered &lt;p&gt;/&lt;div&gt; from contenteditable (plain or rich); do not require B/I/U — Chrome often has no rich tags. */
         if(/<p\b|<div\b/i.test(raw)) {
-            if(!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers())) {
-                const ghStyled = app.gutterLayoutHtmlFromNumberedEditorHtml(raw);
-                if(ghStyled) return ghStyled;
-            }
+            const ghStyled = app.gutterLayoutHtmlFromNumberedEditorHtml(raw);
+            if(ghStyled) return ghStyled;
         }
         const useHtmlExtract = app.passageHtmlLooksLikeMarkup(raw);
         let basis = raw;
@@ -12351,9 +12272,9 @@ const app = {
         }
         const clean = app.cleanSourceText(basis);
         if(!clean) return useHtmlExtract ? (app.sanitizeSourceHtml(raw) || "Source text not provided.") : "Source text not provided.";
-        if(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers()) {
-            const skimC1 = app.formatSourceHtmlLoosePlainSkim(clean);
-            if(skimC1 && skimC1 !== "Source text not provided.") return skimC1;
+        if(appData && appData.component === 2) {
+            const skimC2 = app.formatSourceHtmlLoosePlainSkim(clean);
+            if(skimC2 && skimC2 !== "Source text not provided.") return skimC2;
         }
         const ghtml = app.gutterLayoutHtmlFromCleanPlain(clean, denseGutterOverride);
         if(ghtml) return ghtml;
@@ -12434,11 +12355,6 @@ const app = {
         const clean = app.cleanSourceText(raw);
         if(!clean) return "";
         const repaired = app.repairExamMarginDigitArtifacts(clean);
-        const c1ProseEd = appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers();
-        if(c1ProseEd) {
-            const skimEd = app.formatSourceHtmlLoosePlainSkim(repaired);
-            if(skimEd && String(skimEd).trim() && skimEd !== "Source text not provided.") return skimEd;
-        }
         const pdfImpEd = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
         let v2Ed = app.plainNumberedLinesToStructuredV2(repaired, pdfImpEd, { sequentialLineNumbers: true });
         if(v2Ed && v2Ed.lines && v2Ed.lines.length >= 1) {
@@ -12925,10 +12841,10 @@ const app = {
         }
         return false;
     },
-    /** True when students should see WJEC booklet gutters (Component 1 only). Default is **prose**. Opt in via meta {@link passageUseBookletLines} (Level Bank “every #” does not turn this on). */
+    /** True when this lesson uses WJEC booklet line gutters (Component 1). Component 2 uses continuous prose via {@link formatSourceHtmlForComponent2Reading}. */
     lessonUsesBookletLineNumbers: function() {
         if(!appData || appData.component === 2) return false;
-        return !!(appData.meta && (appData.meta.passageUseBookletLines === true || appData.meta.passageUseBookletLines === "true"));
+        return appData.component === 1;
     },
     /** Parse "lines 1-5" or "Read lines 1-5" from question text. Returns { from: 1, to: 5 } or null. */
     parseLineRangeFromQuestion: function(questionText) {
@@ -13231,13 +13147,11 @@ const app = {
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
         const everyLineMargin = !!(levelEntry.passageQuoteSelectEveryLineNumber === true || levelEntry.passageQuoteSelectEveryLineNumber === "true");
-        const bookletLesson = typeof app.lessonUsesBookletLineNumbers === "function" && app.lessonUsesBookletLineNumbers();
-        const fullPassageFmtOpts = (everyLineMargin && bookletLesson) ? { passageQuoteSelectDenseLines: true } : {};
+        const fullPassageFmtOpts = everyLineMargin ? { passageQuoteSelectDenseLines: true } : {};
         let lineRange = null;
         const lineWinResolved = app.resolveQuoteSelectLineWindow(lvl);
         if(Object.prototype.hasOwnProperty.call(opts, "lineRange") && opts.lineRange !== undefined) lineRange = opts.lineRange;
         else lineRange = lineWinResolved.lineRange;
-        if(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers() && scope === "focused" && !lineRange) scope = "whole";
         const labelRange = (Object.prototype.hasOwnProperty.call(opts, "displayLineRange") && opts.displayLineRange !== undefined ? opts.displayLineRange : null) || lineWinResolved.displayLineRange || lineRange;
         let excerptSliceFailed = false;
         let useExcerpt = false;
@@ -14523,7 +14437,6 @@ const ui = {
     },
     setPassageDisplayScope: function(scope, opts) {
         let s = scope === "focused" ? "focused" : "whole";
-        if(s === "focused" && appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers()) s = "whole";
         try {
             localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, s);
         } catch(eS) {}
@@ -14539,7 +14452,7 @@ const ui = {
     },
     syncPassageScopeControls: function() {
         const v = ui.getPassageDisplayScope();
-        const showLineScope = !(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+        const showLineScope = !!(appData && appData.component === 1);
         document.querySelectorAll(".tsa-passage-scope-controls").forEach(function(wrap) {
             wrap.style.display = showLineScope ? "" : "none";
         });
@@ -16870,8 +16783,6 @@ const ui = {
             if(hasSource) {
                 const warn = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
                 let scopeSel = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
-                const c1ProseNoLineWindowSel = !!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
-                if(c1ProseNoLineWindowSel && scopeSel === "focused" && !lineRange) scopeSel = "whole";
                 const bundle = typeof app.buildPassagePaneHtmlForLevel === "function"
                     ? app.buildPassagePaneHtmlForLevel(level, sourceText, { warnHtml: warn, scope: scopeSel, lineRange: lineRange, displayLineRange: lineWinEarly.displayLineRange })
                     : null;
@@ -16892,12 +16803,9 @@ const ui = {
         }
         const passageHintEl = document.getElementById("selection-passage-window-hint");
         if(passageHintEl) {
-            const c1ProseNoLineWindow = !!(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
-            const c1ExplicitLineRef = !!(appData && appData.component === 1 && typeof app.lessonHasExplicitFocusLineRef === "function" && app.lessonHasExplicitFocusLineRef());
-            const scopeFocusedHint = !c1ProseNoLineWindow && typeof ui.getPassageDisplayScope === "function" && ui.getPassageDisplayScope() === "focused";
-            const excerptOrAffirmOn = !!(levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
-            const wantsPassageWindow = !c1ProseNoLineWindow && !!(scopeFocusedHint || excerptOrAffirmOn);
-            const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange && (appData.component !== 1 || c1ExplicitLineRef || !excerptOrAffirmOn);
+            const scopeFocusedHint = typeof ui.getPassageDisplayScope === "function" && ui.getPassageDisplayScope() === "focused";
+            const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
+            const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange;
             if(excerptSliceFailed && wantsPassageWindow && lineRange) {
                 passageHintEl.classList.remove("hidden");
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.08);font-size:0.86rem;line-height:1.45;">
@@ -23196,7 +23104,7 @@ const admin = {
         };
         row.appendChild(moveWrap);
         row.appendChild(input);
-        const showLineRef = !(appData && appData.component === 1 && typeof app.lessonUsesBookletLineNumbers === "function" && !app.lessonUsesBookletLineNumbers());
+        const showLineRef = !!(appData && appData.component === 1);
         if(showLineRef) row.appendChild(lineRefInp);
         if(c2Sel) row.appendChild(c2Sel);
         row.appendChild(wsWrap);
