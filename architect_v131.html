@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-18T18:00:00">
+<meta name="architect-build" content="2026-05-18T20:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -21,7 +21,8 @@
         --reader-window-height: 3.2em;
         --reader-zoom: 1.1rem;
         /* Approximate WJEC-style insert column width so wrapped lines track the paper more closely than full viewport width. */
-        --exam-passage-max-width: 96ch; /* set at runtime from meta; see app.PASSAGE_INSERT_WIDTH_CH_MAX (default 36–150ch) */
+        --exam-passage-max-width: 96ch; /* PDF insert edge (dashed guide); set from meta.pdfInsertWidthCh */
+        --exam-passage-text-max-width: 96ch; /* word-wrap / Sync limit (solid guide); ≤ max-width unless strict guillotine */
     }
     /* Exam-style passage: gutter shows 5, 10, 15… on merged rows; PDF physical paste keeps booklet line numbers in data-src-line and matches margin ticks to the insert. */
     .source-with-line-numbers { display: flex; flex-direction: column; font-family: inherit; }
@@ -112,12 +113,39 @@
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor {
         overflow-x: auto;
     }
-    /* One continuous dashed insert edge (WJEC column cap). Per-row border-right + shrink-wrap looked like many short tick marks and drifted vs Lab. */
+    /* Insert column guides: solid = Sync/reflow word limit; hatched = safety margin; dashed = PDF insert edge (align slider here). */
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers,
     #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers,
     #intro-text.architect-passage-line-mode .source-with-line-numbers,
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers {
         position: relative;
+    }
+    #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers::before,
+    #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers::before,
+    #intro-text.architect-passage-line-mode .source-with-line-numbers::before,
+    #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: calc(2.5em + min(var(--exam-passage-text-max-width), (100% - 2.5em)));
+        width: 0;
+        border-left: 2px solid rgba(0, 150, 136, 0.52);
+        pointer-events: none;
+        z-index: 1;
+        box-sizing: border-box;
+    }
+    html.architect-passage-wrap-margin-visible #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers::before,
+    html.architect-passage-wrap-margin-visible #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers::before,
+    html.architect-passage-wrap-margin-visible #intro-text.architect-passage-line-mode .source-with-line-numbers::before,
+    html.architect-passage-wrap-margin-visible #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers::before {
+        width: max(0px, calc(min(var(--exam-passage-max-width), (100% - 2.5em)) - min(var(--exam-passage-text-max-width), (100% - 2.5em))));
+        background: repeating-linear-gradient(
+            -45deg,
+            rgba(0, 150, 136, 0.09) 0 3px,
+            rgba(0, 150, 136, 0.02) 3px 7px
+        );
+        border-left: 2px solid rgba(0, 150, 136, 0.55);
     }
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers::after,
     #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers::after,
@@ -129,7 +157,7 @@
         bottom: 0;
         left: calc(2.5em + min(var(--exam-passage-max-width), (100% - 2.5em)));
         width: 0;
-        border-right: 1px dashed rgba(0, 150, 136, 0.42);
+        border-right: 2px dashed rgba(0, 150, 136, 0.5);
         pointer-events: none;
         z-index: 1;
         box-sizing: border-box;
@@ -141,8 +169,8 @@
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers .source-line-text {
         position: relative;
         z-index: 2;
-        /** Fixed `ch` cap (not `min(100%, …)`): percentage max-width on flex items resolved against a narrow ancestor made the Teacher modal column wrap before the dashed insert edge while `--exam-passage-max-width` still tracked meta; `.source-with-line-numbers` min-width + `#ai-input` overflow-x scroll keeps gutter+Nch scrollable. */
-        max-width: var(--exam-passage-max-width);
+        /** Cap ink at the **wrap** guide (`--exam-passage-text-max-width`); dashed insert edge can sit further right in the hatched safety band. */
+        max-width: var(--exam-passage-text-max-width);
         padding-right: 4px;
         box-sizing: border-box;
         /**
@@ -1471,7 +1499,8 @@
                             <span style="font-size:0.72rem; opacity:0.85;">ch</span>
                             <input type="range" id="c1-passage-insert-width-range" min="36" max="150" value="96" title="36–150ch. Editor + Lab rows reflow together while dragging (debounced). Then click **Sync passage layout** (or Reflow body natural wrap) so stored lines match this width." style="width:120px;vertical-align:middle;margin:0 4px;" oninput="if(typeof app.scheduleExamPassageInsertWidthChFromRangeInput==='function')app.scheduleExamPassageInsertWidthChFromRangeInput()" onchange="if(typeof app.applyPassageInsertWidthChFromInput==='function')app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true })">
                             <button type="button" class="btn btn-outline btn-small" onclick="if(typeof app.applySuggestedPassageInsertWidthCh==='function')app.applySuggestedPassageInsertWidthCh({})" title="Binary‑search the smallest Insert width so the longest plain segment in your stored rows fits **one** simulated line — uses Aptos + the same canvas/DOM wrap as Reflow (not raw character count). Then tweak ±1 vs the paper if needed.">Fit longest line</button>
-                            <span id="arch-passage-insert-width-live" title="Matches Lab / Quote Select passage column (--exam-passage-max-width)." style="font-size:0.68rem; opacity:0.82; margin-left:6px; flex:1 1 200px; min-width:120px;"></span>
+                            <span id="arch-passage-insert-width-live" title="Solid line = word wrap limit; hatched band = safety margin; dashed line = PDF insert edge (move slider until dashed matches the paper)." style="font-size:0.68rem; opacity:0.82; margin-left:6px; flex:1 1 200px; min-width:120px;"></span>
+                            <label style="font-size:0.68rem; white-space:nowrap; margin-left:4px; opacity:0.9; cursor:pointer;" title="When on: Sync/reflow pack to the dashed line (no hatched safety band). Words may touch the PDF edge — use if lines still stop short of the dashed guide. When off (default): solid line shows where words stop; hatched gap shows hidden margin before the dashed PDF edge."><input type="checkbox" id="c1-passage-strict-insert-edge" style="vertical-align:middle;margin:0 4px 0 0;" onchange="if(typeof app.setPassageStrictInsertEdgeFromCheckbox==='function')app.setPassageStrictInsertEdgeFromCheckbox(this)">Strict insert edge</label>
                             <span style="font-size:0.72rem; margin-left:6px; white-space:nowrap; opacity:0.9;" title="Booklet line **printed on the exam paper** for your **first screen row** (after intro). Each row is numbered +1 from this (6, 7, 8…). The grey column only **displays** 5 / 10 / 15 like the real WJEC insert — so changing this by 1 moves **which row** shows those ticks in a pattern that repeats every 5 lines (not because the control skips numbers). Use ‘All line #s’ while lining up.">Booklet line 1 =</span>
                             <input type="number" id="c1-passage-booklet-first" min="1" max="500" value="1" title="First row’s booklet line number. Row 2 = this+1, etc. WJEC shows 5/10/15 only — use ‘All line #s’ to see every line move while you adjust. Updates while typing or using the spinner (not only after blur)." style="width:58px;padding:2px 4px;font-size:0.8rem;">
                             <label style="font-size:0.68rem; white-space:nowrap; margin-left:6px; opacity:0.88; cursor:pointer;" title="Off: grey column matches the exam (only 5, 10, 15…). On: show every booklet line number on each row **in this editor only** — makes small Booklet line 1 tweaks visible. Lab/student view stays WJEC-sparse unless Level Bank ticks every # for that level."><input type="checkbox" id="c1-passage-show-all-booklet-lines" style="vertical-align:middle;margin:0 4px 0 0;" onchange="if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox==='function')app.applyPassageShowAllBookletLinesInEditorFromCheckbox()">All line #s</label>
@@ -1752,7 +1781,7 @@
                     <li><strong>Insert width (ch)</strong> is a browser measure (character width), not millimetres — proportional fonts never wrap exactly like the printed column. Tune the number, then <strong>Sync passage layout</strong> or <strong>Reflow body (natural wrap)</strong> so the editor matches the Lab.</li>
                     <li><strong>Margin ticks (5, 10, 15…)</strong> follow <strong>simulated lines inside the app</strong> after reflow. They stay consistent for students in Quote Select; they are not guaranteed to match every physical insert line-for-line.</li>
                     <li><strong>Strict PDF lines</strong> / <strong>OCR margin</strong> toggles change how rows are built — try both if counts look wrong. <strong>Copy PDF debug</strong> after import records strategies and counts for troubleshooting.</li>
-                    <li>The teal <strong>dashed vertical guide</strong> beside the passage marks the insert column — it can look <strong>clipped or segmented</strong> when scrolling or behind row layers; that is cosmetic. Trust <strong>Insert width</strong> + reflow for alignment, not the dash alone.</li>
+                    <li><strong>Insert guides:</strong> align the <strong>dashed</strong> line with the PDF right margin. The <strong>solid</strong> line is where Sync/reflow stops words; the <strong>hatched band</strong> between them is the safety margin (hidden when <strong>Strict insert edge</strong> is on). Tune Insert width until the dashed line matches the paper, then <strong>Sync passage layout</strong>.</li>
                 </ul>
                 <p><strong>Settings summary</strong></p>
                 <p style="margin:0.3em 0;"><strong>Reward</strong> tab: optional external link after level complete (minutes / every N levels). <strong>Editing Suite</strong>: Level Bank, questions, quote bank, sentence structure, Writing Desk sentence lines. Practice Mode (auto-disables Auto progress), Practice Level, Worksheet Match Mode. Quote Select and Writing Desk are always active. A level is active when it has one or more questions selected in the Level Bank.</p>
@@ -5670,9 +5699,12 @@ const app = {
             const c0 = typeof app.clampPassageInsertWidthCh === "function" ? app.clampPassageInsertWidthCh(m.pdfInsertWidthCh) : null;
             if(c0 != null) ch = c0;
         }
-        try {
-            document.documentElement.style.setProperty("--exam-passage-max-width", ch + "ch");
-        } catch(e) {}
+        if(typeof app.applyPassageInsertWidthCssVariables === "function") app.applyPassageInsertWidthCssVariables(ch);
+        else {
+            try {
+                document.documentElement.style.setProperty("--exam-passage-max-width", ch + "ch");
+            } catch(e) {}
+        }
         const el = document.getElementById("c1-passage-insert-width-ch");
         if(el && document.activeElement !== el) el.value = String(ch);
         const rngEl = document.getElementById("c1-passage-insert-width-range");
@@ -5696,9 +5728,17 @@ const app = {
         const lined = !!(wrap && wrap.classList.contains("architect-passage-line-mode"));
         const snap = !!(appData && appData.meta && appData.meta.passageInsertWidthCaretSnap);
         const snapHint = snap ? " Old lesson flag (caret snap). Edit ch ±1 or re-save after width change to clear." : "";
+        let textCh = ch;
+        try {
+            textCh = typeof app.computePassageTextWrapWidthCh === "function" ? app.computePassageTextWrapWidthCh(ch) : ch;
+        } catch(eTc) {}
+        const strict = !!(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge());
+        const guideHint = strict
+            ? " Strict: dashed = word limit (" + ch + "ch). Sync to the dashed line."
+            : " Dashed " + ch + "ch (PDF edge) · solid " + textCh + "ch (word stop)" + (textCh < ch ? " · hatched = safety margin." : ".");
         span.textContent = (lined
-            ? "Column " + ch + "ch — one dashed insert edge (same cap as Lab). Short printed lines may not fill the cap."
-            : "Column " + ch + "ch — dashed guide appears when the passage uses booklet line layout.") + snapHint;
+            ? "Insert column" + guideHint
+            : "Column " + ch + "ch — guides appear in booklet line layout.") + snapHint;
     },
     /** Column width (ch) for simulating printed lines: must match {@link applyExamPassageInsertWidthCh} so gutters split at the same width as `--exam-passage-max-width`. */
     getPassageColumnWidthChForLayout: function() {
@@ -5733,7 +5773,9 @@ const app = {
         /** Caret snap already sets Insert width from measured px → use full `ch` for split rows so dashes align with simulated line ends. */
         if(caretSnap) return Math.max(28, Math.min(wCap, Math.round(ch)));
         const frac = typeof app.EXAM_SPLIT_VS_INSERT_CH_FRAC === "number" ? app.EXAM_SPLIT_VS_INSERT_CH_FRAC : 1;
-        const pad = typeof app.EXAM_SPLIT_COLUMN_PAD_CHARS === "number" ? app.EXAM_SPLIT_COLUMN_PAD_CHARS : 2;
+        const pad = typeof app.getPassageSplitColumnPadCharsEffective === "function"
+            ? app.getPassageSplitColumnPadCharsEffective()
+            : (typeof app.EXAM_SPLIT_COLUMN_PAD_CHARS === "number" ? app.EXAM_SPLIT_COLUMN_PAD_CHARS : 2);
         return Math.max(28, Math.round(ch * frac) - pad);
     },
     /**
@@ -5830,8 +5872,60 @@ const app = {
      * Too tight = gap before the dashed edge; too loose → overhang even after Sync / natural reflow.
      */
     EXAM_CANVAS_WRAP_INNER_PX_FRAC: 0.92,
-    /** Caps “keep whole overweight word” slack — &lt;1 pulls slightly inside {@link _bookletInnerMaxPxForInsertCh} so Aptos rarely spills past the dashed guide (“overhangers”). */
+    /** Caps “keep whole overweight word” slack — &lt;1 pulls slightly inside {@link _bookletInnerMaxPxForInsertCh} so Aptos rarely spills past the dashed guide (“overhangers”). Ignored when {@link passageUsesStrictInsertEdge}. */
     EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE: 0.97,
+    /** When true, wrap/sync use the full insert column (dashed guide = word limit; no hatched safety band). */
+    passageUsesStrictInsertEdge: function() {
+        try {
+            return !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageStrictInsertEdge === true);
+        } catch(eS) {
+            return false;
+        }
+    },
+    getPassageWrapInnerPxFrac: function() {
+        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return 1;
+        const f = typeof app.EXAM_CANVAS_WRAP_INNER_PX_FRAC === "number" ? app.EXAM_CANVAS_WRAP_INNER_PX_FRAC : 0.92;
+        return Math.min(1, Math.max(0.78, f));
+    },
+    getPassageWrapWordTolerance: function() {
+        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return 1;
+        const t = typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 0.97;
+        return Math.min(1, Math.max(0.88, t));
+    },
+    getPassageSplitColumnPadCharsEffective: function() {
+        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return 0;
+        const p = typeof app.EXAM_SPLIT_COLUMN_PAD_CHARS === "number" ? app.EXAM_SPLIT_COLUMN_PAD_CHARS : 2;
+        return Math.max(0, Math.round(p));
+    },
+    /**
+     * CSS `ch` width where Sync/reflow stops words — matches {@link _bookletInnerMaxPxForInsertCh} × tolerance (shown as the **solid** guide).
+     * {@link getPassageColumnWidthChForLayout} is the **dashed** PDF insert edge.
+     */
+    computePassageTextWrapWidthCh: function(layoutCh) {
+        const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
+        const ch = Math.max(28, Math.min(wCap, Math.round(Number(layoutCh) || 96)));
+        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return ch;
+        const splitFrac = typeof app.EXAM_SPLIT_VS_INSERT_CH_FRAC === "number" ? app.EXAM_SPLIT_VS_INSERT_CH_FRAC : 1;
+        const frac = typeof app.getPassageWrapInnerPxFrac === "function" ? app.getPassageWrapInnerPxFrac() : 0.92;
+        const tol = typeof app.getPassageWrapWordTolerance === "function" ? app.getPassageWrapWordTolerance() : 0.97;
+        const pad = typeof app.getPassageSplitColumnPadCharsEffective === "function" ? app.getPassageSplitColumnPadCharsEffective() : 2;
+        return Math.max(28, Math.min(wCap, Math.round(ch * splitFrac * frac * tol) - pad));
+    },
+    /** Sets `--exam-passage-max-width` (dashed) and `--exam-passage-text-max-width` (solid) + margin-band visibility on `html`. */
+    applyPassageInsertWidthCssVariables: function(layoutCh) {
+        const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
+        let ch = Math.round(Number(layoutCh) || 96);
+        ch = Math.max(28, Math.min(wCap, ch));
+        const textCh = typeof app.computePassageTextWrapWidthCh === "function" ? app.computePassageTextWrapWidthCh(ch) : ch;
+        try {
+            const root = document.documentElement;
+            root.style.setProperty("--exam-passage-max-width", ch + "ch");
+            root.style.setProperty("--exam-passage-text-max-width", textCh + "ch");
+            root.classList.toggle("architect-passage-wrap-margin-visible", textCh < ch);
+            root.classList.toggle("architect-passage-insert-strict", !!(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()));
+        } catch(eCss) {}
+        return { layoutCh: ch, textWrapCh: textCh };
+    },
     /** Width of one `ch` unit (digit “0”) for `element`’s computed font — maps measured px ↔ Insert width box. */
     measurePassageChPxFromElement: function(el) {
         if(!el || !el.ownerDocument) return 8;
@@ -6309,6 +6403,27 @@ const app = {
         if(rngEl) rngEl.value = String(ch);
         if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
     },
+    /** Restore **Strict insert edge** from {@link appData.meta.passageStrictInsertEdge} after Load JSON. */
+    syncPassageStrictInsertEdgeCheckboxFromMeta: function() {
+        const cb = document.getElementById("c1-passage-strict-insert-edge");
+        if(!cb || typeof appData === "undefined" || !appData) return;
+        cb.checked = !!(appData.meta && appData.meta.passageStrictInsertEdge === true);
+    },
+    /** Persist {@link appData.meta.passageStrictInsertEdge}; refresh dual guides (solid / hatched / dashed). Run **Sync passage layout** to repack stored lines. */
+    setPassageStrictInsertEdgeFromCheckbox: function(el) {
+        if(typeof appData === "undefined" || !appData) return;
+        appData.meta = appData.meta && typeof appData.meta === "object" ? appData.meta : {};
+        appData.meta.passageStrictInsertEdge = !!(el && el.checked);
+        if(typeof app.save === "function") app.save();
+        try {
+            if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
+            let ch = 96;
+            if(typeof app.getPassageColumnWidthChForLayout === "function") ch = app.getPassageColumnWidthChForLayout();
+            if(typeof app.applyPassageInsertWidthCssVariables === "function") app.applyPassageInsertWidthCssVariables(ch);
+            if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
+            if(typeof ui !== "undefined" && ui.refreshSourceDisplay && typeof appData.sourceText === "string") ui.refreshSourceDisplay(appData.sourceText);
+        } catch(eSt) {}
+    },
     /** Restore **Merge orphan hang lines** checkbox from {@link appData.meta.passageMergeOrphanHangSegments} after Load JSON. */
     syncPassageMergeOrphanHangCheckboxFromMeta: function() {
         const cb = document.getElementById("c1-passage-merge-orphan-hang");
@@ -6336,6 +6451,7 @@ const app = {
     finishC1PassageLayoutAfterLessonLoad: function() {
         if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
         if(typeof app.syncPassageMergeOrphanHangCheckboxFromMeta === "function") app.syncPassageMergeOrphanHangCheckboxFromMeta();
+        if(typeof app.syncPassageStrictInsertEdgeCheckboxFromMeta === "function") app.syncPassageStrictInsertEdgeCheckboxFromMeta();
         if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
         if(typeof appData === "undefined" || !appData) return;
         const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
@@ -7981,7 +8097,9 @@ const app = {
         const max = Math.max(12, Math.min(wCap, Math.round(Number(maxCh))));
         const borderBoxPx = max * m.chPx;
         const inner = Math.max(24, borderBoxPx - m.bl - m.br - m.pl - m.pr);
-        const frac = typeof app.EXAM_CANVAS_WRAP_INNER_PX_FRAC === "number" ? app.EXAM_CANVAS_WRAP_INNER_PX_FRAC : 0.968;
+        const frac = typeof app.getPassageWrapInnerPxFrac === "function"
+            ? app.getPassageWrapInnerPxFrac()
+            : (typeof app.EXAM_CANVAS_WRAP_INNER_PX_FRAC === "number" ? app.EXAM_CANVAS_WRAP_INNER_PX_FRAC : 0.968);
         let px = Math.max(24, Math.floor(inner * Math.min(1, Math.max(0.78, frac))));
         if(m.cell && typeof app._measureBookletCellContentPx === "function") {
             const domInner = app._measureBookletCellContentPx(m.cell);
@@ -8081,7 +8199,9 @@ const app = {
         const innerPx = narrow && narrow.innerPx != null
             ? narrow.innerPx
             : (metrics && typeof app._bookletInnerMaxPxForInsertCh === "function" ? app._bookletInnerMaxPxForInsertCh(layoutChForPx, metrics) : null);
-        const wordTol = typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 1;
+        const wordTol = typeof app.getPassageWrapWordTolerance === "function"
+            ? app.getPassageWrapWordTolerance()
+            : (typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 1);
         const lineBudgetPx = innerPx != null && Number.isFinite(innerPx) ? innerPx * wordTol : null;
         if(innerPx != null && typeof document !== "undefined" && metrics) {
             let domProbe = null;
