@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-18T12:00:00">
+<meta name="architect-build" content="2026-05-18T18:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -8067,15 +8067,22 @@ const app = {
         if(!text) return [];
         const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
         const max = Math.max(12, Math.min(wCap, Math.round(maxCh)));
+        /** Pixel budget tracks Insert width CSS (`--exam-passage-max-width`), not the char shave from {@link getPassageSplitPlainMaxChars}. */
+        let layoutChForPx = max;
+        try {
+            const colCh = typeof app.getPassageColumnWidthChForLayout === "function" ? app.getPassageColumnWidthChForLayout() : null;
+            if(colCh != null && Number.isFinite(Number(colCh))) layoutChForPx = Math.max(max, Math.round(Number(colCh)));
+        } catch(eLc) {}
         const narrow = typeof app._narrowestBookletWrapMetricsAndInnerPx === "function"
-            ? app._narrowestBookletWrapMetricsAndInnerPx(max) : null;
+            ? app._narrowestBookletWrapMetricsAndInnerPx(layoutChForPx) : null;
         const metrics = narrow && narrow.metrics
             ? narrow.metrics
             : (typeof app._getBookletSourceLineTextMetricsForWrap === "function" ? app._getBookletSourceLineTextMetricsForWrap() : null);
         const innerPx = narrow && narrow.innerPx != null
             ? narrow.innerPx
-            : (metrics && typeof app._bookletInnerMaxPxForInsertCh === "function" ? app._bookletInnerMaxPxForInsertCh(max, metrics) : null);
+            : (metrics && typeof app._bookletInnerMaxPxForInsertCh === "function" ? app._bookletInnerMaxPxForInsertCh(layoutChForPx, metrics) : null);
         const wordTol = typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 1;
+        const lineBudgetPx = innerPx != null && Number.isFinite(innerPx) ? innerPx * wordTol : null;
         if(innerPx != null && typeof document !== "undefined" && metrics) {
             let domProbe = null;
             try {
@@ -8094,52 +8101,85 @@ const app = {
                         if(ctx && metrics.font) return ctx.measureText(str).width || 0;
                         return str.length * ((metrics.chPx && Number.isFinite(metrics.chPx)) ? metrics.chPx : 8);
                     };
+                    const budgetPx = lineBudgetPx != null && Number.isFinite(lineBudgetPx) ? lineBudgetPx : innerPx;
+                    const isNormalWordToken = function(tok) {
+                        const t = String(tok || "").trim();
+                        if(!t.length || t.length > 48) return false;
+                        return /^[\p{L}\p{M}'\u2019\u2018\-]+$/u.test(t);
+                    };
                     const splitLongToken = function(tok) {
                         const out = [];
                         let rest = String(tok || "").trim();
                         if(!rest.length) return out;
+                        /** Never break ordinary English words (e.g. “anything” → “anyth” / “ing”) — one wide row beats a mid-word hang. */
+                        if(isNormalWordToken(rest)) {
+                            out.push(rest);
+                            return out;
+                        }
                         /** Avoid one-letter rows when the whole token is only slightly over budget (rounding / font mismatch). */
-                        if(measure(rest) <= innerPx * wordTol && rest.length <= 96) {
+                        if(measure(rest) <= budgetPx && rest.length <= 96) {
                             out.push(rest);
                             return out;
                         }
                         while(rest.length) {
-                            if(measure(rest) <= innerPx) {
+                            if(measure(rest) <= budgetPx) {
                                 out.push(rest);
                                 break;
                             }
                             let cut = 0;
                             for(let n = rest.length; n >= 1; n--) {
-                                if(measure(rest.slice(0, n)) <= innerPx) {
+                                if(measure(rest.slice(0, n)) <= budgetPx) {
                                     cut = n;
                                     break;
                                 }
                             }
                             if(cut < 1) cut = 1;
                             /** Prefer ≥2 chars per chunk when more remains — stops “t” + “he” for normal English words. */
-                            if(cut === 1 && rest.length > 2 && measure(rest.slice(0, 2)) <= innerPx * 1.15) cut = 2;
+                            if(cut === 1 && rest.length > 2 && measure(rest.slice(0, 2)) <= budgetPx * 1.12) cut = 2;
                             out.push(rest.slice(0, cut));
                             rest = rest.slice(cut).trim();
                         }
                         return out;
+                    };
+                    /** If Aptos/canvas still underestimates width, peel trailing words until the line fits the dashed insert. */
+                    const tightenLinesToBudget = function(arr) {
+                        if(!arr || !arr.length || budgetPx == null) return arr;
+                        const out = [];
+                        let carry = "";
+                        for(let li = 0; li < arr.length; li++) {
+                            let line = carry ? carry + " " + String(arr[li] || "").trim() : String(arr[li] || "").trim();
+                            carry = "";
+                            if(!line) continue;
+                            while(measure(line) > budgetPx) {
+                                const parts = line.split(/\s+/).filter(Boolean);
+                                if(parts.length <= 1) break;
+                                const tail = parts.pop();
+                                line = parts.join(" ");
+                                if(!line) {
+                                    carry = tail;
+                                    line = "";
+                                    break;
+                                }
+                                carry = carry ? tail + " " + carry : tail;
+                            }
+                            if(line) out.push(line);
+                        }
+                        if(carry) out.push(carry);
+                        return out.length ? out : arr;
                     };
                     const words = text.split(/\s+/).filter(Boolean);
                     const lines = [];
                     let cur = "";
                     words.forEach(function(w) {
                         if(!w) return;
-                        if(measure(w) > innerPx) {
-                            if(measure(w) <= innerPx * wordTol && w.length <= 96) {
-                                if(cur) {
-                                    lines.push(cur.trim());
-                                    cur = "";
-                                }
-                                lines.push(w);
-                                return;
-                            }
+                        if(measure(w) > budgetPx) {
                             if(cur) {
                                 lines.push(cur.trim());
                                 cur = "";
+                            }
+                            if(isNormalWordToken(w) || (measure(w) <= innerPx && w.length <= 96)) {
+                                lines.push(w);
+                                return;
                             }
                             splitLongToken(w).forEach(function(chunk) {
                                 const t = String(chunk || "").trim();
@@ -8148,7 +8188,7 @@ const app = {
                             return;
                         }
                         const cand = cur ? cur + " " + w : w;
-                        if(measure(cand) <= innerPx) cur = cand;
+                        if(measure(cand) <= budgetPx) cur = cand;
                         else {
                             if(cur) lines.push(cur.trim());
                             cur = w;
@@ -8156,10 +8196,11 @@ const app = {
                     });
                     if(cur) lines.push(cur.trim());
                     if(lines.length) {
+                        const tightened = tightenLinesToBudget(lines);
                         if(typeof app._fixSplitPronounHangArtifactsInLine === "function") {
-                            for(let li = 0; li < lines.length; li++) lines[li] = app._fixSplitPronounHangArtifactsInLine(lines[li]);
+                            for(let li = 0; li < tightened.length; li++) tightened[li] = app._fixSplitPronounHangArtifactsInLine(tightened[li]);
                         }
-                        return lines;
+                        return tightened;
                     }
                 }
             } catch(ePx) {
