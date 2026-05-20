@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T19:40:00">
+<meta name="architect-build" content="2026-05-20T20:05:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -100,7 +100,9 @@
     /* Class toggled in JS when passage uses line gutters — avoids relying on :has() and beats inline white-space:pre-wrap on the host. */
     #source-inline-select-wrap.architect-passage-line-mode,
     #source-lab-wrap.architect-passage-line-mode {
-        overflow-x: auto;
+        /** Beat inline `overflow:hidden` on the hosts — otherwise nowrap insert rows clip the 2.5em gutter (numbers “missing” in Lab / Quote Select while the editor shows them). */
+        overflow-x: auto !important;
+        overflow-y: hidden;
     }
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select,
     #source-lab-wrap.architect-passage-line-mode #source-inline,
@@ -255,6 +257,14 @@
         font-weight: 600 !important;
         position: relative !important;
         z-index: 3 !important;
+    }
+    /** Pin WJEC ticks when the insert column scrolls horizontally (nowrap rows). */
+    #source-lab-wrap.architect-passage-line-mode #source-inline .source-with-line-numbers .source-line-num,
+    #source-inline-select-wrap.architect-passage-line-mode #source-inline-select .source-with-line-numbers .source-line-num {
+        position: sticky !important;
+        left: 0 !important;
+        z-index: 4 !important;
+        box-shadow: 6px 0 8px -4px var(--bg);
     }
     /* Quote Select: excerpt-only passage (question line window) — prose layout, no booklet gutter; better for zoom on phones */
     #source-inline-select-wrap.architect-passage-excerpt-shell {
@@ -967,7 +977,7 @@
                         <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st')" style="padding:4px 10px; font-size:0.85rem;">21st C (Resource)</button>
                         <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th')" style="padding:4px 10px; font-size:0.85rem;">19th C (Q p3)</button>
                     </div>
-                    <div id="source-lab-wrap" style="position:relative; max-height:60vh; overflow:hidden;">
+                    <div id="source-lab-wrap" style="position:relative; max-height:60vh;">
                         <div id="reader-window-lab" class="reader-window hidden"><div class="reader-window-line"></div></div>
                         <div class="guide-content" id="source-inline" style="overflow:auto; max-height:60vh; white-space:pre-wrap; line-height:1.6; font-family:'Aptos','Segoe UI',Calibri,sans-serif; font-weight:normal; padding:8px; -webkit-user-select:text; user-select:text; -webkit-touch-callout:default;"></div>
                     </div>
@@ -1034,7 +1044,7 @@
                     <label><input type="radio" name="tsa-passage-scope-select" class="tsa-passage-scope-radio" value="focused"> Question-focused</label>
                 </div>
             </div>
-            <div id="source-inline-select-wrap" style="flex:1; min-height:140px; max-height:45vh; position:relative; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--border); border-radius:6px; background:var(--bg); margin-bottom:12px; -webkit-user-select:text; user-select:text;">
+            <div id="source-inline-select-wrap" style="flex:1; min-height:140px; max-height:45vh; position:relative; display:flex; flex-direction:column; border:1px solid var(--border); border-radius:6px; background:var(--bg); margin-bottom:12px; -webkit-user-select:text; user-select:text;">
                 <div id="reader-window-select" class="reader-window hidden"><div class="reader-window-line"></div></div>
                 <div id="source-inline-select-scroll" style="flex:1; overflow:auto; padding:12px; -webkit-user-select:text; user-select:text;">
                     <div class="guide-content" id="source-inline-select" style="white-space:pre-wrap; line-height:1.6; font-family:'Aptos','Segoe UI',Calibri,sans-serif; font-weight:normal; -webkit-user-select:text; user-select:text; -webkit-touch-callout:default;"></div>
@@ -9149,7 +9159,8 @@ const app = {
         const stored = app.serializeStructuredPassageV2(w);
         app.syncLessonSourceCanonical(stored);
         if(typeof app.setAiInputValue === "function") app.setAiInputValue(stored);
-        if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+        if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) ui.refreshAllPassageDisplays(stored);
+        else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
         if(typeof app.save === "function") app.save();
     },
     /**
@@ -9190,10 +9201,11 @@ const app = {
             if(w.lines && w.lines.length) appData.meta.passageStoredLineCount = w.lines.length;
         }
         if(typeof app.setAiInputValue === "function") app.setAiInputValue(stored);
-        if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+        if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) ui.refreshAllPassageDisplays(stored);
+        else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
         if(typeof app.save === "function") app.save();
         if(!opts.silent && w.lines && w.lines.length) {
-            alert("Passage layout synced: " + w.lines.length + " stored lines.\n\nQuote Select, Lab, and Student App now use the same rows.\nRe-export Student App after this. On GitHub, confirm build stamp 2026-05-19T22:00:00 (hard refresh).");
+            alert("Passage layout synced: " + w.lines.length + " stored lines.\n\nQuote Select, Lab, and Student App now use the same rows.\nRe-export Student App after this. Hard-refresh and confirm the build stamp in the page header.");
         }
     },
     /**
@@ -9234,10 +9246,13 @@ const app = {
                     } else if(!silent) {
                         alert("Reflow is not available — reload the page (hard refresh) so architect_v131 includes the latest script.");
                     }
-                    /** Reflow already refreshes; repeat with explicit canonical + renderLab so Evidence Lab #source-inline cannot stay on stale selection HTML. */
+                    /** Reflow already refreshes; repeat so Lab / Quote Select match #ai-input gutters (not only the editor). */
                     const stCanon = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
-                    if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay(stCanon);
-                    if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+                    if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) ui.refreshAllPassageDisplays(stCanon);
+                    else {
+                        if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay(stCanon);
+                        if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+                    }
                 } catch(eRaf) {
                     if(!silent) alert("Sync passage layout failed: " + (eRaf && eRaf.message ? eRaf.message : String(eRaf)));
                 }
@@ -14840,6 +14855,35 @@ const ui = {
         if(typeof ui !== "undefined" && ui.positionReaderWindow) {
             requestAnimationFrame(() => { if(ui.positionReaderWindow) ui.positionReaderWindow(); });
         }
+    },
+    /**
+     * Rebuild Lab (#source-inline), Quote Select (#source-inline-select), and intro from the same canonical JSON as #ai-input.
+     * Call after Sync/reflow so gutters are not only refreshed in the Editing Suite.
+     */
+    refreshAllPassageDisplays: function(overrideCanon) {
+        const st = overrideCanon != null ? overrideCanon : (appData && typeof appData.sourceText === "string" ? appData.sourceText : "");
+        try {
+            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+        } catch(eW) {}
+        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(st);
+        if(typeof ui.renderLab === "function") ui.renderLab();
+        if(typeof ui.renderSelection === "function") ui.renderSelection();
+        const repaint = function() {
+            if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(st);
+            const inline = document.getElementById("source-inline");
+            const inlineSel = document.getElementById("source-inline-select");
+            const labWrap = document.getElementById("source-lab-wrap");
+            const selWrap = document.getElementById("source-inline-select-wrap");
+            const hLab = inline && inline.innerHTML ? inline.innerHTML : "";
+            const hSel = inlineSel && inlineSel.innerHTML ? inlineSel.innerHTML : "";
+            if(typeof ui.syncPassageLineLayoutShell === "function") {
+                ui.syncPassageLineLayoutShell(labWrap, inline, hLab);
+                ui.syncPassageLineLayoutShell(selWrap, inlineSel, hSel || hLab);
+            }
+            if(typeof ui.positionReaderWindow === "function") ui.positionReaderWindow();
+        };
+        if(typeof requestAnimationFrame === "function") requestAnimationFrame(repaint);
+        else repaint();
     },
     /** Persisted: show full insert vs line-window excerpt in Lab, Quote Select, and intro (student + teacher preview). */
     PASSAGE_SCOPE_STORAGE_KEY: "tsa_passage_display_scope",
