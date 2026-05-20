@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T20:35:00">
+<meta name="architect-build" content="2026-05-20T21:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -19784,11 +19784,87 @@ const admin = {
         }
         return out.length ? out : chunks;
     },
+    /** Plain text from a chunk (PDF or teacher bold in passage HTML) for instruction-vs-question checks. */
+    _plainTextFromQuestionChunk: function(s) {
+        let t = String(s || "");
+        if(/<[a-z][\s/>]/i.test(t)) {
+            t = t.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>\s*<p[^>]*>/gi, "\n").replace(/<[^>]+>/g, " ");
+        }
+        return t.replace(/[\u200b-\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim();
+    },
+    /**
+     * Board / Section A rubric lines (often bold on the PDF or after teacher formatting) — not Focus questions.
+     * PDF import does not read font weight; short standalone instruction lines are split like questions unless filtered here.
+     */
+    isC2ExamInstructionChunk: function(s) {
+        const plain = admin._plainTextFromQuestionChunk(s);
+        if(!plain || plain.length < 8) return false;
+        /** Real sub-parts: leading (a) with a mark bracket and a question verb. */
+        if(/^\s*\(?a\)\s/i.test(plain) && /\[\s*\d+\s*\]/.test(plain) && /\b(?:explain|how|what|why|describe|compare|evaluate|identify|comment|write|suggest|give|refer|summari)/i.test(plain))
+            return false;
+        if(/^\s*\d{1,2}\s+[1-6]\s+a\)\s/i.test(plain) || /^\s*1\s+1\s+a\)\s/i.test(plain)) return false;
+        if(/\[\s*\d+\s*\]/.test(plain) && /\(\s*[a-z]\s*\)/i.test(plain) && /\b(?:explain|how|what|why|describe|compare|evaluate)\b/i.test(plain)) return false;
+        const shortInstruction = [
+            /^answer\s+all\s+questions/i,
+            /^read\s+the\s+separate\s+resource/i,
+            /^read\s+the\s+separate\s*$/i,
+            /^read\s+the\s+21st\s+century/i,
+            /^read\s+the\s+19th\s+century/i,
+            /^read\s+the\s+newspaper\s+article/i,
+            /^read\s+the\s+resource\s+material/i,
+            /^read\s+carefully\s+the\s+passage/i,
+            /^you\s+must\s+answer\s+the\s+questions/i,
+            /^you\s+must\s+answer\s+in\s+the\s+spaces/i,
+            /^you\s+are\s+advised\s+to\s+spend/i,
+            /^do\s+not\s+write\s+outside/i,
+            /^write\s+your\s+answers\s+in\s+the\s+spaces/i,
+            /^write\s+in\s+the\s+spaces\s+provided/i,
+            /^instructions\s+to\s+candidates/i,
+            /^information\s+for\s+candidates/i,
+            /^use\s+black\s+ink/i,
+            /^use\s+a\s+black\s+ballpoint/i,
+            /^for\s+examiner['\u2019]?s\s+use\s+only/i,
+            /^centre\s+number/i,
+            /^candidate\s+number/i,
+            /^total\s+marks\s+for\s+section/i,
+            /^section\s+a\s*[:.]?\s*$/i,
+            /^section\s+a\s*[-–—]\s*reading/i,
+            /^there\s+are\s+two\s+sections/i,
+            /^for\s+this\s+paper\s+you\s+must/i,
+            /^advice\s*$/i,
+            /^turn\s+over\s*$/i,
+            /^please\s+turn\s+over/i,
+            /^additional\s+page(s)?\s+for\s+answers/i,
+            /^write\s+the\s+question\s+numbers/i
+        ];
+        if(plain.length <= 320) {
+            for(let i = 0; i < shortInstruction.length; i++) {
+                if(shortInstruction[i].test(plain)) return true;
+            }
+        }
+        if(!/\[\s*\d+\s*\]/.test(plain) && !/^\s*\(?a\)\s/i.test(plain)) {
+            if(/^(?:answer\s+all|read\s+the\s+(?:separate|21st|19th|newspaper|resource)|instructions\s+to|information\s+for|you\s+must\s+answer|do\s+not\s+write|write\s+your\s+answers|use\s+black\s+ink)/i.test(plain) && plain.length < 520)
+                return true;
+            if(/^(?:SECTION\s+A|Reading\s*\(\s*\d+\s*marks?\s*\))\s*$/i.test(plain)) return true;
+            if(/\bResource\s+Material\s+for\s+use\s+with\s+Section\s+A\b/i.test(plain) && !/\(\s*a\s*\)/i.test(plain) && plain.length < 400) return true;
+        }
+        /** Teacher-bold rubric in HTML: entire chunk is emphasis with no marks / no leading (a). */
+        const raw = String(s || "");
+        if(/<(?:b|strong)\b/i.test(raw) && !/\[\s*\d+\s*\]/.test(plain) && !/^\s*\(?a\)\s/i.test(plain) && plain.length < 280) {
+            if(/instruction|answer\s+all|read\s+the|resource\s+material|spaces\s+provided|black\s+ink|turn\s+over|section\s+a\b/i.test(plain)) return true;
+        }
+        return false;
+    },
+    filterC2ExamInstructionChunks: function(chunks) {
+        if(!Array.isArray(chunks) || !chunks.length) return chunks || [];
+        return chunks.filter(function(c) { return !admin.isC2ExamInstructionChunk(c); });
+    },
     /** After parsing C2-style papers: merge orphan “To answer…” rubrics into the next real question; drop footers / planning / Section B starter lines. */
     polishPastPaperQuestionChunks: function(chunks) {
         if(!Array.isArray(chunks) || !chunks.length) return chunks;
         const minLen = 8;
         const isNoiseOnly = (t) => {
+            if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(t)) return true;
             const s = String(t || "").trim();
             if(s.length < minLen) return true;
             if(/\bEND\s+OF\s+PAPER\b/i.test(s)) return true;
@@ -20013,6 +20089,7 @@ const admin = {
             const z3 = admin.trimTextToFirstPartA(p[0]);
             if(z3 && z3.length >= 8 && /^\(?a\)\s/i.test(z3.trim())) p[0] = z3;
         }
+        p = admin.filterC2ExamInstructionChunks(p);
         return p;
     },
     /** Split questions-PDF text into exam questions. Splits on PDF structure only; does not rewrite wording
@@ -20056,8 +20133,9 @@ const admin = {
         /** True if this text block already contains a real exam question (do not drop as "intro only"). */
         const firstChunkLooksLikeExamQuestion = (s) => {
             if(!s || typeof s !== "string" || s.length < minLen) return false;
-            if(/\[\s*\d+\s*\]/.test(s)) return true;
-            if(/[a-z]\s*\)\s+/i.test(s)) return true;
+            if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(s)) return false;
+            if(/^\s*\(?a\)\s/i.test(s) && /\[\s*\d+\s*\]/.test(s)) return true;
+            if(/\[\s*\d+\s*\]/.test(s) && /\(\s*[a-z]\s*\)/i.test(s) && /\b(?:explain|how|what|why|describe|compare|evaluate|identify|comment|write|suggest|give|refer)\b/i.test(s)) return true;
             if(/\bRead\s+lines?\s+\d+/i.test(s)) return true;
             if(/Question\s+\d+/i.test(s)) return true;
             if(/^\s*\d{1,2}\s*[.)]\s+\S/.test(s)) return true;
@@ -20277,7 +20355,9 @@ const admin = {
             if(chunks[0].length >= minLen) return [chunks[0]];
         }
         if(raw.length >= 30 && (/\b(?:read|how|explain|describe|what|why|identify|analyse|analyze)\b/i.test(raw) || /lines?\s+\d+\s*[-–]\s*\d+/i.test(raw))) {
-            return [normalize(raw)];
+            const last = [normalize(raw)];
+            if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(last[0])) return [];
+            return last;
         }
         return [];
     },
@@ -23297,7 +23377,15 @@ const admin = {
         let inQuestionBlock = false;
         for(const line of lines) {
             const t = line.trim();
-            const looksLikeQuestion = /^\s*[a-z]\s*\)\s+/.test(line) || /^\s*(?:Compare\s*:|To\s+what\s+extent)/i.test(line) || /^\s*(?:1\s+[1-6]|1[1-6])\s+/.test(line);
+            if(t && typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(t)) {
+                inQuestionBlock = false;
+                passageLines.push(line);
+                continue;
+            }
+            const looksLikeQuestion =
+                (/^\s*\(?a\)\s+/i.test(line) && /\[\s*\d+\s*\]/.test(line)) ||
+                (/^\s*(?:1\s+[1-6]|1[1-6])\s+\(?a\)\s/i.test(line)) ||
+                (/^\s*(?:Compare\s*:|To\s+what\s+extent)/i.test(line) && /\[\s*\d+\s*\]/.test(line));
             if(looksLikeQuestion) { inQuestionBlock = true; continue; }
             if(inQuestionBlock && t && !/^(To\s+answer\s+the\s+following|Read\s+the|You\s+must)/i.test(t)) continue;
             if(/^(To\s+answer|Read\s+the|You\s+must)/i.test(t)) inQuestionBlock = false;
