@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-19T16:00:00">
+<meta name="architect-build" content="2026-05-19T18:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -57,8 +57,8 @@
     #intro-text .source-with-line-numbers .source-line-row.paragraph-start,
     #c2-pooled-editor.source-editor .source-with-line-numbers .source-line-row.paragraph-start,
     #ai-input.source-editor .source-with-line-numbers .source-line-row.paragraph-start {
-        /** One clear step between paragraphs — larger values looked “double spaced” next to line-height. */
-        margin-top: 0.42em;
+        /** Visible paragraph step (exam booklet gap). Too small (0.42em) looked like “unflowed” / glued lines on student vs teacher. */
+        margin-top: 0.75em;
     }
     #source-inline .source-with-line-numbers .source-line-num,
     #source-inline-select .source-with-line-numbers .source-line-num,
@@ -7966,7 +7966,11 @@ const app = {
      */
     _buildStructuredPassageLineBlocksHtml: function(o, editorPassageMode, gutterExtra) {
         if(!o || !Array.isArray(o.lines)) return "";
-        const expanded = app.expandStructuredPassageLineEntries(o, { forceInsertWidthSplitForEditor: true });
+        const expanded = app.expandStructuredPassageLineEntries(o, {
+            forceInsertWidthSplitForEditor: true,
+            /** Student / Lab / intro: trust rows saved by Sync — do not re-split at render (DOM width differed from export). */
+            displayTrustStoredRows: !editorPassageMode
+        });
         if(!expanded.length) return "";
         const m = appData && appData.meta;
         gutterExtra = gutterExtra || {};
@@ -8057,12 +8061,37 @@ const app = {
     _isBookletCellLaidOut: function(cell) {
         if(!cell || !cell.isConnected) return false;
         try {
+            const adminMod = cell.closest ? cell.closest("#modal-admin") : null;
+            if(adminMod && !adminMod.classList.contains("open")) return false;
+            const stageLab = typeof document !== "undefined" ? document.getElementById("stage-lab") : null;
+            if(stageLab && cell.closest && cell.closest("#source-lab-wrap") && stageLab.offsetParent === null) return false;
             const r = cell.getBoundingClientRect();
             const w = typeof cell.clientWidth === "number" && cell.clientWidth > 0 ? cell.clientWidth : r.width;
             return w >= 6;
         } catch(eL) {
             return false;
         }
+    },
+    /**
+     * Lab / Quote Select / student: after Sync, each stored v2 row is one simulated printed line — re-running {@link splitLongRowsForBookletLineGutter} on display used whichever DOM cell was narrowest (closed Editing Suite, hidden Lab) and shifted gutters + ¶ gaps vs the exported lesson.
+     */
+    applyParagraphStartsFromStructuredStorage: function(o, rows) {
+        if(!o || !Array.isArray(o.lines) || !rows || !rows.length) return rows || [];
+        let prevStor = null;
+        return rows.map(function(row, idx) {
+            const si = row.storIdx != null && Number.isFinite(Number(row.storIdx)) ? Number(row.storIdx) : idx;
+            const L = o.lines[si];
+            let ps = !!row.paragraphStart;
+            if(!ps && idx > 0 && si !== prevStor && L) {
+                if(L.paragraphStart === true) ps = true;
+                else if(typeof app._storedLineLooksParagraphIndented === "function" && app._storedLineLooksParagraphIndented(L)) ps = true;
+            }
+            prevStor = si;
+            if(!ps) return row;
+            const out = Object.assign({}, row);
+            out.paragraphStart = true;
+            return out;
+        });
     },
     /** Content-box width for glyphs (padding excluded). When present, caps theory-based {@link _bookletInnerMaxPxForInsertCh} so split math never trusts canvas/`ch` over the real column. */
     _measureBookletCellContentPx: function(cell) {
@@ -9241,6 +9270,8 @@ const app = {
                 pt = String(L.html).replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
             const ent = { n: L.n, text: pt, html: html, storIdx: i };
             if(L.paragraphStart) ent.paragraphStart = true;
+            else if(i > 0 && typeof app._storedLineLooksParagraphIndented === "function" && app._storedLineLooksParagraphIndented(L))
+                ent.paragraphStart = true;
             return ent;
         });
         let useEntries = entries;
@@ -9306,11 +9337,21 @@ const app = {
          */
         if(opts.forceInsertWidthSplitForEditor && typeof app.splitLongRowsForBookletLineGutter === "function") {
             var finishEd = typeof app.applyPassageBookletDisplayOffsetToRows === "function"
-                ? function(rows) { return app.applyPassageBookletDisplayOffsetToRows(rows); }
-                : function(rows) { return rows; };
+                ? function(rows) {
+                    const laid = app.applyPassageBookletDisplayOffsetToRows(rows);
+                    return typeof app.applyParagraphStartsFromStructuredStorage === "function"
+                        ? app.applyParagraphStartsFromStructuredStorage(o, laid)
+                        : laid;
+                }
+                : function(rows) {
+                    return typeof app.applyParagraphStartsFromStructuredStorage === "function"
+                        ? app.applyParagraphStartsFromStructuredStorage(o, rows)
+                        : rows;
+                };
             /** Match Sync/reflow: unless meta.passageMergeOrphanHangSegments, skip gutter orphan merge so displayed rows = canvas segments. */
             var mergeHangSeg = !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
             var gutterOptsEd = { skipOrphanSegmentMerge: !mergeHangSeg };
+            if(opts.displayTrustStoredRows) return finishEd(expanded);
             return finishEd(app.splitLongRowsForBookletLineGutter(expanded, undefined, gutterOptsEd));
         }
         /**
