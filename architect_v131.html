@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-19T18:00:00">
+<meta name="architect-build" content="2026-05-19T20:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -7636,7 +7636,7 @@ const app = {
     countStoredPassageSegments: function(stored) {
         const o = app.parseStructuredPassageSource(stored);
         if(o && Array.isArray(o.lines) && o.lines.length && typeof app.expandStructuredPassageLineEntries === "function") {
-            const exp = app.expandStructuredPassageLineEntries(o, { forceInsertWidthSplitForEditor: true });
+            const exp = app.expandStructuredPassageLineEntries(o, { forceInsertWidthSplitForEditor: true, displayTrustStoredRows: true });
             if(exp && exp.length) return exp.length;
         }
         const s = String(stored || "").trim();
@@ -7968,8 +7968,11 @@ const app = {
         if(!o || !Array.isArray(o.lines)) return "";
         const expanded = app.expandStructuredPassageLineEntries(o, {
             forceInsertWidthSplitForEditor: true,
-            /** Student / Lab / intro: trust rows saved by Sync — do not re-split at render (DOM width differed from export). */
-            displayTrustStoredRows: !editorPassageMode
+            /**
+             * **All** readers (Editing Suite, Lab, Quote Select, student export): one `.source-line-row` per v2 `lines[]` row after Sync.
+             * Re-splitting only in the editor made many DOM rows per stored line while student showed fewer — significant gutter / ¶ drift.
+             */
+            displayTrustStoredRows: true
         });
         if(!expanded.length) return "";
         const m = appData && appData.meta;
@@ -9310,10 +9313,18 @@ const app = {
             }
         }
         var lineExpandOpts = opts.forceInsertWidthSplitForEditor ? { skipOrphanPartMerge: true } : undefined;
-        let expanded = app.expandLineEntriesOnNewlines(entriesBook, lineExpandOpts);
-        expanded = expanded.filter(function(row) {
-            return String(row.text == null ? "" : row.text).replace(/\s+/g, " ").trim().length > 0;
-        });
+        let expanded;
+        if(opts.displayTrustStoredRows) {
+            /** Sync/reflow already sized each stored row for insert width — do not split on `\\n` / `&lt;br&gt;` again at render (student vs teacher row counts diverged). */
+            expanded = entriesBook.filter(function(row) {
+                return String(row.text == null ? "" : row.text).replace(/\s+/g, " ").trim().length > 0;
+            });
+        } else {
+            expanded = app.expandLineEntriesOnNewlines(entriesBook, lineExpandOpts);
+            expanded = expanded.filter(function(row) {
+                return String(row.text == null ? "" : row.text).replace(/\s+/g, " ").trim().length > 0;
+            });
+        }
         if(expanded.length) {
             expanded = expanded.map(function(row, idx) {
                 const o = { n: idx + 1, text: row.text };
