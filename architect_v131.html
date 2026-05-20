@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T20:05:00">
+<meta name="architect-build" content="2026-05-20T20:20:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -5724,7 +5724,8 @@ const app = {
                 if(inner && String(inner).trim()) ai.innerHTML = inner;
             }
             if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
-            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay(typeof appData.sourceText === "string" ? appData.sourceText : undefined);
+            if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) ui.refreshAllPassageDisplays(typeof appData.sourceText === "string" ? appData.sourceText : undefined);
+            else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay(typeof appData.sourceText === "string" ? appData.sourceText : undefined);
             if(typeof app.save === "function") app.save();
         } catch(eAll) {} finally {
             app._suppressCaretSnapClear = false;
@@ -8009,6 +8010,15 @@ const app = {
         if(!entries || !entries.length) return entries || [];
         const kept = entries.filter(function(row) { return app._passageLayoutEntryHasVisibleText(row); });
         return kept.length ? kept : entries;
+    },
+    /** True when structured canon actually builds `.source-with-line-numbers` for Lab / Quote Select (close Settings flush must not replace good post-Sync JSON with plain/HTML that loses gutters). */
+    _passageCanonRendersGutterHtml: function(canon) {
+        if(!canon || typeof canon !== "string") return false;
+        const o = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(String(canon).replace(/^\uFEFF/, "").trim()) : null;
+        if(!o || !Array.isArray(o.lines) || !o.lines.length) return false;
+        if(typeof app._buildStructuredPassageLineBlocksHtml !== "function") return false;
+        const html = app._buildStructuredPassageLineBlocksHtml(o, false);
+        return !!(html && /source-with-line-numbers/i.test(html));
     },
     /** Drop trailing blank/br-only stored rows and duplicate tail prose before any gutter HTML is built. Never remove every row — that emptied gutters after load/flush. */
     _passagePrepareForDisplay: function(o) {
@@ -15906,9 +15916,15 @@ const ui = {
         if(id === 'modal-source') { ui.stopReader(); }
         if(id === 'modal-admin' && !appData.isStandalone) {
             ui._pauseSelectionGate = false;
-            ui.refreshSourceDisplay && ui.refreshSourceDisplay();
-            ui.renderLab();
-            if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
+            /** Do not call bare {@link refreshSourceDisplay}() — it can fall back to stale selection/plain and wipe gutters Sync just painted in Lab. */
+            const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+            if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(stClose);
+            else {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(stClose);
+                if(ui.renderLab) ui.renderLab();
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
+            }
+            if(typeof ui.refreshAllPassageDisplays !== "function" && userState.view === "select" && ui.renderSelection) ui.renderSelection();
             if(ui.activeQuoteId) {
                 const item = appData.items.find(i=>i.id===ui.activeQuoteId);
                 if(item) ui.runBuilder(item); 
@@ -22938,25 +22954,39 @@ const admin = {
             if(txt && !app.isLikelyJson(txt)) {
                 /** Always editorPassageToStoredCanonical (v2 JSON when possible). Do not save serializeNumberedSourceLayoutToPlain first — plain overwrites JSON, formatSourceHtml misses parseNumberedPlainSourceLines, plainProseToSyntheticNumberedEntries collapses to few rows and only ~5/10 show in the margin. */
                 const hadExamGutterDom = !!(ai.querySelector && ai.querySelector(".source-with-line-numbers"));
+                const priorTrim = (appData && typeof appData.sourceText === "string") ? String(appData.sourceText).replace(/^\uFEFF/, "").trim() : "";
+                const priorOk = !!(priorTrim && typeof app.parseStructuredPassageSource === "function" && app.parseStructuredPassageSource(priorTrim));
                 const canon = app.editorPassageToStoredCanonical(txt);
-                if(!canon || !String(canon).trim()) return;
-                /** If canonical round-trip looks unsafe but the editor still shows exam gutters, persist live HTML — otherwise we return without saving and closeModal refreshes from stale plain sourceText (width/meta ok, margin numbers gone). */
-                if(hadExamGutterDom && !app._storedCanonKeepsPassageLayout(canon)) {
-                    if(/source-with-line-numbers|source-line-row/i.test(txt)) {
-                        const live = txt.trim();
-                        app.syncLessonSourceCanonical(live);
-                        ui.refreshSourceDisplay(live);
+                if(!canon || !String(canon).trim()) {
+                    if(priorOk) {
+                        if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(priorTrim);
+                        else if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(priorTrim);
                         app.save();
                     }
                     return;
                 }
-                const rebuilt = app.storedCanonicalToEditorInnerHtml(canon) || "";
+                let toStore = canon;
+                if(hadExamGutterDom) {
+                    const flushKeepsGutters = app._storedCanonKeepsPassageLayout(canon)
+                        && typeof app._passageCanonRendersGutterHtml === "function"
+                        && app._passageCanonRendersGutterHtml(canon);
+                    /** After Sync, a close-time flush can downgrade JSON → plain/HTML; keep the last good v2 string so Lab keeps WJEC ticks. */
+                    if(!flushKeepsGutters && priorOk) toStore = priorTrim;
+                }
+                if(toStore === priorTrim) {
+                    if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(priorTrim);
+                    else if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(priorTrim);
+                    app.save();
+                    return;
+                }
+                const rebuilt = app.storedCanonicalToEditorInnerHtml(toStore) || "";
                 if(rebuilt.trim() && (!hadExamGutterDom || /source-with-line-numbers/i.test(rebuilt))) {
                     if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(rebuilt);
                     else ai.innerHTML = rebuilt;
                 }
-                app.syncLessonSourceCanonical(canon);
-                ui.refreshSourceDisplay(canon);
+                app.syncLessonSourceCanonical(toStore);
+                if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(toStore);
+                else if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(toStore);
                 app.save();
             }
         }
