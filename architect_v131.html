@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-19T14:00:00">
+<meta name="architect-build" content="2026-05-19T16:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -98,6 +98,10 @@
     }
     /* Line-numbered passages: .reader-window left/width is set in JS from the first .source-line-row (gutter + insert text) so the band runs under WJEC margin ticks; ticks stay above (z-index:3 on .source-line-num). */
     /* Class toggled in JS when passage uses line gutters — avoids relying on :has() and beats inline white-space:pre-wrap on the host. */
+    #source-inline-select-wrap.architect-passage-line-mode,
+    #source-lab-wrap.architect-passage-line-mode {
+        overflow-x: auto;
+    }
     #source-inline-select-wrap.architect-passage-line-mode #source-inline-select,
     #source-lab-wrap.architect-passage-line-mode #source-inline,
     #intro-text.architect-passage-line-mode {
@@ -162,15 +166,17 @@
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers .source-line-text {
         position: relative;
         z-index: 2;
-        /** Cap ink at the **wrap** guide (`--exam-passage-text-max-width`); dashed insert edge can sit further right in the hatched safety band. */
+        /**
+         * Fixed insert column width on every host (teacher modal, Lab, Quote Select, student app). `flex: 1 1 auto` + `max-width` alone
+         * let the cell **shrink** in a narrow pane, so `pre-wrap` reflowed differently from a wide student window — gutter 5/10 drifted and
+         * ¶ spacing looked glued to the previous line. Scroll the host when the pane is narrower than gutter + insert `ch`.
+         */
+        flex: 0 0 auto !important;
+        width: var(--exam-passage-text-max-width);
+        min-width: var(--exam-passage-text-max-width);
         max-width: var(--exam-passage-text-max-width);
         padding-right: 4px;
         box-sizing: border-box;
-        /**
-         * Booklet rows are still one flex row per stored segment; `pre-wrap` lets the browser wrap **within** the `ch`-capped cell
-         * when prose is longer than the insert width. (Older builds used `nowrap` here to avoid a second visual line without a new
-         * gutter digit; that forced mile-long horizontal strips and looked like words glued together—especially in Teacher Settings.)
-         */
         white-space: pre-wrap !important;
         word-break: break-word !important;
         overflow-wrap: break-word !important;
@@ -296,9 +302,13 @@
      */
     #source-inline-select-wrap.architect-passage-excerpt-shell.architect-passage-line-mode #source-inline-select .source-with-line-numbers .source-line-text,
     #source-lab-wrap.architect-passage-excerpt-shell.architect-passage-line-mode #source-inline .source-with-line-numbers .source-line-text {
+        flex: 0 0 auto !important;
+        width: var(--exam-passage-text-max-width);
+        min-width: var(--exam-passage-text-max-width);
+        max-width: var(--exam-passage-text-max-width);
         white-space: pre-wrap !important;
         word-break: break-word !important;
-        overflow-wrap: anywhere !important;
+        overflow-wrap: break-word !important;
     }
     /* Level Bank “Show line window”: same insert ch-cap + min track as Quote Select so {@link splitPlainIntoVisualLinesByCh} measures the same px budget as the student excerpt (not a wide modal column). */
     #teacher-passage-preview-output.architect-passage-line-wrap {
@@ -314,7 +324,10 @@
     #teacher-passage-preview-output.architect-passage-line-wrap .source-with-line-numbers .source-line-text {
         position: relative;
         z-index: 2;
-        max-width: var(--exam-passage-max-width);
+        flex: 0 0 auto !important;
+        width: var(--exam-passage-text-max-width);
+        min-width: var(--exam-passage-text-max-width);
+        max-width: var(--exam-passage-text-max-width);
         padding-right: 4px;
         box-sizing: border-box;
         white-space: pre-wrap !important;
@@ -13685,14 +13698,19 @@ const app = {
         }
 
         if(appData.isStandalone && (!Array.isArray(appData.items) || appData.items.length === 0)) {
-            const fallback = app.repair(defaultData);
-            appData.items = fallback.items;
-            appData.banks = fallback.banks;
-            appData.sentenceConfig = fallback.sentenceConfig;
-            appData.globalStructure = fallback.globalStructure;
-            if(!appData.sourceText) appData.sourceText = fallback.sourceText;
-            if(!appData.question) appData.question = fallback.question;
-            if(!appData.meta || !appData.meta.title) appData.meta = fallback.meta;
+            const tapOnlyLesson = typeof app.lessonHasExportableStudentContent === "function" && app.lessonHasExportableStudentContent();
+            if(tapOnlyLesson) {
+                appData.items = [];
+            } else {
+                const fallback = app.repair(defaultData);
+                appData.items = fallback.items;
+                appData.banks = fallback.banks;
+                appData.sentenceConfig = fallback.sentenceConfig;
+                appData.globalStructure = fallback.globalStructure;
+                if(!appData.sourceText) appData.sourceText = fallback.sourceText;
+                if(!appData.question) appData.question = fallback.question;
+                if(!appData.meta || !appData.meta.title) appData.meta = fallback.meta;
+            }
         }
         if((!appData.sourceText || !appData.sourceText.trim()) && appData.selection && appData.selection.text && appData.selection.text.source) {
             appData.sourceText = String(appData.selection.text.source || "").trim();
