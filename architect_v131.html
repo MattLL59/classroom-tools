@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-19T20:00:00">
+<meta name="architect-build" content="2026-05-19T22:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -167,9 +167,9 @@
         position: relative;
         z-index: 2;
         /**
-         * Fixed insert column width on every host (teacher modal, Lab, Quote Select, student app). `flex: 1 1 auto` + `max-width` alone
-         * let the cell **shrink** in a narrow pane, so `pre-wrap` reflowed differently from a wide student window — gutter 5/10 drifted and
-         * ¶ spacing looked glued to the previous line. Scroll the host when the pane is narrower than gutter + insert `ch`.
+         * Fixed insert column + **one visual line per stored row**. `pre-wrap` wrapped long rows inside one `.source-line-row`, so the
+         * WJEC tick (e.g. 5) stayed at the row top while “Did I” sat on the wrapped tail of line 4 and “remember?” beside the tick.
+         * Sync sizes each stored row to one printed line — use `nowrap` and scroll horizontally if needed. Intentional `&lt;br&gt;` still breaks inside the cell.
          */
         flex: 0 0 auto !important;
         width: var(--exam-passage-text-max-width);
@@ -177,9 +177,11 @@
         max-width: var(--exam-passage-text-max-width);
         padding-right: 4px;
         box-sizing: border-box;
-        white-space: pre-wrap !important;
-        word-break: break-word !important;
-        overflow-wrap: break-word !important;
+        white-space: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        word-break: normal !important;
+        overflow-wrap: normal !important;
     }
     /* Leading / trailing prose outside booklet gutters (WJEC body anchors); same column cap as counted lines. */
     #source-inline .architect-passage-head-prose,
@@ -306,9 +308,11 @@
         width: var(--exam-passage-text-max-width);
         min-width: var(--exam-passage-text-max-width);
         max-width: var(--exam-passage-text-max-width);
-        white-space: pre-wrap !important;
-        word-break: break-word !important;
-        overflow-wrap: break-word !important;
+        white-space: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        word-break: normal !important;
+        overflow-wrap: normal !important;
     }
     /* Level Bank “Show line window”: same insert ch-cap + min track as Quote Select so {@link splitPlainIntoVisualLinesByCh} measures the same px budget as the student excerpt (not a wide modal column). */
     #teacher-passage-preview-output.architect-passage-line-wrap {
@@ -330,9 +334,11 @@
         max-width: var(--exam-passage-text-max-width);
         padding-right: 4px;
         box-sizing: border-box;
-        white-space: pre-wrap !important;
-        word-break: break-word !important;
-        overflow-wrap: break-word !important;
+        white-space: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        word-break: normal !important;
+        overflow-wrap: normal !important;
     }
     #teacher-passage-preview-output.architect-passage-line-wrap .source-with-line-numbers .source-line-row {
         display: flex !important;
@@ -9120,9 +9126,16 @@ const app = {
         }
         const stored = app.serializeStructuredPassageV2(w);
         app.syncLessonSourceCanonical(stored);
+        if(appData.meta) {
+            appData.meta.passageLayoutSyncedAt = new Date().toISOString();
+            if(w.lines && w.lines.length) appData.meta.passageStoredLineCount = w.lines.length;
+        }
         if(typeof app.setAiInputValue === "function") app.setAiInputValue(stored);
         if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
         if(typeof app.save === "function") app.save();
+        if(!opts.silent && w.lines && w.lines.length) {
+            alert("Passage layout synced: " + w.lines.length + " stored lines.\n\nQuote Select, Lab, and Student App now use the same rows.\nRe-export Student App after this. On GitHub, confirm build stamp 2026-05-19T22:00:00 (hard refresh).");
+        }
     },
     /**
      * One-click: {@link applyPassageInsertWidthChFromInput} (meta + flush; **`skipResync: true`** so we skip {@link resyncC1PassageEditorWithInsertWidth} before reflow — that resync re-expanded width-baked rows and fought compound/orphan merge → “overhangers”) + {@link reflowC1PassageBodyToNaturalInsertWidthCh}.
