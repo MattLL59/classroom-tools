@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-19T22:00:00">
+<meta name="architect-build" content="2026-05-20T19:15:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -7965,6 +7965,51 @@ const app = {
             return null;
         }
     },
+    /** True when `tailHtml` repeats (or extends) the last stored booklet line — showing both caused an extra line at the end in Quote Select vs the editor. */
+    passageTailRedundantWithLastStoredLine: function(o) {
+        if(!o || !Array.isArray(o.lines) || !o.lines.length) return false;
+        const tail = app.htmlFragmentToPlainText(o.tailHtml || "").replace(/\s+/g, " ").trim();
+        if(!tail) return false;
+        const last = app.htmlFragmentToPlainText(o.lines[o.lines.length - 1].html || "").replace(/\s+/g, " ").trim();
+        if(!last) return false;
+        if(tail === last) return true;
+        if(tail.length >= 8 && last.endsWith(tail)) return true;
+        if(last.length >= 8 && tail.endsWith(last)) return true;
+        return false;
+    },
+    normalizePassageDedupeRedundantTail: function(o) {
+        if(!o || !app.passageTailRedundantWithLastStoredLine(o)) return o;
+        const out = Object.assign({}, o);
+        delete out.tailHtml;
+        return out;
+    },
+    _passageLayoutEntryHasVisibleText: function(row) {
+        if(!row) return false;
+        const plain = app.htmlFragmentToPlainText(row.html != null ? row.html : row.text || "").replace(/\s+/g, " ").trim();
+        if(plain.length > 0) return true;
+        const h = String(row.html != null ? row.html : "").trim();
+        if(!h) return false;
+        return !/^(?:\s*<br\s*\/?>\s*)+$/i.test(h) && !/^<p>\s*<br\s*\/?>\s*<\/p>$/i.test(h);
+    },
+    _filterEmptyPassageLayoutEntries: function(entries) {
+        if(!entries || !entries.length) return entries || [];
+        const kept = entries.filter(function(row) { return app._passageLayoutEntryHasVisibleText(row); });
+        return kept.length ? kept : entries;
+    },
+    /** Drop trailing blank/br-only stored rows and duplicate tail prose before any gutter HTML is built. */
+    _passagePrepareForDisplay: function(o) {
+        if(!o || !Array.isArray(o.lines)) return o;
+        let lines = o.lines.slice();
+        while(lines.length && !app._passageLayoutEntryHasVisibleText({ html: lines[lines.length - 1].html, text: lines[lines.length - 1].text })) {
+            lines = lines.slice(0, -1);
+        }
+        let out = lines.length === o.lines.length ? o : Object.assign({}, o, { lines: lines });
+        if(app.passageTailRedundantWithLastStoredLine(out)) {
+            out = Object.assign({}, out);
+            delete out.tailHtml;
+        }
+        return out;
+    },
     /**
      * Single expansion + gutter HTML path for Lab and Editing Suite — avoids drifting opts ({@link useStoredPassageRichHtml} vs {@link editorPassageMode} alone) producing different `.source-line-row` sets.
      * **Always** passes `{ forceInsertWidthSplitForEditor: true }` into {@link expandStructuredPassageLineEntries} so Lab and teacher see the **same** insert-width row count (otherwise Lab kept PDF-strict / skip-split paths and one stored paragraph became one `.source-line-row` — a “mile-long” line vs the Editing Suite).
@@ -7972,6 +8017,7 @@ const app = {
      */
     _buildStructuredPassageLineBlocksHtml: function(o, editorPassageMode, gutterExtra) {
         if(!o || !Array.isArray(o.lines)) return "";
+        o = typeof app._passagePrepareForDisplay === "function" ? app._passagePrepareForDisplay(o) : o;
         const expanded = app.expandStructuredPassageLineEntries(o, {
             forceInsertWidthSplitForEditor: true,
             /**
@@ -7999,6 +8045,7 @@ const app = {
     structuredPassageToEditorHtml: function(o, opts) {
         opts = opts || {};
         if(!o || !Array.isArray(o.lines)) return "";
+        o = typeof app._passagePrepareForDisplay === "function" ? app._passagePrepareForDisplay(o) : o;
         const core = typeof app._buildStructuredPassageLineBlocksHtml === "function"
             ? app._buildStructuredPassageLineBlocksHtml(o, true)
             : "";
@@ -9429,6 +9476,7 @@ const app = {
     },
     formatStructuredPassageHtml: function(o) {
         if(!o || !Array.isArray(o.lines)) return "Source text not provided.";
+        o = typeof app._passagePrepareForDisplay === "function" ? app._passagePrepareForDisplay(o) : o;
         const hasHead = o.headHtml != null && String(o.headHtml).trim();
         const hasTail = o.tailHtml != null && String(o.tailHtml).trim();
         const core = typeof app._buildStructuredPassageLineBlocksHtml === "function"
@@ -9455,6 +9503,7 @@ const app = {
     /** Same as {@link formatStructuredPassageHtml} but every booklet line appears in the left margin (matches teacher “every line #” / Insert width tooling). Used for Quote Select when Level Bank ticks <strong>every line #</strong>. */
     formatStructuredPassageHtmlDenseMargins: function(o) {
         if(!o || !Array.isArray(o.lines)) return "Source text not provided.";
+        o = typeof app._passagePrepareForDisplay === "function" ? app._passagePrepareForDisplay(o) : o;
         const hasHead = o.headHtml != null && String(o.headHtml).trim();
         const hasTail = o.tailHtml != null && String(o.tailHtml).trim();
         const core = typeof app._buildStructuredPassageLineBlocksHtml === "function"
@@ -11991,6 +12040,7 @@ const app = {
      * WJEC / exam: margin shows **booklet line** numbers **5, 10, 15…** (see {@link EXAM_GUTTER_INTERVAL}) unless `examShowAllBookletLines`. Blank cells on other rows. Display booklet index comes from **Booklet line 1** + row order ({@link applyPassageBookletDisplayOffsetToRows}) so ticks align with the insert.
      */
     buildNumberedSourceLayoutHtml: function(lineEntries, opts) {
+        if(typeof app._filterEmptyPassageLayoutEntries === "function") lineEntries = app._filterEmptyPassageLayoutEntries(lineEntries);
         const examMarginOnly = !!(opts && opts.examMarginMultiplesOf5Only);
         /** `examShowAllBookletLines: true` → every row shows booklet `n`. False → WJEC ticks 5, 10, 15… only (blank cells for other lines). */
         const denseEveryLineGutter = !examMarginOnly && !!(opts && opts.denseEveryLineGutter);
@@ -12323,6 +12373,7 @@ const app = {
         const hadGutterDom = /source-with-line-numbers[\s\S]*source-line-row/i.test(t);
         const v2FromEditor = app.editorHtmlNumberedToStructuredV2(t);
         if(v2FromEditor && v2FromEditor.lines.length) {
+            if(typeof app.normalizePassageDedupeRedundantTail === "function") v2FromEditor = app.normalizePassageDedupeRedundantTail(v2FromEditor);
             if(v2FromEditor._skipPassageWideCollapse) {
                 let wSkip = app.stripStructuredPassageV2Meta(v2FromEditor);
                 wSkip = app.normalizeStructuredPassageV2MergeOrphanRows(wSkip);
@@ -12346,6 +12397,7 @@ const app = {
             }
             const stripped = app.stripStructuredPassageV2Meta(v2FromEditor);
             let w = app.normalizeStructuredPassageV2MergeOrphanRows(stripped);
+            if(typeof app.normalizePassageDedupeRedundantTail === "function") w = app.normalizePassageDedupeRedundantTail(w);
             /** Do not collapse many gutter rows into one v2 line when any row has manual `<br>` — collapse merge uses spaces between fragments and natural reflow then glued printed-line pairs into one chunk (“how” + “well-intentioned.”). Omit collapse when no `<br>` too would regress PDF imports; see {@link passageV2HasManualBrInAnyLine}. */
             if(!(typeof app.passageV2HasManualBrInAnyLine === "function" && app.passageV2HasManualBrInAnyLine(w))) {
                 w = app.normalizeStructuredPassageV2CollapseExamVisualRowsToOneLine(w, { force: hadGutterDom });
