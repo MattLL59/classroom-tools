@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-19T10:00:00">
+<meta name="architect-build" content="2026-05-19T14:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -2109,6 +2109,39 @@ const app = {
         if(entry && entry.freeSelectFromText === true) return true;
         const def = defaultData.settings.levelBank && defaultData.settings.levelBank[lvl];
         return !(def && def.freeSelectFromText === false);
+    },
+    /**
+     * True when the lesson can be bundled as a **Student App** — quote bank rows **or** passage + question with tap-to-select / short-answer / LoR on an active level.
+     * Importing focus questions alone used to fail export because {@link exportStandalone} required {@link appData.items} only.
+     */
+    lessonHasExportableStudentContent: function() {
+        try {
+            const items = Array.isArray(appData && appData.items) ? appData.items : [];
+            if(items.length > 0) return true;
+            const selItems = appData && appData.selection && Array.isArray(appData.selection.items) ? appData.selection.items : [];
+            if(selItems.length > 0) return true;
+            let hasSource = false;
+            if(typeof app.getSourceText === "function") hasSource = !!(String(app.getSourceText() || "").trim());
+            if(!hasSource && appData && typeof appData.sourceText === "string") hasSource = !!String(appData.sourceText).trim();
+            if(!hasSource) return false;
+            const qs = Array.isArray(appData && appData.questions) ? appData.questions : [];
+            const hasQuestion = qs.some(function(q) { return q && String(q.prompt || "").trim(); })
+                || !!(appData && appData.question && String(appData.question).trim());
+            if(!hasQuestion) return false;
+            const active = typeof app.getActiveLevels === "function" ? app.getActiveLevels() : [1];
+            const bank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
+            for(let ai = 0; ai < active.length; ai++) {
+                const lvl = active[ai];
+                const ent = bank && bank[lvl] ? bank[lvl] : {};
+                if(ent.levelsOfResponse === true) return true;
+                if(ent.shortAnswersOnly === true) return true;
+                if(typeof app.isComponent2ShortAnswerQuestion === "function" && app.isComponent2ShortAnswerQuestion(lvl)) return true;
+                if(typeof app.getEffectiveTapText === "function" && app.getEffectiveTapText(lvl)) return true;
+            }
+            return false;
+        } catch(eEx) {
+            return false;
+        }
     },
     /** Synonym suggestions (I'm stuck) — must not be confused with Q1 / tap-only flows (formerly leaked via misnamed getEffectiveNoQuotes). */
     isStudentSynonymsHelp: function() {
@@ -28899,7 +28932,12 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     },
 
     exportStandalone: () => {
-        if(!appData.items || appData.items.length === 0) {
+        if(!Array.isArray(appData.items)) appData.items = [];
+        const canExport = typeof app.lessonHasExportableStudentContent === "function" && app.lessonHasExportableStudentContent();
+        if(!canExport) {
+            return alert("No lesson data to export yet.\n\nAdd at least one of:\n• Quote bank rows (Editing Suite → Quote bank), or\n• Source passage + focus question(s) with tap-to-select enabled on an active level (Level Bank — tap text is on by default), or\n• Load JSON that includes items[] with quotes.");
+        }
+        if(appData.items.length === 0) {
             const selItems = appData.selection && Array.isArray(appData.selection.items) ? appData.selection.items : [];
             if(selItems.length) {
                 appData.items = selItems.map((s, idx) => {
@@ -28919,8 +28957,6 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                         includeInWorksheet: true
                     };
                 });
-            } else {
-                return alert("No lesson data to export yet.");
             }
         }
         /** Snapshot live C1 passage (gutters + &lt;b&gt;/&lt;i&gt; in v2) into `appData` before clone — otherwise export reused stale `sourceText` or `innerText` fallbacks that stripped markup. */
@@ -29004,6 +29040,8 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         if (allowedTypes.length === 0) allowedTypes = ["language", "tone", "structure"];
         const norm = (t) => (typeof t === "string" ? t.toLowerCase().trim() : "");
         const allowedSet = new Set(allowedTypes.map(norm));
+        if(!Array.isArray(exportData.items)) exportData.items = [];
+        const tapOrShortLesson = typeof app.lessonHasExportableStudentContent === "function" && app.lessonHasExportableStudentContent();
         if(Array.isArray(exportData.items)) {
             const typesInLessonBefore = [...new Set((exportData.items || []).map(i => i && i.type).filter(Boolean))];
             exportData.items = exportData.items.filter(i => {
@@ -29011,7 +29049,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 if(!i.type) return true;
                 return allowedSet.has(norm(i.type));
             });
-            if(exportData.items.length === 0) {
+            if(exportData.items.length === 0 && !tapOrShortLesson) {
                 const hint = typesInLessonBefore.length ? " Your lesson items use: " + typesInLessonBefore.join(", ") + ". Enable at least one of these in Admin \u2192 Device types (Language / Tone / Structure)." : " Enable at least one device type in Admin (Language, Tone, Structure).";
                 return alert("Export blocked: no lesson items match the selected device types." + hint);
             }
