@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T20:20:00">
+<meta name="architect-build" content="2026-05-20T20:35:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -8020,6 +8020,21 @@ const app = {
         const html = app._buildStructuredPassageLineBlocksHtml(o, false);
         return !!(html && /source-with-line-numbers/i.test(html));
     },
+    _passageStructuredV2LineCount: function(canon) {
+        const o = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(String(canon || "").replace(/^\uFEFF/, "").trim()) : null;
+        return o && Array.isArray(o.lines) ? o.lines.length : 0;
+    },
+    /** Settings close: do not replace post-Sync v2 JSON with a shorter collapse from {@link editorPassageToStoredCanonical}. */
+    _closeTimeFlushAcceptsPassageCanon: function(priorTrim, canon, hadExamGutterDom) {
+        if(!hadExamGutterDom || !priorTrim || !canon) return true;
+        const priorOk = app.parseStructuredPassageSource(priorTrim);
+        if(!priorOk || !Array.isArray(priorOk.lines) || !priorOk.lines.length) return true;
+        const keeps = app._storedCanonKeepsPassageLayout(canon)
+            && typeof app._passageCanonRendersGutterHtml === "function"
+            && app._passageCanonRendersGutterHtml(canon);
+        if(!keeps) return false;
+        return app._passageStructuredV2LineCount(canon) >= priorOk.lines.length;
+    },
     /** Drop trailing blank/br-only stored rows and duplicate tail prose before any gutter HTML is built. Never remove every row — that emptied gutters after load/flush. */
     _passagePrepareForDisplay: function(o) {
         if(!o || !Array.isArray(o.lines)) return o;
@@ -14876,8 +14891,8 @@ const ui = {
             if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
         } catch(eW) {}
         if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(st);
-        if(typeof ui.renderLab === "function") ui.renderLab();
-        if(typeof ui.renderSelection === "function") ui.renderSelection();
+        if(typeof ui.renderLab === "function") ui.renderLab(st);
+        if(typeof ui.renderSelection === "function") ui.renderSelection(st);
         const repaint = function() {
             if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(st);
             const inline = document.getElementById("source-inline");
@@ -15669,8 +15684,10 @@ const ui = {
         location.reload(); 
     },
 
-    renderLab: function() {
-        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
+    renderLab: function(overrideCanon) {
+        const src = (overrideCanon != null && String(overrideCanon).trim())
+            ? String(overrideCanon).trim()
+            : (app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText());
         const inline = document.getElementById("source-inline");
         if(inline) {
             const warn = app._sourceWarn
@@ -15921,10 +15938,15 @@ const ui = {
             if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(stClose);
             else {
                 if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(stClose);
-                if(ui.renderLab) ui.renderLab();
-                if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
+                if(ui.renderLab) ui.renderLab(stClose);
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(stClose);
             }
-            if(typeof ui.refreshAllPassageDisplays !== "function" && userState.view === "select" && ui.renderSelection) ui.renderSelection();
+            if(typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(function() {
+                    const st2 = appData && typeof appData.sourceText === "string" ? appData.sourceText : stClose;
+                    if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(st2);
+                });
+            }
             if(ui.activeQuoteId) {
                 const item = appData.items.find(i=>i.id===ui.activeQuoteId);
                 if(item) ui.runBuilder(item); 
@@ -17165,8 +17187,9 @@ const ui = {
         });
     },
 
-    renderSelection: function() {
+    renderSelection: function(overrideCanon) {
         const cont = document.getElementById("selection-area");
+        const passageCanonOverride = (overrideCanon != null && String(overrideCanon).trim()) ? String(overrideCanon).trim() : "";
         if(!cont) return;
         admin.ensureSelectionData();
         if(!appData.selection) {
@@ -17201,7 +17224,7 @@ const ui = {
         if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
         const lblLevelSelect = document.getElementById("lbl-level-select");
         if(lblLevelSelect) lblLevelSelect.textContent = String(level);
-        const sourceTextEarly = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText();
+        const sourceTextEarly = passageCanonOverride || (app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText());
         const hasSourceEarly = !!(sourceTextEarly && String(sourceTextEarly).trim());
         const helpWrap = document.getElementById("selection-student-help-wrap");
         if(helpWrap) {
@@ -17254,7 +17277,7 @@ const ui = {
         const optionCount = Math.max(2, Math.min(20, pointsGoal + distractorTarget));
         const correctItemsAll = sel.items.filter(i => i.correct)
             .filter(i => !i.device || selectionDevices[i.device] !== false);
-        const sourceText = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText();
+        const sourceText = passageCanonOverride || (app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText());
         const hasSource = !!(sourceText && String(sourceText).trim());
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         let excerptSliceFailed = false;
@@ -22966,12 +22989,13 @@ const admin = {
                     return;
                 }
                 let toStore = canon;
-                if(hadExamGutterDom) {
-                    const flushKeepsGutters = app._storedCanonKeepsPassageLayout(canon)
-                        && typeof app._passageCanonRendersGutterHtml === "function"
-                        && app._passageCanonRendersGutterHtml(canon);
-                    /** After Sync, a close-time flush can downgrade JSON → plain/HTML; keep the last good v2 string so Lab keeps WJEC ticks. */
-                    if(!flushKeepsGutters && priorOk) toStore = priorTrim;
+                if(hadExamGutterDom && priorOk) {
+                    if(!app._closeTimeFlushAcceptsPassageCanon(priorTrim, canon, hadExamGutterDom)) {
+                        if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(priorTrim);
+                        else if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(priorTrim);
+                        app.save();
+                        return;
+                    }
                 }
                 if(toStore === priorTrim) {
                     if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(priorTrim);
