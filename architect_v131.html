@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T19:25:00">
+<meta name="architect-build" content="2026-05-20T19:40:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -7985,10 +7985,14 @@ const app = {
     },
     _passageLayoutEntryHasVisibleText: function(row) {
         if(!row) return false;
-        const plain = app.htmlFragmentToPlainText(row.html != null ? row.html : row.text || "").replace(/\s+/g, " ").trim();
+        const htmlSrc = row.html != null ? row.html : "";
+        const textSrc = row.text != null ? row.text : "";
+        const plain = app.htmlFragmentToPlainText(htmlSrc || textSrc).replace(/\s+/g, " ").trim();
         if(plain.length > 0) return true;
-        const h = String(row.html != null ? row.html : "").trim();
+        if(String(textSrc).replace(/\s+/g, " ").trim().length > 0) return true;
+        const h = String(htmlSrc).trim();
         if(!h) return false;
+        if(/&(nbsp|#160);/i.test(h)) return true;
         return !/^(?:\s*<br\s*\/?>\s*)+$/i.test(h) && !/^<p>\s*<br\s*\/?>\s*<\/p>$/i.test(h);
     },
     _filterEmptyPassageLayoutEntries: function(entries) {
@@ -7996,13 +8000,15 @@ const app = {
         const kept = entries.filter(function(row) { return app._passageLayoutEntryHasVisibleText(row); });
         return kept.length ? kept : entries;
     },
-    /** Drop trailing blank/br-only stored rows and duplicate tail prose before any gutter HTML is built. */
+    /** Drop trailing blank/br-only stored rows and duplicate tail prose before any gutter HTML is built. Never remove every row — that emptied gutters after load/flush. */
     _passagePrepareForDisplay: function(o) {
         if(!o || !Array.isArray(o.lines)) return o;
+        if(!o.lines.length) return o;
         let lines = o.lines.slice();
-        while(lines.length && !app._passageLayoutEntryHasVisibleText({ html: lines[lines.length - 1].html, text: lines[lines.length - 1].text })) {
+        while(lines.length > 1 && !app._passageLayoutEntryHasVisibleText({ html: lines[lines.length - 1].html, text: lines[lines.length - 1].text })) {
             lines = lines.slice(0, -1);
         }
+        if(!lines.length) return o;
         let out = lines.length === o.lines.length ? o : Object.assign({}, o, { lines: lines });
         if(app.passageTailRedundantWithLastStoredLine(out)) {
             out = Object.assign({}, out);
@@ -8017,15 +8023,21 @@ const app = {
      */
     _buildStructuredPassageLineBlocksHtml: function(o, editorPassageMode, gutterExtra) {
         if(!o || !Array.isArray(o.lines)) return "";
+        const oBeforePrepare = o;
         o = typeof app._passagePrepareForDisplay === "function" ? app._passagePrepareForDisplay(o) : o;
-        const expanded = app.expandStructuredPassageLineEntries(o, {
+        const expandOpts = {
             forceInsertWidthSplitForEditor: true,
             /**
              * **All** readers (Editing Suite, Lab, Quote Select, student export): one `.source-line-row` per v2 `lines[]` row after Sync.
              * Re-splitting only in the editor made many DOM rows per stored line while student showed fewer — significant gutter / ¶ drift.
              */
             displayTrustStoredRows: true
-        });
+        };
+        let expanded = app.expandStructuredPassageLineEntries(o, expandOpts);
+        /** Prepare/filter must not wipe the whole passage — fall back to unprepared rows so WJEC gutters still render. */
+        if(!expanded.length && oBeforePrepare && Array.isArray(oBeforePrepare.lines) && oBeforePrepare.lines.length) {
+            expanded = app.expandStructuredPassageLineEntries(oBeforePrepare, expandOpts);
+        }
         if(!expanded.length) return "";
         const m = appData && appData.meta;
         gutterExtra = gutterExtra || {};
@@ -9377,7 +9389,9 @@ const app = {
         if(opts.displayTrustStoredRows) {
             /** Sync/reflow already sized each stored row for insert width — do not split on `\\n` / `&lt;br&gt;` again at render (student vs teacher row counts diverged). */
             expanded = entriesBook.filter(function(row) {
-                return String(row.text == null ? "" : row.text).replace(/\s+/g, " ").trim().length > 0;
+                return typeof app._passageLayoutEntryHasVisibleText === "function"
+                    ? app._passageLayoutEntryHasVisibleText(row)
+                    : String(row.text == null ? "" : row.text).replace(/\s+/g, " ").trim().length > 0;
             });
         } else {
             expanded = app.expandLineEntriesOnNewlines(entriesBook, lineExpandOpts);
