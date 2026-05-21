@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T21:00:00">
+<meta name="architect-build" content="2026-05-20T21:15:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -4056,26 +4056,66 @@ const app = {
         if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
         return true;
     },
-    /** When Level Bank assigns only one question id per level, advance to the next active level after the goal is met (separate lesson rows for Q1a/Q1b etc.; bank maps one id per level). */
-    tryAdvanceToNextActiveLevel: function(currentLevel) {
-        const cur = parseInt(currentLevel, 10) || 1;
+    /** Next row in {@link getActiveLevels} after `cur`, or null if at the last active level / cur not in list. */
+    getNextActiveLevelAfter: function(cur) {
+        const active = app.getActiveLevels();
+        const c = parseInt(cur, 10) || 1;
+        const idx = active.indexOf(c);
+        if(idx < 0) return active.length ? active[0] : null;
+        if(idx >= active.length - 1) return null;
+        return active[idx + 1];
+    },
+    /** Quote Select / desk goal met for this level (Component 2 tap-only levels often have no Evidence Lab quote cards). */
+    isLevelSelectionGoalMet: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const goal = app.getSelectionEvidenceGoalForLevel(lvl);
+        if(goal < 1) return false;
+        if(app.countSelectionEvidencePoints(lvl) >= goal) return true;
+        if(app.countDeskCommitsForLevel(lvl) >= goal) return true;
+        return false;
+    },
+    /**
+     * Move the student to the next Level Bank level after finishing the current one.
+     * Uses activeLevels order (not numeric level+1). Component 2: works when there are zero quote-bank rows.
+     */
+    advanceStudentToNextActiveLevel: function(opts) {
+        opts = opts || {};
+        const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
         if(app.isLevelsOfResponseLevel(cur)) return false;
         const bank = app.getLevelBank();
         const entry = bank && bank[cur] ? bank[cur] : {};
-        const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
-        if(ids.length > 1) return false;
-        const active = app.getActiveLevels();
-        const idx = active.indexOf(cur);
-        if(idx < 0 || idx >= active.length - 1) return false;
-        const next = active[idx + 1];
+        let ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
+        if(!ids.length && Array.isArray(appData.questions)) ids = appData.questions.filter(q => q && q.id).map(q => q.id);
+        if(ids.length > 1) {
+            const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[cur] === "number")
+                ? userState.currentQuestionIndexByLevel[cur] : 0;
+            if(qIdx < ids.length - 1) return false;
+            if(!app.isLevelSelectionGoalMet(cur)) return false;
+        }
+        const next = app.getNextActiveLevelAfter(cur);
+        if(!userState.completedLevels.includes(cur)) userState.completedLevels.push(cur);
+        if(next == null) {
+            app.save();
+            if(opts.showCelebration !== false && typeof ui !== "undefined" && ui.showCelebration) ui.showCelebration(false, true);
+            return false;
+        }
         userState.selectionAnsweredForQuestion = [];
         userState.pendingCommitForNextQuestion = false;
+        userState.selectionCompleted = false;
         app.setLevel(next);
         if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
         app.save();
         if(ui.renderQuestionBanner) ui.renderQuestionBanner();
         if(ui.updateCommitAnswerPanel) ui.updateCommitAnswerPanel();
+        if(opts.showCelebration !== false && typeof ui !== "undefined" && ui.showCelebration) {
+            const rewardUrl = appData.settings && appData.settings.rewardUrl ? String(appData.settings.rewardUrl).trim() : "";
+            ui.showCelebration(!rewardUrl, false);
+        }
         return true;
+    },
+    /** When Level Bank assigns only one question id per level, advance to the next active level after the goal is met (separate lesson rows for Q1a/Q1b etc.; bank maps one id per level). */
+    tryAdvanceToNextActiveLevel: function(currentLevel) {
+        return app.advanceStudentToNextActiveLevel({ level: currentLevel, showCelebration: false });
     },
     simplifyText: function(text, tier) {
         let t = String(text || "").trim();
@@ -14600,7 +14640,12 @@ const app = {
                 if(idx < ids.length - 1) {
                     if(!userState.currentQuestionIndexByLevel) userState.currentQuestionIndexByLevel = {};
                     userState.currentQuestionIndexByLevel[level] = idx + 1;
+                    didAdvance = true;
+                } else if(app.isLevelSelectionGoalMet(level) && app.advanceStudentToNextActiveLevel({ level: level, showCelebration: false })) {
+                    didAdvance = true;
                 }
+            } else if(app.isLevelSelectionGoalMet(level) && app.advanceStudentToNextActiveLevel({ level: level, showCelebration: false })) {
+                didAdvance = true;
             }
         }
         userState.selectionChosen = [];
@@ -14666,11 +14711,8 @@ const app = {
             return;
         }
         const modules = app.getModulesActive();
-        const activeLevels = app.getActiveLevels();
-        const maxLevel = activeLevels.length ? Math.max(...activeLevels) : 1;
         if(modules.selection) app.advanceSelectionQuestionIfComplete();
-        if(userState.level < maxLevel) {
-            app.setLevel(userState.level + 1);
+        if(app.advanceStudentToNextActiveLevel({ showCelebration: false })) {
             if(modules.selection) {
                 ui.switchView('select');
                 ui.renderSelection();
@@ -14705,9 +14747,10 @@ const app = {
                 ui._seenQuoteKeys.add(key);
                 return true;
             });
-        if(levelItems.length === 0) return;
+        const selectionGoalMet = app.isLevelSelectionGoalMet(userState.level);
+        if(levelItems.length === 0 && !selectionGoalMet) return;
 
-        const allDone = levelItems.every(i => userState.completed.includes(i.id));
+        const allDone = levelItems.length > 0 && levelItems.every(i => userState.completed.includes(i.id));
         let meetsTarget = false;
         {
             const bank = app.getLevelBank();
@@ -14721,7 +14764,7 @@ const app = {
             }
         }
 
-        if(allDone || meetsTarget) {
+        if(allDone || meetsTarget || (levelItems.length === 0 && selectionGoalMet)) {
             if(!userState.completedLevels.includes(userState.level)) {
                 userState.completedLevels.push(userState.level);
             }
@@ -16400,14 +16443,7 @@ const ui = {
                     userState.selectionCompleted = !!goalMetRb;
                     app.save();
                     ui.renderDeskQuoteTabs();
-                    const modules = app.getModulesActive();
-                    const activeLevels = app.getActiveLevels();
-                    const maxLevel = activeLevels.length ? Math.max(...activeLevels) : 1;
-                    if(goalMetRb && userState.level < maxLevel) {
-                        app.setLevel(userState.level + 1);
-                        userState.selectionCompleted = false;
-                        app.save();
-                    }
+                    if(goalMetRb) app.advanceStudentToNextActiveLevel({ showCelebration: false });
                     ui.switchView("select");
                     ui.renderSelection();
                     app.checkLevelCompletion();
@@ -19171,16 +19207,16 @@ const ui = {
                 btn.style.display = 'none';
                 setTimeout(() => {
                     ui.closeCelebration();
-                    app.setLevel(userState.level + 1);
-                    ui.switchView('select');
+                    if(app.advanceStudentToNextActiveLevel({ showCelebration: false })) ui.switchView('select');
+                    else ui.switchView('select');
                 }, 3000);
             } else {
                 btn.innerText = "Continue";
                 btn.style.display = 'block';
                 btn.onclick = () => {
                     ui.closeCelebration();
-                    app.setLevel(userState.level + 1);
-                    ui.switchView('select');
+                    if(app.advanceStudentToNextActiveLevel({ showCelebration: false })) ui.switchView('select');
+                    else ui.switchView('select');
                 };
             }
         }
