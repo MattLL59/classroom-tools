@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T21:15:00">
+<meta name="architect-build" content="2026-05-20T21:30:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3281,8 +3281,7 @@ const app = {
         const lvl = parseInt(level, 10) || 1;
         const bank = app.getLevelBank();
         const entry = bank && bank[lvl] ? bank[lvl] : null;
-        let ids = entry && Array.isArray(entry.questionIds) && entry.questionIds.length ? entry.questionIds : null;
-        if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+        const ids = app.resolveQuestionIdsForLevel(lvl);
         if(!ids || ids.length === 0) return false;
         const questions = Array.isArray(appData.questions) && appData.questions.length ? appData.questions : [{ id: "q1" }];
         const firstId = questions[0] ? questions[0].id : "q1";
@@ -3293,12 +3292,36 @@ const app = {
         if(ids.length === 1) return norm(ids[0]) === norm(firstId) && norm(currentId) === norm(firstId);
         return norm(currentId) === norm(firstId);
     },
-    getCurrentQuestionIdForLevel: function(level) {
+    /**
+     * Question id(s) for this Level Bank row only. Empty questionIds → **one** id for this level (L1→q1), never the whole question bank.
+     * Falling back to all bank ids made completion advance “Question 2” inside the same level instead of moving to level 2.
+     */
+    resolveQuestionIdsForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
         const bank = app.getLevelBank();
-        const entry = bank && bank[lvl] ? bank[lvl] : null;
-        let ids = entry && Array.isArray(entry.questionIds) && entry.questionIds.length ? entry.questionIds : null;
-        if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+        const entry = bank && bank[lvl] ? bank[lvl] : {};
+        const assigned = Array.isArray(entry.questionIds)
+            ? entry.questionIds.map(function(id) { return id && String(id).trim(); }).filter(Boolean)
+            : [];
+        if(assigned.length) return assigned;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const norm = function(id) { return String(id || "").replace(/^q0?/i, "q").toLowerCase(); };
+        const sorted = questions.slice().sort(function(a, b) {
+            const ma = String(a && a.id || "").match(/q0?(\d+)/i);
+            const mb = String(b && b.id || "").match(/q0?(\d+)/i);
+            return (ma ? parseInt(ma[1], 10) : 99) - (mb ? parseInt(mb[1], 10) : 99);
+        });
+        const active = app.getActiveLevels();
+        const ai = active.indexOf(lvl);
+        if(ai >= 0 && sorted[ai] && sorted[ai].id) return [String(sorted[ai].id).trim()];
+        if(sorted[lvl - 1] && sorted[lvl - 1].id) return [String(sorted[lvl - 1].id).trim()];
+        const byLvl = sorted.find(function(q) { return q && norm(q.id) === norm("q" + lvl); });
+        if(byLvl && byLvl.id) return [String(byLvl.id).trim()];
+        return sorted.length && sorted[0].id ? [String(sorted[0].id).trim()] : ["q1"];
+    },
+    getCurrentQuestionIdForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const ids = app.resolveQuestionIdsForLevel(lvl);
         if(!ids || ids.length === 0) return null;
         const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number")
             ? Math.max(0, Math.min(userState.currentQuestionIndexByLevel[lvl], ids.length - 1))
@@ -3314,8 +3337,7 @@ const app = {
         if(app.isLevelsOfResponseLevel(lvl)) return null;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
-        let ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
-        if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+        const ids = app.resolveQuestionIdsForLevel(lvl);
         if(!ids || ids.length <= 1) return null;
         const rawIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number") ? userState.currentQuestionIndexByLevel[lvl] : 0;
         const idx = Math.max(0, Math.min(rawIdx, ids.length - 1));
@@ -3423,16 +3445,8 @@ const app = {
         const level = userState.level || 1;
         const bank = app.getLevelBank();
         const entry = bank && bank[level] ? bank[level] : null;
-        const ids = entry && Array.isArray(entry.questionIds) && entry.questionIds.length ? entry.questionIds : null;
-        if(!ids || !ids.length) {
-            const firstQ = Array.isArray(appData.questions) && appData.questions.length ? appData.questions[0] : null;
-            const prompt = firstQ && typeof firstQ.prompt === "string" ? firstQ.prompt : (appData.question || "");
-            if(prompt && appData.selection.question.prompt !== prompt) {
-                appData.selection.question.prompt = prompt;
-                if(appData.question === appData.selection.question.prompt || !appData.question) appData.question = prompt;
-            }
-            return;
-        }
+        const ids = app.resolveQuestionIdsForLevel(level);
+        if(!ids || !ids.length) return;
         const currentId = app.getCurrentQuestionIdForLevel(level);
         const norm = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const q = (appData.questions || []).find(qq => qq && (qq.id === currentId || norm(qq.id) === norm(currentId)));
@@ -4001,8 +4015,7 @@ const app = {
         const level = app.getEffectiveLevel();
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
-        let ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
-        if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+        const ids = app.resolveQuestionIdsForLevel(level);
         if(!ids || ids.length <= 1) return false;
         const deskQ = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
         if(deskQ.length > 0) return false;
@@ -4027,11 +4040,7 @@ const app = {
         const level = app.getEffectiveLevel();
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
-        let ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
-        if(!ids || ids.length === 0) {
-            const questions = Array.isArray(appData.questions) ? appData.questions : [];
-            ids = questions.filter(q => q && q.id).map(q => q.id);
-        }
+        const ids = app.resolveQuestionIdsForLevel(level);
         if(!ids || ids.length <= 1) return false;
         const shortAns = (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || levelEntry.shortAnswersOnly === true;
         const sel = appData.selection;
@@ -4082,10 +4091,7 @@ const app = {
         opts = opts || {};
         const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
         if(app.isLevelsOfResponseLevel(cur)) return false;
-        const bank = app.getLevelBank();
-        const entry = bank && bank[cur] ? bank[cur] : {};
-        let ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
-        if(!ids.length && Array.isArray(appData.questions)) ids = appData.questions.filter(q => q && q.id).map(q => q.id);
+        const ids = app.resolveQuestionIdsForLevel(cur);
         if(ids.length > 1) {
             const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[cur] === "number")
                 ? userState.currentQuestionIndexByLevel[cur] : 0;
@@ -4102,6 +4108,8 @@ const app = {
         userState.selectionAnsweredForQuestion = [];
         userState.pendingCommitForNextQuestion = false;
         userState.selectionCompleted = false;
+        if(!userState.currentQuestionIndexByLevel) userState.currentQuestionIndexByLevel = {};
+        userState.currentQuestionIndexByLevel[next] = 0;
         app.setLevel(next);
         if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
         app.save();
@@ -14633,8 +14641,7 @@ const app = {
             const level = app.getEffectiveLevel();
             const levelBank = app.getLevelBank();
             const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
-            let ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
-            if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+            const ids = app.resolveQuestionIdsForLevel(level);
             if(ids && ids.length > 1) {
                 const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[level] === "number") ? userState.currentQuestionIndexByLevel[level] : 0;
                 if(idx < ids.length - 1) {
@@ -18932,8 +18939,7 @@ const ui = {
             panel.classList.remove("hidden");
             const levelBank = app.getLevelBank();
             const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
-            let ids = levelEntry.questionIds && levelEntry.questionIds.length ? levelEntry.questionIds : null;
-            if(!ids || ids.length === 0) ids = (appData.questions || []).filter(q => q && q.id).map(q => q.id);
+            const ids = app.resolveQuestionIdsForLevel(level);
             const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[level] === "number") ? userState.currentQuestionIndexByLevel[level] : 0;
             const clamped = Math.max(0, Math.min(idx, Math.max(0, (ids.length || 1) - 1)));
             const qNum = Math.min(clamped + 1, ids.length || 1);
@@ -19028,8 +19034,10 @@ const ui = {
             const lvlNow = app.getEffectiveLevel();
             const goalOk = app.countSelectionEvidencePoints(lvlNow) >= app.getSelectionEvidenceGoalForLevel(lvlNow);
             const lor = app.isLevelsOfResponseLevel(lvlNow);
-            const advancedInLevel = !lor && app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete();
-            const advancedLevel = !lor && !advancedInLevel && goalOk && app.tryAdvanceToNextActiveLevel && app.tryAdvanceToNextActiveLevel(lvlNow);
+            const idsForLvl = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvlNow) : [];
+            const singleQuestionOnLevel = !idsForLvl || idsForLvl.length <= 1;
+            const advancedInLevel = !lor && !singleQuestionOnLevel && app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete();
+            const advancedLevel = !lor && goalOk && (singleQuestionOnLevel || !advancedInLevel) && app.tryAdvanceToNextActiveLevel && app.tryAdvanceToNextActiveLevel(lvlNow);
             if(app.checkLevelCompletion) app.checkLevelCompletion();
             if(advancedLevel || advancedInLevel) {
                 if(ui.switchView) ui.switchView("select", true);
