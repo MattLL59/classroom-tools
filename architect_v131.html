@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T21:30:00">
+<meta name="architect-build" content="2026-05-20T21:45:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3728,9 +3728,9 @@ const app = {
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
         if(levelEntry.levelsOfResponse === true) return 1;
         const ptsOverride = app.getLevelBankPointsRequiredOverride(levelEntry);
-        const ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+        const ids = app.resolveQuestionIdsForLevel(lvl);
         const questions = Array.isArray(appData.questions) ? appData.questions : [{ id: "q1", prompt: appData.question || "" }];
-        const hasMultipleQuestions = !!(ids && ids.length > 1);
+        const hasMultipleQuestions = ids.length > 1;
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const findQById = (id) => questions.find(qq => qq && (qq.id === id || normQid(qq.id) === normQid(id)));
         let currentQId = app.getCurrentQuestionIdForLevel(lvl);
@@ -4098,8 +4098,11 @@ const app = {
             if(qIdx < ids.length - 1) return false;
             if(!app.isLevelSelectionGoalMet(cur)) return false;
         }
-        const next = app.getNextActiveLevelAfter(cur);
+        let next = app.getNextActiveLevelAfter(cur);
         if(!userState.completedLevels.includes(cur)) userState.completedLevels.push(cur);
+        if(next == null && app.isLevelSelectionGoalMet(cur) && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
+            next = app.getNextActiveLevelAfter(cur);
+        }
         if(next == null) {
             app.save();
             if(opts.showCelebration !== false && typeof ui !== "undefined" && ui.showCelebration) ui.showCelebration(false, true);
@@ -13742,11 +13745,42 @@ const app = {
         if(level === 10) return ["marker", "starter", "quote", "method", "manual_effect", "link_l3"];
         return ["marker", "starter", "quote", "method", "manual_effect", "link_l3"];
     },
+    /**
+     * Past-paper lessons often keep activeLevels [1] while the bank has q1–qN. Sync Level Bank + activeLevels
+     * (same as Extract questions) so level completion can move L1→L2 instead of staying on one level.
+     */
+    ensureActiveLevelsFromQuestions: function() {
+        if(!appData || !appData.settings) return false;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        if(questions.length < 2) return false;
+        const activeArr = Array.isArray(appData.settings.activeLevels)
+            ? appData.settings.activeLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= ARCHITECT_MAX_LEVEL)
+            : [];
+        const bank = app.getLevelBank();
+        let tickedLevels = 0;
+        for(let lvl = 1; lvl <= ARCHITECT_MAX_LEVEL; lvl++) {
+            const entry = bank && bank[lvl] ? bank[lvl] : {};
+            const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
+            if(ids.length > 0) tickedLevels++;
+        }
+        if(activeArr.length >= questions.length && tickedLevels >= questions.length) return false;
+        if(typeof admin !== "undefined" && typeof admin.syncLevelBankForPastPaperQuestions === "function") {
+            admin.syncLevelBankForPastPaperQuestions();
+            return true;
+        }
+        return false;
+    },
     getActiveLevels: function() {
+        const questions = Array.isArray(appData && appData.questions) ? appData.questions : [];
         const fromSettings = appData && appData.settings && Array.isArray(appData.settings.activeLevels) && appData.settings.activeLevels.length
             ? appData.settings.activeLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= ARCHITECT_MAX_LEVEL)
             : [];
-        if(fromSettings.length) return fromSettings;
+        if(fromSettings.length) {
+            if(questions.length >= 2 && fromSettings.length < questions.length) {
+                return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, (_, i) => i + 1);
+            }
+            return fromSettings;
+        }
         const bank = app.getLevelBank();
         const active = [];
         for(let lvl = 1; lvl <= ARCHITECT_MAX_LEVEL; lvl++) {
@@ -13754,7 +13788,11 @@ const app = {
             const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
             if(ids.length > 0) active.push(lvl);
         }
-        return active.length ? active : [1];
+        if(active.length) return active;
+        if(questions.length >= 2) {
+            return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, (_, i) => i + 1);
+        }
+        return [1];
     },
     getModulesActive: function() {
         return { selection: true, lab: false, desk: true };
@@ -15120,6 +15158,7 @@ const ui = {
     init: function() {
         ui._initInProgress = true;
         if(typeof admin !== "undefined" && admin.ensureSelectionData) admin.ensureSelectionData();
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         if(!ui._textGuardBound) {
             ui._textGuardBound = true;
             const isEditable = (el) => {
