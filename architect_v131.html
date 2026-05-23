@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T22:15:00">
+<meta name="architect-build" content="2026-05-20T22:30:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3446,20 +3446,43 @@ const app = {
             ui.renderSelection();
         }
     },
-    /** True for highlight→answer, no Sentence Builder: Level Bank "Short ans" checked, or Component 1 when this level is on the paper's first question block. For Component 2, short mode is only when "Short ans" is checked — not inferred from question id (so Level 4 long marks + Points field control behaviour). */
-    isComponent2ShortAnswerQuestion: function(level) {
+    /** Level Bank "Short ans" (accepts legacy true / "true"). C1 Q1 retrieval when not component 2. */
+    isShortAnswerLevel: function(level) {
         try {
-            if(!appData) return false;
-            const bank = app.getLevelBank();
-            const entry = bank && bank[level] ? bank[level] : {};
-            if(entry.shortAnswersOnly === true) return true;
-            if(entry.shortAnswersOnly === false) return false;
-            if(appData.component !== 2) {
-                if(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) return true;
-                return false;
-            }
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
+            const entry = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
+            const sa = entry.shortAnswersOnly;
+            if(sa === true || sa === "true" || sa === 1) return true;
+            if(sa === false || sa === "false" || sa === 0) return false;
+            if(appData && appData.component !== 2 && app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
             return false;
         } catch(e) { return false; }
+    },
+    /** True for highlight→answer, no Sentence Builder: Level Bank "Short ans" on C2, or C1 first-question retrieval. */
+    isComponent2ShortAnswerQuestion: function(level) {
+        try {
+            if(!appData || appData.component !== 2) return false;
+            return app.isShortAnswerLevel(level);
+        } catch(e) { return false; }
+    },
+    /** C2 Short ans: quote only — no examine/justify step; send to answer and advance. */
+    acceptShortAnswerQuoteFromPassage: function(quoteText, level) {
+        const pending = String(quoteText || "").trim();
+        if(!pending) return false;
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
+        if(!app.isShortAnswerLevel(lvl) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl))) return false;
+        if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode()) return false;
+        if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+        const k = app.quoteKey(pending);
+        if(!userState.selectionChosen.some(function(ch) {
+            return app.quoteKey(typeof ch === "object" && ch && ("quote" in ch || "original" in ch) ? (ch.quote || ch.original) : ch) === k;
+        })) {
+            userState.selectionChosen.push(pending);
+        }
+        ui._freeSelectPendingQuote = "";
+        app.save();
+        if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer();
+        return true;
     },
     syncSelectionQuestionFromLevel: function() {
         if(!appData.selection || !appData.selection.question) return;
@@ -14325,7 +14348,7 @@ const app = {
                 distractorCount: parseInt(r.distractorCount, 10) || fallbackDistractors,
                 freeSelectFromText: r.freeSelectFromText !== false,
                 noQuotesDistractors: r.noQuotesDistractors === true,
-                shortAnswersOnly: r.shortAnswersOnly === true,
+                shortAnswersOnly: !!(r.shortAnswersOnly === true || r.shortAnswersOnly === "true" || r.shortAnswersOnly === 1),
                 levelsOfResponse: r.levelsOfResponse === true,
                 questionIds: questionIds,
                 c2Source: c2Source,
@@ -15533,6 +15556,15 @@ const ui = {
                     } catch(eOk) { /* keep okMatch false */ }
                 }
                 if(!okMatch) return;
+                const lvlTap = (app.getEffectiveLevel && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1;
+                if(app.acceptShortAnswerQuoteFromPassage && app.acceptShortAnswerQuoteFromPassage(text, lvlTap)) {
+                    if(window.getSelection) window.getSelection().removeAllRanges();
+                    if(closeReaderThenSwitch) {
+                        ui.closeModal("modal-source");
+                        ui.switchView("select");
+                    }
+                    return;
+                }
                 ui._freeSelectPendingQuote = text;
                 if(window.getSelection) window.getSelection().removeAllRanges();
                 if(closeReaderThenSwitch) {
@@ -17373,7 +17405,13 @@ const ui = {
         const autoDeskAdv = app.shouldAutoAdvanceQuotePipelineToDesk(level);
         let c2ShortAnswer = false;
         try { c2ShortAnswer = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)); } catch(e) {}
-        const isShortAnswerMode = !!(c2ShortAnswer || (levelEntry && levelEntry.shortAnswersOnly === true));
+        const isShortAnswerMode = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level));
+        if(isShortAnswerMode && sel && sel.modes) {
+            sel.modes.requireReason = false;
+            if(Array.isArray(sel.modes.stages)) {
+                sel.modes.stages = sel.modes.stages.filter(function(s) { return s !== "justify" && s !== "align"; });
+            }
+        }
         const questionTextEarly = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.getQuestionForLevel(level) || (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "");
         ui.renderQuestionBanner();
         if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
@@ -17724,6 +17762,9 @@ const ui = {
         const questionText = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(app.getQuestionForLevel(level)) : app.getQuestionForLevel(level));
         /* Passage highlight → examine step must run even when "Give me quote choices" is on (that option only hides the tap *hint* card, not tapping itself). */
         const pendingQuotePassage = String(ui._freeSelectPendingQuote || "").trim();
+        if(tapPathActive && hasSource && pendingQuotePassage && isShortAnswerMode && !teacherRecordMode && !(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level))) {
+            if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
+        }
         if(tapPathActive && hasSource && pendingQuotePassage) {
             const pendingQuote = pendingQuotePassage;
             const tr = teacherRecordMode;
@@ -18194,6 +18235,18 @@ const ui = {
                         meta.textContent = `✅ ${label} — ${reason}`;
                         card.classList.remove("quote-dim", "card-choice-incorrect");
                         card.classList.add("card-choice-correct");
+                        if(isShortAnswerMode && o.correct && o.quote) {
+                            if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+                            const sk = storeKey(o.quote);
+                            if(!userState.selectionChosen.some(ch => app.quoteKey(typeof ch === "object" && ch && "quote" in ch ? ch.quote : ch) === sk)) {
+                                userState.selectionChosen.push(o.quote);
+                            }
+                            ui._selectionCorrectItem = o.item;
+                            ui._selectionQuote = o.quote;
+                            app.save();
+                            ui.sendSelectionQuotesDirectToAnswer();
+                            return;
+                        }
                     } else {
                         const expectedLab = correct === "analysis" ? "Strong" : "Not strong";
                         const chosenLab = choice === "analysis" ? "Strong" : "Not strong";
