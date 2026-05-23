@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T12:00:00">
-<meta name="architect-rev" content="shortans-per-level-pull-main-a91c04">
+<meta name="architect-build" content="2026-05-23T14:00:00">
+<meta name="architect-rev" content="shortans-l2-advance-fix-b82d10">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3495,12 +3495,29 @@ const app = {
     hasShortAnswerContentForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
         if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
-        if(!userState.questionEssays || typeof userState.questionEssays !== "object") return false;
-        const key = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvl) : (String(lvl) + "_0");
-        const body = String(userState.questionEssays[key] || "").trim();
-        if(!body) return false;
-        const stripped = body.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
-        return stripped.length >= 3;
+        if(userState.questionEssays && typeof userState.questionEssays === "object") {
+            const key = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvl) : (String(lvl) + "_0");
+            const body = String(userState.questionEssays[key] || "").trim();
+            const stripped = body.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
+            if(stripped.length >= 3) return true;
+        }
+        if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) {
+            const essayEl = document.getElementById("essay-area");
+            const live = essayEl ? String(essayEl.value || "").trim() : String((userState && userState.essay) || "").trim();
+            if(live.length >= 8) return true;
+        }
+        return false;
+    },
+    /** Next active level after cur (handles gaps e.g. activeLevels [1,2,3,6,7,8]). */
+    resolveNextActiveLevelAfter: function(cur) {
+        const active = app.getActiveLevels();
+        const c = parseInt(cur, 10) || 1;
+        const idx = active.indexOf(c);
+        if(idx >= 0 && idx < active.length - 1) return active[idx + 1];
+        for(let i = 0; i < active.length; i++) {
+            if(active[i] > c) return active[i];
+        }
+        return null;
     },
     /** Level Bank "Short ans" (accepts legacy true / "true"). C1 Q1 retrieval when not component 2. */
     isShortAnswerLevel: function(level) {
@@ -4188,12 +4205,7 @@ const app = {
     },
     /** Next row in {@link getActiveLevels} after `cur`, or null if at the last active level / cur not in list. */
     getNextActiveLevelAfter: function(cur) {
-        const active = app.getActiveLevels();
-        const c = parseInt(cur, 10) || 1;
-        const idx = active.indexOf(c);
-        if(idx < 0) return active.length ? active[0] : null;
-        if(idx >= active.length - 1) return null;
-        return active[idx + 1];
+        return app.resolveNextActiveLevelAfter ? app.resolveNextActiveLevelAfter(cur) : null;
     },
     /** Quote Select / desk goal met for this level (Component 2 tap-only levels often have no Evidence Lab quote cards). */
     isLevelSelectionGoalMet: function(level) {
@@ -4226,24 +4238,18 @@ const app = {
         if(app.isLevelsOfResponseLevel(lvl)) return false;
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         if(!app.isLevelProgressionReady(lvl)) return false;
-        let next = app.getNextActiveLevelAfter(lvl);
-        if(next == null && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
-            next = app.getNextActiveLevelAfter(lvl);
-        }
-        if(next == null && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
-            const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
-            if(qCount > lvl) {
-                const candidate = lvl + 1;
-                const activeNow = app.getActiveLevels();
-                if(activeNow.indexOf(candidate) < 0 && appData.settings) {
-                    if(!Array.isArray(appData.settings.activeLevels)) appData.settings.activeLevels = [];
-                    if(appData.settings.activeLevels.indexOf(candidate) < 0) {
-                        appData.settings.activeLevels.push(candidate);
-                        appData.settings.activeLevels.sort(function(a, b) { return a - b; });
-                    }
-                }
-                next = app.getNextActiveLevelAfter(lvl) || candidate;
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
+        let next = app.resolveNextActiveLevelAfter(lvl);
+        if(next == null && quoteOnly && appData && appData.settings) {
+            const activeNow = app.getActiveLevels();
+            const candidate = lvl + 1;
+            if(activeNow.indexOf(candidate) < 0 && candidate <= ARCHITECT_MAX_LEVEL) {
+                if(!Array.isArray(appData.settings.activeLevels)) appData.settings.activeLevels = [];
+                appData.settings.activeLevels.push(candidate);
+                appData.settings.activeLevels.sort(function(a, b) { return a - b; });
+                app.save();
             }
+            next = app.resolveNextActiveLevelAfter(lvl);
         }
         if(next == null) return false;
         return app.advanceStudentToNextActiveLevel({
@@ -4293,10 +4299,11 @@ const app = {
         } else if(!shortAnswerAdvance && !app.isLevelProgressionReady(cur)) {
             return false;
         }
-        let next = app.getNextActiveLevelAfter(cur);
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
+        let next = app.resolveNextActiveLevelAfter(cur);
         if(!userState.completedLevels.includes(cur)) userState.completedLevels.push(cur);
-        if(next == null && app.isLevelProgressionReady(cur) && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
-            next = app.getNextActiveLevelAfter(cur);
+        if(next == null && app.isLevelProgressionReady(cur)) {
+            next = app.resolveNextActiveLevelAfter(cur);
         }
         if(next == null) {
             app.save();
@@ -13975,10 +13982,22 @@ const app = {
             ? appData.settings.activeLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= ARCHITECT_MAX_LEVEL)
             : [];
         if(fromSettings.length) {
-            if(questions.length >= 2 && fromSettings.length < questions.length) {
-                return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, (_, i) => i + 1);
+            const bank = app.getLevelBank();
+            const fromBank = [];
+            for(let lvl = 1; lvl <= ARCHITECT_MAX_LEVEL; lvl++) {
+                const entry = bank && bank[lvl] ? bank[lvl] : {};
+                const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
+                if(ids.length > 0) fromBank.push(lvl);
             }
-            return fromSettings;
+            let merged = fromSettings.slice();
+            fromBank.forEach(function(l) {
+                if(merged.indexOf(l) < 0) merged.push(l);
+            });
+            merged.sort(function(a, b) { return a - b; });
+            if(questions.length >= 2 && merged.length < questions.length) {
+                return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, function(_, i) { return i + 1; });
+            }
+            return merged.length ? merged : fromSettings;
         }
         const bank = app.getLevelBank();
         const active = [];
@@ -15364,7 +15383,7 @@ const ui = {
             if(typeof app.tryFinishShortAnswerLevelAndAdvance !== "function") {
                 const rev = document.querySelector("meta[name=\"architect-rev\"]");
                 const need = rev ? String(rev.getAttribute("content") || "").trim() : "";
-                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 2026-05-23T12:00:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
+                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 2026-05-23T14:00:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
                 console.warn(msg);
                 if(!document.getElementById("architect-outdated-script-banner")) {
                     const b = document.createElement("div");
@@ -19369,7 +19388,7 @@ const ui = {
             const lvlEarly = app.getEffectiveLevel && app.getEffectiveLevel();
             let perLevelQuoteEssay = false;
             try {
-                perLevelQuoteEssay = !!(lvlEarly != null && app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlEarly) && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout());
+                perLevelQuoteEssay = !!(lvlEarly != null && app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlEarly));
             } catch(eSa) {}
             let toAdd = texts.map(t => app.formatDeskQueueEntryForEssay(t)).filter(Boolean).join("\n\n");
             if(!toAdd && perLevelQuoteEssay) {
