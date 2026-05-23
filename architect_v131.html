@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T21:15:00">
-<meta name="architect-rev" content="c2-instruction-rubric-filter-f806">
+<meta name="architect-build" content="2026-05-23T22:00:00">
+<meta name="architect-rev" content="c2-q13a-name-one-subpart-f806">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -20271,6 +20271,11 @@ const admin = {
         const splitSubparts = (s) => {
             if(!s || typeof s !== "string" || s.length < minLen) return [s];
             const t = s.trim();
+            /* WJEC Q13-style: (a) Name one… [1] (b) … — split all lettered parts, not only (b)(c). */
+            if(/\(\s*a\s*\)/i.test(t) && /\(\s*b\s*\)/i.test(t) && /\[\s*\d+\s*\]/.test(t)) {
+                const byABC = t.split(/(?=\(\s*[a-c]\s*\)\s+)/i).map(x => x.trim()).filter(x => x.length >= minLen);
+                if(byABC.length >= 2 && byABC.length <= 6) return byABC;
+            }
             const byAfterMark = t.split(/(?<=\])\s*(?=\(?[b-z]\)\s)/i).map(x => x.trim()).filter(x => x.length >= minLen);
             if(byAfterMark.length > 1) return byAfterMark;
             const byAfterMarkTight = t.split(/(?<=\])(?=\s*\(?[b-z]\)\s)/i).map(x => x.trim()).filter(x => x.length >= minLen);
@@ -20321,11 +20326,10 @@ const admin = {
     isC2ExamInstructionChunk: function(s) {
         const plain = admin._plainTextFromQuestionChunk(s);
         if(!plain || plain.length < 8) return false;
-        /** Real sub-parts: leading (a) with a mark bracket and a question verb. */
-        if(/^\s*\(?a\)\s/i.test(plain) && /\[\s*\d+\s*\]/.test(plain) && /\b(?:explain|how|what|why|describe|compare|evaluate|identify|comment|write|suggest|give|refer|summari)/i.test(plain))
-            return false;
+        /** Real sub-parts: leading (a) with a mark bracket (incl. “Name one…”, “Give one…”, not only Explain/How). */
+        if(/^\s*\(?a\)\s/i.test(plain) && /\[\s*\d+\s*\]/.test(plain)) return false;
         if(/^\s*\d{1,2}\s+[1-6]\s+a\)\s/i.test(plain) || /^\s*1\s+1\s+a\)\s/i.test(plain)) return false;
-        if(/\[\s*\d+\s*\]/.test(plain) && /\(\s*[a-z]\s*\)/i.test(plain) && /\b(?:explain|how|what|why|describe|compare|evaluate)\b/i.test(plain)) return false;
+        if(/\[\s*\d+\s*\]/.test(plain) && /\(\s*[a-z]\s*\)/i.test(plain) && /\b(?:explain|how|what|why|describe|compare|evaluate|identify|name|give|refer|write|comment)\b/i.test(plain)) return false;
         const shortInstruction = [
             /^answer\s+all\s+questions/i,
             /^read\s+the\s+separate\s+resource/i,
@@ -20377,6 +20381,8 @@ const admin = {
         }
         /** Board rubric before a Victorian / 19th C or resource extract block — not a Focus question. */
         if(/^to\s+answer\s+the\s+following\s+question(?:s)?\b/i.test(plain)) {
+            /* Rubric glued to (a)(b)(c) in one PDF chunk — keep the question parts, not the rubric line. */
+            if(/\(\s*a\s*\)\s[\s\S]{4,}?\[\s*\d+\s*\]/i.test(plain)) return false;
             if(/\b(?:read|use\s+both|refer\s+to|must\s+read|will\s+need\s+to\s+read)\b/i.test(plain)) return true;
         }
         if(/^to\s+answer\s+this\s+question\b/i.test(plain) && /\bread\b/i.test(plain)) return true;
@@ -20391,6 +20397,20 @@ const admin = {
         if(/\b(?:21st|twenty.?first|newspaper\s+article|resource\s+material|separate\s+resource|resource\s+paper)\b/i.test(plain)) return "21st";
         if(/\bread\s+the\s+extract\b/i.test(plain) && !/\bresource\b/i.test(plain)) return "19th";
         return null;
+    },
+    /** If a chunk starts with a “To answer…” rubric then (a), return rubric + question body separately. */
+    peelLeadingC2InstructionRubricFromChunk: function(s) {
+        const raw = String(s || "").trim();
+        if(!raw) return { body: "", rubric: null };
+        const plain = admin._plainTextFromQuestionChunk(raw);
+        if(!/^to\s+answer\s+the\s+following\s+question(?:s)?\b/i.test(plain)) return { body: raw, rubric: null };
+        const ia = admin.indexOfFirstPartA(raw);
+        if(ia < 12) return { body: raw, rubric: null };
+        const rubricPart = raw.slice(0, ia).trim();
+        const body = raw.slice(ia).trimStart();
+        if(!body || body.length < 8) return { body: raw, rubric: null };
+        if(!/^to\s+answer\s+the\s+following/i.test(admin._plainTextFromQuestionChunk(rubricPart))) return { body: raw, rubric: null };
+        return { body, rubric: rubricPart };
     },
     /** Short label for students/teachers, e.g. “London As It Is” from the rubric quotes. */
     shortenC2InstructionRubricLabel: function(s) {
@@ -20413,8 +20433,19 @@ const admin = {
         let pendingSource = null;
         let pendingHint = "";
         chunks.forEach(function(ch) {
-            const raw = String(ch || "").trim();
+            let raw = String(ch || "").trim();
             if(!raw) return;
+            if(typeof admin.peelLeadingC2InstructionRubricFromChunk === "function") {
+                const peeled = admin.peelLeadingC2InstructionRubricFromChunk(raw);
+                if(peeled.rubric) {
+                    const inferred = admin.inferC2PassageFromInstructionRubric(peeled.rubric);
+                    if(inferred) pendingSource = inferred;
+                    const lab = admin.shortenC2InstructionRubricLabel(peeled.rubric);
+                    if(lab) pendingHint = lab;
+                    raw = peeled.body;
+                }
+            }
+            if(!raw || raw.length < 8) return;
             if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(raw)) {
                 const inferred = admin.inferC2PassageFromInstructionRubric(raw);
                 if(inferred) pendingSource = inferred;
@@ -20451,8 +20482,20 @@ const admin = {
         const kept = [];
         safe.questions.forEach(function(q) {
             if(!q || typeof q.prompt !== "string") return;
-            const p = q.prompt.trim();
+            let p = q.prompt.trim();
             if(!p) return;
+            if(typeof admin.peelLeadingC2InstructionRubricFromChunk === "function") {
+                const peeled = admin.peelLeadingC2InstructionRubricFromChunk(p);
+                if(peeled.rubric) {
+                    const inferred = admin.inferC2PassageFromInstructionRubric(peeled.rubric);
+                    if(inferred) pendingSource = inferred;
+                    const lab = admin.shortenC2InstructionRubricLabel(peeled.rubric);
+                    if(lab) pendingHint = lab;
+                    p = peeled.body;
+                    q.prompt = p;
+                    changed = true;
+                }
+            }
             if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(p)) {
                 const inferred = admin.inferC2PassageFromInstructionRubric(p);
                 if(inferred) pendingSource = inferred;
@@ -20513,7 +20556,7 @@ const admin = {
         if(!raw || typeof raw !== "string" || raw.length < minLen) return null;
         /* C1 single-page extracts often omit the literal "SECTION A" line; marks + lettered parts are enough. */
         if(!/\[\s*\d+\s*\]/.test(raw) || !/\(\s*[a-z]\s*\)/i.test(raw)) return null;
-        const mega = /(?<=\])\s+(?=How\s+does\s+(?:Mark|the\s+writer)\b)|(?<=\])\s+(?=How\s+(?:do|is|are|might|would|could|have|had)\b)|(?<=\])\s+(?=What\s+do\s+you\s+think)|(?<=\])\s+(?=What\s+(?:are|is)\b)|(?<=\])\s+(?=According\s+to\s+these\s+two)|(?<=\])\s+(?=Using\s+information\s+from\s+both\s+texts)|(?<=\])\s+(?=Both\s+of\s+these\s+texts)|(?<=\])\s+(?=How\s+far\s+do\s+you\s+agree)|(?<=\])\s+(?=[\u2018\u2019']The\s+writer,)|(?<=\])\s+(?=Explain\s+(?:how|why)\b)|(?<=\])\s+(?=Evaluate\b)|(?<=\])\s+(?=Comment\s+on\b)|(?<=\])\s+(?=Describe\s+how\b)|(?<=\])\s+(?=Identify\s+how\b)|(?<=\])\s+(?=Suggest\s+how\b)|(?<=\])\s+(?=Refer\s+to\b)|(?<=\])\s+(?=Give\s+(?:one|two|three)\b)|(?<=\])\s+(?=Write\s+about\b)|(?<=\])\s+(?=Summari[sz]e\b)|(?<=\])\s+(?=To\s+answer\s+the\s+following\s+questions\s+you\s+will\s+need\s+to\s+read\b)|(?=[\r\n]+\s*To\s+answer\s+the\s+following\s+questions\s+you\s+will\s+need\s+to\s+read\b)|(?<=\])\s+(?=To\s+answer\s+the\s+following\s+questions\s+you\s+must\s+use\s+both\s+texts\.?)|(?=[\r\n]+\s*To\s+answer\s+the\s+following\s+questions\s+you\s+must\s+use\s+both\s+texts\.?)/gi;
+        const mega = /(?<=\])\s+(?=How\s+does\s+(?:Mark|the\s+writer)\b)|(?<=\])\s+(?=How\s+(?:do|is|are|might|would|could|have|had)\b)|(?<=\])\s+(?=What\s+do\s+you\s+think)|(?<=\])\s+(?=What\s+(?:are|is)\b)|(?<=\])\s+(?=According\s+to\s+these\s+two)|(?<=\])\s+(?=Using\s+information\s+from\s+both\s+texts)|(?<=\])\s+(?=Both\s+of\s+these\s+texts)|(?<=\])\s+(?=How\s+far\s+do\s+you\s+agree)|(?<=\])\s+(?=[\u2018\u2019']The\s+writer,)|(?<=\])\s+(?=Explain\s+(?:how|why)\b)|(?<=\])\s+(?=Evaluate\b)|(?<=\])\s+(?=Comment\s+on\b)|(?<=\])\s+(?=Describe\s+how\b)|(?<=\])\s+(?=Identify\s+how\b)|(?<=\])\s+(?=Suggest\s+how\b)|(?<=\])\s+(?=Refer\s+to\b)|(?<=\])\s+(?=Give\s+(?:one|two|three)\b)|(?<=\])\s+(?=Name\s+one\b)|(?<=\])\s+(?=\(?\s*a\s*\)\s+Name\s+one\b)|(?<=\])\s+(?=Write\s+about\b)|(?<=\])\s+(?=Summari[sz]e\b)|(?<=\])\s+(?=To\s+answer\s+the\s+following\s+questions\s+you\s+will\s+need\s+to\s+read\b)|(?=[\r\n]+\s*To\s+answer\s+the\s+following\s+questions\s+you\s+will\s+need\s+to\s+read\b)|(?<=\])\s+(?=To\s+answer\s+the\s+following\s+questions\s+you\s+must\s+use\s+both\s+texts\.?)|(?=[\r\n]+\s*To\s+answer\s+the\s+following\s+questions\s+you\s+must\s+use\s+both\s+texts\.?)/gi;
         const parts = raw.split(mega).map(x => x.trim()).filter(x => x.length >= minLen);
         /* Two segments are enough when expandQuestionChunksSubparts pulls (a)(b)(c) from each (e.g. one page, five parts). */
         if(parts.length < 2) return null;
@@ -20745,7 +20788,7 @@ const admin = {
             if(!s || typeof s !== "string" || s.length < minLen) return false;
             if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(s)) return false;
             if(/^\s*\(?a\)\s/i.test(s) && /\[\s*\d+\s*\]/.test(s)) return true;
-            if(/\[\s*\d+\s*\]/.test(s) && /\(\s*[a-z]\s*\)/i.test(s) && /\b(?:explain|how|what|why|describe|compare|evaluate|identify|comment|write|suggest|give|refer)\b/i.test(s)) return true;
+            if(/\[\s*\d+\s*\]/.test(s) && /\(\s*[a-z]\s*\)/i.test(s) && /\b(?:explain|how|what|why|describe|compare|evaluate|identify|comment|write|suggest|give|refer|name)\b/i.test(s)) return true;
             if(/\bRead\s+lines?\s+\d+/i.test(s)) return true;
             if(/Question\s+\d+/i.test(s)) return true;
             if(/^\s*\d{1,2}\s*[.)]\s+\S/.test(s)) return true;
