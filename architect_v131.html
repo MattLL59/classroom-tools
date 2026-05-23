@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T21:45:00">
+<meta name="architect-build" content="2026-05-20T22:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3035,8 +3035,10 @@ const app = {
         } catch(e) {}
         const q = userState.deskQueue;
         if(!Array.isArray(q) || !q.length) return;
-        const parts = q.map(function(s) {
-            const raw = typeof s === "object" && s && "quote" in s ? s.quote : s;
+        const rawQuotes = q.map(function(s) {
+            return typeof s === "object" && s && "quote" in s ? s.quote : s;
+        }).filter(function(s) { return String(s || "").trim(); });
+        const parts = rawQuotes.map(function(raw) {
             return app.formatDeskQueueQuoteWithJustification(raw);
         }).filter(Boolean);
         if(!parts.length) return;
@@ -3045,9 +3047,28 @@ const app = {
         userState.essay = ess ? ess + "\n\n" + block : block;
         const ta = document.getElementById("essay-area");
         if(ta) ta.value = userState.essay;
+        if(!Array.isArray(userState.selectionAnsweredForQuestion)) userState.selectionAnsweredForQuestion = [];
+        rawQuotes.forEach(function(raw) {
+            const t = String(raw || "").trim();
+            if(!t) return;
+            const k = app.quoteKey(t);
+            const dup = userState.selectionAnsweredForQuestion.some(function(ch) {
+                return app.quoteKey(typeof ch === "object" && ch && "quote" in ch ? ch.quote : ch) === k;
+            });
+            if(!dup) userState.selectionAnsweredForQuestion.push(t);
+        });
+        if(app.bumpDeskCommitForLevel) app.bumpDeskCommitForLevel(level);
         userState.deskQueue = [];
         ui.activeQuoteId = null;
         app.save();
+        if(app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(level, { showCelebration: false })) {
+            if(typeof ui !== "undefined") {
+                if(ui.switchView) ui.switchView("select", true);
+                if(ui.renderSelection) ui.renderSelection();
+                if(ui.renderQuestionBanner) ui.renderQuestionBanner();
+                if(ui.updateMarksDisplay) ui.updateMarksDisplay();
+            }
+        }
     },
     parseRequiredCountFromQuestion: function(questionText) {
         if(!questionText || typeof questionText !== "string") return null;
@@ -4083,6 +4104,33 @@ const app = {
         if(app.countDeskCommitsForLevel(lvl) >= goal) return true;
         return false;
     },
+    /** Level→level advance (L1→L2): one question per level on C2 can progress after first quote reaches the desk/answer. */
+    isLevelProgressionReady: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        if(app.isLevelSelectionGoalMet(lvl)) return true;
+        if(appData && appData.component === 2 && app.resolveQuestionIdsForLevel(lvl).length === 1) {
+            if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
+            const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
+            if(answered.length >= 1) return true;
+        }
+        return false;
+    },
+    tryAdvanceLevelAfterDeskActivity: function(level, opts) {
+        opts = opts || {};
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
+        if(app.isLevelsOfResponseLevel(lvl)) return false;
+        const ids = app.resolveQuestionIdsForLevel(lvl);
+        if(ids.length > 1) {
+            const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number")
+                ? userState.currentQuestionIndexByLevel[lvl] : 0;
+            if(qIdx < ids.length - 1) {
+                if(app.advanceSelectionQuestionIfComplete(opts)) return true;
+                return false;
+            }
+        }
+        if(!app.isLevelProgressionReady(lvl)) return false;
+        return app.advanceStudentToNextActiveLevel({ level: lvl, showCelebration: opts.showCelebration !== false });
+    },
     /**
      * Move the student to the next Level Bank level after finishing the current one.
      * Uses activeLevels order (not numeric level+1). Component 2: works when there are zero quote-bank rows.
@@ -4096,11 +4144,13 @@ const app = {
             const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[cur] === "number")
                 ? userState.currentQuestionIndexByLevel[cur] : 0;
             if(qIdx < ids.length - 1) return false;
-            if(!app.isLevelSelectionGoalMet(cur)) return false;
+            if(!app.isLevelProgressionReady(cur)) return false;
+        } else if(!app.isLevelProgressionReady(cur)) {
+            return false;
         }
         let next = app.getNextActiveLevelAfter(cur);
         if(!userState.completedLevels.includes(cur)) userState.completedLevels.push(cur);
-        if(next == null && app.isLevelSelectionGoalMet(cur) && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
+        if(next == null && app.isLevelProgressionReady(cur) && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
             next = app.getNextActiveLevelAfter(cur);
         }
         if(next == null) {
@@ -14686,10 +14736,10 @@ const app = {
                     if(!userState.currentQuestionIndexByLevel) userState.currentQuestionIndexByLevel = {};
                     userState.currentQuestionIndexByLevel[level] = idx + 1;
                     didAdvance = true;
-                } else if(app.isLevelSelectionGoalMet(level) && app.advanceStudentToNextActiveLevel({ level: level, showCelebration: false })) {
+                } else if(app.isLevelProgressionReady(level) && app.advanceStudentToNextActiveLevel({ level: level, showCelebration: false })) {
                     didAdvance = true;
                 }
-            } else if(app.isLevelSelectionGoalMet(level) && app.advanceStudentToNextActiveLevel({ level: level, showCelebration: false })) {
+            } else if(app.isLevelProgressionReady(level) && app.advanceStudentToNextActiveLevel({ level: level, showCelebration: false })) {
                 didAdvance = true;
             }
         }
@@ -14757,7 +14807,10 @@ const app = {
         }
         const modules = app.getModulesActive();
         if(modules.selection) app.advanceSelectionQuestionIfComplete();
-        if(app.advanceStudentToNextActiveLevel({ showCelebration: false })) {
+        const lvlCommit = app.getEffectiveLevel();
+        const advanced = (app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlCommit, { showCelebration: false }))
+            || app.advanceStudentToNextActiveLevel({ showCelebration: false });
+        if(advanced) {
             if(modules.selection) {
                 ui.switchView('select');
                 ui.renderSelection();
@@ -16485,7 +16538,7 @@ const ui = {
                     const lvlRb = userState.level || 1;
                     const evGoalRb = app.getSelectionEvidenceGoalForLevel(lvlRb);
                     const ptsRb = app.countSelectionEvidencePoints(lvlRb);
-                    const goalMetRb = ptsRb >= evGoalRb;
+                    const goalMetRb = app.isLevelProgressionReady ? app.isLevelProgressionReady(lvlRb) : (ptsRb >= evGoalRb);
                     userState.selectionCompleted = !!goalMetRb;
                     app.save();
                     ui.renderDeskQuoteTabs();
@@ -19071,12 +19124,13 @@ const ui = {
             }
             app.save();
             const lvlNow = app.getEffectiveLevel();
-            const goalOk = app.countSelectionEvidencePoints(lvlNow) >= app.getSelectionEvidenceGoalForLevel(lvlNow);
             const lor = app.isLevelsOfResponseLevel(lvlNow);
             const idsForLvl = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvlNow) : [];
             const singleQuestionOnLevel = !idsForLvl || idsForLvl.length <= 1;
             const advancedInLevel = !lor && !singleQuestionOnLevel && app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete();
-            const advancedLevel = !lor && goalOk && (singleQuestionOnLevel || !advancedInLevel) && app.tryAdvanceToNextActiveLevel && app.tryAdvanceToNextActiveLevel(lvlNow);
+            const advancedLevel = !lor && (singleQuestionOnLevel || !advancedInLevel)
+                && app.isLevelProgressionReady && app.isLevelProgressionReady(lvlNow)
+                && app.tryAdvanceToNextActiveLevel && app.tryAdvanceToNextActiveLevel(lvlNow);
             if(app.checkLevelCompletion) app.checkLevelCompletion();
             if(advancedLevel || advancedInLevel) {
                 if(ui.switchView) ui.switchView("select", true);
