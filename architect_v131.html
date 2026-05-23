@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-20T23:45:00">
-<meta name="architect-rev" content="c2-shortans-l2-advance-b4e91c0">
+<meta name="architect-build" content="2026-05-20T24:00:00">
+<meta name="architect-rev" content="c2-shortans-no-dialog-c8d2a41">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3510,12 +3510,26 @@ const app = {
             return app.isShortAnswerLevel(level);
         } catch(e) { return false; }
     },
+    /** C2 + Short ans: verbatim quote to answer — no examine/justify dialogue. */
+    isC2QuoteOnlyShortAnswer: function(level) {
+        try {
+            return !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level));
+        } catch(e) { return false; }
+    },
+    /** C1 retrieval Q1 + Short ans: own-words paraphrase in Quote Select (not verbatim quote). */
+    isC1OwnWordsShortAnswerLevel: function(level) {
+        try {
+            if(!appData || appData.component === 2) return false;
+            if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(level)) return false;
+            return !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+        } catch(e) { return false; }
+    },
     /** C2 Short ans: quote only — no examine/justify step; send to answer and advance. */
     acceptShortAnswerQuoteFromPassage: function(quoteText, level) {
         const pending = String(quoteText || "").trim();
         if(!pending) return false;
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
-        if(!app.isShortAnswerLevel(lvl)) return false;
+        if(!app.isC2QuoteOnlyShortAnswer || !app.isC2QuoteOnlyShortAnswer(lvl)) return false;
         if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode()) return false;
         if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
         const k = app.quoteKey(pending);
@@ -3525,8 +3539,9 @@ const app = {
             userState.selectionChosen.push(pending);
         }
         ui._freeSelectPendingQuote = "";
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         app.save();
-        if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer();
+        if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
         else if(app.tryFinishShortAnswerLevelAndAdvance) app.tryFinishShortAnswerLevelAndAdvance(lvl, { showCelebration: false });
         return true;
     },
@@ -15313,7 +15328,7 @@ const ui = {
             if(typeof app.tryFinishShortAnswerLevelAndAdvance !== "function") {
                 const rev = document.querySelector("meta[name=\"architect-rev\"]");
                 const need = rev ? String(rev.getAttribute("content") || "").trim() : "";
-                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 23:45:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
+                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 24:00:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
                 console.warn(msg);
                 if(!document.getElementById("architect-outdated-script-banner")) {
                     const b = document.createElement("div");
@@ -17811,13 +17826,14 @@ const ui = {
                 const clearBtn = topPanel.querySelector("#selection-clear-chosen");
                 const sendBtn = topPanel.querySelector("#selection-send-chosen");
                 if(clearBtn) clearBtn.onclick = () => { userState.selectionChosen = []; userState.deskQueue = []; userState.selectionJustification = {}; app.save(); ui.renderSelection(); };
-                if(sendBtn) sendBtn.onclick = () => (c2ShortAnswer ? ui.sendSelectionQuotesDirectToAnswer() : ui.sendSelectionQuotesToBuilder());
+                if(sendBtn) sendBtn.onclick = () => (c2ShortAnswer ? ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true }) : ui.sendSelectionQuotesToBuilder());
             }
         };
         updateTopAndQuestion();
         const pendingHighlightQuote = String(ui._freeSelectPendingQuote || "").trim();
         if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && !canPickFromText && uniqueChosenCount > 0 && !ui._initInProgress) {
-            (c2ShortAnswer ? ui.sendSelectionQuotesDirectToAnswer : ui.sendSelectionQuotesToBuilder)();
+            if(c2ShortAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+            else ui.sendSelectionQuotesToBuilder();
             return;
         }
         if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && !canPickFromText) {
@@ -17834,10 +17850,18 @@ const ui = {
         const questionText = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(app.getQuestionForLevel(level)) : app.getQuestionForLevel(level));
         /* Passage highlight → examine step must run even when "Give me quote choices" is on (that option only hides the tap *hint* card, not tapping itself). */
         const pendingQuotePassage = String(ui._freeSelectPendingQuote || "").trim();
-        if(tapPathActive && hasSource && pendingQuotePassage && isShortAnswerMode && !teacherRecordMode) {
+        const c1OwnWordsShort = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
+        if(tapPathActive && hasSource && pendingQuotePassage && c2ShortAnswer && !teacherRecordMode) {
             if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
         }
         if(tapPathActive && hasSource && pendingQuotePassage) {
+            if(c2ShortAnswer && !teacherRecordMode) {
+                if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
+                ui._freeSelectPendingQuote = "";
+                app.save();
+                ui.renderSelection();
+                return;
+            }
             const pendingQuote = pendingQuotePassage;
             const tr = teacherRecordMode;
             const officialAnswerPassage = (!tr && app.getAnswerPassageExcerptForLevel) ? app.getAnswerPassageExcerptForLevel(level) : "";
@@ -17847,16 +17871,20 @@ const ui = {
                     <div style="opacity:0.95;">Your highlight does not closely match the <strong>answer passage</strong> your teacher set for this question. You can still continue if you are sure — in the exam you must work from the lines the question gives you.</div>
                 </div>`
                 : "";
-            const q1TapParaphrase = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+            const q1TapParaphrase = c1OwnWordsShort || !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
             const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
-            /* Hide optional justify only for true short-answer levels that are not Q1 retrieval; Q1 needs visible own-words even when "shortAnswersOnly" is on. Synonym help must not hide this (legacy bug used synonym flag as “no quotes”). */
-            const whyHidden = !tr && (isShortAnswerMode && !q1TapParaphrase);
-            const whyStyle = whyHidden ? "display:none;" : "";
+            const showJustifyBox = tr || (!isShortAnswerMode) || c1OwnWordsShort;
+            const whyHeading = tr
+                ? "Comment / analysis (saved to lesson)"
+                : (c1OwnWordsShort
+                    ? "Put each fact in your own words below (retrieval — do not copy the passage)."
+                    : (q1TapParaphrase ? "Does this text answer the question? You will paraphrase it in the Writing Desk." : "Does this quote support your answer? Why?"));
+            const whyBlockHtml = showJustifyBox
+                ? `<div style="font-weight:700; margin-bottom:4px;">${whyHeading}</div>
+                        <textarea id="free-select-why" placeholder="${whyPlaceholder}" style="width:100%; min-height:60px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>`
+                : "";
             const trMeaningBlock = tr && !isShortAnswerMode ? `<div style="font-weight:700; margin-bottom:4px;">Meaning (gloss)</div>
                         <textarea id="teacher-record-translation" placeholder="Short paraphrase / meaning for worksheet match" style="width:100%; min-height:52px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>` : "";
-            const shortAnsLine = isShortAnswerMode
-                ? (q1TapParaphrase ? "Put each fact in your own words below (retrieval — do not copy the passage)." : "Use this highlight as your short answer — no separate justification needed.")
-                : "";
             cont.innerHTML = `
                     <div class="section-header">${tr ? "Teacher: record this quote" : "Examine your quote"}</div>
                     ${passageMismatchWarn}
@@ -17866,10 +17894,9 @@ const ui = {
                         <div style="font-weight:700; margin-bottom:4px;">Question</div>
                         <div style="margin-bottom:10px; opacity:0.9;">${app.escapeHtml(questionText) || "—"}</div>
                         ${trMeaningBlock}
-                        <div style="font-weight:700; margin-bottom:4px;">${isShortAnswerMode ? shortAnsLine : (q1TapParaphrase ? "Does this text answer the question? You will paraphrase it in the Writing Desk." : (tr ? "Comment / analysis (saved to lesson)" : "Does this quote support your answer? Why?"))}</div>
-                        <textarea id="free-select-why" placeholder="${whyPlaceholder}" style="width:100%; min-height:60px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem; ${whyStyle}"></textarea>
+                        ${whyBlockHtml}
                         <div style="display:flex; gap:8px;">
-                            <button class="btn btn-primary btn-small" id="free-select-use">${tr ? "Save to lesson & continue" : "Use this quote"}</button>
+                            <button class="btn btn-primary btn-small" id="free-select-use">${tr ? "Save to lesson & continue" : (c1OwnWordsShort ? "Save and continue" : "Use this quote")}</button>
                             <button class="btn btn-outline btn-small" id="free-select-cancel">Cancel</button>
                         </div>
                     </div>
@@ -17889,6 +17916,10 @@ const ui = {
                 } else if(pendingQuote) {
                     const whyEl = document.getElementById("free-select-why");
                     const whyStu = whyEl ? String(whyEl.value || "").trim() : "";
+                    if(c1OwnWordsShort && !whyStu) {
+                        alert("Put the fact in your own words before continuing (do not copy the passage).");
+                        return;
+                    }
                     if(whyStu && app.setSelectionJustificationForQuoteText) app.setSelectionJustificationForQuoteText(pendingQuote, whyStu);
                 }
                 if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
@@ -17897,9 +17928,14 @@ const ui = {
                     userState.selectionChosen.push(pendingQuote);
                 }
                 ui._freeSelectPendingQuote = "";
+                if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
                 app.save();
-                if(isShortAnswerMode || c2ShortAnswer) {
-                    ui.sendSelectionQuotesDirectToAnswer();
+                if(c1OwnWordsShort) {
+                    ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                    return;
+                }
+                if(c2ShortAnswer) {
+                    ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                     return;
                 }
                 ui.renderSelection();
@@ -17923,14 +17959,15 @@ const ui = {
             }
             const noQuotesFlow = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
             if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && uniqueChosenCount > 0 && !ui._initInProgress && !canPickFromText) {
-                (c2ShortAnswer ? ui.sendSelectionQuotesDirectToAnswer : ui.sendSelectionQuotesToBuilder)();
+                if(c2ShortAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                else ui.sendSelectionQuotesToBuilder();
                 return;
             }
             const targetMetLine = pointsMade >= evidenceGoalForUi
                 ? (c2ShortAnswer ? `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Writing Desk when ready, or add another.</p>`)
                 : (c2ShortAnswer ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will paraphrase each selection in the Writing Desk.</p>`);
             const sendLabel = c2ShortAnswer ? "Send to Answer" : (noQuotesFlow ? "Send to Writing Desk" : "Send quotes to Sentence Builder");
-            const sendAction = c2ShortAnswer ? "ui.sendSelectionQuotesDirectToAnswer()" : "ui.sendSelectionQuotesToBuilder()";
+            const sendAction = c2ShortAnswer ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })" : "ui.sendSelectionQuotesToBuilder()";
             const tapProgressLine = tapHighlightEvidenceMode
                 ? `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span></div>`
                 : `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span><span style="opacity:0.85;"> · </span><span>Evidence points:</span> <span style="font-variant-numeric: tabular-nums;">${pointsMade}</span></div>`;
@@ -18316,7 +18353,7 @@ const ui = {
                             ui._selectionCorrectItem = o.item;
                             ui._selectionQuote = o.quote;
                             app.save();
-                            ui.sendSelectionQuotesDirectToAnswer();
+                            ui.sendSelectionQuotesDirectToAnswer(c2ShortAnswer ? { stayOnQuoteSelect: true } : undefined);
                             return;
                         }
                     } else {
@@ -18366,7 +18403,7 @@ const ui = {
                     }
                     if(isShortAnswerMode && picked && picked.quote) {
                         app.save();
-                        ui.sendSelectionQuotesDirectToAnswer();
+                        ui.sendSelectionQuotesDirectToAnswer(c2ShortAnswer ? { stayOnQuoteSelect: true } : undefined);
                         return;
                     }
                     userState.selectionStage = stageIndex + 1;
@@ -18715,7 +18752,7 @@ const ui = {
             }
             userState.selectionStage = 1;
             app.save();
-            ui.sendSelectionQuotesDirectToAnswer();
+            ui.sendSelectionQuotesDirectToAnswer(c2ShortAnswer ? { stayOnQuoteSelect: true } : undefined);
             return;
         }
         if(stageKey === "justify") {
@@ -19247,8 +19284,11 @@ const ui = {
     },
     _sendToBuilderGuard: false,
     /** Component 2 Q11/Q13: add chosen highlights directly to the answer as short answers. No Writing Desk or paraphrasing. */
-    sendSelectionQuotesDirectToAnswer: function(useDeskQueue) {
+    sendSelectionQuotesDirectToAnswer: function(useDeskQueueOrOpts) {
         try {
+            const opts = (useDeskQueueOrOpts && typeof useDeskQueueOrOpts === "object") ? useDeskQueueOrOpts : {};
+            const useDeskQueue = opts.useDeskQueue === true || useDeskQueueOrOpts === true;
+            const stayOnQuoteSelect = opts.stayOnQuoteSelect === true;
             let chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
             if (useDeskQueue || (!chosen.length && Array.isArray(userState.deskQueue) && userState.deskQueue.length > 0)) {
                 chosen = userState.deskQueue.map(q => (typeof q === "object" && q && "quote" in q ? q.quote : q));
@@ -19313,13 +19353,17 @@ const ui = {
             }
             if(app.bumpDeskCommitForLevel) app.bumpDeskCommitForLevel(lvlEarly);
             if(app.persistCurrentQuestionEssay) app.persistCurrentQuestionEssay();
+            if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
             app.save();
             const lvlNow = app.getEffectiveLevel();
             let c2SaNow = false;
-            try { c2SaNow = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(lvlNow)); } catch(eSn) {}
+            let c1OwnWordsSa = false;
+            try { c2SaNow = !!(app.isC2QuoteOnlyShortAnswer && app.isC2QuoteOnlyShortAnswer(lvlNow)); } catch(eSn) {}
+            try { c1OwnWordsSa = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvlNow)); } catch(eC1) {}
+            const shortAnsStayOnSelect = stayOnQuoteSelect || c2SaNow || c1OwnWordsSa;
             let advancedLevel = false;
             let advancedInLevel = false;
-            if(c2SaNow && app.tryFinishShortAnswerLevelAndAdvance) {
+            if((c2SaNow || c1OwnWordsSa) && app.tryFinishShortAnswerLevelAndAdvance) {
                 advancedLevel = app.tryFinishShortAnswerLevelAndAdvance(lvlNow, { showCelebration: false });
             } else {
                 const lor = app.isLevelsOfResponseLevel(lvlNow);
@@ -19330,11 +19374,8 @@ const ui = {
                     && app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlNow, { showCelebration: false });
             }
             if(app.checkLevelCompletion) app.checkLevelCompletion();
-            if(advancedLevel || advancedInLevel) {
+            if(advancedLevel || advancedInLevel || shortAnsStayOnSelect) {
                 if(ui.switchView) ui.switchView("select", true);
-                if(ui.renderSelection) ui.renderSelection();
-            } else if(c2SaNow) {
-                if(ui.switchView) ui.switchView("desk", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(ui.switchView) ui.switchView("desk", true);
             if(ui.updateMarksDisplay) ui.updateMarksDisplay();
@@ -19345,7 +19386,7 @@ const ui = {
         try {
             const lvl = app.getEffectiveLevel && app.getEffectiveLevel();
             if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
-                ui.sendSelectionQuotesDirectToAnswer();
+                ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                 return;
             }
         } catch(e) { /* fall through to normal flow */ }
