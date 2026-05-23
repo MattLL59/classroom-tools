@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T18:00:00">
-<meta name="architect-rev" content="shortans-overrides-lor-c4e21a">
+<meta name="architect-build" content="2026-05-23T19:15:00">
+<meta name="architect-rev" content="shortans-lor-mutex-ui-f806">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -560,6 +560,9 @@
     #level-bank-editor .level-bank-row .level-bank-cb-cell { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     #level-bank-editor .level-bank-row .level-bank-cb-cell input[type="checkbox"] { flex-shrink: 0; margin: 0; }
     #level-bank-editor .level-bank-row .level-bank-cb-cell label { white-space: nowrap; margin: 0; cursor: pointer; font-size: 0.8rem; }
+    #level-bank-editor .level-bank-row .level-bank-cb-cell.level-bank-cb-mutex-off { opacity: 0.42; }
+    #level-bank-editor .level-bank-row .level-bank-cb-cell.level-bank-cb-mutex-off label { cursor: not-allowed; color: var(--text); }
+    #level-bank-editor .level-bank-row .level-bank-cb-cell.level-bank-cb-mutex-off input[type="checkbox"] { cursor: not-allowed; }
     #level-bank-editor .level-bank-questions-wrap { min-width: 0; }
     #level-bank-editor .level-bank-chip { white-space: normal; word-break: break-word; text-align: left; }
     @media (max-width: 768px) {
@@ -3461,6 +3464,27 @@ const app = {
             const n = parseInt(c, 10);
             return (n === 1 || n === 2) ? n : 1;
         } catch(e) { return 1; }
+    },
+    /** Short ans and LoR cannot both be on; Short ans wins if a saved lesson has both. Returns true if data was repaired. */
+    repairLevelBankShortAnsLorConflict: function(level, bank) {
+        const lvl = parseInt(level, 10) || 1;
+        const b = bank || (app.getLevelBank && app.getLevelBank()) || {};
+        const entry = b[lvl];
+        if(!entry) return false;
+        const shortOn = entry.shortAnswersOnly === true || entry.shortAnswersOnly === "true" || entry.shortAnswersOnly === 1;
+        const lorOn = entry.levelsOfResponse === true;
+        if(!shortOn || !lorOn) return false;
+        entry.levelsOfResponse = false;
+        return true;
+    },
+    repairAllLevelBankShortAnsLorConflicts: function(bank) {
+        const b = bank || (appData && appData.settings && appData.settings.levelBank) || null;
+        if(!b || typeof b !== "object") return false;
+        let changed = false;
+        for(let lvl = 1; lvl <= ARCHITECT_MAX_LEVEL; lvl++) {
+            if(app.repairLevelBankShortAnsLorConflict(lvl, b)) changed = true;
+        }
+        return changed;
     },
     /** Level Bank "Short ans" on this row only (not propagated to other levels). */
     levelBankShortAnswerEnabled: function(level) {
@@ -14482,6 +14506,7 @@ const app = {
                 passageQuoteSelectEveryLineNumber: !!(r.passageQuoteSelectEveryLineNumber === true || r.passageQuoteSelectEveryLineNumber === "true")
             };
             if(pointsRequired != null && pointsRequired >= 1) entry.pointsRequired = pointsRequired;
+            if(entry.shortAnswersOnly && entry.levelsOfResponse) entry.levelsOfResponse = false;
             safe.settings.levelBank[lvl] = entry;
         }
         /* Leave questionIds empty by default; user selects which questions per level in Level Bank. */
@@ -28754,8 +28779,15 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const levelsToShow = Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => i + 1);
         const rows = [];
+        if(app.repairAllLevelBankShortAnsLorConflicts && app.repairAllLevelBankShortAnsLorConflicts()) app.save();
         for(const lvl of levelsToShow) {
             const entry = appData.settings.levelBank[lvl] || defaultData.settings.levelBank[lvl];
+            const shortAnsOn = !!(entry.shortAnswersOnly === true || entry.shortAnswersOnly === "true" || entry.shortAnswersOnly === 1);
+            const lorOn = entry.levelsOfResponse === true;
+            const shortAnsMutexOff = lorOn && !shortAnsOn;
+            const lorMutexOff = shortAnsOn;
+            const shortAnsMutexTitle = shortAnsMutexOff ? "Turn off LoR on this level to use Short ans (only one mode per level)." : "Highlight → straight into the answer (no Writing Desk / Sentence Builder). For C2 retrieval-style tasks. Long language questions: leave off and turn Tap off for full stages.";
+            const lorMutexTitle = lorMutexOff ? "Turn off Short ans on this level to use LoR (only one mode per level)." : "Levels-of-response (e.g. 6–10 marks): quote/evidence tally is not the exam mark. Set Points to the question total; teacher records marks on the Writing Desk.";
             const selectedIds = Array.isArray(entry.questionIds) ? entry.questionIds : [];
             const selectedNorm = new Set(selectedIds.map(normQid));
             const assignedElsewhere = new Set();
@@ -28805,8 +28837,8 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                         <option value="very advanced" ${entry.complexity==="very advanced"?"selected":""}>Very advanced</option>
                     </select>
                     <input type="number" min="1" max="30" value="${entry.pointsRequired || entry.answersRequired || ""}" data-lvl="${lvl}" data-key="pointsRequired" class="level-bank-input" placeholder="—" title="Total marks for this level's question (e.g. whole Q1 including a/b/c if they share one lesson question). Overrides counts parsed from the prompt. Leave empty to use parsed sum or defaults.">
-                    <div class="level-bank-cb-cell" title="Highlight → straight into the answer (no Writing Desk / Sentence Builder). For C2 retrieval-style tasks. Long language questions: leave off and turn Tap off for full stages.">
-                        <label><input type="checkbox" data-lvl="${lvl}" data-key="shortAnswersOnly" ${entry.shortAnswersOnly ? "checked" : ""}> Short ans</label>
+                    <div class="level-bank-cb-cell${shortAnsMutexOff ? " level-bank-cb-mutex-off" : ""}" title="${app.escapeHtml(shortAnsMutexTitle)}">
+                        <label><input type="checkbox" data-lvl="${lvl}" data-key="shortAnswersOnly" ${entry.shortAnswersOnly ? "checked" : ""}${shortAnsMutexOff ? " disabled" : ""}> Short ans</label>
                     </div>
                     <div class="level-bank-cb-cell" title="On: highlight in the passage (quick). Off: quote bank with language / tone / structure / justify stages from Settings.">
                         <label><input type="checkbox" data-lvl="${lvl}" data-key="freeSelectFromText" ${entry.freeSelectFromText !== false ? "checked" : ""}> Tap</label>
@@ -28817,8 +28849,8 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                         <label style="font-size:0.68rem;line-height:1.2;display:block;"><input type="checkbox" data-lvl="${lvl}" data-key="passageConfirmLinesFirst" ${entry.passageConfirmLinesFirst === true ? "checked" : ""}> affirm</label>
                     </div>
                     ${c2CellHtml}
-                    <div class="level-bank-cb-cell" title="Levels-of-response (e.g. 6–10 marks): quote/evidence tally is not the exam mark. Set Points to the question total; teacher records marks on the Writing Desk.">
-                        <label style="font-size:0.72rem; line-height:1.2;"><input type="checkbox" data-lvl="${lvl}" data-key="levelsOfResponse" ${entry.levelsOfResponse ? "checked" : ""}> LoR</label>
+                    <div class="level-bank-cb-cell${lorMutexOff ? " level-bank-cb-mutex-off" : ""}" title="${app.escapeHtml(lorMutexTitle)}">
+                        <label style="font-size:0.72rem; line-height:1.2;"><input type="checkbox" data-lvl="${lvl}" data-key="levelsOfResponse" ${entry.levelsOfResponse ? "checked" : ""}${lorMutexOff ? " disabled" : ""}> LoR</label>
                     </div>
                     <div class="level-bank-questions-wrap" data-lvl="${lvl}" data-key="questionIds" style="min-height:28px;" title="One question per level. Select or change question.">${questionCellHtml}</div>
                 </div>
@@ -29108,6 +29140,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         } else if(key === "levelsOfResponse") {
             appData.settings.levelBank[lvl].levelsOfResponse = el.checked;
             if(el.checked) appData.settings.levelBank[lvl].shortAnswersOnly = false;
+            admin.renderLevelBank && admin.renderLevelBank();
             ui.renderSelection && ui.renderSelection();
             ui.updateMarksDisplay && ui.updateMarksDisplay();
         } else if(key === "passageExamExcerpt") {
