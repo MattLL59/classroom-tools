@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-20T24:00:00">
-<meta name="architect-rev" content="c2-shortans-no-dialog-c8d2a41">
+<meta name="architect-build" content="2026-05-20T24:15:00">
+<meta name="architect-rev" content="shortans-quote-only-any-comp-d7e2f19">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3455,10 +3455,17 @@ const app = {
             ui.renderSelection();
         }
     },
-    /** Component 2 past paper: one focus question per Level Bank row (L1→q1, L2→q2). */
-    c2UsesOneQuestionPerLevel: function() {
+    getArchitectComponent: function() {
         try {
-            if(!appData || appData.component !== 2) return false;
+            const c = appData && appData.component;
+            const n = parseInt(c, 10);
+            return (n === 1 || n === 2) ? n : 1;
+        } catch(e) { return 1; }
+    },
+    /** Past paper: one focus question per Level Bank row (L1→q1, L2→q2). Works on Component 1 or 2. */
+    usesOneQuestionPerLevelLayout: function() {
+        try {
+            if(!appData) return false;
             const questions = Array.isArray(appData.questions) ? appData.questions : [];
             if(questions.length < 2) return false;
             const active = app.getActiveLevels ? app.getActiveLevels() : [];
@@ -3468,6 +3475,10 @@ const app = {
                 return ids && ids.length === 1;
             });
         } catch(e) { return false; }
+    },
+    /** @deprecated alias */
+    c2UsesOneQuestionPerLevel: function() {
+        return !!(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout());
     },
     /** True when this level already has a short-answer quote in the answer / desk (not global L1 progress). */
     hasShortAnswerContentForLevel: function(level) {
@@ -3488,7 +3499,7 @@ const app = {
             const sa = entry.shortAnswersOnly;
             if(sa === true || sa === "true" || sa === 1) return true;
             if(sa === false || sa === "false" || sa === 0) return false;
-            if(appData && appData.component === 2 && app.c2UsesOneQuestionPerLevel && app.c2UsesOneQuestionPerLevel()) {
+            if(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
                 const bank = app.getLevelBank ? app.getLevelBank() : {};
                 const active = app.getActiveLevels ? app.getActiveLevels() : [];
                 if(active.indexOf(lvl) >= 0) {
@@ -3506,20 +3517,26 @@ const app = {
     /** True for highlight→answer, no Sentence Builder: Level Bank "Short ans" on C2, or C1 first-question retrieval. */
     isComponent2ShortAnswerQuestion: function(level) {
         try {
-            if(!appData || appData.component !== 2) return false;
+            if(app.getArchitectComponent() !== 2) return false;
             return app.isShortAnswerLevel(level);
         } catch(e) { return false; }
     },
-    /** C2 + Short ans: verbatim quote to answer — no examine/justify dialogue. */
-    isC2QuoteOnlyShortAnswer: function(level) {
+    /** Short ans + verbatim quote (not C1 Q1 own-words). Component 1 or 2 — no examine/justify dialogue. */
+    isQuoteOnlyShortAnswerLevel: function(level) {
         try {
-            return !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level));
+            if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(level)) return false;
+            if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level)) return false;
+            return true;
         } catch(e) { return false; }
+    },
+    /** @deprecated alias */
+    isC2QuoteOnlyShortAnswer: function(level) {
+        return !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level));
     },
     /** C1 retrieval Q1 + Short ans: own-words paraphrase in Quote Select (not verbatim quote). */
     isC1OwnWordsShortAnswerLevel: function(level) {
         try {
-            if(!appData || appData.component === 2) return false;
+            if(app.getArchitectComponent() === 2) return false;
             if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(level)) return false;
             return !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
         } catch(e) { return false; }
@@ -3529,7 +3546,7 @@ const app = {
         const pending = String(quoteText || "").trim();
         if(!pending) return false;
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
-        if(!app.isC2QuoteOnlyShortAnswer || !app.isC2QuoteOnlyShortAnswer(lvl)) return false;
+        if(!app.isQuoteOnlyShortAnswerLevel || !app.isQuoteOnlyShortAnswerLevel(lvl)) return false;
         if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode()) return false;
         if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
         const k = app.quoteKey(pending);
@@ -4196,7 +4213,7 @@ const app = {
             return !!(app.hasShortAnswerContentForLevel && app.hasShortAnswerContentForLevel(lvl));
         }
         if(app.isLevelSelectionGoalMet(lvl)) return true;
-        if(appData && appData.component === 2 && app.resolveQuestionIdsForLevel(lvl).length === 1) {
+        if(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout() && app.resolveQuestionIdsForLevel(lvl).length === 1) {
             if(app.hasShortAnswerContentForLevel && app.hasShortAnswerContentForLevel(lvl)) return true;
         }
         return false;
@@ -4212,6 +4229,21 @@ const app = {
         let next = app.getNextActiveLevelAfter(lvl);
         if(next == null && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
             next = app.getNextActiveLevelAfter(lvl);
+        }
+        if(next == null && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
+            const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
+            if(qCount > lvl) {
+                const candidate = lvl + 1;
+                const activeNow = app.getActiveLevels();
+                if(activeNow.indexOf(candidate) < 0 && appData.settings) {
+                    if(!Array.isArray(appData.settings.activeLevels)) appData.settings.activeLevels = [];
+                    if(appData.settings.activeLevels.indexOf(candidate) < 0) {
+                        appData.settings.activeLevels.push(candidate);
+                        appData.settings.activeLevels.sort(function(a, b) { return a - b; });
+                    }
+                }
+                next = app.getNextActiveLevelAfter(lvl) || candidate;
+            }
         }
         if(next == null) return false;
         return app.advanceStudentToNextActiveLevel({
@@ -14676,7 +14708,8 @@ const app = {
         const anyFreeSelect = safe.settings.levelBank && Object.keys(safe.settings.levelBank).some(l => safe.settings.levelBank[l] && safe.settings.levelBank[l].freeSelectFromText === true);
         if(anyFreeSelect) safe.selection.enabled = true;
         app.reduceGoodQuotesToTargetsOnImport(safe);
-        safe.component = (safe.component === 1 || safe.component === 2) ? safe.component : 1;
+        const compN = parseInt(safe.component, 10);
+        safe.component = (compN === 1 || compN === 2) ? compN : 1;
         const defC2 = defaultData.component2Layout || { resourcePaperText: "", resourceHeadLine1: "", resourceHeadLine2: "", questionPaperPage2Text: "", questionPaperPage3Text: "", nineteenthHeadLine1: "", nineteenthHeadLine2: "", resourcePaperPages: "2,3", questionPaperPagesForQuestions: "2", questionPaperPagesFor19th: "3", markSchemeText: "", defaultQuestion: 11 };
         safe.component2Layout = safe.component2Layout && typeof safe.component2Layout === "object" ? safe.component2Layout : {};
         safe.component2Layout.resourcePaperText = typeof safe.component2Layout.resourcePaperText === "string" ? safe.component2Layout.resourcePaperText : defC2.resourcePaperText || "";
@@ -15328,7 +15361,7 @@ const ui = {
             if(typeof app.tryFinishShortAnswerLevelAndAdvance !== "function") {
                 const rev = document.querySelector("meta[name=\"architect-rev\"]");
                 const need = rev ? String(rev.getAttribute("content") || "").trim() : "";
-                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 24:00:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
+                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 24:15:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
                 console.warn(msg);
                 if(!document.getElementById("architect-outdated-script-banner")) {
                     const b = document.createElement("div");
@@ -17490,8 +17523,8 @@ const ui = {
         const level = app.getEffectiveLevel();
         const levelEntry = levelBank[level] || {};
         const autoDeskAdv = app.shouldAutoAdvanceQuotePipelineToDesk(level);
-        let c2ShortAnswer = false;
-        try { c2ShortAnswer = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)); } catch(e) {}
+        let quoteOnlyShort = false;
+        try { quoteOnlyShort = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level)); } catch(e) {}
         const isShortAnswerMode = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level));
         if(isShortAnswerMode && sel && sel.modes) {
             sel.modes.requireReason = false;
@@ -17516,7 +17549,7 @@ const ui = {
                 app.save();
             }
         }
-        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || c2ShortAnswer || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
         if((!sel.items.length || sel.items.length < 2) && !(tapSelectOnly && hasSourceEarly)) {
             if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
             const tPanel = document.getElementById("selection-top-panel");
@@ -17554,7 +17587,7 @@ const ui = {
         const displayLineRange = lineWinEarly.displayLineRange || lineRange;
         const usePerQuestionGoal = hasMultipleQuestions;
         const pointsGoal = app.getSelectionPointsGoalForLevel(level);
-        const tapHighlightEvidenceMode = c2ShortAnswer || (levelEntry && levelEntry.shortAnswersOnly === true) || app.getEffectiveTapText(level) || app.isTeacherTapRecordPassageMode();
+        const tapHighlightEvidenceMode = quoteOnlyShort || (levelEntry && levelEntry.shortAnswersOnly === true) || app.getEffectiveTapText(level) || app.isTeacherTapRecordPassageMode();
         const evidenceGoalForUi = app.getSelectionEvidenceGoalForLevel(level);
         const distractorTarget = Math.max(0, parseInt(levelEntry.distractorCount, 10) || 0);
         const optionCount = Math.max(2, Math.min(20, pointsGoal + distractorTarget));
@@ -17784,7 +17817,7 @@ const ui = {
         const canPickFromText = (
             app.getEffectiveTapText(level) ||
             app.isStudentSynonymsHelp() ||
-            c2ShortAnswer ||
+            quoteOnlyShort ||
             app.isTeacherTapRecordPassageMode() ||
             levelEntry.shortAnswersOnly === true ||
             (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level))
@@ -17810,7 +17843,7 @@ const ui = {
                         : `<span class="stage-tag" style="${style}">${i+1}. ${label}</span>`;
                 }).join("");
                 const chosenListHtml = chosenList.length ? `<details style="font-size:0.85rem;"><summary>Chosen (${chosenList.length})</summary><div id="selection-chosen-list" style="margin-top:6px; max-height:80px; overflow:auto;"></div></details>` : `<div id="selection-chosen-list" class="hidden"></div>`;
-                const sendBtnLabel = c2ShortAnswer ? "Send to Answer" : (noQuotesTopPanel ? "Send to Writing Desk" : "Send to Builder");
+                const sendBtnLabel = quoteOnlyShort ? "Send to Answer" : (noQuotesTopPanel ? "Send to Writing Desk" : "Send to Builder");
                 const supJ = app.countSupportJustifications ? app.countSupportJustifications() : 0;
                 const supD = app.countDeskCommitsForLevel ? app.countDeskCommitsForLevel(level) : 0;
                 const lorHint = app.isLevelsOfResponseLevel(level) ? `<span style="font-size:0.78rem; opacity:0.85; display:block; margin-bottom:6px;">Long-response task: aim for clear points with evidence (quotes and/or comments on tone, structure, language). Open <strong>Writing Desk</strong> anytime (bottom nav).</span>` : "";
@@ -17826,13 +17859,13 @@ const ui = {
                 const clearBtn = topPanel.querySelector("#selection-clear-chosen");
                 const sendBtn = topPanel.querySelector("#selection-send-chosen");
                 if(clearBtn) clearBtn.onclick = () => { userState.selectionChosen = []; userState.deskQueue = []; userState.selectionJustification = {}; app.save(); ui.renderSelection(); };
-                if(sendBtn) sendBtn.onclick = () => (c2ShortAnswer ? ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true }) : ui.sendSelectionQuotesToBuilder());
+                if(sendBtn) sendBtn.onclick = () => (quoteOnlyShort ? ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true }) : ui.sendSelectionQuotesToBuilder());
             }
         };
         updateTopAndQuestion();
         const pendingHighlightQuote = String(ui._freeSelectPendingQuote || "").trim();
         if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && !canPickFromText && uniqueChosenCount > 0 && !ui._initInProgress) {
-            if(c2ShortAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+            if(quoteOnlyShort) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
             else ui.sendSelectionQuotesToBuilder();
             return;
         }
@@ -17846,16 +17879,16 @@ const ui = {
         const studentWantsQuoteList = !!(userState && userState.studentQuoteListHelp === true);
         /* Short-answer questions: always use simple tap flow (no language/justify stages). Teacher "record" mode uses the same tap UI to save meaning/analysis to the lesson. */
         const teacherRecordMode = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
-        const tapPathActive = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || c2ShortAnswer || teacherRecordMode || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const tapPathActive = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || teacherRecordMode || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
         const questionText = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(app.getQuestionForLevel(level)) : app.getQuestionForLevel(level));
         /* Passage highlight → examine step must run even when "Give me quote choices" is on (that option only hides the tap *hint* card, not tapping itself). */
         const pendingQuotePassage = String(ui._freeSelectPendingQuote || "").trim();
         const c1OwnWordsShort = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
-        if(tapPathActive && hasSource && pendingQuotePassage && c2ShortAnswer && !teacherRecordMode) {
+        if(tapPathActive && hasSource && pendingQuotePassage && quoteOnlyShort && !teacherRecordMode) {
             if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
         }
         if(tapPathActive && hasSource && pendingQuotePassage) {
-            if(c2ShortAnswer && !teacherRecordMode) {
+            if(quoteOnlyShort && !teacherRecordMode) {
                 if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
                 ui._freeSelectPendingQuote = "";
                 app.save();
@@ -17934,7 +17967,7 @@ const ui = {
                     ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                     return;
                 }
-                if(c2ShortAnswer) {
+                if(quoteOnlyShort) {
                     ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                     return;
                 }
@@ -17959,15 +17992,15 @@ const ui = {
             }
             const noQuotesFlow = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
             if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && uniqueChosenCount > 0 && !ui._initInProgress && !canPickFromText) {
-                if(c2ShortAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                if(quoteOnlyShort) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                 else ui.sendSelectionQuotesToBuilder();
                 return;
             }
             const targetMetLine = pointsMade >= evidenceGoalForUi
-                ? (c2ShortAnswer ? `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Writing Desk when ready, or add another.</p>`)
-                : (c2ShortAnswer ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will paraphrase each selection in the Writing Desk.</p>`);
-            const sendLabel = c2ShortAnswer ? "Send to Answer" : (noQuotesFlow ? "Send to Writing Desk" : "Send quotes to Sentence Builder");
-            const sendAction = c2ShortAnswer ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })" : "ui.sendSelectionQuotesToBuilder()";
+                ? (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Writing Desk when ready, or add another.</p>`)
+                : (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will paraphrase each selection in the Writing Desk.</p>`);
+            const sendLabel = quoteOnlyShort ? "Send to Answer" : (noQuotesFlow ? "Send to Writing Desk" : "Send quotes to Sentence Builder");
+            const sendAction = quoteOnlyShort ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })" : "ui.sendSelectionQuotesToBuilder()";
             const tapProgressLine = tapHighlightEvidenceMode
                 ? `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span></div>`
                 : `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span><span style="opacity:0.85;"> · </span><span>Evidence points:</span> <span style="font-variant-numeric: tabular-nums;">${pointsMade}</span></div>`;
@@ -18353,7 +18386,7 @@ const ui = {
                             ui._selectionCorrectItem = o.item;
                             ui._selectionQuote = o.quote;
                             app.save();
-                            ui.sendSelectionQuotesDirectToAnswer(c2ShortAnswer ? { stayOnQuoteSelect: true } : undefined);
+                            ui.sendSelectionQuotesDirectToAnswer(quoteOnlyShort ? { stayOnQuoteSelect: true } : undefined);
                             return;
                         }
                     } else {
@@ -18403,7 +18436,7 @@ const ui = {
                     }
                     if(isShortAnswerMode && picked && picked.quote) {
                         app.save();
-                        ui.sendSelectionQuotesDirectToAnswer(c2ShortAnswer ? { stayOnQuoteSelect: true } : undefined);
+                        ui.sendSelectionQuotesDirectToAnswer(quoteOnlyShort ? { stayOnQuoteSelect: true } : undefined);
                         return;
                     }
                     userState.selectionStage = stageIndex + 1;
@@ -18697,7 +18730,7 @@ const ui = {
                                 userState.selectionChosen.push(quoteToAdd);
                             }
                             const ptsNow = app.countSelectionEvidencePoints(level);
-                            const shortReady = c2ShortAnswer && quoteToAdd;
+                            const shortReady = quoteOnlyShort && quoteToAdd;
                             if(shortReady && autoDeskAdv) {
                                 userState.selectionCompleted = true;
                                 app.save();
@@ -18752,7 +18785,7 @@ const ui = {
             }
             userState.selectionStage = 1;
             app.save();
-            ui.sendSelectionQuotesDirectToAnswer(c2ShortAnswer ? { stayOnQuoteSelect: true } : undefined);
+            ui.sendSelectionQuotesDirectToAnswer(quoteOnlyShort ? { stayOnQuoteSelect: true } : undefined);
             return;
         }
         if(stageKey === "justify") {
@@ -19307,10 +19340,12 @@ const ui = {
             if(!texts.length) return;
             const existing = (userState.essay || "").trim();
             const lvlEarly = app.getEffectiveLevel && app.getEffectiveLevel();
-            let c2SaSend = false;
-            try { c2SaSend = !!(lvlEarly != null && app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvlEarly)); } catch(eSa) {}
+            let perLevelQuoteEssay = false;
+            try {
+                perLevelQuoteEssay = !!(lvlEarly != null && app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlEarly) && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout());
+            } catch(eSa) {}
             let toAdd = texts.map(t => app.formatDeskQueueEntryForEssay(t)).filter(Boolean).join("\n\n");
-            if(!toAdd && c2SaSend) {
+            if(!toAdd && perLevelQuoteEssay) {
                 toAdd = texts.map(t => app.formatDeskQueueQuoteWithJustification(t)).filter(Boolean).join("\n\n");
             }
             if(!toAdd) {
@@ -19321,7 +19356,7 @@ const ui = {
                 return;
             }
             let newEssay;
-            if(c2SaSend) {
+            if(perLevelQuoteEssay) {
                 const withPrefix = app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(toAdd, lvlEarly) : toAdd;
                 newEssay = withPrefix;
                 if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
@@ -19356,14 +19391,14 @@ const ui = {
             if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
             app.save();
             const lvlNow = app.getEffectiveLevel();
-            let c2SaNow = false;
+            let quoteOnlySa = false;
             let c1OwnWordsSa = false;
-            try { c2SaNow = !!(app.isC2QuoteOnlyShortAnswer && app.isC2QuoteOnlyShortAnswer(lvlNow)); } catch(eSn) {}
+            try { quoteOnlySa = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlNow)); } catch(eSn) {}
             try { c1OwnWordsSa = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvlNow)); } catch(eC1) {}
-            const shortAnsStayOnSelect = stayOnQuoteSelect || c2SaNow || c1OwnWordsSa;
+            const shortAnsStayOnSelect = stayOnQuoteSelect || quoteOnlySa || c1OwnWordsSa;
             let advancedLevel = false;
             let advancedInLevel = false;
-            if((c2SaNow || c1OwnWordsSa) && app.tryFinishShortAnswerLevelAndAdvance) {
+            if((quoteOnlySa || c1OwnWordsSa) && app.tryFinishShortAnswerLevelAndAdvance) {
                 advancedLevel = app.tryFinishShortAnswerLevelAndAdvance(lvlNow, { showCelebration: false });
             } else {
                 const lor = app.isLevelsOfResponseLevel(lvlNow);
@@ -19385,7 +19420,7 @@ const ui = {
         if(ui._sendToBuilderGuard) return;
         try {
             const lvl = app.getEffectiveLevel && app.getEffectiveLevel();
-            if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
+            if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) {
                 ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                 return;
             }
@@ -29021,7 +29056,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             appData.settings.levelBank[lvl].freeSelectFromText = el.checked;
         } else if(key === "shortAnswersOnly") {
             appData.settings.levelBank[lvl].shortAnswersOnly = el.checked;
-            if(el.checked && appData.component === 2 && app.c2UsesOneQuestionPerLevel && app.c2UsesOneQuestionPerLevel()) {
+            if(el.checked && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
                 (app.getActiveLevels() || []).forEach(function(L) {
                     if(!appData.settings.levelBank[L]) appData.settings.levelBank[L] = {};
                     if(appData.settings.levelBank[L].shortAnswersOnly === false) return;
