@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T22:30:00">
+<meta name="architect-build" content="2026-05-20T22:45:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3021,7 +3021,7 @@ const app = {
         if(!qStr) return "";
         const lvl = (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
         const ownWordsQ1 = app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl);
-        if(ownWordsQ1) {
+        if(ownWordsQ1 && !(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl))) {
             return String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(qStr) : "") || "").trim();
         }
         return app.formatDeskQueueQuoteWithJustification(qStr);
@@ -3300,6 +3300,7 @@ const app = {
      * False for single-question mode (one 10-mark question) or when on Q2+ in a past paper. */
     isLevelUsingFirstQuestion: function(level) {
         const lvl = parseInt(level, 10) || 1;
+        if(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl)) return false;
         const bank = app.getLevelBank();
         const entry = bank && bank[lvl] ? bank[lvl] : null;
         const ids = app.resolveQuestionIdsForLevel(lvl);
@@ -3470,7 +3471,7 @@ const app = {
         const pending = String(quoteText || "").trim();
         if(!pending) return false;
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
-        if(!app.isShortAnswerLevel(lvl) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl))) return false;
+        if(!app.isShortAnswerLevel(lvl)) return false;
         if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode()) return false;
         if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
         const k = app.quoteKey(pending);
@@ -4057,6 +4058,7 @@ const app = {
     },
     shouldShowCommitAnswerPanel: function() {
         const level = app.getEffectiveLevel();
+        if(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) return false;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
         const ids = app.resolveQuestionIdsForLevel(level);
@@ -4204,6 +4206,10 @@ const app = {
         userState.selectionAnsweredForQuestion = [];
         userState.pendingCommitForNextQuestion = false;
         userState.selectionCompleted = false;
+        userState.selectionStage = 1;
+        userState.selectionProgress = {};
+        userState.selectionJustification = {};
+        if(ui && ui._freeSelectPendingQuote != null) ui._freeSelectPendingQuote = "";
         if(!userState.currentQuestionIndexByLevel) userState.currentQuestionIndexByLevel = {};
         userState.currentQuestionIndexByLevel[next] = 0;
         app.setLevel(next);
@@ -17411,6 +17417,10 @@ const ui = {
             if(Array.isArray(sel.modes.stages)) {
                 sel.modes.stages = sel.modes.stages.filter(function(s) { return s !== "justify" && s !== "align"; });
             }
+            userState.selectionStage = 1;
+            userState.selectionProgress = {};
+            userState.selectionJustification = {};
+            ui._freeSelectPendingQuote = "";
         }
         const questionTextEarly = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.getQuestionForLevel(level) || (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "");
         ui.renderQuestionBanner();
@@ -17762,7 +17772,7 @@ const ui = {
         const questionText = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(app.getQuestionForLevel(level)) : app.getQuestionForLevel(level));
         /* Passage highlight → examine step must run even when "Give me quote choices" is on (that option only hides the tap *hint* card, not tapping itself). */
         const pendingQuotePassage = String(ui._freeSelectPendingQuote || "").trim();
-        if(tapPathActive && hasSource && pendingQuotePassage && isShortAnswerMode && !teacherRecordMode && !(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level))) {
+        if(tapPathActive && hasSource && pendingQuotePassage && isShortAnswerMode && !teacherRecordMode) {
             if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
         }
         if(tapPathActive && hasSource && pendingQuotePassage) {
@@ -19208,7 +19218,16 @@ const ui = {
                 }
                 return;
             }
-            const newEssay = existing ? existing + "\n\n" + toAdd : toAdd;
+            let newEssay;
+            if(c2SaSend) {
+                const withPrefix = app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(toAdd, lvlEarly) : toAdd;
+                newEssay = withPrefix;
+                if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
+                const essayKey = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvlEarly) : String(lvlEarly) + "_0";
+                userState.questionEssays[essayKey] = withPrefix;
+            } else {
+                newEssay = existing ? existing + "\n\n" + toAdd : toAdd;
+            }
             userState.essay = newEssay;
             const essayEl = document.getElementById("essay-area");
             if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
@@ -19231,6 +19250,7 @@ const ui = {
                 app.awardXp(10 * texts.length);
             }
             if(app.bumpDeskCommitForLevel) app.bumpDeskCommitForLevel(lvlEarly);
+            if(app.persistCurrentQuestionEssay) app.persistCurrentQuestionEssay();
             app.save();
             const lvlNow = app.getEffectiveLevel();
             let c2SaNow = false;
@@ -19246,7 +19266,7 @@ const ui = {
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(c2SaNow) {
-                if(ui.switchView) ui.switchView("select", true);
+                if(ui.switchView) ui.switchView("desk", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(ui.switchView) ui.switchView("desk", true);
             if(ui.updateMarksDisplay) ui.updateMarksDisplay();
