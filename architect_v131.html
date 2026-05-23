@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T22:00:00">
+<meta name="architect-build" content="2026-05-20T22:15:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -4108,10 +4108,30 @@ const app = {
     isLevelProgressionReady: function(level) {
         const lvl = parseInt(level, 10) || 1;
         if(app.isLevelSelectionGoalMet(lvl)) return true;
+        let c2Sa = false;
+        try { c2Sa = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)); } catch(e) {}
+        const entry = app.getLevelBank() && app.getLevelBank()[lvl] ? app.getLevelBank()[lvl] : {};
+        const shortAns = c2Sa || entry.shortAnswersOnly === true;
+        const quoteCount = (() => {
+            const seen = new Set();
+            let n = 0;
+            const add = (ch) => {
+                const raw = typeof ch === "object" && ch && ("quote" in ch || "original" in ch) ? (ch.quote || ch.original) : ch;
+                const k = app.quoteKey(String(raw || "").trim());
+                if(!k || seen.has(k)) return;
+                seen.add(k);
+                n++;
+            };
+            (userState.selectionChosen || []).forEach(add);
+            (userState.selectionAnsweredForQuestion || []).forEach(add);
+            (userState.deskQueue || []).forEach(add);
+            return n;
+        })();
+        if(shortAns && quoteCount >= 1) return true;
+        if(app.countDeskCommitsForLevel(lvl) >= 1 && shortAns) return true;
         if(appData && appData.component === 2 && app.resolveQuestionIdsForLevel(lvl).length === 1) {
             if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
-            const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
-            if(answered.length >= 1) return true;
+            if(quoteCount >= 1) return true;
         }
         return false;
     },
@@ -17385,7 +17405,10 @@ const ui = {
         }
         const quickPick = sel.modes && sel.modes.quickPick;
         const baseStages = sel.modes && sel.modes.stages ? sel.modes.stages : ["discriminate","align","justify"];
-        const stages = quickPick ? ["guided"] : baseStages;
+        let stages = quickPick ? ["guided"] : baseStages;
+        if(isShortAnswerMode) {
+            stages = stages.filter(s => s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize");
+        }
         const stageIndex = Math.max(1, Math.min(stages.length, userState.selectionStage || 1));
         const stageKey = stages[stageIndex - 1];
         const canJumpStages = !appData.isStandalone;
@@ -17775,8 +17798,8 @@ const ui = {
             };
             return;
         }
-        /* Tap-first card only when the student is not using "Give me quote choices" — otherwise Q1 / short-answer tap levels would return here and never build the MC grid. */
-        if(tapPathActive && !studentWantsQuoteList) {
+        /* Tap-first card: short-answer levels always allow passage tap (no justify). Quote-list mode still uses MC for other levels. */
+        if(tapPathActive && (!studentWantsQuoteList || isShortAnswerMode)) {
             if(!hasSource) {
                 cont.innerHTML = `<div class="card" style="cursor:default;">
                     <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Source text needed</div>
@@ -18216,6 +18239,11 @@ const ui = {
                             userState.selectionChosen.push(picked.quote);
                         }
                     }
+                    if(isShortAnswerMode && picked && picked.quote) {
+                        app.save();
+                        ui.sendSelectionQuotesDirectToAnswer();
+                        return;
+                    }
                     userState.selectionStage = stageIndex + 1;
                     app.save();
                     ui.renderSelection();
@@ -18255,6 +18283,23 @@ const ui = {
                 };
                 grid.appendChild(btn);
             });
+            return;
+        }
+        if(stageKey === "align" && isShortAnswerMode) {
+            const qShort = (chosenCorrect && (chosenCorrect.quote || chosenCorrect.original)) || (ui._selectionQuote || "");
+            if(qShort) {
+                if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+                const kS = app.quoteKey(qShort);
+                if(!userState.selectionChosen.some(ch => app.quoteKey(typeof ch === "object" && ch && "quote" in ch ? ch.quote : ch) === kS)) {
+                    userState.selectionChosen.push(qShort);
+                }
+                app.save();
+                ui.sendSelectionQuotesDirectToAnswer();
+                return;
+            }
+            userState.selectionStage = 1;
+            app.save();
+            ui.renderSelection();
             return;
         }
         if(stageKey === "align") {
@@ -18507,6 +18552,13 @@ const ui = {
                                 userState.selectionChosen.push(quoteToAdd);
                             }
                             const ptsNow = app.countSelectionEvidencePoints(level);
+                            const shortReady = c2ShortAnswer && quoteToAdd;
+                            if(shortReady && autoDeskAdv) {
+                                userState.selectionCompleted = true;
+                                app.save();
+                                ui.sendSelectionQuotesDirectToAnswer();
+                                return;
+                            }
                             if(ptsNow >= evidenceGoalForUi && autoDeskAdv) {
                                 userState.selectionCompleted = true;
                                 app.save();
@@ -18542,6 +18594,10 @@ const ui = {
                 };
                 grid.appendChild(btn);
             });
+            return;
+        }
+        if(stageKey === "justify" && isShortAnswerMode) {
+            ui.sendSelectionQuotesDirectToAnswer();
             return;
         }
         if(stageKey === "justify") {
@@ -19092,9 +19148,15 @@ const ui = {
             const texts = uniqueChosen.map(q => strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim())).filter(Boolean);
             if(!texts.length) return;
             const existing = (userState.essay || "").trim();
-            const toAdd = texts.map(t => app.formatDeskQueueEntryForEssay(t)).filter(Boolean).join("\n\n");
+            const lvlEarly = app.getEffectiveLevel && app.getEffectiveLevel();
+            let c2SaSend = false;
+            try { c2SaSend = !!(lvlEarly != null && app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvlEarly)); } catch(eSa) {}
+            let toAdd = texts.map(t => app.formatDeskQueueEntryForEssay(t)).filter(Boolean).join("\n\n");
+            if(!toAdd && c2SaSend) {
+                toAdd = texts.map(t => app.formatDeskQueueQuoteWithJustification(t)).filter(Boolean).join("\n\n");
+            }
             if(!toAdd) {
-                const lvl = app.getEffectiveLevel && app.getEffectiveLevel();
+                const lvl = lvlEarly;
                 if(app.isLevelUsingFirstQuestion && lvl != null && app.isLevelUsingFirstQuestion(lvl)) {
                     alert("For Question 1, write each point in your own words in Quote Select first, or type your answer in the box.");
                 }
@@ -19122,17 +19184,22 @@ const ui = {
             if(texts.length) {
                 app.awardXp(10 * texts.length);
             }
+            if(app.bumpDeskCommitForLevel) app.bumpDeskCommitForLevel(lvlEarly);
             app.save();
             const lvlNow = app.getEffectiveLevel();
+            let c2SaNow = false;
+            try { c2SaNow = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvlNow)); } catch(eSn) {}
             const lor = app.isLevelsOfResponseLevel(lvlNow);
             const idsForLvl = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvlNow) : [];
             const singleQuestionOnLevel = !idsForLvl || idsForLvl.length <= 1;
             const advancedInLevel = !lor && !singleQuestionOnLevel && app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete();
             const advancedLevel = !lor && (singleQuestionOnLevel || !advancedInLevel)
-                && app.isLevelProgressionReady && app.isLevelProgressionReady(lvlNow)
-                && app.tryAdvanceToNextActiveLevel && app.tryAdvanceToNextActiveLevel(lvlNow);
+                && app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlNow, { showCelebration: false });
             if(app.checkLevelCompletion) app.checkLevelCompletion();
             if(advancedLevel || advancedInLevel) {
+                if(ui.switchView) ui.switchView("select", true);
+                if(ui.renderSelection) ui.renderSelection();
+            } else if(c2SaNow) {
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(ui.switchView) ui.switchView("desk", true);
