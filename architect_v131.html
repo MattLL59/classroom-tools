@@ -3462,42 +3462,16 @@ const app = {
             return (n === 1 || n === 2) ? n : 1;
         } catch(e) { return 1; }
     },
-    /** Any Level Bank row has Short ans ticked (legacy true / "true" / 1). */
-    lessonHasShortAnswerTicked: function() {
+    /** Level Bank "Short ans" on this row only (not propagated to other levels). */
+    levelBankShortAnswerEnabled: function(level) {
         try {
-            const bank = app.getLevelBank ? app.getLevelBank() : {};
-            for(let lvl = 1; lvl <= ARCHITECT_MAX_LEVEL; lvl++) {
-                const sa = bank[lvl] && bank[lvl].shortAnswersOnly;
-                if(sa === true || sa === "true" || sa === 1) return true;
-            }
-            return !!(appData && appData.settings && appData.settings.shortAnswersPastPaper === true);
+            const lvl = parseInt(level, 10) || 1;
+            const entry = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
+            const sa = entry.shortAnswersOnly;
+            if(sa === true || sa === "true" || sa === 1) return true;
+            if(sa === false || sa === "false" || sa === 0) return false;
+            return false;
         } catch(e) { return false; }
-    },
-    /**
-     * Component 2 past papers: if Short ans is on for any level, apply to every question level and
-     * widen activeLevels so L2→L6 advance works (lessons often only tick L1 or keep activeLevels [1,2]).
-     */
-    normalizeShortAnswerForComponent2PastPaper: function() {
-        try {
-            if(app.getArchitectComponent() !== 2) return;
-            if(!app.lessonHasShortAnswerTicked()) return;
-            if(!appData.settings) appData.settings = {};
-            if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
-            const bank = appData.settings.levelBank;
-            const questions = Array.isArray(appData.questions) ? appData.questions : [];
-            const n = Math.min(Math.max(questions.length, 2), ARCHITECT_MAX_LEVEL);
-            for(let lvl = 1; lvl <= n; lvl++) {
-                if(!bank[lvl]) bank[lvl] = {};
-                if(bank[lvl].shortAnswersOnly === false) continue;
-                bank[lvl].shortAnswersOnly = true;
-            }
-            appData.settings.shortAnswersPastPaper = true;
-            const span = Array.from({ length: n }, function(_, i) { return i + 1; });
-            appData.settings.activeLevels = span;
-            if(typeof admin !== "undefined" && admin.syncLevelBankForPastPaperQuestions) {
-                admin.syncLevelBankForPastPaperQuestions();
-            }
-        } catch(e) {}
     },
     /** Past paper: one focus question per Level Bank row (L1→q1, L2→q2). Works on Component 1 or 2. */
     usesOneQuestionPerLevelLayout: function() {
@@ -3505,7 +3479,6 @@ const app = {
             if(!appData) return false;
             const questions = Array.isArray(appData.questions) ? appData.questions : [];
             if(questions.length < 2) return false;
-            if(app.getArchitectComponent() === 2 && app.lessonHasShortAnswerTicked()) return true;
             const active = app.getActiveLevels ? app.getActiveLevels() : [];
             if(active.length < 2) return false;
             return active.every(function(l) {
@@ -3533,23 +3506,8 @@ const app = {
     isShortAnswerLevel: function(level) {
         try {
             const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
-            const entry = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
-            const sa = entry.shortAnswersOnly;
-            if(sa === true || sa === "true" || sa === 1) return true;
-            if(sa === false || sa === "false" || sa === 0) return false;
-            if(app.getArchitectComponent() === 2 && app.lessonHasShortAnswerTicked()) return true;
-            if(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
-                const bank = app.getLevelBank ? app.getLevelBank() : {};
-                const active = app.getActiveLevels ? app.getActiveLevels() : [];
-                if(active.indexOf(lvl) >= 0) {
-                    for(let i = 0; i < active.length; i++) {
-                        const sib = bank[active[i]] || {};
-                        const ssa = sib.shortAnswersOnly;
-                        if(ssa === true || ssa === "true" || ssa === 1) return true;
-                    }
-                }
-            }
-            if(appData && appData.component !== 2 && app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
+            if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) return true;
+            if(app.getArchitectComponent() !== 2 && app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
             return false;
         } catch(e) { return false; }
     },
@@ -3565,13 +3523,7 @@ const app = {
         try {
             const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
             if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) return false;
-            if(app.getArchitectComponent() === 2 && app.lessonHasShortAnswerTicked()) {
-                const entry = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
-                if(entry.shortAnswersOnly === false || entry.shortAnswersOnly === "false" || entry.shortAnswersOnly === 0) return false;
-                return true;
-            }
-            if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(lvl)) return false;
-            return true;
+            return !!(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl));
         } catch(e) { return false; }
     },
     /** @deprecated alias */
@@ -3601,7 +3553,6 @@ const app = {
             userState.selectionChosen.push(pending);
         }
         ui._freeSelectPendingQuote = "";
-        if(app.normalizeShortAnswerForComponent2PastPaper) app.normalizeShortAnswerForComponent2PastPaper();
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         app.save();
         if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
@@ -4269,7 +4220,9 @@ const app = {
     tryFinishShortAnswerLevelAndAdvance: function(level, opts) {
         opts = opts || {};
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
-        if(!app.isShortAnswerLevel(lvl)) return false;
+        const quoteOnly = app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl);
+        const ownWords = app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl);
+        if(!quoteOnly && !ownWords) return false;
         if(app.isLevelsOfResponseLevel(lvl)) return false;
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         if(!app.isLevelProgressionReady(lvl)) return false;
@@ -4326,7 +4279,10 @@ const app = {
     advanceStudentToNextActiveLevel: function(opts) {
         opts = opts || {};
         const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
-        const shortAnswerAdvance = opts.shortAnswerAdvance === true && app.isShortAnswerLevel(cur);
+        const shortAnswerAdvance = opts.shortAnswerAdvance === true && (
+            (app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(cur))
+            || (app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(cur))
+        );
         if(app.isLevelsOfResponseLevel(cur)) return false;
         const ids = app.resolveQuestionIdsForLevel(cur);
         if(!shortAnswerAdvance && ids.length > 1) {
@@ -14015,9 +13971,6 @@ const app = {
     },
     getActiveLevels: function() {
         const questions = Array.isArray(appData && appData.questions) ? appData.questions : [];
-        if(app.getArchitectComponent() === 2 && questions.length >= 2 && app.lessonHasShortAnswerTicked()) {
-            return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, function(_, i) { return i + 1; });
-        }
         const fromSettings = appData && appData.settings && Array.isArray(appData.settings.activeLevels) && appData.settings.activeLevels.length
             ? appData.settings.activeLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= ARCHITECT_MAX_LEVEL)
             : [];
@@ -15425,7 +15378,6 @@ const ui = {
         } catch(eInitBanner) {}
         if(typeof admin !== "undefined" && admin.ensureSelectionData) admin.ensureSelectionData();
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
-        if(app.normalizeShortAnswerForComponent2PastPaper) app.normalizeShortAnswerForComponent2PastPaper();
         if(!ui._textGuardBound) {
             ui._textGuardBound = true;
             const isEditable = (el) => {
@@ -17571,7 +17523,6 @@ const ui = {
             </div>`;
             return;
         }
-        if(app.normalizeShortAnswerForComponent2PastPaper) app.normalizeShortAnswerForComponent2PastPaper();
         const levelBank = app.getLevelBank();
         const level = app.getEffectiveLevel();
         const levelEntry = levelBank[level] || {};
@@ -29109,13 +29060,6 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             appData.settings.levelBank[lvl].freeSelectFromText = el.checked;
         } else if(key === "shortAnswersOnly") {
             appData.settings.levelBank[lvl].shortAnswersOnly = el.checked;
-            if(el.checked && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
-                (app.getActiveLevels() || []).forEach(function(L) {
-                    if(!appData.settings.levelBank[L]) appData.settings.levelBank[L] = {};
-                    if(appData.settings.levelBank[L].shortAnswersOnly === false) return;
-                    appData.settings.levelBank[L].shortAnswersOnly = true;
-                });
-            }
             admin.renderLevelBank && admin.renderLevelBank();
             ui.renderSelection && ui.renderSelection();
         } else if(key === "levelsOfResponse") {
