@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="architect-build" content="2026-05-20T22:45:00">
+<meta name="architect-build" content="2026-05-20T23:00:00">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3483,6 +3483,7 @@ const app = {
         ui._freeSelectPendingQuote = "";
         app.save();
         if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer();
+        else if(app.tryFinishShortAnswerLevelAndAdvance) app.tryFinishShortAnswerLevelAndAdvance(lvl, { showCelebration: false });
         return true;
     },
     syncSelectionQuestionFromLevel: function() {
@@ -4132,37 +4133,45 @@ const app = {
     /** Level→level advance (L1→L2): one question per level on C2 can progress after first quote reaches the desk/answer. */
     isLevelProgressionReady: function(level) {
         const lvl = parseInt(level, 10) || 1;
+        if(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl)) {
+            if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
+            const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
+            if(answered.length >= 1) return true;
+            return false;
+        }
         if(app.isLevelSelectionGoalMet(lvl)) return true;
-        let c2Sa = false;
-        try { c2Sa = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)); } catch(e) {}
-        const entry = app.getLevelBank() && app.getLevelBank()[lvl] ? app.getLevelBank()[lvl] : {};
-        const shortAns = c2Sa || entry.shortAnswersOnly === true;
-        const quoteCount = (() => {
-            const seen = new Set();
-            let n = 0;
-            const add = (ch) => {
-                const raw = typeof ch === "object" && ch && ("quote" in ch || "original" in ch) ? (ch.quote || ch.original) : ch;
-                const k = app.quoteKey(String(raw || "").trim());
-                if(!k || seen.has(k)) return;
-                seen.add(k);
-                n++;
-            };
-            (userState.selectionChosen || []).forEach(add);
-            (userState.selectionAnsweredForQuestion || []).forEach(add);
-            (userState.deskQueue || []).forEach(add);
-            return n;
-        })();
-        if(shortAns && quoteCount >= 1) return true;
-        if(app.countDeskCommitsForLevel(lvl) >= 1 && shortAns) return true;
         if(appData && appData.component === 2 && app.resolveQuestionIdsForLevel(lvl).length === 1) {
             if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
-            if(quoteCount >= 1) return true;
+            const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
+            if(answered.length >= 1) return true;
         }
         return false;
+    },
+    /** After a Short ans quote is saved, move Ln→Ln+1 (not in-level multi-question steps). */
+    tryFinishShortAnswerLevelAndAdvance: function(level, opts) {
+        opts = opts || {};
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
+        if(!app.isShortAnswerLevel(lvl)) return false;
+        if(app.isLevelsOfResponseLevel(lvl)) return false;
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
+        if(!app.isLevelProgressionReady(lvl)) return false;
+        let next = app.getNextActiveLevelAfter(lvl);
+        if(next == null && app.ensureActiveLevelsFromQuestions && app.ensureActiveLevelsFromQuestions()) {
+            next = app.getNextActiveLevelAfter(lvl);
+        }
+        if(next == null) return false;
+        return app.advanceStudentToNextActiveLevel({
+            level: lvl,
+            showCelebration: opts.showCelebration !== false,
+            shortAnswerAdvance: true
+        });
     },
     tryAdvanceLevelAfterDeskActivity: function(level, opts) {
         opts = opts || {};
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
+        if(app.isShortAnswerLevel(lvl) && app.tryFinishShortAnswerLevelAndAdvance) {
+            return app.tryFinishShortAnswerLevelAndAdvance(lvl, opts);
+        }
         if(app.isLevelsOfResponseLevel(lvl)) return false;
         const ids = app.resolveQuestionIdsForLevel(lvl);
         if(ids.length > 1) {
@@ -4174,6 +4183,7 @@ const app = {
             }
         }
         if(!app.isLevelProgressionReady(lvl)) return false;
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         return app.advanceStudentToNextActiveLevel({ level: lvl, showCelebration: opts.showCelebration !== false });
     },
     /**
@@ -4183,14 +4193,15 @@ const app = {
     advanceStudentToNextActiveLevel: function(opts) {
         opts = opts || {};
         const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
+        const shortAnswerAdvance = opts.shortAnswerAdvance === true && app.isShortAnswerLevel(cur);
         if(app.isLevelsOfResponseLevel(cur)) return false;
         const ids = app.resolveQuestionIdsForLevel(cur);
-        if(ids.length > 1) {
+        if(!shortAnswerAdvance && ids.length > 1) {
             const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[cur] === "number")
                 ? userState.currentQuestionIndexByLevel[cur] : 0;
             if(qIdx < ids.length - 1) return false;
             if(!app.isLevelProgressionReady(cur)) return false;
-        } else if(!app.isLevelProgressionReady(cur)) {
+        } else if(!shortAnswerAdvance && !app.isLevelProgressionReady(cur)) {
             return false;
         }
         let next = app.getNextActiveLevelAfter(cur);
@@ -19254,13 +19265,19 @@ const ui = {
             app.save();
             const lvlNow = app.getEffectiveLevel();
             let c2SaNow = false;
-            try { c2SaNow = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvlNow)); } catch(eSn) {}
-            const lor = app.isLevelsOfResponseLevel(lvlNow);
-            const idsForLvl = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvlNow) : [];
-            const singleQuestionOnLevel = !idsForLvl || idsForLvl.length <= 1;
-            const advancedInLevel = !lor && !singleQuestionOnLevel && app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete();
-            const advancedLevel = !lor && (singleQuestionOnLevel || !advancedInLevel)
-                && app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlNow, { showCelebration: false });
+            try { c2SaNow = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(lvlNow)); } catch(eSn) {}
+            let advancedLevel = false;
+            let advancedInLevel = false;
+            if(c2SaNow && app.tryFinishShortAnswerLevelAndAdvance) {
+                advancedLevel = app.tryFinishShortAnswerLevelAndAdvance(lvlNow, { showCelebration: false });
+            } else {
+                const lor = app.isLevelsOfResponseLevel(lvlNow);
+                const idsForLvl = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvlNow) : [];
+                const singleQuestionOnLevel = !idsForLvl || idsForLvl.length <= 1;
+                advancedInLevel = !lor && !singleQuestionOnLevel && app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete();
+                advancedLevel = !lor && (singleQuestionOnLevel || !advancedInLevel)
+                    && app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlNow, { showCelebration: false });
+            }
             if(app.checkLevelCompletion) app.checkLevelCompletion();
             if(advancedLevel || advancedInLevel) {
                 if(ui.switchView) ui.switchView("select", true);
