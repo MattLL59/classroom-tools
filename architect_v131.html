@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-20T24:15:00">
-<meta name="architect-rev" content="shortans-quote-only-any-comp-d7e2f19">
+<meta name="architect-build" content="2026-05-20T24:30:00">
+<meta name="architect-rev" content="c2-shortans-normalize-l2-f4a8c31">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3462,12 +3462,50 @@ const app = {
             return (n === 1 || n === 2) ? n : 1;
         } catch(e) { return 1; }
     },
+    /** Any Level Bank row has Short ans ticked (legacy true / "true" / 1). */
+    lessonHasShortAnswerTicked: function() {
+        try {
+            const bank = app.getLevelBank ? app.getLevelBank() : {};
+            for(let lvl = 1; lvl <= ARCHITECT_MAX_LEVEL; lvl++) {
+                const sa = bank[lvl] && bank[lvl].shortAnswersOnly;
+                if(sa === true || sa === "true" || sa === 1) return true;
+            }
+            return !!(appData && appData.settings && appData.settings.shortAnswersPastPaper === true);
+        } catch(e) { return false; }
+    },
+    /**
+     * Component 2 past papers: if Short ans is on for any level, apply to every question level and
+     * widen activeLevels so L2→L6 advance works (lessons often only tick L1 or keep activeLevels [1,2]).
+     */
+    normalizeShortAnswerForComponent2PastPaper: function() {
+        try {
+            if(app.getArchitectComponent() !== 2) return;
+            if(!app.lessonHasShortAnswerTicked()) return;
+            if(!appData.settings) appData.settings = {};
+            if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
+            const bank = appData.settings.levelBank;
+            const questions = Array.isArray(appData.questions) ? appData.questions : [];
+            const n = Math.min(Math.max(questions.length, 2), ARCHITECT_MAX_LEVEL);
+            for(let lvl = 1; lvl <= n; lvl++) {
+                if(!bank[lvl]) bank[lvl] = {};
+                if(bank[lvl].shortAnswersOnly === false) continue;
+                bank[lvl].shortAnswersOnly = true;
+            }
+            appData.settings.shortAnswersPastPaper = true;
+            const span = Array.from({ length: n }, function(_, i) { return i + 1; });
+            appData.settings.activeLevels = span;
+            if(typeof admin !== "undefined" && admin.syncLevelBankForPastPaperQuestions) {
+                admin.syncLevelBankForPastPaperQuestions();
+            }
+        } catch(e) {}
+    },
     /** Past paper: one focus question per Level Bank row (L1→q1, L2→q2). Works on Component 1 or 2. */
     usesOneQuestionPerLevelLayout: function() {
         try {
             if(!appData) return false;
             const questions = Array.isArray(appData.questions) ? appData.questions : [];
             if(questions.length < 2) return false;
+            if(app.getArchitectComponent() === 2 && app.lessonHasShortAnswerTicked()) return true;
             const active = app.getActiveLevels ? app.getActiveLevels() : [];
             if(active.length < 2) return false;
             return active.every(function(l) {
@@ -3499,6 +3537,7 @@ const app = {
             const sa = entry.shortAnswersOnly;
             if(sa === true || sa === "true" || sa === 1) return true;
             if(sa === false || sa === "false" || sa === 0) return false;
+            if(app.getArchitectComponent() === 2 && app.lessonHasShortAnswerTicked()) return true;
             if(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
                 const bank = app.getLevelBank ? app.getLevelBank() : {};
                 const active = app.getActiveLevels ? app.getActiveLevels() : [];
@@ -3524,8 +3563,14 @@ const app = {
     /** Short ans + verbatim quote (not C1 Q1 own-words). Component 1 or 2 — no examine/justify dialogue. */
     isQuoteOnlyShortAnswerLevel: function(level) {
         try {
-            if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(level)) return false;
-            if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level)) return false;
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+            if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) return false;
+            if(app.getArchitectComponent() === 2 && app.lessonHasShortAnswerTicked()) {
+                const entry = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
+                if(entry.shortAnswersOnly === false || entry.shortAnswersOnly === "false" || entry.shortAnswersOnly === 0) return false;
+                return true;
+            }
+            if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(lvl)) return false;
             return true;
         } catch(e) { return false; }
     },
@@ -3556,9 +3601,11 @@ const app = {
             userState.selectionChosen.push(pending);
         }
         ui._freeSelectPendingQuote = "";
+        if(app.normalizeShortAnswerForComponent2PastPaper) app.normalizeShortAnswerForComponent2PastPaper();
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         app.save();
         if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+        else if(ui.showSelectionMessage) ui.showSelectionMessage("Quote saved", "Added to your answer. Open Writing Desk when you want to edit.");
         else if(app.tryFinishShortAnswerLevelAndAdvance) app.tryFinishShortAnswerLevelAndAdvance(lvl, { showCelebration: false });
         return true;
     },
@@ -13968,6 +14015,9 @@ const app = {
     },
     getActiveLevels: function() {
         const questions = Array.isArray(appData && appData.questions) ? appData.questions : [];
+        if(app.getArchitectComponent() === 2 && questions.length >= 2 && app.lessonHasShortAnswerTicked()) {
+            return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, function(_, i) { return i + 1; });
+        }
         const fromSettings = appData && appData.settings && Array.isArray(appData.settings.activeLevels) && appData.settings.activeLevels.length
             ? appData.settings.activeLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= ARCHITECT_MAX_LEVEL)
             : [];
@@ -15361,7 +15411,7 @@ const ui = {
             if(typeof app.tryFinishShortAnswerLevelAndAdvance !== "function") {
                 const rev = document.querySelector("meta[name=\"architect-rev\"]");
                 const need = rev ? String(rev.getAttribute("content") || "").trim() : "";
-                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 24:15:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
+                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 24:30:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
                 console.warn(msg);
                 if(!document.getElementById("architect-outdated-script-banner")) {
                     const b = document.createElement("div");
@@ -15375,6 +15425,7 @@ const ui = {
         } catch(eInitBanner) {}
         if(typeof admin !== "undefined" && admin.ensureSelectionData) admin.ensureSelectionData();
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
+        if(app.normalizeShortAnswerForComponent2PastPaper) app.normalizeShortAnswerForComponent2PastPaper();
         if(!ui._textGuardBound) {
             ui._textGuardBound = true;
             const isEditable = (el) => {
@@ -15671,8 +15722,9 @@ const ui = {
                         const q1OrShort = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl)) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl));
                         const tr = app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode();
                         let c2Sa = false;
-                        try { c2Sa = !!(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)); } catch(eC2) {}
-                        if((q1OrShort || tr || c2Sa) && text.length >= 3) okMatch = true;
+                        let quoteOnlyTap = false;
+                        try { quoteOnlyTap = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)); } catch(eC2) {}
+                        if((q1OrShort || tr || quoteOnlyTap) && text.length >= 3) okMatch = true;
                     } catch(eOk) { /* keep okMatch false */ }
                 }
                 if(!okMatch) return;
@@ -17519,6 +17571,7 @@ const ui = {
             </div>`;
             return;
         }
+        if(app.normalizeShortAnswerForComponent2PastPaper) app.normalizeShortAnswerForComponent2PastPaper();
         const levelBank = app.getLevelBank();
         const level = app.getEffectiveLevel();
         const levelEntry = levelBank[level] || {};
