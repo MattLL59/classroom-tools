@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-20T23:30:00">
-<meta name="architect-rev" content="c2-shortans-quote-select-a1f3e82">
+<meta name="architect-build" content="2026-05-20T23:45:00">
+<meta name="architect-rev" content="c2-shortans-l2-advance-b4e91c0">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3455,6 +3455,31 @@ const app = {
             ui.renderSelection();
         }
     },
+    /** Component 2 past paper: one focus question per Level Bank row (L1→q1, L2→q2). */
+    c2UsesOneQuestionPerLevel: function() {
+        try {
+            if(!appData || appData.component !== 2) return false;
+            const questions = Array.isArray(appData.questions) ? appData.questions : [];
+            if(questions.length < 2) return false;
+            const active = app.getActiveLevels ? app.getActiveLevels() : [];
+            if(active.length < 2) return false;
+            return active.every(function(l) {
+                const ids = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(l) : [];
+                return ids && ids.length === 1;
+            });
+        } catch(e) { return false; }
+    },
+    /** True when this level already has a short-answer quote in the answer / desk (not global L1 progress). */
+    hasShortAnswerContentForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
+        if(!userState.questionEssays || typeof userState.questionEssays !== "object") return false;
+        const key = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvl) : (String(lvl) + "_0");
+        const body = String(userState.questionEssays[key] || "").trim();
+        if(!body) return false;
+        const stripped = body.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
+        return stripped.length >= 3;
+    },
     /** Level Bank "Short ans" (accepts legacy true / "true"). C1 Q1 retrieval when not component 2. */
     isShortAnswerLevel: function(level) {
         try {
@@ -3463,6 +3488,17 @@ const app = {
             const sa = entry.shortAnswersOnly;
             if(sa === true || sa === "true" || sa === 1) return true;
             if(sa === false || sa === "false" || sa === 0) return false;
+            if(appData && appData.component === 2 && app.c2UsesOneQuestionPerLevel && app.c2UsesOneQuestionPerLevel()) {
+                const bank = app.getLevelBank ? app.getLevelBank() : {};
+                const active = app.getActiveLevels ? app.getActiveLevels() : [];
+                if(active.indexOf(lvl) >= 0) {
+                    for(let i = 0; i < active.length; i++) {
+                        const sib = bank[active[i]] || {};
+                        const ssa = sib.shortAnswersOnly;
+                        if(ssa === true || ssa === "true" || ssa === 1) return true;
+                    }
+                }
+            }
             if(appData && appData.component !== 2 && app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
             return false;
         } catch(e) { return false; }
@@ -4142,16 +4178,11 @@ const app = {
     isLevelProgressionReady: function(level) {
         const lvl = parseInt(level, 10) || 1;
         if(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl)) {
-            if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
-            const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
-            if(answered.length >= 1) return true;
-            return false;
+            return !!(app.hasShortAnswerContentForLevel && app.hasShortAnswerContentForLevel(lvl));
         }
         if(app.isLevelSelectionGoalMet(lvl)) return true;
         if(appData && appData.component === 2 && app.resolveQuestionIdsForLevel(lvl).length === 1) {
-            if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
-            const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
-            if(answered.length >= 1) return true;
+            if(app.hasShortAnswerContentForLevel && app.hasShortAnswerContentForLevel(lvl)) return true;
         }
         return false;
     },
@@ -15282,7 +15313,7 @@ const ui = {
             if(typeof app.tryFinishShortAnswerLevelAndAdvance !== "function") {
                 const rev = document.querySelector("meta[name=\"architect-rev\"]");
                 const need = rev ? String(rev.getAttribute("content") || "").trim() : "";
-                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 23:30:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
+                const msg = "This page is an old copy of Answer Architect" + (need ? " (need rev " + need + ")" : "") + ". Open architect_v131.html from the latest main branch (build 23:45:00+), or re-export Student App — hard refresh alone will not update an exported HTML file.";
                 console.warn(msg);
                 if(!document.getElementById("architect-outdated-script-banner")) {
                     const b = document.createElement("div");
@@ -17867,7 +17898,7 @@ const ui = {
                 }
                 ui._freeSelectPendingQuote = "";
                 app.save();
-                if(c2ShortAnswer) {
+                if(isShortAnswerMode || c2ShortAnswer) {
                     ui.sendSelectionQuotesDirectToAnswer();
                     return;
                 }
@@ -28949,6 +28980,14 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             appData.settings.levelBank[lvl].freeSelectFromText = el.checked;
         } else if(key === "shortAnswersOnly") {
             appData.settings.levelBank[lvl].shortAnswersOnly = el.checked;
+            if(el.checked && appData.component === 2 && app.c2UsesOneQuestionPerLevel && app.c2UsesOneQuestionPerLevel()) {
+                (app.getActiveLevels() || []).forEach(function(L) {
+                    if(!appData.settings.levelBank[L]) appData.settings.levelBank[L] = {};
+                    if(appData.settings.levelBank[L].shortAnswersOnly === false) return;
+                    appData.settings.levelBank[L].shortAnswersOnly = true;
+                });
+            }
+            admin.renderLevelBank && admin.renderLevelBank();
             ui.renderSelection && ui.renderSelection();
         } else if(key === "levelsOfResponse") {
             appData.settings.levelBank[lvl].levelsOfResponse = el.checked;
