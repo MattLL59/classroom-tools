@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T20:30:00">
-<meta name="architect-rev" content="question-glue-repair-c1c2-f806">
+<meta name="architect-build" content="2026-05-23T21:15:00">
+<meta name="architect-rev" content="c2-instruction-rubric-filter-f806">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -1020,6 +1020,7 @@
                     </summary>
                     <div class="select-question-body">
                         <span id="lbl-title-select-num" style="display:none; font-size:0.8rem; font-weight:600; color:var(--primary); margin-bottom:4px;"></span>
+                        <span id="lbl-title-select-c2-passage" style="display:none; font-size:0.78rem; font-weight:600; color:var(--primary); opacity:0.88; margin-bottom:4px;"></span>
                         <span id="lbl-title-select" style="font-weight:normal; display:block;">...</span>
                     </div>
                 </details>
@@ -3724,6 +3725,23 @@ const app = {
         const cleaned = app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(raw) : raw;
         return String(cleaned || raw || "").trim();
     },
+    /** C2: short passage label from instruction rubric or per-question c2Source (e.g. “London As It Is”). */
+    getC2PassageHintForLevel: function(level) {
+        if(!appData || appData.component !== 2) return "";
+        const lvl = parseInt(level, 10) || 1;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const norm = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        let q = null;
+        const ids = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvl) : [];
+        if(ids && ids.length) q = questions.find(qq => qq && norm(qq.id) === norm(ids[0]));
+        if(!q && questions[lvl - 1]) q = questions[lvl - 1];
+        if(!q) return "";
+        if(q.c2PassageHint && String(q.c2PassageHint).trim()) return String(q.c2PassageHint).trim();
+        if(q.c2Source === "19th") return "19th-century extract";
+        if(q.c2Source === "21st") return "21st-century resource";
+        if(q.c2Source === "both") return "Both passages";
+        return "";
+    },
     /** Long “levels of response” style tasks: quote/evidence tallies and scheme overlap support drafting. */
     isLevelsOfResponseLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
@@ -4117,6 +4135,7 @@ const app = {
         }
         app.maybeSplitConflatedDualTextQuestionRow(safe);
         if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(safe);
+        if(typeof admin.sanitizeC2InstructionRowsFromQuestionBank === "function") admin.sanitizeC2InstructionRowsFromQuestionBank(safe);
         if(Array.isArray(safe.questions)) {
             safe.questions.forEach((q) => {
                 if(q && typeof q.prompt === "string" && q.prompt.trim()) q.prompt = app.sanitizeFocusQuestionPrompt(q.prompt);
@@ -14371,8 +14390,10 @@ const app = {
             if (q && typeof q === "object") {
                 const lineRef = (q.lineRef && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined;
                 const c2Source = (q.c2Source === "21st" || q.c2Source === "19th" || q.c2Source === "both") ? q.c2Source : undefined;
+                const c2PassageHint = (q.c2PassageHint && typeof q.c2PassageHint === "string" && q.c2PassageHint.trim()) ? q.c2PassageHint.trim() : undefined;
                 const o = { id: (q.id && typeof q.id === "string") ? q.id : "q" + (i + 1), prompt: typeof q.prompt === "string" ? q.prompt : "", lineRef };
                 if(c2Source) o.c2Source = c2Source;
+                if(c2PassageHint) o.c2PassageHint = c2PassageHint;
                 if(typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) o.answerPassageExcerpt = q.answerPassageExcerpt.trim();
                 if(q.includeInWorksheet === false) o.includeInWorksheet = false;
                 if(typeof q.worksheetInferenceModel === "string" && q.worksheetInferenceModel.trim()) o.worksheetInferenceModel = q.worksheetInferenceModel.trim();
@@ -15392,6 +15413,7 @@ const ui = {
         const qNum = typeof o.qNum === "number" ? o.qNum : 0;
         const total = typeof o.total === "number" ? o.total : 0;
         const numEl = document.getElementById("lbl-title-select-num");
+        const c2PassEl = document.getElementById("lbl-title-select-c2-passage");
         const lbl = document.getElementById("lbl-title-select");
         if(numEl) {
             if(qNum >= 1 && total >= 2) {
@@ -15400,6 +15422,18 @@ const ui = {
             } else {
                 numEl.style.display = "none";
                 numEl.textContent = "";
+            }
+        }
+        if(c2PassEl) {
+            const c2Hint = (typeof o.c2PassageHint === "string" && o.c2PassageHint.trim())
+                ? o.c2PassageHint.trim()
+                : (typeof app.getC2PassageHintForLevel === "function" ? app.getC2PassageHintForLevel(typeof o.level === "number" ? o.level : (userState && userState.level)) : "");
+            if(c2Hint) {
+                c2PassEl.style.display = "block";
+                c2PassEl.textContent = "Passage: " + c2Hint;
+            } else {
+                c2PassEl.style.display = "none";
+                c2PassEl.textContent = "";
             }
         }
         if(lbl) lbl.textContent = (text && text.trim()) || "—";
@@ -17905,7 +17939,8 @@ const ui = {
             ui._syncSelectQuestionLabel({
                 text: questionTextGlobal || "No question text is set for this level.",
                 qNum,
-                total
+                total,
+                level
             });
             if(topPanel) {
                 const stageTagsHtml = stages.map((s, i) => {
@@ -20337,10 +20372,105 @@ const admin = {
         }
         /** Teacher-bold rubric in HTML: entire chunk is emphasis with no marks / no leading (a). */
         const raw = String(s || "");
-        if(/<(?:b|strong)\b/i.test(raw) && !/\[\s*\d+\s*\]/.test(plain) && !/^\s*\(?a\)\s/i.test(plain) && plain.length < 280) {
-            if(/instruction|answer\s+all|read\s+the|resource\s+material|spaces\s+provided|black\s+ink|turn\s+over|section\s+a\b/i.test(plain)) return true;
+        if(/<(?:b|strong)\b/i.test(raw) && !/\[\s*\d+\s*\]/.test(plain) && !/^\s*\(?a\)\s/i.test(plain) && plain.length < 520) {
+            if(/instruction|answer\s+all|read\s+the|resource\s+material|spaces\s+provided|black\s+ink|turn\s+over|section\s+a\b|to\s+answer\s+the\s+following/i.test(plain)) return true;
         }
+        /** Board rubric before a Victorian / 19th C or resource extract block — not a Focus question. */
+        if(/^to\s+answer\s+the\s+following\s+question(?:s)?\b/i.test(plain)) {
+            if(/\b(?:read|use\s+both|refer\s+to|must\s+read|will\s+need\s+to\s+read)\b/i.test(plain)) return true;
+        }
+        if(/^to\s+answer\s+this\s+question\b/i.test(plain) && /\bread\b/i.test(plain)) return true;
         return false;
+    },
+    /** From a “To answer the following questions…” rubric, infer which C2 passage the next tasks use. */
+    inferC2PassageFromInstructionRubric: function(s) {
+        const plain = admin._plainTextFromQuestionChunk(s);
+        if(!plain || !/^to\s+answer\s+the\s+following\s+question(?:s)?\b/i.test(plain)) return null;
+        if(/\b(?:both\s+texts|both\s+of\s+these\s+texts|use\s+both\s+texts|from\s+both\s+texts)\b/i.test(plain)) return "both";
+        if(/\b(?:19th|nineteenth|victorian|opposite\s+page|diary\s+entries|extract\s+on\s+the\s+opposite|question\s+paper\s+page\s+3)\b/i.test(plain)) return "19th";
+        if(/\b(?:21st|twenty.?first|newspaper\s+article|resource\s+material|separate\s+resource|resource\s+paper)\b/i.test(plain)) return "21st";
+        if(/\bread\s+the\s+extract\b/i.test(plain) && !/\bresource\b/i.test(plain)) return "19th";
+        return null;
+    },
+    /** Short label for students/teachers, e.g. “London As It Is” from the rubric quotes. */
+    shortenC2InstructionRubricLabel: function(s) {
+        const plain = admin._plainTextFromQuestionChunk(s);
+        if(!plain) return "";
+        const titleMatch = plain.match(/[\u2018\u2019'""]([^'""\u2018\u2019]{3,80})[\u2018\u2019'""]/);
+        if(titleMatch && titleMatch[1]) return titleMatch[1].trim();
+        if(/\b(?:19th|nineteenth|victorian|opposite\s+page)\b/i.test(plain)) return "19th-century extract";
+        if(/\b(?:21st|twenty.?first|newspaper|resource\s+material)\b/i.test(plain)) return "21st-century resource";
+        if(/\bboth\s+texts\b/i.test(plain)) return "Both passages";
+        return "";
+    },
+    /**
+     * Drop instruction rubrics; tag following real questions with c2Source / c2PassageHint from the rubric.
+     * Returns { prompt, c2Source?, c2PassageHint? }[].
+     */
+    applyC2InstructionRubricsToQuestionChunks: function(chunks) {
+        if(!Array.isArray(chunks) || !chunks.length) return [];
+        const out = [];
+        let pendingSource = null;
+        let pendingHint = "";
+        chunks.forEach(function(ch) {
+            const raw = String(ch || "").trim();
+            if(!raw) return;
+            if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(raw)) {
+                const inferred = admin.inferC2PassageFromInstructionRubric(raw);
+                if(inferred) pendingSource = inferred;
+                const lab = admin.shortenC2InstructionRubricLabel(raw);
+                if(lab) pendingHint = lab;
+                return;
+            }
+            const row = { prompt: raw };
+            if(pendingSource) row.c2Source = pendingSource;
+            if(pendingHint) row.c2PassageHint = pendingHint;
+            out.push(row);
+        });
+        return out;
+    },
+    /** Build lesson question rows from finalizeExtractedQuestionPrompts output. */
+    buildQuestionsFromFinalizedPrompts: function(parsed) {
+        const list = Array.isArray(parsed) ? parsed : [];
+        return list.map(function(item, i) {
+            const prompt = typeof item === "string" ? item : (item && item.prompt);
+            const row = { id: "q" + (i + 1), prompt: app.sanitizeFocusQuestionPrompt(String(prompt || "").trim()) };
+            if(item && typeof item === "object") {
+                if(item.c2Source === "21st" || item.c2Source === "19th" || item.c2Source === "both") row.c2Source = item.c2Source;
+                if(item.c2PassageHint && String(item.c2PassageHint).trim()) row.c2PassageHint = String(item.c2PassageHint).trim();
+            }
+            return row;
+        }).filter(function(q) { return q.prompt && q.prompt.length >= 8; });
+    },
+    /** Remove instruction-only rows already in the bank; apply passage hints from any rubrics left in order. */
+    sanitizeC2InstructionRowsFromQuestionBank: function(safe) {
+        if(!safe || !Array.isArray(safe.questions)) return false;
+        let pendingSource = null;
+        let pendingHint = "";
+        let changed = false;
+        const kept = [];
+        safe.questions.forEach(function(q) {
+            if(!q || typeof q.prompt !== "string") return;
+            const p = q.prompt.trim();
+            if(!p) return;
+            if(typeof admin.isC2ExamInstructionChunk === "function" && admin.isC2ExamInstructionChunk(p)) {
+                const inferred = admin.inferC2PassageFromInstructionRubric(p);
+                if(inferred) pendingSource = inferred;
+                const lab = admin.shortenC2InstructionRubricLabel(p);
+                if(lab) pendingHint = lab;
+                changed = true;
+                return;
+            }
+            const row = Object.assign({}, q);
+            if(pendingSource && !row.c2Source) { row.c2Source = pendingSource; changed = true; }
+            if(pendingHint && !row.c2PassageHint) { row.c2PassageHint = pendingHint; changed = true; }
+            kept.push(row);
+        });
+        if(kept.length !== safe.questions.length) {
+            safe.questions = kept.length ? kept : safe.questions;
+            changed = true;
+        }
+        return changed;
     },
     filterC2ExamInstructionChunks: function(chunks) {
         if(!Array.isArray(chunks) || !chunks.length) return chunks || [];
@@ -20369,17 +20499,7 @@ const admin = {
                 /^\s*To\s+answer\s+the\s+following\s+questions\b/i.test(c) &&
                 (/\bread\b/i.test(c)) &&
                 !/\[\s*\d+\s*\]/.test(c);
-            if(rub && i + 1 < chunks.length) {
-                const n = String(chunks[i + 1] || "").trim();
-                if(
-                    /^\s*\(?a\)\s/i.test(n) ||
-                    /\[\s*1\s*\]\s*\[\s*3\s*\]/i.test(n) ||
-                    /^[\s\S]{0,80}\(\s*a\s*\)/i.test(n)
-                ) {
-                    c = (c.replace(/\s+$/, "") + "\n\n" + n.trim()).trim();
-                    i++;
-                }
-            }
+            if(rub) continue;
             if(!isNoiseOnly(c)) merged.push(c);
         }
         return merged.filter(s => String(s).trim().length >= minLen);
@@ -20579,7 +20699,7 @@ const admin = {
             const z3 = admin.trimTextToFirstPartA(p[0]);
             if(z3 && z3.length >= 8 && /^\(?a\)\s/i.test(z3.trim())) p[0] = z3;
         }
-        p = admin.filterC2ExamInstructionChunks(p);
+        p = admin.applyC2InstructionRubricsToQuestionChunks(p);
         return p;
     },
     /** Split questions-PDF text into exam questions. Splits on PDF structure only; does not rewrite wording
@@ -21135,9 +21255,9 @@ const admin = {
                     }
                 }
             }
-            appData.questions = parsed.map((prompt, i) => ({ id: "q" + (i + 1), prompt: app.sanitizeFocusQuestionPrompt(String(prompt || "").trim()) }));
+            appData.questions = admin.buildQuestionsFromFinalizedPrompts(parsed);
             if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
-            if(parsed.length >= 1) {
+            if(appData.questions.length >= 1) {
                 appData.question = appData.questions[0].prompt || appData.question;
                 if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
             } else if(appData.selection && appData.selection.question) {
@@ -21241,9 +21361,9 @@ const admin = {
                     }
                 };
             } catch(eDbg) {}
-            appData.questions = parsed.map((prompt, i) => ({ id: "q" + (i + 1), prompt: app.sanitizeFocusQuestionPrompt(String(prompt || "").trim()) }));
+            appData.questions = admin.buildQuestionsFromFinalizedPrompts(parsed);
             if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
-            if(parsed.length >= 1) {
+            if(appData.questions.length >= 1) {
                 appData.question = appData.questions[0].prompt || appData.question;
                 if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
             } else {
@@ -24190,6 +24310,14 @@ const admin = {
             sel.style.cssText = "max-width:160px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;";
             sel.addEventListener("change", (e) => admin.syncQuestionsFromList(false, e.target));
             c2Sel = sel;
+            if(q && q.c2PassageHint && String(q.c2PassageHint).trim()) {
+                const hint = document.createElement("span");
+                hint.className = "question-c2-passage-hint";
+                hint.style.cssText = "font-size:0.72rem; opacity:0.82; white-space:normal; max-width:140px; line-height:1.25;";
+                hint.title = "From the board rubric before this question group";
+                hint.textContent = "↳ " + String(q.c2PassageHint).trim();
+                c2Sel = [sel, hint];
+            }
         }
         const wsWrap = document.createElement("label");
         wsWrap.style.cssText = "display:flex; align-items:center; gap:4px; font-size:0.8rem; white-space:nowrap;";
@@ -24217,7 +24345,14 @@ const admin = {
         row.appendChild(input);
         const showLineRef = !!(appData && appData.component === 1);
         if(showLineRef) row.appendChild(lineRefInp);
-        if(c2Sel) row.appendChild(c2Sel);
+        if(c2Sel) {
+            if(Array.isArray(c2Sel)) {
+                const c2Wrap = document.createElement("div");
+                c2Wrap.style.cssText = "display:flex; flex-direction:column; gap:2px; align-items:flex-start; max-width:160px;";
+                c2Sel.forEach(el => c2Wrap.appendChild(el));
+                row.appendChild(c2Wrap);
+            } else row.appendChild(c2Sel);
+        }
         row.appendChild(wsWrap);
         row.appendChild(removeBtn);
         outer.appendChild(row);
@@ -24289,6 +24424,9 @@ const admin = {
         if(!mounts.length) return;
         if(!Array.isArray(appData.questions)) appData.questions = [{ id: "q1", prompt: appData.question || "" }];
         let questionsRepaired = false;
+        if(typeof admin.sanitizeC2InstructionRowsFromQuestionBank === "function" && admin.sanitizeC2InstructionRowsFromQuestionBank(appData)) {
+            questionsRepaired = true;
+        }
         appData.questions.forEach((q) => {
             if(!q || typeof q.prompt !== "string") return;
             const san = app.sanitizeFocusQuestionPrompt(q.prompt);
@@ -24424,6 +24562,7 @@ const admin = {
             if(r.c2Explicit) {
                 if(r.c2Source === "21st" || r.c2Source === "19th" || r.c2Source === "both") o.c2Source = r.c2Source;
             } else if(old && old.c2Source) o.c2Source = old.c2Source;
+            if(old && old.c2PassageHint && String(old.c2PassageHint).trim()) o.c2PassageHint = String(old.c2PassageHint).trim();
             if(i === 0 && appData && appData.component !== 2) {
                 const el = r._rowEl;
                 const infM = el && el.querySelector("textarea.question-ws-inference-model");
@@ -28489,6 +28628,8 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             const prompt = q && typeof q.prompt === "string" ? q.prompt : "";
             const marks = app.parseRequiredCountFromQuestion ? app.parseRequiredCountFromQuestion(prompt) : null;
             if(marks != null && marks >= 1) appData.settings.levelBank[lvl].quoteTarget = Math.min(12, Math.max(2, marks));
+            if(q && (q.c2Source === "21st" || q.c2Source === "19th" || q.c2Source === "both"))
+                appData.settings.levelBank[lvl].c2Source = q.c2Source;
         }
         appData.settings.activeLevels = sorted.map((_, i) => i + 1);
         app.save();
