@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T05:00:00">
+<meta name="architect-build" content="2026-05-24T06:00:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15630,9 +15630,6 @@ const ui = {
             /** Lab/intro refresh must apply saved {@link meta.pdfInsertWidthCh} only — full DOM sync here re-read Insert width while focus is on Booklet line (or another control) and can collapse ch or fight booklet-only updates. */
             if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
         } catch(eR) {}
-        try {
-            if(typeof admin.flushC2IntroLinesFromEditorsToLayout === "function") admin.flushC2IntroLinesFromEditorsToLayout();
-        } catch(eC2Intro) {}
         let src = overrideContent != null ? overrideContent : null;
         if(src == null) src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
         let html;
@@ -22551,22 +22548,9 @@ const admin = {
         return { line1: line1, line2: line2 };
     },
     flushC2IntroLinesFromEditorsToLayout: function() {
-        if(!appData || !appData.component2Layout) return;
         const modal = document.getElementById("modal-admin");
         if(!modal || !modal.classList.contains("open")) return;
-        const h1 = document.getElementById("c2-passage-intro-line1");
-        const h2 = document.getElementById("c2-passage-intro-line2");
-        if(!h1 || !h2) return;
-        const v = architectC2SourceView || "21st";
-        const i1 = h1.getAttribute("contenteditable") === "true" ? admin.repairC2HeaderFragmentHtml(h1.innerHTML || "") : "";
-        const i2 = h2.getAttribute("contenteditable") === "true" ? admin.repairC2HeaderFragmentHtml(h2.innerHTML || "") : "";
-        if(v === "21st") {
-            appData.component2Layout.resourceHeadLine1 = i1;
-            appData.component2Layout.resourceHeadLine2 = i2;
-        } else {
-            appData.component2Layout.nineteenthHeadLine1 = i1;
-            appData.component2Layout.nineteenthHeadLine2 = i2;
-        }
+        if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(architectC2SourceView || "21st");
     },
     /** Lab / Quote Select: per-line B/I fix — never run display sanitize on both intro &lt;p&gt;s at once (that can merge them). */
     normalizeC2PassageHeadBlockForDisplay: function(headDivHtml) {
@@ -24373,17 +24357,10 @@ const admin = {
         }
     },
     /** Write pooled C2 editor HTML into layout for the current architectC2SourceView (only when admin is open — avoids clearing data when toggling from the header). */
-    flushC2PooledEditorToLayout: function() {
-        const modal = document.getElementById("modal-admin");
-        if(!modal || !modal.classList.contains("open")) return;
-        const wrap = document.getElementById("source-text-c2-wrap");
-        if(!wrap || wrap.classList.contains("hidden")) return;
-        const el = document.getElementById("c2-pooled-editor");
-        if(!el || el.getAttribute("contenteditable") !== "true" || !appData || !appData.component2Layout) return;
-        const html = app.sanitizeSourceHtml(el.innerHTML) || "";
-        const v = architectC2SourceView || "21st";
-        if(v === "21st") appData.component2Layout.resourcePaperText = html;
-        else appData.component2Layout.questionPaperPage3Text = html;
+    /** Save intro line 1/2 for a specific century (used when switching 21st ↔ 19th before the DOM is repopulated). */
+    flushC2IntroLinesToLayoutForView: function(view) {
+        if(!appData || !appData.component2Layout) return;
+        const v = (view === "19th" || view === "21st") ? view : (architectC2SourceView || "21st");
         const h1 = document.getElementById("c2-passage-intro-line1");
         const h2 = document.getElementById("c2-passage-intro-line2");
         const i1 = h1 && h1.getAttribute("contenteditable") === "true" ? (admin.repairC2HeaderFragmentHtml(h1.innerHTML || "")) : "";
@@ -24395,6 +24372,19 @@ const admin = {
             appData.component2Layout.nineteenthHeadLine1 = i1;
             appData.component2Layout.nineteenthHeadLine2 = i2;
         }
+    },
+    flushC2PooledEditorToLayout: function() {
+        const modal = document.getElementById("modal-admin");
+        if(!modal || !modal.classList.contains("open") || !appData || !appData.component2Layout) return;
+        const v = architectC2SourceView || "21st";
+        if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(v);
+        const wrap = document.getElementById("source-text-c2-wrap");
+        if(!wrap || wrap.classList.contains("hidden")) return;
+        const el = document.getElementById("c2-pooled-editor");
+        if(!el || el.getAttribute("contenteditable") !== "true") return;
+        const html = app.sanitizeSourceHtml(el.innerHTML) || "";
+        if(v === "21st") appData.component2Layout.resourcePaperText = html;
+        else appData.component2Layout.questionPaperPage3Text = html;
     },
     fillC2PooledEditorFromLayout: function() {
         const el = document.getElementById("c2-pooled-editor");
@@ -24766,16 +24756,28 @@ const admin = {
     setArchitectC2SourceView: function(view, opts) {
         if(view !== "21st" && view !== "19th") return;
         const skipFlush = opts && opts.skipFlush;
-        if(!skipFlush) {
+        const prevView = (typeof architectC2SourceView !== "undefined" && architectC2SourceView)
+            || (appData && appData.settings && appData.settings.architectC2SourceView)
+            || "21st";
+        if(!skipFlush && prevView !== view) {
+            if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(prevView);
+            const modal = document.getElementById("modal-admin");
+            const wrap = document.getElementById("source-text-c2-wrap");
+            const el = document.getElementById("c2-pooled-editor");
+            if(modal && modal.classList.contains("open") && wrap && !wrap.classList.contains("hidden") && el && el.getAttribute("contenteditable") === "true" && appData && appData.component2Layout) {
+                const html = app.sanitizeSourceHtml(el.innerHTML) || "";
+                if(prevView === "21st") appData.component2Layout.resourcePaperText = html;
+                else appData.component2Layout.questionPaperPage3Text = html;
+            }
+        } else if(!skipFlush) {
             admin.flushC2PooledEditorToLayout();
-            if(typeof admin.flushC2IntroLinesFromEditorsToLayout === "function") admin.flushC2IntroLinesFromEditorsToLayout();
         }
         architectC2SourceView = view;
         if(appData && appData.settings) appData.settings.architectC2SourceView = view;
         admin.syncArchitectC2SourceBar();
         admin.syncC2AdminViewButtons();
-        ui.refreshSourceDisplay();
         admin.fillC2PooledEditorFromLayout();
+        ui.refreshSourceDisplay();
         const disp = admin.getArchitectC2SourceForDisplay ? admin.getArchitectC2SourceForDisplay() : "";
         if(appData && appData.selection) {
             if(!appData.selection.text) appData.selection.text = {};
