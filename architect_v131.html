@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T23:00:00">
+<meta name="architect-build" content="2026-05-23T23:30:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -3531,6 +3531,7 @@ const app = {
         return ids && ids.length ? ids[0] : "";
     },
     getQuestionLabelShort: function(qid) {
+        if(!appData) return String(qid || "—");
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const norm = app.normalizeQuestionId;
         const q = questions.find(qq => qq && norm(qq.id) === norm(qid));
@@ -4524,6 +4525,9 @@ const app = {
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
+    },
+    escapeHtmlAttr: function(text) {
+        return app.escapeHtml(text).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     },
     isLikelyJson: function(text) {
         const t = String(text || "").trim();
@@ -14982,7 +14986,8 @@ const app = {
         if(userState.view === "select") ui.renderSelection();
         if(admin.hasC2DualSource && admin.hasC2DualSource()) ui.refreshSourceDisplay && ui.refreshSourceDisplay();
         if(app.applyQuestionEssayForCurrentQuestion) app.applyQuestionEssayForCurrentQuestion(userState.level);
-        if(admin.renderQuotesBank) admin.renderQuotesBank();
+        const adm = document.getElementById("modal-admin");
+        if(admin.renderQuotesBank && adm && adm.classList.contains("open")) admin.renderQuotesBank();
     },
 
     setFilter: function(f) { userState.filter = f; ui.renderLab(); },
@@ -16435,9 +16440,20 @@ const ui = {
     
     openAdmin: () => {
         ui._pauseSelectionGate = true;
-        admin.renderAll();
         ui.openModal("modal-admin");
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
+        const run = () => {
+            try {
+                if(admin.renderAll) admin.renderAll();
+            } catch(e) {
+                console.error("Settings render failed:", e);
+                if(typeof admin.renderQuotesBank === "function") {
+                    try { admin.renderQuotesBank(); } catch(e2) { console.error(e2); }
+                }
+            }
+        };
+        if(typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+        else setTimeout(run, 0);
     },
     openAdminToQuote: function(itemId) {
         if(appData.isStandalone) return;
@@ -25393,6 +25409,10 @@ const admin = {
     renderQuotesBank: function() {
         const wrap = document.getElementById("quotes-bank-list");
         if(!wrap) return;
+        if(admin._renderingQuotesBank) return;
+        admin._renderingQuotesBank = true;
+        try {
+        if(!appData) { wrap.innerHTML = "<div style='opacity:0.7;'>Load a lesson first.</div>"; return; }
         admin.ensureSelectionData();
         if(admin.renderQuotesBankExamToolbar) admin.renderQuotesBankExamToolbar();
         const items = appData.items || [];
@@ -25414,7 +25434,7 @@ const admin = {
                 const q = app.getLevelBankQuestionIdForLevel(lvl);
                 if(!q) return;
                 const nq = norm(q);
-                html += `<option value="${app.escapeHtml(q)}" ${cur === nq ? "selected" : ""}>L${lvl} · ${app.escapeHtml(app.getQuestionLabelShort(q))}</option>`;
+                html += `<option value="${app.escapeHtmlAttr(q)}" ${cur === nq ? "selected" : ""}>L${lvl} · ${app.escapeHtml(app.getQuestionLabelShort(q))}</option>`;
             });
             return html;
         };
@@ -25460,6 +25480,12 @@ const admin = {
         const badSection = showBad ? `<div><div class="admin-h" style="margin-bottom:8px;">Bad quotes (${badList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${badList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "bad" ? (examEmptyHint || "<div style='opacity:0.7;'>No bad quotes. Use + Add bad quote or uncheck Good quote, or switch filter to All.</div>" : "");
         wrap.innerHTML = f === "bad" ? badSection : (goodSection + badSection) || (examEmptyHint || "<div style='opacity:0.7;'>No quotes match the filter.</div>");
         if(document.getElementById("quotes-filter-all")) { ["all","good","bad"].forEach(function(id){ var b=document.getElementById("quotes-filter-"+id); if(b){ var active=(id==="all"&&f==="all")||(id==="good"&&f==="good")||(id==="bad"&&f==="bad"); b.classList.toggle("btn-primary",active); b.classList.toggle("btn-outline",!active); } }); }
+        } catch(eQb) {
+            console.error("Quote bank render failed:", eQb);
+            wrap.innerHTML = "<div style='padding:10px;border:1px solid var(--error);border-radius:6px;font-size:0.85rem;'>Quote bank could not render. Try <strong>All levels</strong> in the exam toolbar, or reload the page. Error: " + app.escapeHtml(String(eQb && eQb.message ? eQb.message : eQb)) + "</div>";
+        } finally {
+            admin._renderingQuotesBank = false;
+        }
     },
     /** Parse `component2Layout.markSchemeText` into `appData.markScheme` when the object is still empty (same as quote suggest). */
     ensureMarkSchemeParsedFromLayout: function() {
