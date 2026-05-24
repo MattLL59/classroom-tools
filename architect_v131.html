@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T22:30:00">
+<meta name="architect-build" content="2026-05-23T23:00:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1391,6 +1391,7 @@
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.suggestAnswerPassagesFromMarkScheme({ onlyEmpty: false })" title="Overwrites every focus question’s Answer passage field when the mark scheme yields matches">Replace all answer passages…</button>
                             <span style="font-size:0.78rem; opacity:0.8;">Same local matcher as quote suggest; uses each row’s Lines / prompt window when set. Edit the text after if needed.</span>
                         </div>
+                        <div id="quotes-bank-exam-toolbar" style="display:none; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(76,175,80,0.06); font-size:0.82rem; line-height:1.45;"></div>
                         <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
                             <span style="font-size:0.9rem; font-weight:600;">Show:</span>
                             <button type="button" class="btn btn-outline btn-small" id="quotes-filter-all" onclick="admin.setQuotesBankFilter('all'); admin.renderQuotesBank();">All</button>
@@ -3517,6 +3518,61 @@ const app = {
     /** @deprecated alias */
     c2UsesOneQuestionPerLevel: function() {
         return !!(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout());
+    },
+    normalizeQuestionId: function(id) {
+        return String(id || "").replace(/^q0?/i, "q").toLowerCase();
+    },
+    /** Past-paper / exam training: Level Bank maps one focus question per level — quotes should carry that question id. */
+    shouldLinkQuotesToExamQuestions: function() {
+        return !!(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout());
+    },
+    getLevelBankQuestionIdForLevel: function(level) {
+        const ids = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(parseInt(level, 10) || 1) : [];
+        return ids && ids.length ? ids[0] : "";
+    },
+    getQuestionLabelShort: function(qid) {
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const norm = app.normalizeQuestionId;
+        const q = questions.find(qq => qq && norm(qq.id) === norm(qid));
+        if(!q) return String(qid || "—");
+        const p = String(q.prompt || "").replace(/\s+/g, " ").trim();
+        const idLab = q.id ? String(q.id).toUpperCase() : "";
+        const tail = p ? (p.length > 72 ? p.slice(0, 69) + "…" : p) : "";
+        return idLab + (tail ? ": " + tail : "");
+    },
+    /** Whether a quote bank row belongs to the Level Bank question for this level (exam layout). */
+    quoteItemMatchesLevelBankQuestion: function(item, level) {
+        if(!item) return false;
+        const lvl = parseInt(level, 10) || 1;
+        const qId = app.getLevelBankQuestionIdForLevel(lvl);
+        if(!qId) return Array.isArray(item.levels) && item.levels.includes(lvl);
+        const norm = app.normalizeQuestionId;
+        const qids = Array.isArray(item.questionIds) ? item.questionIds : [];
+        if(!qids.length) return Array.isArray(item.levels) && item.levels.includes(lvl);
+        return qids.some(id => norm(id) === norm(qId));
+    },
+    /** Copy Level Bank question id(s) from checked L1–L10 boxes onto a quote row. */
+    syncQuoteItemQuestionIdsFromLevels: function(item) {
+        if(!item || !app.shouldLinkQuotesToExamQuestions()) return false;
+        const levels = Array.isArray(item.levels) ? item.levels.filter(l => l >= 1 && l <= ARCHITECT_MAX_LEVEL) : [];
+        if(!levels.length) return false;
+        const norm = app.normalizeQuestionId;
+        const qids = [];
+        levels.forEach(lvl => {
+            const q = app.getLevelBankQuestionIdForLevel(lvl);
+            if(q && !qids.some(id => norm(id) === norm(q))) qids.push(q);
+        });
+        if(!qids.length) return false;
+        const prev = (Array.isArray(item.questionIds) ? item.questionIds : []).map(id => norm(id)).sort().join("|");
+        const next = qids.map(id => norm(id)).sort().join("|");
+        if(prev === next) return false;
+        item.questionIds = qids;
+        return true;
+    },
+    getQuestionIdsForNewQuoteItem: function() {
+        if(!app.shouldLinkQuotesToExamQuestions()) return [];
+        const q = app.getLevelBankQuestionIdForLevel(app.getEffectiveLevel ? app.getEffectiveLevel() : 1);
+        return q ? [q] : [];
     },
     /** True when this level already has a short-answer quote in the answer / desk (not global L1 progress). */
     hasShortAnswerContentForLevel: function(level) {
@@ -14926,6 +14982,7 @@ const app = {
         if(userState.view === "select") ui.renderSelection();
         if(admin.hasC2DualSource && admin.hasC2DualSource()) ui.refreshSourceDisplay && ui.refreshSourceDisplay();
         if(app.applyQuestionEssayForCurrentQuestion) app.applyQuestionEssayForCurrentQuestion(userState.level);
+        if(admin.renderQuotesBank) admin.renderQuotesBank();
     },
 
     setFilter: function(f) { userState.filter = f; ui.renderLab(); },
@@ -19893,7 +19950,46 @@ const admin = {
     },
     _quoteBankStateBeforePrepare: null,
     quotesBankFilter: "all",
+    quotesBankExamScope: "current",
     setQuotesBankFilter: function(v) { admin.quotesBankFilter = (v === "good" || v === "bad") ? v : "all"; ["all","good","bad"].forEach(f => { const b = document.getElementById("quotes-filter-" + f); if(b) { b.classList.toggle("btn-primary", admin.quotesBankFilter === f); b.classList.toggle("btn-outline", admin.quotesBankFilter !== f); } }); },
+    setQuotesBankExamScope: function(v) {
+        admin.quotesBankExamScope = (v === "all") ? "all" : "current";
+        admin.renderQuotesBank();
+    },
+    syncAllQuoteQuestionIdsFromLevels: function() {
+        admin.ensureSelectionData();
+        let n = 0;
+        (appData.items || []).forEach(item => {
+            if(app.syncQuoteItemQuestionIdsFromLevels(item)) n++;
+        });
+        appData.selection.items = appData.items;
+        app.save();
+        admin.renderQuotesBank();
+        if(admin.renderSelectionEditor) admin.renderSelectionEditor();
+        if(ui.renderSelection) ui.renderSelection();
+        admin.flashBrief(n ? "Linked " + n + " quote(s) to Level Bank questions" : "All quotes already linked to questions");
+    },
+    setQuoteItemQuestionId: function(idx, qid) {
+        const item = appData.items[idx];
+        if(!item) return;
+        const q = String(qid || "").trim();
+        item.questionIds = q ? [q] : [];
+        if(q && app.shouldLinkQuotesToExamQuestions()) {
+            const norm = app.normalizeQuestionId;
+            const active = app.getActiveLevels();
+            for(let i = 0; i < active.length; i++) {
+                const lvl = active[i];
+                if(norm(app.getLevelBankQuestionIdForLevel(lvl)) === norm(q)) {
+                    item.levels = [lvl];
+                    break;
+                }
+            }
+        }
+        app.save();
+        admin.renderQuotesBank();
+        if(admin.renderSelectionEditor) admin.renderSelectionEditor();
+        if(ui.renderSelection) ui.renderSelection();
+    },
     /** Parse "Resource page(s)" input: "2", "2-3", "2,3,4", "all" or empty. Empty → [2,3] unless layout stores another range; type "all" for every page. */
     getResourcePageSpec: function() {
         const inp = document.getElementById("past-paper-resource-pages");
@@ -25144,7 +25240,7 @@ const admin = {
             correct: true,
             reasons: [],
             distractors: [],
-            questionIds: [],
+            questionIds: app.getQuestionIdsForNewQuoteItem ? app.getQuestionIdsForNewQuoteItem() : [],
             device: "language",
             deviceReason: ""
         });
@@ -25153,7 +25249,7 @@ const admin = {
         admin.renderQuotesBank();
         if(admin.renderSelectionEditor) admin.renderSelectionEditor();
         if(ui.renderSelection) ui.renderSelection();
-        if(!silent) admin.flashBrief("Quote added — tick Include on worksheet when ready for export");
+        if(!silent) admin.flashBrief(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions() ? "Quote added for L" + lvl + " — linked to Level Bank question" : "Quote added — tick Include on worksheet when ready for export");
         return appData.items.length - 1;
     },
     tryTeacherPassageCaptureFromPre: function(preCaptured, ctx) {
@@ -25261,15 +25357,67 @@ const admin = {
         admin.renderQuotesBank();
         if(admin.renderSelectionEditor) admin.renderSelectionEditor();
     },
+    renderQuotesBankExamToolbar: function() {
+        const bar = document.getElementById("quotes-bank-exam-toolbar");
+        if(!bar) return;
+        const examLink = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
+        if(!examLink) {
+            bar.style.display = "none";
+            bar.innerHTML = "";
+            return;
+        }
+        bar.style.display = "block";
+        const lvl = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
+        const qid = app.getLevelBankQuestionIdForLevel(lvl);
+        const qLabel = qid ? app.escapeHtml(app.getQuestionLabelShort(qid)) : "—";
+        const scope = admin.quotesBankExamScope === "all" ? "all" : "current";
+        const items = appData.items || [];
+        const matchN = items.filter(it => app.quoteItemMatchesLevelBankQuestion(it, lvl)).length;
+        bar.innerHTML = `<div style="font-weight:600; margin-bottom:6px;">Exam training — quotes follow Level Bank questions</div>
+            <div style="opacity:0.9; margin-bottom:8px;">Changing <strong>level</strong> in the header filters this bank to the matching focus question. Students only see quotes linked to that question in Quote Select (same as your Level Bank row).</div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px;">
+                <span>Level <strong>L${lvl}</strong> → ${qLabel}</span>
+                <span style="opacity:0.5;">|</span>
+                <span style="font-weight:600;">Bank list:</span>
+                <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-current" onclick="admin.setQuotesBankExamScope('current')">This level only</button>
+                <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-all" onclick="admin.setQuotesBankExamScope('all')">All levels</button>
+                <button type="button" class="btn btn-outline btn-small" onclick="admin.syncAllQuoteQuestionIdsFromLevels()" title="Set each quote's question id from its checked L1–L10 boxes (Level Bank mapping)">Link all quotes to questions</button>
+            </div>
+            <div style="font-size:0.78rem; opacity:0.85;">${scope === "current" ? matchN + " quote(s) for L" + lvl + " / " + (qid || "question") + "." : "Showing every quote; use This level only to match the header level."}</div>`;
+        const curBtn = document.getElementById("quotes-exam-scope-current");
+        const allBtn = document.getElementById("quotes-exam-scope-all");
+        if(curBtn) { curBtn.classList.toggle("btn-primary", scope === "current"); curBtn.classList.toggle("btn-outline", scope !== "current"); }
+        if(allBtn) { allBtn.classList.toggle("btn-primary", scope === "all"); allBtn.classList.toggle("btn-outline", scope !== "all"); }
+    },
     // QUOTES BANK (Good quotes section + Bad quotes section)
     renderQuotesBank: function() {
         const wrap = document.getElementById("quotes-bank-list");
         if(!wrap) return;
         admin.ensureSelectionData();
+        if(admin.renderQuotesBankExamToolbar) admin.renderQuotesBankExamToolbar();
         const items = appData.items || [];
         const sourceText = app.getSourceText ? app.getSourceText() : ((appData.selection && appData.selection.text && appData.selection.text.source) ? appData.selection.text.source : (appData.sourceText || ""));
-        const goodList = items.map((item, idx) => ({ item, idx })).filter(x => x.item.correct !== false);
-        const badList = items.map((item, idx) => ({ item, idx })).filter(x => x.item.correct === false);
+        const examLink = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
+        const bankLvl = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
+        let indexed = items.map((item, idx) => ({ item, idx }));
+        if(examLink && admin.quotesBankExamScope !== "all") {
+            indexed = indexed.filter(x => app.quoteItemMatchesLevelBankQuestion(x.item, bankLvl));
+        }
+        const goodList = indexed.filter(x => x.item.correct !== false);
+        const badList = indexed.filter(x => x.item.correct === false);
+        const questionOptionsForQuote = (item) => {
+            const active = app.getActiveLevels();
+            const norm = app.normalizeQuestionId;
+            const cur = Array.isArray(item.questionIds) && item.questionIds[0] ? norm(item.questionIds[0]) : "";
+            let html = `<option value="">— Not linked —</option>`;
+            active.forEach(lvl => {
+                const q = app.getLevelBankQuestionIdForLevel(lvl);
+                if(!q) return;
+                const nq = norm(q);
+                html += `<option value="${app.escapeHtml(q)}" ${cur === nq ? "selected" : ""}>L${lvl} · ${app.escapeHtml(app.getQuestionLabelShort(q))}</option>`;
+            });
+            return html;
+        };
         const renderCard = (item, idx) => {
             const quote = item.original || item.quote || "";
             const reasons = Array.isArray(item.reasons) ? item.reasons.join("\n") : "";
@@ -25288,7 +25436,8 @@ const admin = {
                     <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForDistractorReasons(${idx})" title="Copies a prompt for wrong explanations about this quotation (paste into ChatGPT / Copilot)">Copy AI prompt for distractor points</button></div></div>
                     <div class="input-group"><label>Wrong quotes <span style="font-weight:400; opacity:0.75;">(other <em>quotations</em> for quote MC only — use Distractor points for wrong explanations)</span></label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:70px;" placeholder="One per line: alternate quotation from the passage (verbatim). No reasons needed.">${app.escapeHtml(distractors)}</textarea>
                     <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForWrongQuotes(${idx})" title="Copies a prompt with the full passage so the AI suggests verbatim weak quotes from the text">Copy AI prompt for wrong quotes</button></div></div>`}
-                    <div class="input-group"><label>Level(s)</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="checkbox" ${(Array.isArray(item.levels) && item.levels.includes(l)) ? "checked" : ""} onchange="admin.togQuoteLevel(${idx},${l})"></label>`).join(" ")}</div></div>
+                    <div class="input-group"><label>Level(s)</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="checkbox" ${(Array.isArray(item.levels) && item.levels.includes(l)) ? "checked" : ""} onchange="admin.togQuoteLevel(${idx},${l})"></label>`).join(" ")}</div>${examLink ? `<div style="font-size:0.78rem; opacity:0.8; margin-top:4px;">In exam mode, tick the level that matches this quote; use <strong>Link all quotes to questions</strong> if older rows have no question id.</div>` : ""}</div>
+                    ${examLink ? `<div class="input-group"><label>Focus question (exam)</label><select onchange="admin.setQuoteItemQuestionId(${idx}, this.value)">${questionOptionsForQuote(item)}</select></div>` : ""}
                     <div class="input-group"><label>Device</label><select onchange="admin.updateQuoteItem(${idx}, 'device', this.value)">
                         <option value="language" ${(item.device || item.type) === "language" ? "selected" : ""}>Language</option>
                         <option value="tone" ${(item.device || item.type) === "tone" ? "selected" : ""}>Tone</option>
@@ -25304,9 +25453,12 @@ const admin = {
         const f = admin.quotesBankFilter || "all";
         const showGood = (f === "all" || f === "good") && goodList.length;
         const showBad = (f === "all" || f === "bad") && badList.length;
-        const goodSection = showGood ? `<div style="margin-bottom:16px;"><div class="admin-h" style="margin-bottom:8px;">Good quotes (${goodList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${goodList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "good" ? "<div style='opacity:0.7;'>No good quotes. Add a quote and check Good quote, or switch filter to All.</div>" : "");
-        const badSection = showBad ? `<div><div class="admin-h" style="margin-bottom:8px;">Bad quotes (${badList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${badList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "bad" ? "<div style='opacity:0.7;'>No bad quotes. Use + Add bad quote or uncheck Good quote, or switch filter to All.</div>" : "");
-        wrap.innerHTML = f === "bad" ? badSection : (goodSection + badSection) || "<div style='opacity:0.7;'>No quotes match the filter.</div>";
+        const examEmptyHint = examLink && admin.quotesBankExamScope !== "all"
+            ? `<div style="opacity:0.75; padding:8px 0;">No quotes for <strong>L${bankLvl}</strong> yet. Add a quote (it picks up this level’s question), switch to <strong>All levels</strong>, or run <strong>Link all quotes to questions</strong> on existing rows.</div>`
+            : "";
+        const goodSection = showGood ? `<div style="margin-bottom:16px;"><div class="admin-h" style="margin-bottom:8px;">Good quotes (${goodList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${goodList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "good" ? (examEmptyHint || "<div style='opacity:0.7;'>No good quotes. Add a quote and check Good quote, or switch filter to All.</div>") : "");
+        const badSection = showBad ? `<div><div class="admin-h" style="margin-bottom:8px;">Bad quotes (${badList.length})</div><div style="display:flex; flex-direction:column; gap:12px;">${badList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "bad" ? (examEmptyHint || "<div style='opacity:0.7;'>No bad quotes. Use + Add bad quote or uncheck Good quote, or switch filter to All.</div>" : "");
+        wrap.innerHTML = f === "bad" ? badSection : (goodSection + badSection) || (examEmptyHint || "<div style='opacity:0.7;'>No quotes match the filter.</div>");
         if(document.getElementById("quotes-filter-all")) { ["all","good","bad"].forEach(function(id){ var b=document.getElementById("quotes-filter-"+id); if(b){ var active=(id==="all"&&f==="all")||(id==="good"&&f==="good")||(id==="bad"&&f==="bad"); b.classList.toggle("btn-primary",active); b.classList.toggle("btn-outline",!active); } }); }
     },
     /** Parse `component2Layout.markSchemeText` into `appData.markScheme` when the object is still empty (same as quote suggest). */
@@ -25569,6 +25721,7 @@ const admin = {
         if(asCorrect === undefined) asCorrect = true;
         admin.ensureSelectionData();
         const levels = app.getActiveLevels().length ? app.getActiveLevels() : [1];
+        const addLvl = app.getEffectiveLevel ? app.getEffectiveLevel() : levels[0];
         appData.items.push({
             id: "q" + Date.now(),
             original: asCorrect ? "New quote" : "Wrong choice (edit me)",
@@ -25578,12 +25731,12 @@ const admin = {
             type: "language",
             effect: "",
             effectDistractors: [],
-            levels: [levels[0]],
+            levels: [addLvl],
             includeInWorksheet: false,
             correct: !!asCorrect,
             reasons: [],
             distractors: [],
-            questionIds: [],
+            questionIds: app.getQuestionIdsForNewQuoteItem ? app.getQuestionIdsForNewQuoteItem() : [],
             device: "language",
             deviceReason: ""
         });
@@ -25653,9 +25806,11 @@ const admin = {
         else item.levels.push(lvl);
         item.levels = item.levels.filter(l => l >= 1 && l <= ARCHITECT_MAX_LEVEL).sort((a,b) => a - b);
         if(!item.levels.length) item.levels = [app.getActiveLevels()[0] || 1];
+        if(app.syncQuoteItemQuestionIdsFromLevels) app.syncQuoteItemQuestionIdsFromLevels(item);
         app.save();
         admin.renderQuotesBank();
         admin.renderSelectionEditor();
+        if(ui.renderSelection) ui.renderSelection();
     },
     renderQuoteList: function() {
         const w = document.getElementById("quotes-bank-list");
