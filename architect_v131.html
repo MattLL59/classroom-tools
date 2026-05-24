@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T06:00:00">
+<meta name="architect-build" content="2026-05-24T06:30:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -13699,6 +13699,17 @@ const app = {
         const level = (levelOverride != null && levelOverride !== "")
             ? (parseInt(levelOverride, 10) || 1)
             : (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1));
+        /** Lab / Quote Select: follow header 21st|19th toggle. Level Bank preview (levelOverride + fixed c2Source) still uses {@link getSourceTextForLevel}. */
+        if(appData && appData.component === 2 && admin.getArchitectC2SourceForDisplay) {
+            if(levelOverride != null && levelOverride !== "" && admin.hasC2DualSource && admin.hasC2DualSource()) {
+                const bank = app.getLevelBank();
+                const entry = bank && bank[parseInt(levelOverride, 10) || 1] ? bank[parseInt(levelOverride, 10) || 1] : {};
+                const mode = (entry.c2Source === "21st" || entry.c2Source === "19th" || entry.c2Source === "both") ? entry.c2Source : "both";
+                if(mode === "21st" || mode === "19th") return app.getSourceTextForLevel(levelOverride);
+            }
+            const c2disp = admin.getArchitectC2SourceForDisplay() || "";
+            if(String(c2disp).trim()) return c2disp;
+        }
         if(admin.hasC2DualSource && admin.hasC2DualSource()) {
             return app.getSourceTextForLevel(level);
         }
@@ -22552,6 +22563,15 @@ const admin = {
         if(!modal || !modal.classList.contains("open")) return;
         if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(architectC2SourceView || "21st");
     },
+    /** Push current C2 passage (header view + layout) into the Lab / Quote Select columns. */
+    refreshC2LabPassageDisplay: function() {
+        if(!appData || appData.component !== 2 || !admin.getArchitectC2SourceForDisplay) return;
+        const disp = admin.getArchitectC2SourceForDisplay() || "";
+        if(!String(disp).trim()) return;
+        if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(disp);
+        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
+        if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection();
+    },
     /** Lab / Quote Select: per-line B/I fix — never run display sanitize on both intro &lt;p&gt;s at once (that can merge them). */
     normalizeC2PassageHeadBlockForDisplay: function(headDivHtml) {
         if(!headDivHtml || typeof headDivHtml !== "string") return "";
@@ -24486,9 +24506,12 @@ const admin = {
         if(opts && opts.rewriteEditor) {
             el.innerHTML = html;
         }
-        const disp = admin.getArchitectC2SourceForDisplay ? admin.getArchitectC2SourceForDisplay() : "";
-        app.syncLessonSourceCanonical(disp);
-        ui.refreshSourceDisplay();
+        if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+        else {
+            const disp = admin.getArchitectC2SourceForDisplay ? admin.getArchitectC2SourceForDisplay() : "";
+            app.syncLessonSourceCanonical(disp);
+            if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
+        }
         if(admin.syncAiQuoteCountFromLevelBank) admin.syncAiQuoteCountFromLevelBank();
         app.save();
     },
@@ -24554,7 +24577,15 @@ const admin = {
         let introTimer = null;
         const introDebounce = () => {
             if(introTimer) clearTimeout(introTimer);
-            introTimer = setTimeout(() => { try { admin.syncC2PooledDataFromEditor(); } catch(eI) {} introTimer = null; }, 320);
+            introTimer = setTimeout(() => {
+                try {
+                    const v = architectC2SourceView || "21st";
+                    if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(v);
+                    if(typeof admin.syncC2PooledDataFromEditor === "function") admin.syncC2PooledDataFromEditor();
+                    else if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+                } catch(eI) {}
+                introTimer = null;
+            }, 320);
         };
         const introKeydown = (he) => (e) => {
             if(!(e.ctrlKey || e.metaKey)) return;
@@ -24777,15 +24808,13 @@ const admin = {
         admin.syncArchitectC2SourceBar();
         admin.syncC2AdminViewButtons();
         admin.fillC2PooledEditorFromLayout();
-        ui.refreshSourceDisplay();
-        const disp = admin.getArchitectC2SourceForDisplay ? admin.getArchitectC2SourceForDisplay() : "";
-        if(appData && appData.selection) {
-            if(!appData.selection.text) appData.selection.text = {};
-            appData.selection.text.source = disp;
-            appData.sourceText = disp;
-            app.save();
+        if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+        else {
+            const disp = admin.getArchitectC2SourceForDisplay ? admin.getArchitectC2SourceForDisplay() : "";
+            if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(disp);
+            if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
         }
-        if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
+        if(typeof app.save === "function") app.save();
     },
     syncArchitectC2SourceBar: function() {
         const layout = appData && appData.component2Layout ? appData.component2Layout : {};
