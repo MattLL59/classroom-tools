@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T07:00:00">
+<meta name="architect-build" content="2026-05-24T07:15:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -13699,14 +13699,8 @@ const app = {
         const level = (levelOverride != null && levelOverride !== "")
             ? (parseInt(levelOverride, 10) || 1)
             : (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1));
-        /** Lab / Quote Select: follow header 21st|19th toggle. Level Bank preview (levelOverride + fixed c2Source) still uses {@link getSourceTextForLevel}. */
+        /** Lab / Quote Select / header 21st|19th: always {@link admin.getArchitectC2SourceForDisplay}. Per-level 21st/19th lock lives in {@link getSourceTextForLevel} (student {@link getSourceText}, Level Bank preview). */
         if(appData && appData.component === 2 && admin.getArchitectC2SourceForDisplay) {
-            if(levelOverride != null && levelOverride !== "" && admin.hasC2DualSource && admin.hasC2DualSource()) {
-                const bank = app.getLevelBank();
-                const entry = bank && bank[parseInt(levelOverride, 10) || 1] ? bank[parseInt(levelOverride, 10) || 1] : {};
-                const mode = (entry.c2Source === "21st" || entry.c2Source === "19th" || entry.c2Source === "both") ? entry.c2Source : "both";
-                if(mode === "21st" || mode === "19th") return app.getSourceTextForLevel(levelOverride);
-            }
             const c2disp = admin.getArchitectC2SourceForDisplay() || "";
             if(String(c2disp).trim()) return c2disp;
         }
@@ -13736,7 +13730,9 @@ const app = {
         const L = appData && appData.component2Layout ? appData.component2Layout : {};
         function mergedForView(c2View) {
             const lines = admin.getC2IntroLinesForDisplay ? admin.getC2IntroLinesForDisplay(c2View) : { line1: "", line2: "" };
-            const body = c2View === "19th" ? p2 : p1;
+            const body = admin.getC2LayoutPassageBodyForView
+                ? admin.getC2LayoutPassageBodyForView(c2View)
+                : (c2View === "19th" ? p2 : p1);
             return admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(lines.line1, lines.line2, body) : body;
         }
         const bank = app.getLevelBank();
@@ -17935,7 +17931,7 @@ const ui = {
         if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
         const lblLevelSelect = document.getElementById("lbl-level-select");
         if(lblLevelSelect) lblLevelSelect.textContent = String(level);
-        const sourceTextEarly = passageCanonOverride || (app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText());
+        const sourceTextEarly = passageCanonOverride || (app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText());
         const hasSourceEarly = !!(sourceTextEarly && String(sourceTextEarly).trim());
         const helpWrap = document.getElementById("selection-student-help-wrap");
         if(helpWrap) {
@@ -17991,7 +17987,7 @@ const ui = {
         const optionCount = Math.max(2, Math.min(20, pointsGoal + distractorTarget));
         const correctItemsAll = sel.items.filter(i => i.correct)
             .filter(i => !i.device || selectionDevices[i.device] !== false);
-        const sourceText = passageCanonOverride || (app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText());
+        const sourceText = passageCanonOverride || (app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText());
         const hasSource = !!(sourceText && String(sourceText).trim());
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         let excerptSliceFailed = false;
@@ -22568,11 +22564,10 @@ const admin = {
     refreshC2LabPassageDisplay: function() {
         if(!appData || appData.component !== 2 || !admin.getArchitectC2SourceForDisplay) return;
         const disp = admin.getArchitectC2SourceForDisplay() || "";
-        if(!String(disp).trim()) return;
-        if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(disp);
+        if(String(disp).trim() && typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(disp);
         if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
         if(typeof ui.renderLab === "function") ui.renderLab(disp);
-        if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection();
+        if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection(disp);
     },
     /** Lab / Quote Select: per-line B/I fix — never run display sanitize on both intro &lt;p&gt;s at once (that can merge them). */
     normalizeC2PassageHeadBlockForDisplay: function(headDivHtml) {
@@ -24766,11 +24761,19 @@ const admin = {
         }
         return head + body;
     },
+    /** Passage body for one century: layout fields first (same as {@link fillC2PooledEditorFromLayout}), then pooled parts / blob split. */
+    getC2LayoutPassageBodyForView: function(view) {
+        const v = (view === "19th" || view === "21st") ? view : (architectC2SourceView || "21st");
+        const layout = appData && appData.component2Layout ? appData.component2Layout : {};
+        const fromLayout = v === "21st" ? layout.resourcePaperText : layout.questionPaperPage3Text;
+        if(fromLayout != null && String(fromLayout).trim()) return String(fromLayout);
+        const p = admin.getC2ResourceParts ? admin.getC2ResourceParts() : {};
+        return v === "21st" ? (p.twentyFirst || "") : (p.nineteenth || "");
+    },
     getArchitectC2SourceForDisplay: function() {
         const view = architectC2SourceView || "21st";
-        const p = admin.getC2ResourceParts();
         const lines = admin.getC2IntroLinesForDisplay ? admin.getC2IntroLinesForDisplay(view) : null;
-        const body = view === "21st" ? (p.twentyFirst || "") : (p.nineteenth || "");
+        const body = admin.getC2LayoutPassageBodyForView ? admin.getC2LayoutPassageBodyForView(view) : "";
         if(lines) {
             return admin.mergeC2HeadAndBody(lines.line1, lines.line2, body);
         }
@@ -30103,7 +30106,9 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const lvl = sel ? parseInt(sel.value, 10) || 1 : 1;
         const bank = app.getLevelBank();
         const ent = bank[lvl] || {};
-        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : app.getSourceText();
+        const src = (appData && appData.component === 2 && admin.hasC2DualSource && admin.hasC2DualSource() && app.getSourceTextForLevel)
+            ? app.getSourceTextForLevel(lvl)
+            : (app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText());
         const win = app.resolveQuoteSelectLineWindow(lvl);
         if(!src || !String(src).trim()) {
             out.innerHTML = "<span style=\"color:var(--error)\">No source text loaded.</span>";
