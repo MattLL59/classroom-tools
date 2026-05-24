@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T01:00:00">
+<meta name="architect-build" content="2026-05-24T01:30:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1721,7 +1721,7 @@
                         <div class="lobby-help-body">
                             <p>Upload the PDFs for a past paper. Use <strong>Extract text</strong> then <strong>Extract questions</strong> (or paste past-paper JSON and use <strong>Load JSON</strong> in this Editing Suite panel — loading a lesson clears cached PDFs in this browser so you choose files again for this paper).</p>
                             <p><strong>Extract text</strong> caches PDFs and updates the <strong>resource</strong>, <strong>questions-PDF passages</strong> (including Component 2 layout for the 21st C resource text and the 19th C extract from the question paper), and <strong>mark scheme</strong>. It does <strong>not</strong> change the question bank. Then use <strong>Extract questions</strong> to split <strong>Section A reading</strong> tasks into the bank. If <strong>Extract questions</strong> finds fewer than two items and you left the Section A reading page field empty (Component 2), the app may retry from the full Questions PDF; if you set specific pages, that widening is skipped.</p>
-                            <p>At least one PDF is required. <strong>Component 1</strong>: resource page(s) empty → defaults 2–3; question page(s) empty → whole PDF. <strong>Component 2</strong> when a page box is left empty: <strong>Resource</strong> defaults to pages <strong>2–3</strong> (type <code>all</code> for every page). <strong>Section A reading</strong> defaults to page <strong>2</strong>. <strong>19th C passage</strong> defaults to page <strong>3</strong>. Mark scheme: 5–13 if empty. After changing files or page fields, run <strong>Extract text</strong> then <strong>Extract questions</strong> (or the per-part <strong>Re-extract …</strong> buttons).</p>
+                            <p>At least one PDF is required. <strong>Component 1</strong>: resource page(s) empty → defaults 2–3; question page(s) empty → whole PDF; mark scheme page(s) empty → <strong>5–13</strong>. <strong>Component 2</strong> when a page box is left empty: <strong>Resource</strong> defaults to pages <strong>2–3</strong> (type <code>all</code> for every page). <strong>Section A reading</strong> defaults to page <strong>2</strong>. <strong>19th C passage</strong> defaults to page <strong>3</strong>. Mark scheme: <strong>4–12</strong>. After changing files or page fields, run <strong>Extract text</strong> then <strong>Extract questions</strong> (or the per-part <strong>Re-extract …</strong> buttons).</p>
                             <p>PDFs are stored in <strong>IndexedDB</strong> when you choose files or run <strong>Extract text</strong>, so <strong>Extract questions</strong> and <strong>Re-extract …</strong> still work after a reload. Filenames (not file data) are saved in your lesson JSON; exports for students omit PDF cache.</p>
                         </div>
                     </details>
@@ -1760,7 +1760,7 @@
                         <span id="past-paper-name-3" style="font-size:0.8rem; opacity:0.8; margin-left:8px;"></span>
                         <div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
                             <label style="font-size:0.85rem;">Mark scheme page(s):</label>
-                            <input type="text" id="past-paper-markscheme-pages" placeholder="5-13 (default) or e.g. 5, 6, 7-9" style="max-width:200px; padding:4px 8px;">
+                            <input type="text" id="past-paper-markscheme-pages" placeholder="C1: 5-13 · C2: 4-12 (if empty)" style="max-width:200px; padding:4px 8px;">
                         </div>
                     </div>
                     <button type="button" class="btn btn-outline" id="past-paper-extract-btn" onclick="admin.extractPastPaperText({ questions: false })" disabled title="Cache PDFs, pull resource + questions-PDF passages (C2 layout), and mark scheme. Does not change the question bank — use Extract questions next.">Extract text</button>
@@ -2313,7 +2313,7 @@ const app = {
         if(text == null || typeof text !== "string") return "";
         return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\u00a0/g, " ").trim();
     },
-    /** Parse mark scheme text (Section A, pages 5–13). Extracts indicative content per question for retrieval (Q1) style. Also supports Component 2 (1 1, 1 2, … 1 6). */
+    /** Parse mark scheme text (C1 default pages 5–13; C2 default 4–12). Extracts indicative content per question for retrieval (Q1) style. Also supports Component 2 (1 1, 1 2, … 1 6). */
     parseMarkSchemeFromText: function(text) {
         if(!text || typeof text !== "string") return {};
         const raw = app.stripMarkSchemePasteToPlain(text);
@@ -20262,11 +20262,18 @@ const admin = {
         if(!valid.length) return null;
         return valid;
     },
-    /** Parse "Mark scheme page(s)" input: "5-13", "5,6,7", "all" or empty = default [5..13]. Returns array of 1-based page numbers or null for all. */
+    /** Default mark-scheme PDF pages when the Lobby field is empty (C1 vs C2). */
+    getMarkSchemeDefaultPages: function() {
+        const loadModeEl = document.getElementById("past-paper-load-mode");
+        const isC2 = loadModeEl ? Number(loadModeEl.value) === 2 : !!(appData && appData.component === 2);
+        return isC2 ? [4, 5, 6, 7, 8, 9, 10, 11, 12] : [5, 6, 7, 8, 9, 10, 11, 12, 13];
+    },
+    /** Parse "Mark scheme page(s)" input: "4-12", "5-13", "all" or empty = component default. Returns array of 1-based page numbers or null for all. */
     getMarkSchemePageSpec: function() {
         const inp = document.getElementById("past-paper-markscheme-pages");
         const s = (inp && inp.value) ? String(inp.value).trim() : "";
-        if(!s) return [5,6,7,8,9,10,11,12,13];
+        const def = admin.getMarkSchemeDefaultPages();
+        if(!s) return def.slice();
         if(/^all$/i.test(s)) return null;
         const nums = new Set();
         const parts = s.split(/[,;\s]+/).filter(Boolean);
@@ -20281,7 +20288,7 @@ const admin = {
                 if(!isNaN(n) && n >= 1) nums.add(n);
             }
         }
-        if(nums.size === 0) return [5,6,7,8,9,10,11,12,13];
+        if(nums.size === 0) return def.slice();
         return Array.from(nums).sort((a,b) => a - b);
     },
     _parsePageSpec: function(s) {
@@ -24394,6 +24401,8 @@ const admin = {
         if(l3) l3.textContent = "3. Mark scheme (PDF)";
         if(c1Row) c1Row.classList.toggle("hidden", !!isC2);
         if(c2Row) c2Row.classList.toggle("hidden", !isC2);
+        const msPages = document.getElementById("past-paper-markscheme-pages");
+        if(msPages) msPages.placeholder = isC2 ? "4-12 (default if empty)" : "5-13 (default if empty)";
         const re19th = document.getElementById("past-paper-reextract-19th-btn");
         if(re19th) re19th.style.display = isC2 ? "" : "none";
         if(isC2) {
