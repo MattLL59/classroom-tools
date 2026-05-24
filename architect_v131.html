@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T02:15:00">
+<meta name="architect-build" content="2026-05-24T03:00:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -10449,6 +10449,25 @@ const app = {
         } catch(e) {
             return html;
         }
+    },
+    /**
+     * C1/C2 intro line editors often store a single &lt;p&gt;…&lt;/p&gt;; {@link mergeC2HeadAndBody} adds another &lt;p&gt; per line — nested &lt;p&gt; is invalid and browsers drop the second intro row in the Lab.
+     */
+    stripSingleParagraphWrapperFromFragment: function(html) {
+        let h = String(html || "").trim();
+        if(!h) return "";
+        while(/^<p\b[^>]*>/i.test(h) && /<\/p\s*>$/i.test(h)) {
+            try {
+                const d = document.createElement("div");
+                d.innerHTML = h;
+                if(d.children.length === 1 && d.firstElementChild && d.firstElementChild.tagName === "P") {
+                    h = (d.firstElementChild.innerHTML || "").trim();
+                } else break;
+            } catch(e) {
+                break;
+            }
+        }
+        return h;
     },
     /**
      * Intro/outro prose shown in Lab ({@link formatStructuredPassageHtml}) and booklet editor shell ({@link structuredPassageToEditorHtml}): hoist &lt;b&gt;/&lt;strong&gt; off block children, then sanitize — same order as {@link mergeC1IntroHeaderAndAiInputHtml}.
@@ -22397,15 +22416,22 @@ const admin = {
     repairC2HeaderFragmentHtml: function(html) {
         if(!html || typeof html !== "string") return "";
         var t = String(html);
+        if(typeof app.stripSingleParagraphWrapperFromFragment === "function") t = app.stripSingleParagraphWrapperFromFragment(t);
         if(typeof app.repairExamMarginDigitArtifacts === "function") t = app.repairExamMarginDigitArtifacts(t);
         if(typeof app.repairKnownPdfWordJoins === "function") t = app.repairKnownPdfWordJoins(t);
         if(typeof app.sanitizePassageProseFragmentForDisplay === "function") {
             var s = app.sanitizePassageProseFragmentForDisplay(t);
-            if(s) return s;
+            if(s) {
+                if(typeof app.stripSingleParagraphWrapperFromFragment === "function") s = app.stripSingleParagraphWrapperFromFragment(s);
+                return s;
+            }
         }
         if(typeof app.sanitizeSourceHtml === "function") {
             var s2 = app.sanitizeSourceHtml(t, { skipHoistRepair: true });
-            if(s2) return s2;
+            if(s2) {
+                if(typeof app.stripSingleParagraphWrapperFromFragment === "function") s2 = app.stripSingleParagraphWrapperFromFragment(s2);
+                return s2;
+            }
         }
         return t;
     },
@@ -22417,21 +22443,31 @@ const admin = {
             d.innerHTML = String(headDivHtml).trim();
             const head = d.querySelector(".architect-passage-head-prose") || d.firstElementChild;
             if(!head) return headDivHtml;
-            const sanitize = typeof app.sanitizePassageProseFragmentForDisplay === "function"
-                ? app.sanitizePassageProseFragmentForDisplay.bind(app)
+            const stripP = typeof app.stripSingleParagraphWrapperFromFragment === "function"
+                ? app.stripSingleParagraphWrapperFromFragment.bind(app)
                 : null;
             const ps = head.querySelectorAll(":scope > p");
+            let inner = "";
             if(ps.length) {
                 const parts = [];
                 ps.forEach((p) => {
-                    const inner = sanitize ? sanitize(p.innerHTML || "") : String(p.innerHTML || "").trim();
-                    if(inner) parts.push('<p style="margin:0 0 6px 0;">' + inner + "</p>");
+                    let raw = String(p.innerHTML || "").trim();
+                    if(stripP) raw = stripP(raw) || raw;
+                    const plain = (p.textContent || "").replace(/\u00a0/g, " ").trim();
+                    if(!raw && !plain) return;
+                    parts.push('<p style="margin:0 0 6px 0;">' + (raw || app.escapeHtml(plain)) + "</p>");
                 });
-                if(parts.length) return '<div class="architect-passage-head-prose">' + parts.join("") + "</div>";
+                if(parts.length) inner = parts.join("");
+            } else {
+                inner = String(head.innerHTML || "").trim();
+                if(stripP) inner = stripP(inner) || inner;
             }
-            const innerAll = sanitize ? sanitize(head.innerHTML || "") : String(head.innerHTML || "").trim();
-            if(innerAll) return '<div class="architect-passage-head-prose">' + innerAll + "</div>";
-            return headDivHtml;
+            if(!inner) return headDivHtml;
+            if(typeof app.sanitizePassageProseFragmentForDisplay === "function") {
+                const sanitized = app.sanitizePassageProseFragmentForDisplay(inner);
+                if(sanitized && String(sanitized).trim()) inner = sanitized;
+            }
+            return '<div class="architect-passage-head-prose">' + inner + "</div>";
         } catch(e) {
             return headDivHtml;
         }
@@ -24571,6 +24607,10 @@ const admin = {
     mergeC2HeadAndBody: function(line1Html, line2Html, bodyHtml) {
         var a = String(line1Html || "").trim();
         var b = String(line2Html || "").trim();
+        if(typeof app.stripSingleParagraphWrapperFromFragment === "function") {
+            if(a) a = app.stripSingleParagraphWrapperFromFragment(a);
+            if(b) b = app.stripSingleParagraphWrapperFromFragment(b);
+        }
         if(typeof admin.repairC2HeaderFragmentHtml === "function") {
             if(a) a = admin.repairC2HeaderFragmentHtml(a);
             if(b) b = admin.repairC2HeaderFragmentHtml(b);
@@ -24581,10 +24621,9 @@ const admin = {
             let inner = "";
             if(a) inner += '<p style="margin:0 0 6px 0;">' + a + "</p>";
             if(b) inner += '<p style="margin:0 0 6px 0;">' + b + "</p>";
-            const merged = '<div class="architect-passage-head-prose">' + inner + "</div>";
             head = (typeof admin.normalizeC2PassageHeadBlockForDisplay === "function")
-                ? (admin.normalizeC2PassageHeadBlockForDisplay(merged) || merged)
-                : merged;
+                ? (admin.normalizeC2PassageHeadBlockForDisplay('<div class="architect-passage-head-prose">' + inner + "</div>") || ('<div class="architect-passage-head-prose">' + inner + "</div>"))
+                : ('<div class="architect-passage-head-prose">' + inner + "</div>");
         }
         return head + body;
     },
