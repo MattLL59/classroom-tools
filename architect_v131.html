@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T07:15:00">
+<meta name="architect-build" content="2026-05-24T07:30:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1323,7 +1323,7 @@
                     <div id="level-bank-editor"></div>
                     <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
                         <label style="font-size:0.85rem; font-weight:700;">Focus questions — worksheet (WS)</label>
-                        <p style="font-size:0.78rem; opacity:0.85; margin:4px 0 6px 0; line-height:1.45;">Same rows as <strong>Load &amp; AI → Focus questions</strong>. Tick <strong>WS</strong> to include that question on the Word worksheet (with quote bank <strong>Include on worksheet</strong>). Off by default for every row.</p>
+                        <p style="font-size:0.78rem; opacity:0.85; margin:4px 0 6px 0; line-height:1.45;">Same rows as <strong>Load &amp; AI → Focus questions</strong>. Tick <strong>WS</strong> to include that question on the Word worksheet (with quote bank <strong>Include on worksheet</strong>). Off by default for every row. <strong>Component 2:</strong> each row’s <strong>Passage</strong> is set automatically from the board rubric / question wording (like Level Bank <strong>C2 texts</strong> after <strong>Sync Level Bank from focus questions</strong>); choose <strong>Auto (from question)</strong> to re-infer after edits.</p>
                         <div id="questions-list-edit" class="questions-list-mount"></div>
                         <button type="button" class="btn btn-outline btn-small" onclick="admin.addQuestionRow()" style="margin-top:6px;">+ Add question</button>
                     </div>
@@ -3957,9 +3957,10 @@ const app = {
         if(!q && questions[lvl - 1]) q = questions[lvl - 1];
         if(!q) return "";
         if(q.c2PassageHint && String(q.c2PassageHint).trim()) return String(q.c2PassageHint).trim();
-        if(q.c2Source === "19th") return "19th-century extract";
-        if(q.c2Source === "21st") return "21st-century resource";
-        if(q.c2Source === "both") return "Both passages";
+        const src = q.c2Source || (typeof admin.inferC2SourceForFocusQuestion === "function" ? admin.inferC2SourceForFocusQuestion(q.prompt) : null);
+        if(src === "19th") return "19th-century extract";
+        if(src === "21st") return "21st-century resource";
+        if(src === "both") return "Both passages";
         return "";
     },
     /** Long “levels of response” style tasks: quote/evidence tallies and scheme overlap support drafting. */
@@ -20799,6 +20800,59 @@ const admin = {
         if(/\bread\s+the\s+extract\b/i.test(plain) && !/\bresource\b/i.test(plain)) return "19th";
         return null;
     },
+    /** Infer 21st / 19th / both for a focus-question row (rubric peel + question wording). Same signals as past-paper extract → Level Bank sync. */
+    inferC2SourceForFocusQuestion: function(prompt) {
+        const raw = String(prompt || "").trim();
+        if(!raw) return null;
+        if(typeof admin.peelLeadingC2InstructionRubricFromChunk === "function") {
+            const peeled = admin.peelLeadingC2InstructionRubricFromChunk(raw);
+            if(peeled.rubric) {
+                const fromRub = admin.inferC2PassageFromInstructionRubric(peeled.rubric);
+                if(fromRub) return fromRub;
+            }
+            if(peeled.body && peeled.body !== raw) {
+                const fromBody = admin.inferC2PassageFromInstructionRubric(peeled.body);
+                if(fromBody) return fromBody;
+            }
+        }
+        const fromFull = admin.inferC2PassageFromInstructionRubric(raw);
+        if(fromFull) return fromFull;
+        const plain = admin._plainTextFromQuestionChunk(raw);
+        if(!plain) return null;
+        if(/\b(?:both\s+texts|from\s+both\s+texts|use\s+both\s+texts|using\s+information\s+from\s+both\s+texts)\b/i.test(plain)) return "both";
+        if(/\b(?:19th|nineteenth|victorian|opposite\s+page|opposite\s+side\s+of\s+the\s+question\s+paper|question\s+paper\s+page\s+3|diary\s+entries)\b/i.test(plain)) return "19th";
+        if(/\b(?:21st|twenty.?first|resource\s+material|resource\s+paper|separate\s+resource|newspaper\s+article)\b/i.test(plain)) return "21st";
+        if(/\bread\s+the\s+extract\b/i.test(plain) && !/\bresource\b/i.test(plain)) return "19th";
+        return null;
+    },
+    /** Fill missing focus-question c2Source from prompts (feeds Sync Level Bank from focus questions). */
+    autoAssignC2SourceOnFocusQuestions: function(opts) {
+        opts = opts || {};
+        if(!appData || appData.component !== 2) return 0;
+        if(!admin.shouldShowLevelBankC2Column || !admin.shouldShowLevelBankC2Column()) return 0;
+        const onlyEmpty = opts.onlyEmpty !== false;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        let n = 0;
+        questions.forEach(function(q) {
+            if(!q || typeof q.prompt !== "string") return;
+            if(onlyEmpty && q.c2PassageManual) return;
+            if(onlyEmpty && (q.c2Source === "21st" || q.c2Source === "19th" || q.c2Source === "both")) return;
+            const inf = admin.inferC2SourceForFocusQuestion(q.prompt);
+            if(!inf) return;
+            q.c2Source = inf;
+            delete q.c2PassageManual;
+            if(typeof admin.peelLeadingC2InstructionRubricFromChunk === "function") {
+                const peeled = admin.peelLeadingC2InstructionRubricFromChunk(q.prompt);
+                if(peeled.rubric) {
+                    const lab = admin.shortenC2InstructionRubricLabel(peeled.rubric);
+                    if(lab) q.c2PassageHint = lab;
+                }
+            }
+            n++;
+        });
+        if(n && typeof app.save === "function") app.save();
+        return n;
+    },
     /** First exam question start after a leading “To answer the following questions…” rubric (plain text). */
     _indexWhereC2ExamQuestionStartsAfterRubric: function(plain) {
         if(!plain || typeof plain !== "string") return -1;
@@ -24985,23 +25039,37 @@ const admin = {
                 const inferredIn = app.inferLineRefFromQuestionPrompt(String(input.value || ""));
                 if(inferredIn) lineRefInp.value = inferredIn;
             }
+            if(appData && appData.component === 2) {
+                const c2SelIn = row.querySelector("select.question-c2-source-select");
+                if(c2SelIn && !c2SelIn.dataset.c2Manual && typeof admin.inferC2SourceForFocusQuestion === "function") {
+                    const infC2 = admin.inferC2SourceForFocusQuestion(String(input.value || ""));
+                    if(infC2) c2SelIn.value = infC2;
+                }
+            }
             admin.syncQuestionsFromListCore(preferredMount ? { preferredMount } : undefined);
         });
         let c2Sel = null;
         if(admin.shouldShowLevelBankC2Column && admin.shouldShowLevelBankC2Column()) {
             const sel = document.createElement("select");
             sel.className = "question-c2-source-select";
-            sel.title = "Which passage this question uses (overrides Level Bank → C2 texts for this question only)";
-            const cur = (q && (q.c2Source === "21st" || q.c2Source === "19th" || q.c2Source === "both")) ? q.c2Source : "";
-            [["", "Passage: level bank"], ["21st", "21st C only"], ["19th", "19th C only"], ["both", "Both passages"]].forEach(([v, lab]) => {
+            sel.title = "Which passage this question uses. Auto reads the board rubric / question wording (same as Sync Level Bank from focus questions). Pick 21st / 19th / both to override.";
+            let cur = (q && (q.c2Source === "21st" || q.c2Source === "19th" || q.c2Source === "both")) ? q.c2Source : "";
+            if(!cur && q && q.prompt && typeof admin.inferC2SourceForFocusQuestion === "function")
+                cur = admin.inferC2SourceForFocusQuestion(q.prompt) || "";
+            [["", "Auto (from question)"], ["21st", "21st C only"], ["19th", "19th C only"], ["both", "Both passages"]].forEach(([v, lab]) => {
                 const opt = document.createElement("option");
                 opt.value = v;
                 opt.textContent = lab;
                 if(v === cur) opt.selected = true;
                 sel.appendChild(opt);
             });
+            if(q && q.c2PassageManual) sel.dataset.c2Manual = "1";
             sel.style.cssText = "max-width:160px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;";
-            sel.addEventListener("change", (e) => admin.syncQuestionsFromList(false, e.target));
+            sel.addEventListener("change", (e) => {
+                if(sel.value === "21st" || sel.value === "19th" || sel.value === "both") sel.dataset.c2Manual = "1";
+                else delete sel.dataset.c2Manual;
+                admin.syncQuestionsFromList(false, e.target);
+            });
             c2Sel = sel;
             if(q && q.c2PassageHint && String(q.c2PassageHint).trim()) {
                 const hint = document.createElement("span");
@@ -25133,6 +25201,8 @@ const admin = {
             if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
             app.save();
         }
+        if(appData && appData.component === 2 && typeof admin.autoAssignC2SourceOnFocusQuestions === "function")
+            admin.autoAssignC2SourceOnFocusQuestions({ onlyEmpty: true });
         const questions = appData.questions;
         mounts.forEach(m => { m.innerHTML = ""; });
         mounts.forEach(m => {
@@ -25252,10 +25322,28 @@ const admin = {
             if(r.hasWsCb && r.includeWS !== null) o.includeInWorksheet = !!r.includeWS;
             else if(old) o.includeInWorksheet = !!old.includeInWorksheet;
             else o.includeInWorksheet = false;
-            if(r.c2Explicit) {
-                if(r.c2Source === "21st" || r.c2Source === "19th" || r.c2Source === "both") o.c2Source = r.c2Source;
+            const c2SelEl = r._rowEl && r._rowEl.querySelector ? r._rowEl.querySelector("select.question-c2-source-select") : null;
+            const c2Manual = !!(c2SelEl && c2SelEl.dataset && c2SelEl.dataset.c2Manual === "1");
+            const c2Pick = r.c2Explicit ? String(r.c2Source || "").trim() : "";
+            if(c2Manual && (c2Pick === "21st" || c2Pick === "19th" || c2Pick === "both")) {
+                o.c2Source = c2Pick;
+                o.c2PassageManual = true;
+            } else if(appData && appData.component === 2 && typeof admin.inferC2SourceForFocusQuestion === "function") {
+                const inferredC2 = admin.inferC2SourceForFocusQuestion(r.prompt);
+                if(inferredC2) {
+                    o.c2Source = inferredC2;
+                    delete o.c2PassageManual;
+                    if(c2SelEl && c2SelEl.value !== inferredC2) c2SelEl.value = inferredC2;
+                    if(typeof admin.peelLeadingC2InstructionRubricFromChunk === "function") {
+                        const peeledC2 = admin.peelLeadingC2InstructionRubricFromChunk(r.prompt);
+                        if(peeledC2.rubric) {
+                            const labC2 = admin.shortenC2InstructionRubricLabel(peeledC2.rubric);
+                            if(labC2) o.c2PassageHint = labC2;
+                        }
+                    }
+                } else if(old && old.c2Source) o.c2Source = old.c2Source;
             } else if(old && old.c2Source) o.c2Source = old.c2Source;
-            if(old && old.c2PassageHint && String(old.c2PassageHint).trim()) o.c2PassageHint = String(old.c2PassageHint).trim();
+            if(old && old.c2PassageHint && String(old.c2PassageHint).trim() && !o.c2PassageHint) o.c2PassageHint = String(old.c2PassageHint).trim();
             if(i === 0 && appData && appData.component !== 2) {
                 const el = r._rowEl;
                 const infM = el && el.querySelector("textarea.question-ws-inference-model");
@@ -29500,6 +29588,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     /** After past paper extraction: map L1→q1, L2→q2 etc. and set active levels. Call when we have 2+ questions. */
     syncLevelBankForPastPaperQuestions: () => {
         if(appData && typeof app.normalizeLessonQuestionsAfterRepair === "function") app.normalizeLessonQuestionsAfterRepair(appData, null);
+        if(typeof admin.autoAssignC2SourceOnFocusQuestions === "function") admin.autoAssignC2SourceOnFocusQuestions({ onlyEmpty: true });
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         if(questions.length < 2) return;
         if(!appData.settings) appData.settings = {};
