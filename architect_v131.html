@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T23:50:00">
+<meta name="architect-build" content="2026-05-24T00:15:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1403,6 +1403,18 @@
                                 <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-all" onclick="admin.setQuotesBankExamScope('all')">All levels</button>
                             </div>
                             <div id="quotes-bank-exam-status" style="font-size:0.78rem; opacity:0.85;"></div>
+                            <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed var(--border); font-size:0.82rem;">
+                                <span style="font-weight:600;">Global defaults</span>
+                                <label style="display:flex; align-items:center; gap:6px;">Device
+                                    <select id="quotes-bank-default-device" onchange="admin.setQuotesBankDefaultDevice(this.value)" style="padding:2px 6px;">
+                                        <option value="language">Language</option>
+                                        <option value="tone">Tone</option>
+                                        <option value="structure">Structure</option>
+                                    </select>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="quotes-bank-compact-toggle" onchange="admin.setQuotesBankCompact(this.checked)"> Compact quote cards</label>
+                                <button type="button" class="btn btn-outline btn-small" onclick="admin.applyGlobalQuoteDefaultsToAll()" title="One level + one question per quote; default device; keeps quote text">Apply defaults to all quotes</button>
+                            </div>
                         </div>
                         <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
                             <span style="font-size:0.9rem; font-weight:600;">Show:</span>
@@ -1891,6 +1903,8 @@ const defaultData = {
         freeQuestionNavigation: true,
         deskSentenceBankLines: "",
         selectionStages: ["discriminate","align","justify"],
+        quotesBankCompact: true,
+        quotesBankDefaultDevice: "language",
         architectC2SourceView: "21st",
         modulesActive: { selection: true, lab: true, desk: true },
         levelBank: {
@@ -3562,30 +3576,94 @@ const app = {
     quoteItemMatchesLevelBankQuestion: function(item, level) {
         if(!item) return false;
         const lvl = parseInt(level, 10) || 1;
-        const qId = app.getLevelBankQuestionIdForLevel(lvl);
-        if(!qId) return Array.isArray(item.levels) && item.levels.includes(lvl);
+        if(!Array.isArray(item.levels) || !item.levels.includes(lvl)) return false;
+        if(!app.shouldLinkQuotesToExamQuestions()) {
+            const qId = app.getLevelBankQuestionIdForLevel(lvl);
+            if(!qId) return true;
+            const norm = app.normalizeQuestionId;
+            const qids = Array.isArray(item.questionIds) ? item.questionIds : [];
+            if(!qids.length) return true;
+            return qids.some(id => norm(id) === norm(qId));
+        }
+        return app.quoteItemMatchesExamQuestionForLevel(item, lvl);
+    },
+    /** Exam mode: one level + one question id per quote. */
+    assignQuoteToExamLevel: function(item, level) {
+        if(!item) return;
+        const lvl = parseInt(level, 10) || 1;
+        const q = app.getLevelBankQuestionIdForLevel(lvl);
+        item.levels = [lvl];
+        item.questionIds = q ? [q] : [];
+    },
+    quoteItemMatchesExamQuestionForLevel: function(item, level) {
+        if(!item) return false;
+        const lvl = parseInt(level, 10) || 1;
+        const levels = Array.isArray(item.levels) ? item.levels : [];
+        if(!levels.includes(lvl)) return false;
         const norm = app.normalizeQuestionId;
+        const expectedQ = app.getLevelBankQuestionIdForLevel(lvl);
         const qids = Array.isArray(item.questionIds) ? item.questionIds : [];
-        if(!qids.length) return Array.isArray(item.levels) && item.levels.includes(lvl);
-        return qids.some(id => norm(id) === norm(qId));
+        if(qids.length && expectedQ) return qids.some(id => norm(id) === norm(expectedQ));
+        if(expectedQ && qids.length === 0) return levels.length === 1 && levels[0] === lvl;
+        return levels.length === 1 && levels[0] === lvl;
+    },
+    /** Student Quote Select: show quote only when level + question align (exam lessons). */
+    quoteItemVisibleForSelectionLevel: function(item, level) {
+        if(!item) return false;
+        const lvl = parseInt(level, 10) || 1;
+        if(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions()) {
+            return app.quoteItemMatchesExamQuestionForLevel(item, lvl);
+        }
+        const hasLevel = Array.isArray(item.levels) && item.levels.includes(lvl);
+        if(hasLevel) {
+            const qids = Array.isArray(item.questionIds) ? item.questionIds : [];
+            const currentQId = app.getCurrentQuestionIdForLevel ? app.getCurrentQuestionIdForLevel(lvl) : null;
+            if(qids.length && currentQId) {
+                const norm = app.normalizeQuestionId;
+                return qids.some(id => norm(id) === norm(currentQId));
+            }
+            return true;
+        }
+        return false;
+    },
+    usesQuotesBankCompactView: function() {
+        if(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions()) {
+            const s = appData && appData.settings;
+            return !s || s.quotesBankCompact !== false;
+        }
+        return !!(appData && appData.settings && appData.settings.quotesBankCompact === true);
+    },
+    getQuotesBankDefaultDevice: function() {
+        const d = appData && appData.settings && appData.settings.quotesBankDefaultDevice;
+        return (d === "tone" || d === "structure" || d === "language") ? d : "language";
+    },
+    /** Pick one level for a quote (first tick, or match question id, or header level). */
+    repairExamQuoteLink: function(item) {
+        if(!item || !app.shouldLinkQuotesToExamQuestions()) return false;
+        const levels = Array.isArray(item.levels) ? item.levels.filter(l => l >= 1 && l <= ARCHITECT_MAX_LEVEL) : [];
+        const norm = app.normalizeQuestionId;
+        let lvl = levels.length === 1 ? levels[0] : null;
+        if(!lvl && levels.length > 1) lvl = levels[0];
+        if(!lvl) {
+            const qids = Array.isArray(item.questionIds) ? item.questionIds : [];
+            if(qids[0]) {
+                const active = app.getActiveLevels ? app.getActiveLevels() : [];
+                for(let i = 0; i < active.length; i++) {
+                    if(norm(app.getLevelBankQuestionIdForLevel(active[i])) === norm(qids[0])) { lvl = active[i]; break; }
+                }
+            }
+        }
+        if(!lvl) lvl = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
+        const prevL = (item.levels || []).join(",");
+        const prevQ = (item.questionIds || []).join(",");
+        app.assignQuoteToExamLevel(item, lvl);
+        const changed = prevL !== (item.levels || []).join(",") || prevQ !== (item.questionIds || []).join(",");
+        return changed;
     },
     /** Copy Level Bank question id(s) from checked L1–L10 boxes onto a quote row. */
     syncQuoteItemQuestionIdsFromLevels: function(item) {
         if(!item || !app.shouldLinkQuotesToExamQuestions()) return false;
-        const levels = Array.isArray(item.levels) ? item.levels.filter(l => l >= 1 && l <= ARCHITECT_MAX_LEVEL) : [];
-        if(!levels.length) return false;
-        const norm = app.normalizeQuestionId;
-        const qids = [];
-        levels.forEach(lvl => {
-            const q = app.getLevelBankQuestionIdForLevel(lvl);
-            if(q && !qids.some(id => norm(id) === norm(q))) qids.push(q);
-        });
-        if(!qids.length) return false;
-        const prev = (Array.isArray(item.questionIds) ? item.questionIds : []).map(id => norm(id)).sort().join("|");
-        const next = qids.map(id => norm(id)).sort().join("|");
-        if(prev === next) return false;
-        item.questionIds = qids;
-        return true;
+        return app.repairExamQuoteLink(item);
     },
     getQuestionIdsForNewQuoteItem: function() {
         if(!app.shouldLinkQuotesToExamQuestions()) return [];
@@ -17871,14 +17949,20 @@ const ui = {
         const getQuote = (i) => (i && (i.quote || i.original)) || "";
         const quoteInRangeForLevel = (i) => !lineRange || !hasSource || (getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
         const hasLevelMatch = (i) => Array.isArray(i.levels) && i.levels.length > 0 && i.levels.includes(level);
+        const examQuoteFilter = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
         let correctItems = correctItemsAll.filter(i => {
-            const explicitLevel = hasLevelMatch(i);
-            const inRangeByDefault = !hasLevelMatch(i) && quoteInRangeForLevel(i);
-            if(!explicitLevel && !inRangeByDefault) return false;
-            const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
-            if(qids.length === 0) return true;
-            if(!currentQId) return true;
-            return qids.some(qid => normId(qid) === normId(currentQId));
+            if(examQuoteFilter) {
+                if(!app.quoteItemVisibleForSelectionLevel(i, level)) return false;
+            } else {
+                const explicitLevel = hasLevelMatch(i);
+                const inRangeByDefault = !hasLevelMatch(i) && quoteInRangeForLevel(i);
+                if(!explicitLevel && !inRangeByDefault) return false;
+                const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
+                if(qids.length === 0) return true;
+                if(!currentQId) return true;
+                return qids.some(qid => normId(qid) === normId(currentQId));
+            }
+            return true;
         });
         if(lineRange && hasSource) {
             correctItems = correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
@@ -17896,11 +17980,13 @@ const ui = {
         const uniqueChosenCount = chosenList.length;
         const deskQueueLen = Array.isArray(userState.deskQueue) ? userState.deskQueue.length : 0;
         const levelCorrectKeysBase = correctItemsAll.filter(i => hasLevelMatch(i) || (!hasLevelMatch(i) && quoteInRangeForLevel(i)));
-        const levelCorrectKeysFiltered = (usePerQuestionGoal && currentQId ? levelCorrectKeysBase.filter(i => {
-            const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
-            if(qids.length === 0) return true;
-            return qids.some(qid => normId(qid) === normId(currentQId));
-        }) : levelCorrectKeysBase).filter(i => !lineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, lineRange));
+        const levelCorrectKeysFiltered = (examQuoteFilter
+            ? levelCorrectKeysBase.filter(i => app.quoteItemVisibleForSelectionLevel(i, level))
+            : (usePerQuestionGoal && currentQId ? levelCorrectKeysBase.filter(i => {
+                const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
+                if(qids.length === 0) return true;
+                return qids.some(qid => normId(qid) === normId(currentQId));
+            }) : levelCorrectKeysBase)).filter(i => !lineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, lineRange));
         if(helpWrap) {
             const manualQuoteCount = (sel.items || []).length;
             const canOfferQuoteList = manualQuoteCount >= 2;
@@ -19993,30 +20079,64 @@ const admin = {
         admin.ensureSelectionData();
         let n = 0;
         (appData.items || []).forEach(item => {
-            if(app.syncQuoteItemQuestionIdsFromLevels(item)) n++;
+            if(app.repairExamQuoteLink && app.repairExamQuoteLink(item)) n++;
+            else if(app.syncQuoteItemQuestionIdsFromLevels(item)) n++;
         });
         appData.selection.items = appData.items;
         app.save();
         admin.renderQuotesBank();
         if(admin.renderSelectionEditor) admin.renderSelectionEditor();
         if(ui.renderSelection) ui.renderSelection();
-        admin.flashBrief(n ? "Linked " + n + " quote(s) to Level Bank questions" : "All quotes already linked to questions");
+        admin.flashBrief(n ? "Linked " + n + " quote(s) to level + question" : "All quotes already linked");
+    },
+    setQuotesBankDefaultDevice: function(device) {
+        if(!appData.settings) appData.settings = {};
+        const v = String(device || "").toLowerCase();
+        appData.settings.quotesBankDefaultDevice = (v === "tone" || v === "structure") ? v : "language";
+        app.save();
+    },
+    setQuotesBankCompact: function(on) {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.quotesBankCompact = !!on;
+        app.save();
+        admin.renderQuotesBank();
+    },
+    applyGlobalQuoteDefaultsToAll: function() {
+        admin.ensureSelectionData();
+        const dev = app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language";
+        let n = 0;
+        (appData.items || []).forEach(item => {
+            if(!item) return;
+            if(app.repairExamQuoteLink) app.repairExamQuoteLink(item);
+            item.device = dev;
+            item.type = dev;
+            n++;
+        });
+        appData.selection.items = appData.items;
+        app.save();
+        admin.renderQuotesBank();
+        if(ui.renderSelection) ui.renderSelection();
+        admin.flashBrief("Updated " + n + " quote(s): one level → one question, device = " + dev);
+    },
+    setQuoteExamLevel: function(idx, lvl) {
+        admin.togQuoteLevel(idx, lvl);
     },
     setQuoteItemQuestionId: function(idx, qid) {
         const item = appData.items[idx];
         if(!item) return;
         const q = String(qid || "").trim();
-        item.questionIds = q ? [q] : [];
         if(q && app.shouldLinkQuotesToExamQuestions()) {
             const norm = app.normalizeQuestionId;
             const active = app.getActiveLevels();
             for(let i = 0; i < active.length; i++) {
                 const lvl = active[i];
                 if(norm(app.getLevelBankQuestionIdForLevel(lvl)) === norm(q)) {
-                    item.levels = [lvl];
+                    app.assignQuoteToExamLevel(item, lvl);
                     break;
                 }
             }
+        } else {
+            item.questionIds = q ? [q] : [];
         }
         app.save();
         admin.renderQuotesBank();
@@ -25274,15 +25394,21 @@ const admin = {
             reasons: [],
             distractors: [],
             questionIds: app.getQuestionIdsForNewQuoteItem ? app.getQuestionIdsForNewQuoteItem() : [],
-            device: "language",
+            device: app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language",
             deviceReason: ""
         });
+        const ni = appData.items[appData.items.length - 1];
+        if(ni && app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions()) {
+            app.assignQuoteToExamLevel(ni, lvl);
+            ni.device = app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language";
+            ni.type = ni.device;
+        }
         appData.selection.items = appData.items;
         app.save();
         admin.renderQuotesBank();
         if(admin.renderSelectionEditor) admin.renderSelectionEditor();
         if(ui.renderSelection) ui.renderSelection();
-        if(!silent) admin.flashBrief(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions() ? "Quote added for L" + lvl + " — linked to Level Bank question" : "Quote added — tick Include on worksheet when ready for export");
+        if(!silent) admin.flashBrief(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions() ? "Quote added for L" + lvl + " → " + (app.getLevelBankQuestionIdForLevel(lvl) || "question") : "Quote added — tick Include on worksheet when ready for export");
         return appData.items.length - 1;
     },
     tryTeacherPassageCaptureFromPre: function(preCaptured, ctx) {
@@ -25410,7 +25536,7 @@ const admin = {
         const activeN = (app.getActiveLevels ? app.getActiveLevels() : []).length;
         const hintEl = document.getElementById("quotes-bank-exam-toolbar-hint");
         if(hintEl) {
-            let hint = "Use <strong>Sync Level Bank from focus questions</strong> once after import (maps L1→Q1, L2→Q2, …). Then <strong>Link all quotes to questions</strong> so each quote matches the Level Bank row. Change the header <strong>level</strong> to filter this list.";
+            let hint = "Each quote uses <strong>one level</strong> (radio) → <strong>one question</strong> automatically. Run <strong>Sync Level Bank</strong> then <strong>Apply defaults to all quotes</strong> (or Link all). Change the header <strong>level</strong> to edit and preview that question's quotes.";
             if(activeN < qCount) {
                 hint += " You have <strong>" + qCount + " focus questions</strong> but only <strong>" + activeN + " active level(s)</strong> — run Sync Level Bank to enable L2, L3, … in the header.";
             }
@@ -25426,6 +25552,10 @@ const admin = {
         const allBtn = document.getElementById("quotes-exam-scope-all");
         if(curBtn) { curBtn.classList.toggle("btn-primary", scope === "current"); curBtn.classList.toggle("btn-outline", scope !== "current"); }
         if(allBtn) { allBtn.classList.toggle("btn-primary", scope === "all"); allBtn.classList.toggle("btn-outline", scope !== "all"); }
+        const devSel = document.getElementById("quotes-bank-default-device");
+        if(devSel) devSel.value = app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language";
+        const compactCb = document.getElementById("quotes-bank-compact-toggle");
+        if(compactCb) compactCb.checked = app.usesQuotesBankCompactView ? app.usesQuotesBankCompactView() : true;
     },
     // QUOTES BANK (Good quotes section + Bad quotes section)
     renderQuotesBank: function() {
@@ -25447,25 +25577,38 @@ const admin = {
         }
         const goodList = indexed.filter(x => x.item.correct !== false);
         const badList = indexed.filter(x => x.item.correct === false);
-        const questionOptionsForQuote = (item) => {
-            const active = app.getActiveLevels();
-            const norm = app.normalizeQuestionId;
-            const cur = Array.isArray(item.questionIds) && item.questionIds[0] ? norm(item.questionIds[0]) : "";
-            let html = `<option value="">— Not linked —</option>`;
-            active.forEach(lvl => {
-                const q = app.getLevelBankQuestionIdForLevel(lvl);
-                if(!q) return;
-                const nq = norm(q);
-                html += `<option value="${app.escapeHtmlAttr(q)}" ${cur === nq ? "selected" : ""}>L${lvl} · ${app.escapeHtml(app.getQuestionLabelShort(q))}</option>`;
-            });
-            return html;
-        };
+        const compact = app.usesQuotesBankCompactView && app.usesQuotesBankCompactView();
+        const levels = app.getActiveLevels().length ? app.getActiveLevels() : [1,2,3];
         const renderCard = (item, idx) => {
             const quote = item.original || item.quote || "";
             const reasons = Array.isArray(item.reasons) ? item.reasons.join("\n") : "";
             const distractors = Array.isArray(item.distractors) ? item.distractors.map(d => app.stripLineNumbersFromQuote(d.quote || "")).filter(Boolean).join("\n") : "";
             const inSource = !sourceText.trim() || app.quoteInSource(quote, sourceText);
-            const levels = app.getActiveLevels().length ? app.getActiveLevels() : [1,2,3];
+            const itemLvl = Array.isArray(item.levels) && item.levels.length ? item.levels[0] : null;
+            const linkedQ = itemLvl ? app.getLevelBankQuestionIdForLevel(itemLvl) : "";
+            const qBadge = examLink && linkedQ ? `<span style="font-size:0.75rem; opacity:0.8; font-weight:400;"> · ${app.escapeHtml(String(linkedQ).toUpperCase())}</span>` : "";
+            const levelRow = examLink
+                ? `<div class="input-group"><label>Level → question</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="radio" name="quote-bank-lvl-${idx}" ${itemLvl === l ? "checked" : ""} onchange="admin.setQuoteExamLevel(${idx},${l})"></label>`).join(" ")}</div><div style="font-size:0.76rem; opacity:0.82; margin-top:4px;">Pick <strong>one</strong> level — the focus question is set automatically from Level Bank.</div></div>`
+                : `<div class="input-group"><label>Level(s)</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="checkbox" ${(Array.isArray(item.levels) && item.levels.includes(l)) ? "checked" : ""} onchange="admin.togQuoteLevel(${idx},${l})"></label>`).join(" ")}</div></div>`;
+            if(compact) {
+                return `
+                <div class="quote-editor" id="quotes-bank-item-${idx}">
+                    <div class="editor-header">#${idx+1}${qBadge} <button class="btn btn-danger btn-small" onclick="admin.delQuoteItem(${idx})">Del</button></div>
+                    <div class="input-group"><label>Quote</label><input value="${app.escapeHtml(app.stripLineNumbersFromQuote(quote))}" onchange="admin.updateQuoteItem(${idx}, 'quote', this.value)"></div>
+                    ${inSource ? "" : `<div style="font-size:0.8rem; color:var(--error); margin-bottom:6px;">Not in passage</div>`}
+                    ${item.correct === false ? `<div class="input-group"><label>Bad quote</label><span style="font-size:0.85rem;">Wrong-option line for MC</span></div>` : `<div class="input-group"><label>Point</label><textarea onchange="admin.updateQuoteItem(${idx}, 'reasons', this.value)" style="height:42px;" placeholder="One line">${app.escapeHtml(reasons)}</textarea></div>`}
+                    ${levelRow}
+                    <details style="margin-top:6px;"><summary style="font-size:0.82rem; cursor:pointer;">More options (device, worksheet, distractors, evidence)</summary>
+                        <div class="input-group" style="margin-top:8px;"><label>Good quote</label><label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;"><input type="checkbox" ${item.correct !== false ? "checked" : ""} onchange="admin.updateQuoteItem(${idx}, 'correct', this.checked)"> Strong evidence</label></div>
+                        <div class="input-group"><label>Device</label><select onchange="admin.updateQuoteItem(${idx}, 'device', this.value)"><option value="language" ${(item.device || item.type) === "language" ? "selected" : ""}>Language</option><option value="tone" ${(item.device || item.type) === "tone" ? "selected" : ""}>Tone</option><option value="structure" ${(item.device || item.type) === "structure" ? "selected" : ""}>Structure</option></select></div>
+                        <div class="input-group"><label>Worksheet</label><label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;"><input type="checkbox" ${item.includeInWorksheet === true ? "checked" : ""} onchange="admin.updateQuoteItem(${idx}, 'includeInWorksheet', this.checked)"> Include on export</label></div>
+                        <div class="input-group"><label>Distractor points</label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractorPoints', this.value)" style="height:40px;">${app.escapeHtml((Array.isArray(item.distractorPoints) ? item.distractorPoints.join("\n") : ""))}</textarea></div>
+                        <div class="input-group"><label>Wrong quotes</label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:50px;">${app.escapeHtml(distractors)}</textarea></div>
+                        <div class="input-group"><label>Translation</label><input value="${app.escapeHtml(item.translation || "")}" onchange="admin.updateQuoteItem(${idx}, 'translation', this.value)"></div>
+                        <div class="input-group"><label>Effect</label><input value="${app.escapeHtml(item.effect || "")}" onchange="admin.updateQuoteItem(${idx}, 'effect', this.value)"></div>
+                    </details>
+                </div>`;
+            }
             return `
                 <div class="quote-editor" id="quotes-bank-item-${idx}">
                     <div class="editor-header">#${idx+1} <button class="btn btn-danger btn-small" onclick="admin.delQuoteItem(${idx})">Del</button></div>
@@ -25478,8 +25621,7 @@ const admin = {
                     <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForDistractorReasons(${idx})" title="Copies a prompt for wrong explanations about this quotation (paste into ChatGPT / Copilot)">Copy AI prompt for distractor points</button></div></div>
                     <div class="input-group"><label>Wrong quotes <span style="font-weight:400; opacity:0.75;">(other <em>quotations</em> for quote MC only — use Distractor points for wrong explanations)</span></label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:70px;" placeholder="One per line: alternate quotation from the passage (verbatim). No reasons needed.">${app.escapeHtml(distractors)}</textarea>
                     <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForWrongQuotes(${idx})" title="Copies a prompt with the full passage so the AI suggests verbatim weak quotes from the text">Copy AI prompt for wrong quotes</button></div></div>`}
-                    <div class="input-group"><label>Level(s)</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="checkbox" ${(Array.isArray(item.levels) && item.levels.includes(l)) ? "checked" : ""} onchange="admin.togQuoteLevel(${idx},${l})"></label>`).join(" ")}</div>${examLink ? `<div style="font-size:0.78rem; opacity:0.8; margin-top:4px;">In exam mode, tick the level that matches this quote; use <strong>Link all quotes to questions</strong> if older rows have no question id.</div>` : ""}</div>
-                    ${examLink ? `<div class="input-group"><label>Focus question (exam)</label><select onchange="admin.setQuoteItemQuestionId(${idx}, this.value)">${questionOptionsForQuote(item)}</select></div>` : ""}
+                    ${levelRow}
                     <div class="input-group"><label>Device</label><select onchange="admin.updateQuoteItem(${idx}, 'device', this.value)">
                         <option value="language" ${(item.device || item.type) === "language" ? "selected" : ""}>Language</option>
                         <option value="tone" ${(item.device || item.type) === "tone" ? "selected" : ""}>Tone</option>
@@ -25785,9 +25927,15 @@ const admin = {
             reasons: [],
             distractors: [],
             questionIds: app.getQuestionIdsForNewQuoteItem ? app.getQuestionIdsForNewQuoteItem() : [],
-            device: "language",
+            device: app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language",
             deviceReason: ""
         });
+        const niAdd = appData.items[appData.items.length - 1];
+        if(niAdd && app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions()) {
+            app.assignQuoteToExamLevel(niAdd, addLvl);
+            niAdd.device = app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language";
+            niAdd.type = niAdd.device;
+        }
         appData.selection.items = appData.items;
         app.save();
         admin.renderQuotesBank();
@@ -25848,13 +25996,17 @@ const admin = {
     togQuoteLevel: (idx, lvl) => {
         const item = appData.items[idx];
         if(!item) return;
-        if(!Array.isArray(item.levels)) item.levels = [];
-        const i = item.levels.indexOf(lvl);
-        if(i >= 0) item.levels.splice(i, 1);
-        else item.levels.push(lvl);
-        item.levels = item.levels.filter(l => l >= 1 && l <= ARCHITECT_MAX_LEVEL).sort((a,b) => a - b);
-        if(!item.levels.length) item.levels = [app.getActiveLevels()[0] || 1];
-        if(app.syncQuoteItemQuestionIdsFromLevels) app.syncQuoteItemQuestionIdsFromLevels(item);
+        if(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions()) {
+            app.assignQuoteToExamLevel(item, lvl);
+        } else {
+            if(!Array.isArray(item.levels)) item.levels = [];
+            const i = item.levels.indexOf(lvl);
+            if(i >= 0) item.levels.splice(i, 1);
+            else item.levels.push(lvl);
+            item.levels = item.levels.filter(l => l >= 1 && l <= ARCHITECT_MAX_LEVEL).sort((a,b) => a - b);
+            if(!item.levels.length) item.levels = [app.getActiveLevels()[0] || 1];
+            if(app.syncQuoteItemQuestionIdsFromLevels) app.syncQuoteItemQuestionIdsFromLevels(item);
+        }
         app.save();
         admin.renderQuotesBank();
         admin.renderSelectionEditor();
