@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T01:30:00">
+<meta name="architect-build" content="2026-05-24T02:15:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -711,6 +711,19 @@
     #source-inline p, #source-inline-select p, #intro-text p { font-weight: normal !important; }
     #source-inline b, #source-inline strong, #source-inline-select b, #source-inline-select strong, #intro-text b, #intro-text strong { font-weight: bold !important; }
     #source-inline i, #source-inline em, #source-inline-select i, #source-inline-select em, #intro-text i, #intro-text em { font-style: italic !important; }
+    /* C2 two-line intro head: explicit B/I so mixed line1 bold + line2 italic matches Editing Suite (not swallowed by stray wrappers). */
+    #source-inline .architect-passage-head-prose i,
+    #source-inline .architect-passage-head-prose em,
+    #source-inline-select .architect-passage-head-prose i,
+    #source-inline-select .architect-passage-head-prose em,
+    #intro-text .architect-passage-head-prose i,
+    #intro-text .architect-passage-head-prose em { font-style: italic !important; }
+    #source-inline .architect-passage-head-prose b i,
+    #source-inline .architect-passage-head-prose strong em,
+    #source-inline-select .architect-passage-head-prose b i,
+    #source-inline-select .architect-passage-head-prose strong em,
+    #intro-text .architect-passage-head-prose b i,
+    #intro-text .architect-passage-head-prose strong em { font-weight: normal !important; font-style: italic !important; }
     #source-inline u, #source-inline-select u, #intro-text u { text-decoration: underline !important; }
     #source-inline-select-scroll { scrollbar-gutter: stable; scrollbar-width: auto; }
     /* Wider scrollbars on touch devices (default WebKit scrollbars are too narrow to drag). */
@@ -13136,7 +13149,10 @@ const app = {
         const headRe = /^(\s*<div\b[^>]*\barchitect-passage-head-prose\b[^>]*>[\s\S]*?<\/div>\s*)/i;
         const hm = s.match(headRe);
         if(hm) {
-            headBlock = (app.sanitizeSourceHtml(hm[1], { skipHoistRepair: true }) || hm[1]).trim();
+            const rawHead = (app.sanitizeSourceHtml(hm[1], { skipHoistRepair: true }) || hm[1]).trim();
+            headBlock = (typeof admin !== "undefined" && admin.normalizeC2PassageHeadBlockForDisplay)
+                ? (admin.normalizeC2PassageHeadBlockForDisplay(rawHead) || rawHead).trim()
+                : rawHead;
             s = s.slice(hm[0].length).trim();
         }
         if(/<p\b/i.test(s) && typeof app.c2PassageHtmlLooksLikeFigureWrap === "function" && app.c2PassageHtmlLooksLikeFigureWrap(s) && typeof app.collapseC2LayoutGhostsInHtml === "function") {
@@ -22383,11 +22399,42 @@ const admin = {
         var t = String(html);
         if(typeof app.repairExamMarginDigitArtifacts === "function") t = app.repairExamMarginDigitArtifacts(t);
         if(typeof app.repairKnownPdfWordJoins === "function") t = app.repairKnownPdfWordJoins(t);
-        if(typeof app.sanitizeSourceHtml === "function") {
-            var s = app.sanitizeSourceHtml(t, { skipHoistRepair: true });
+        if(typeof app.sanitizePassageProseFragmentForDisplay === "function") {
+            var s = app.sanitizePassageProseFragmentForDisplay(t);
             if(s) return s;
         }
+        if(typeof app.sanitizeSourceHtml === "function") {
+            var s2 = app.sanitizeSourceHtml(t, { skipHoistRepair: true });
+            if(s2) return s2;
+        }
         return t;
+    },
+    /** Lab / Quote Select: hoist &lt;b&gt; off multi-&lt;p&gt; C2 intro heads so line 2 italic is not wrapped in line 1 bold. */
+    normalizeC2PassageHeadBlockForDisplay: function(headDivHtml) {
+        if(!headDivHtml || typeof headDivHtml !== "string") return "";
+        try {
+            const d = document.createElement("div");
+            d.innerHTML = String(headDivHtml).trim();
+            const head = d.querySelector(".architect-passage-head-prose") || d.firstElementChild;
+            if(!head) return headDivHtml;
+            const sanitize = typeof app.sanitizePassageProseFragmentForDisplay === "function"
+                ? app.sanitizePassageProseFragmentForDisplay.bind(app)
+                : null;
+            const ps = head.querySelectorAll(":scope > p");
+            if(ps.length) {
+                const parts = [];
+                ps.forEach((p) => {
+                    const inner = sanitize ? sanitize(p.innerHTML || "") : String(p.innerHTML || "").trim();
+                    if(inner) parts.push('<p style="margin:0 0 6px 0;">' + inner + "</p>");
+                });
+                if(parts.length) return '<div class="architect-passage-head-prose">' + parts.join("") + "</div>";
+            }
+            const innerAll = sanitize ? sanitize(head.innerHTML || "") : String(head.innerHTML || "").trim();
+            if(innerAll) return '<div class="architect-passage-head-prose">' + innerAll + "</div>";
+            return headDivHtml;
+        } catch(e) {
+            return headDivHtml;
+        }
     },
     /** Plain / PDF extract → safe <p> HTML for component2Layout (no C1 line gutters or numbered &lt;p&gt; rows). */
     normalizedPassageHtmlForC2Layout: function(raw) {
@@ -24534,7 +24581,10 @@ const admin = {
             let inner = "";
             if(a) inner += '<p style="margin:0 0 6px 0;">' + a + "</p>";
             if(b) inner += '<p style="margin:0 0 6px 0;">' + b + "</p>";
-            head = '<div class="architect-passage-head-prose">' + inner + "</div>";
+            const merged = '<div class="architect-passage-head-prose">' + inner + "</div>";
+            head = (typeof admin.normalizeC2PassageHeadBlockForDisplay === "function")
+                ? (admin.normalizeC2PassageHeadBlockForDisplay(merged) || merged)
+                : merged;
         }
         return head + body;
     },
