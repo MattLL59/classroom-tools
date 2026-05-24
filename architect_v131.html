@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T03:30:00">
+<meta name="architect-build" content="2026-05-24T04:15:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -712,6 +712,12 @@
     #source-inline b, #source-inline strong, #source-inline-select b, #source-inline-select strong, #intro-text b, #intro-text strong { font-weight: bold !important; }
     #source-inline i, #source-inline em, #source-inline-select i, #source-inline-select em, #intro-text i, #intro-text em { font-style: italic !important; }
     /* C2 two-line intro head: explicit B/I so mixed line1 bold + line2 italic matches Editing Suite (not swallowed by stray wrappers). */
+    #source-inline .architect-passage-head-prose p.c2-intro-head-line,
+    #source-inline-select .architect-passage-head-prose p.c2-intro-head-line,
+    #intro-text .architect-passage-head-prose p.c2-intro-head-line {
+        display: block !important;
+        margin: 0 0 6px 0 !important;
+    }
     #source-inline .architect-passage-head-prose i,
     #source-inline .architect-passage-head-prose em,
     #source-inline-select .architect-passage-head-prose i,
@@ -13175,8 +13181,8 @@ const app = {
         if(typeof admin !== "undefined" && admin.extractC2PassageHeadFromMergedHtml) {
             const split = admin.extractC2PassageHeadFromMergedHtml(raw);
             if(split && split.head) {
-                const rawHead = (app.sanitizeSourceHtml(split.head, { skipHoistRepair: true }) || split.head).trim();
-                headBlock = (admin.normalizeC2PassageHeadBlockForDisplay ? (admin.normalizeC2PassageHeadBlockForDisplay(rawHead) || rawHead) : rawHead).trim();
+                const parsed = admin.parseC2HeadProseToLines ? admin.parseC2HeadProseToLines(split.head) : { line1: "", line2: "" };
+                headBlock = (admin.buildC2HeadProseHtml ? admin.buildC2HeadProseHtml(parsed.line1, parsed.line2) : split.head).trim();
                 s = split.body || "";
             }
         } else {
@@ -13717,30 +13723,34 @@ const app = {
         const p1 = parts.twentyFirst || "";
         const p2 = parts.nineteenth || "";
         const L = appData && appData.component2Layout ? appData.component2Layout : {};
-        const m21 = admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(L.resourceHeadLine1, L.resourceHeadLine2, p1) : p1;
-        const m19 = admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(L.nineteenthHeadLine1, L.nineteenthHeadLine2, p2) : p2;
+        function mergedForView(c2View) {
+            const lines = admin.getC2IntroLinesForDisplay ? admin.getC2IntroLinesForDisplay(c2View) : { line1: "", line2: "" };
+            const body = c2View === "19th" ? p2 : p1;
+            return admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(lines.line1, lines.line2, body) : body;
+        }
         const bank = app.getLevelBank();
         const entry = bank && bank[lvl] ? bank[lvl] : {};
         /* Level Bank → C2 texts only. Do not override from question.c2Source: AI JSON often sets every question to "21st", which locked the passage and made the header 21st/19th toggle appear to do nothing. */
         const mode = (entry.c2Source === "21st" || entry.c2Source === "19th" || entry.c2Source === "both") ? entry.c2Source : "both";
-        if(mode === "21st") return m21;
-        if(mode === "19th") return m19;
+        if(mode === "21st") return mergedForView("21st");
+        if(mode === "19th") return mergedForView("19th");
         if(p1 && p2) {
             const view = (typeof architectC2SourceView !== "undefined" && architectC2SourceView)
                 || (appData && appData.settings && appData.settings.architectC2SourceView)
                 || "21st";
-            if(view === "19th") return m19;
-            return m21;
+            return mergedForView(view === "19th" ? "19th" : "21st");
         }
-        return m21 || m19 || "";
+        return mergedForView("21st") || mergedForView("19th") || "";
     },
     /** Full lesson export: both passages joined when dual source exists. */
     getSourceTextCombined: function() {
         if(admin.hasC2DualSource && admin.hasC2DualSource()) {
             const p = admin.getC2ResourceParts();
             const L = appData && appData.component2Layout ? appData.component2Layout : {};
-            const m21 = admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(L.resourceHeadLine1, L.resourceHeadLine2, p.twentyFirst || "") : (p.twentyFirst || "");
-            const m19 = admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(L.nineteenthHeadLine1, L.nineteenthHeadLine2, p.nineteenth || "") : (p.nineteenth || "");
+            const l21 = admin.getC2IntroLinesForDisplay ? admin.getC2IntroLinesForDisplay("21st") : { line1: L.resourceHeadLine1, line2: L.resourceHeadLine2 };
+            const l19 = admin.getC2IntroLinesForDisplay ? admin.getC2IntroLinesForDisplay("19th") : { line1: L.nineteenthHeadLine1, line2: L.nineteenthHeadLine2 };
+            const m21 = admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(l21.line1, l21.line2, p.twentyFirst || "") : (p.twentyFirst || "");
+            const m19 = admin.mergeC2HeadAndBody ? admin.mergeC2HeadAndBody(l19.line1, l19.line2, p.nineteenth || "") : (p.nineteenth || "");
             if(p.twentyFirst && p.nineteenth) return m21 + "\n\n—— Text ——\n\n" + m19;
             return m21 || m19 || "";
         }
@@ -22432,29 +22442,69 @@ const admin = {
      * C2 intro lines (contenteditable HTML): same margin + known word-join repairs as the main passage, without C2 lede / strip.
      * Run when loading, saving, and when merging head + body for display.
      */
-    repairC2HeaderFragmentHtml: function(html) {
-        if(!html || typeof html !== "string") return "";
-        var t = String(html);
-        const plainIn = t.replace(/<[^>]+>/g, "").replace(/\u00a0/g, " ").trim();
+    /** One C2 intro line: strip block wrapper; margin repair on plain text only (not on HTML — that was clearing lines). */
+    prepC2IntroLineFragment: function(html) {
+        if(!html || !String(html).trim()) return "";
+        let t = String(html).trim();
         if(typeof app.stripSingleParagraphWrapperFromFragment === "function") t = app.stripSingleParagraphWrapperFromFragment(t);
-        if(typeof app.repairExamMarginDigitArtifacts === "function") t = app.repairExamMarginDigitArtifacts(t);
-        if(typeof app.repairKnownPdfWordJoins === "function") t = app.repairKnownPdfWordJoins(t);
-        if(typeof app.sanitizePassageProseFragmentForDisplay === "function") {
-            var s = app.sanitizePassageProseFragmentForDisplay(t);
-            if(s) {
-                if(typeof app.stripSingleParagraphWrapperFromFragment === "function") s = app.stripSingleParagraphWrapperFromFragment(s);
-                return s;
-            }
+        const plainIn = t.replace(/<[^>]+>/g, "").replace(/\u00a0/g, " ").trim();
+        if(!/<[a-z][\s/>]/i.test(t)) {
+            let plain = plainIn;
+            if(typeof app.repairExamMarginDigitArtifacts === "function") plain = app.repairExamMarginDigitArtifacts(plain);
+            if(typeof app.repairKnownPdfWordJoins === "function") plain = app.repairKnownPdfWordJoins(plain);
+            return plain ? app.escapeHtml(plain) : "";
         }
-        if(typeof app.sanitizeSourceHtml === "function") {
-            var s2 = app.sanitizeSourceHtml(t, { skipHoistRepair: true });
-            if(s2) {
-                if(typeof app.stripSingleParagraphWrapperFromFragment === "function") s2 = app.stripSingleParagraphWrapperFromFragment(s2);
-                return s2;
+        try {
+            let wrap = "<div>" + t + "</div>";
+            if(typeof app.hoistBlockElementsOutOfInlineFormatting === "function") {
+                const ho = app.hoistBlockElementsOutOfInlineFormatting(wrap);
+                if(typeof ho === "string" && ho.trim()) wrap = ho;
             }
-        }
-        if(plainIn) return app.escapeHtml(plainIn);
-        return t;
+            let inner = app.sanitizeSourceHtml(wrap, { skipHoistRepair: true }).replace(/^<div\s*>/i, "").replace(/<\/div\s*>$/i, "").trim();
+            if(typeof app.stripSingleParagraphWrapperFromFragment === "function") inner = app.stripSingleParagraphWrapperFromFragment(inner) || inner;
+            if(typeof app.unwrapSpuriousBoldAroundItalic === "function") {
+                const u = app.unwrapSpuriousBoldAroundItalic(inner);
+                if(u && String(u).trim()) inner = u;
+            }
+            if(inner && String(inner).trim()) return inner;
+        } catch(e) {}
+        return plainIn ? app.escapeHtml(plainIn) : "";
+    },
+    repairC2HeaderFragmentHtml: function(html) {
+        return admin.prepC2IntroLineFragment(html);
+    },
+    /** Read line 1 / line 2 inner HTML from an existing head block. */
+    parseC2HeadProseToLines: function(headDivHtml) {
+        const out = { line1: "", line2: "" };
+        if(!headDivHtml || !String(headDivHtml).trim()) return out;
+        try {
+            const d = document.createElement("div");
+            d.innerHTML = String(headDivHtml).trim();
+            const head = d.querySelector(".architect-passage-head-prose") || d.firstElementChild;
+            if(!head) return out;
+            const ps = head.querySelectorAll(":scope > p");
+            if(ps.length >= 1) out.line1 = String(ps[0].innerHTML || "").trim();
+            if(ps.length >= 2) out.line2 = String(ps[1].innerHTML || "").trim();
+            else if(!ps.length) {
+                const inner = String(head.innerHTML || "").trim();
+                const br = inner.split(/<br\s*\/?>/i);
+                if(br.length >= 2) {
+                    out.line1 = br[0].trim();
+                    out.line2 = br.slice(1).join("<br>").trim();
+                } else out.line1 = inner;
+            }
+        } catch(e) {}
+        return out;
+    },
+    /** Always emit one &lt;p&gt; per non-empty intro line (no nested blocks, no combined sanitize). */
+    buildC2HeadProseHtml: function(line1Html, line2Html) {
+        const a = admin.prepC2IntroLineFragment(line1Html);
+        const b = admin.prepC2IntroLineFragment(line2Html);
+        if(!a && !b) return "";
+        let inner = "";
+        if(a) inner += '<p class="c2-intro-head-line" style="margin:0 0 6px 0;">' + a + "</p>";
+        if(b) inner += '<p class="c2-intro-head-line" style="margin:0 0 6px 0;">' + b + "</p>";
+        return '<div class="architect-passage-head-prose">' + inner + "</div>";
     },
     /** Split merged C2 source into head block + body (DOM — avoids regex clipping the second intro &lt;p&gt;). */
     extractC2PassageHeadFromMergedHtml: function(html) {
@@ -22478,13 +22528,14 @@ const admin = {
         const L = appData && appData.component2Layout ? appData.component2Layout : {};
         let line1 = v === "21st" ? (L.resourceHeadLine1 || "") : (L.nineteenthHeadLine1 || "");
         let line2 = v === "21st" ? (L.resourceHeadLine2 || "") : (L.nineteenthHeadLine2 || "");
-        const modal = document.getElementById("modal-admin");
-        if(modal && modal.classList.contains("open")) {
-            const h1 = document.getElementById("c2-passage-intro-line1");
-            const h2 = document.getElementById("c2-passage-intro-line2");
-            const live1 = h1 && h1.getAttribute("contenteditable") === "true" ? String(h1.innerHTML || "").trim() : "";
-            const live2 = h2 && h2.getAttribute("contenteditable") === "true" ? String(h2.innerHTML || "").trim() : "";
+        const h1 = document.getElementById("c2-passage-intro-line1");
+        const h2 = document.getElementById("c2-passage-intro-line2");
+        if(h1 && h1.getAttribute("contenteditable") === "true") {
+            const live1 = String(h1.innerHTML || "").trim();
             if(live1) line1 = live1;
+        }
+        if(h2 && h2.getAttribute("contenteditable") === "true") {
+            const live2 = String(h2.innerHTML || "").trim();
             if(live2) line2 = live2;
         }
         return { line1: line1, line2: line2 };
@@ -24685,26 +24736,8 @@ const admin = {
     },
     /** Optional two intro lines (HTML fragments) + main passage body for the current 21st/19th view. */
     mergeC2HeadAndBody: function(line1Html, line2Html, bodyHtml) {
-        function normLine(raw) {
-            const t = String(raw || "").trim();
-            if(!t) return "";
-            if(typeof admin.repairC2HeaderFragmentHtml === "function") return admin.repairC2HeaderFragmentHtml(t) || "";
-            return t;
-        }
-        var a = normLine(line1Html);
-        var b = normLine(line2Html);
-        const body = String(bodyHtml || "").trim();
-        let head = "";
-        if(a || b) {
-            let inner = "";
-            if(a) inner += '<p style="margin:0 0 6px 0;">' + a + "</p>";
-            if(b) inner += '<p style="margin:0 0 6px 0;">' + b + "</p>";
-            const merged = '<div class="architect-passage-head-prose">' + inner + "</div>";
-            head = (typeof admin.normalizeC2PassageHeadBlockForDisplay === "function")
-                ? (admin.normalizeC2PassageHeadBlockForDisplay(merged) || merged)
-                : merged;
-        }
-        return head + body;
+        const head = admin.buildC2HeadProseHtml ? admin.buildC2HeadProseHtml(line1Html, line2Html) : "";
+        return head + String(bodyHtml || "").trim();
     },
     getArchitectC2SourceForDisplay: function() {
         const view = architectC2SourceView || "21st";
