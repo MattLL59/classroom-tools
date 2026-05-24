@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-23T23:45:00">
+<meta name="architect-build" content="2026-05-23T23:50:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1391,7 +1391,19 @@
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.suggestAnswerPassagesFromMarkScheme({ onlyEmpty: false })" title="Overwrites every focus question’s Answer passage field when the mark scheme yields matches">Replace all answer passages…</button>
                             <span style="font-size:0.78rem; opacity:0.8;">Same local matcher as quote suggest; uses each row’s Lines / prompt window when set. Edit the text after if needed.</span>
                         </div>
-                        <div id="quotes-bank-exam-toolbar" style="display:none; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(76,175,80,0.06); font-size:0.82rem; line-height:1.45;"></div>
+                        <div id="quotes-bank-exam-toolbar" style="display:none; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(76,175,80,0.06); font-size:0.82rem; line-height:1.45;">
+                            <div style="font-weight:600; margin-bottom:6px;">Exam training — link quotes to focus questions</div>
+                            <p id="quotes-bank-exam-toolbar-hint" style="opacity:0.9; margin:0 0 8px 0; line-height:1.45;"></p>
+                            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px;">
+                                <button type="button" class="btn btn-outline btn-small" onclick="admin.syncLevelBankForPastPaperQuestions(); admin.renderQuotesBank(); if(admin.renderLevelBank) admin.renderLevelBank(); if(ui.renderSelection) ui.renderSelection();" title="Map L1→Q1, L2→Q2 from your focus question list and turn on all levels">Sync Level Bank from focus questions</button>
+                                <button type="button" class="btn btn-outline btn-small" onclick="admin.syncAllQuoteQuestionIdsFromLevels()" title="Set each quote's question id from its L1–L10 checkboxes">Link all quotes to questions</button>
+                                <span style="opacity:0.5;">|</span>
+                                <span style="font-weight:600;">Bank list:</span>
+                                <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-current" onclick="admin.setQuotesBankExamScope('current')">This level only</button>
+                                <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-all" onclick="admin.setQuotesBankExamScope('all')">All levels</button>
+                            </div>
+                            <div id="quotes-bank-exam-status" style="font-size:0.78rem; opacity:0.85;"></div>
+                        </div>
                         <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
                             <span style="font-size:0.9rem; font-weight:600;">Show:</span>
                             <button type="button" class="btn btn-outline btn-small" id="quotes-filter-all" onclick="admin.setQuotesBankFilter('all'); admin.renderQuotesBank();">All</button>
@@ -3522,9 +3534,14 @@ const app = {
     normalizeQuestionId: function(id) {
         return String(id || "").replace(/^q0?/i, "q").toLowerCase();
     },
-    /** Past-paper / exam training: Level Bank maps one focus question per level — quotes should carry that question id. */
+    /** Lesson has 2+ focus questions (past paper / exam training). */
+    hasMultipleFocusQuestions: function() {
+        const questions = Array.isArray(appData && appData.questions) ? appData.questions : [];
+        return questions.length >= 2;
+    },
+    /** Past-paper / exam training: link quotes to Level Bank question ids (not difficulty-only). */
     shouldLinkQuotesToExamQuestions: function() {
-        return !!(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout());
+        return !!(app.hasMultipleFocusQuestions && app.hasMultipleFocusQuestions());
     },
     getLevelBankQuestionIdForLevel: function(level) {
         const ids = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(parseInt(level, 10) || 1) : [];
@@ -25376,12 +25393,12 @@ const admin = {
     renderQuotesBankExamToolbar: function() {
         const bar = document.getElementById("quotes-bank-exam-toolbar");
         if(!bar) return;
-        const examLink = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
-        if(!examLink) {
+        const multiQ = app.hasMultipleFocusQuestions && app.hasMultipleFocusQuestions();
+        if(!multiQ) {
             bar.style.display = "none";
-            bar.innerHTML = "";
             return;
         }
+        if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         bar.style.display = "block";
         const lvl = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
         const qid = app.getLevelBankQuestionIdForLevel(lvl);
@@ -25389,17 +25406,22 @@ const admin = {
         const scope = admin.quotesBankExamScope === "all" ? "all" : "current";
         const items = appData.items || [];
         const matchN = items.filter(it => app.quoteItemMatchesLevelBankQuestion(it, lvl)).length;
-        bar.innerHTML = `<div style="font-weight:600; margin-bottom:6px;">Exam training — quotes follow Level Bank questions</div>
-            <div style="opacity:0.9; margin-bottom:8px;">Changing <strong>level</strong> in the header filters this bank to the matching focus question. Students only see quotes linked to that question in Quote Select (same as your Level Bank row).</div>
-            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px;">
-                <span>Level <strong>L${lvl}</strong> → ${qLabel}</span>
-                <span style="opacity:0.5;">|</span>
-                <span style="font-weight:600;">Bank list:</span>
-                <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-current" onclick="admin.setQuotesBankExamScope('current')">This level only</button>
-                <button type="button" class="btn btn-outline btn-small" id="quotes-exam-scope-all" onclick="admin.setQuotesBankExamScope('all')">All levels</button>
-                <button type="button" class="btn btn-outline btn-small" onclick="admin.syncAllQuoteQuestionIdsFromLevels()" title="Set each quote's question id from its checked L1–L10 boxes (Level Bank mapping)">Link all quotes to questions</button>
-            </div>
-            <div style="font-size:0.78rem; opacity:0.85;">${scope === "current" ? matchN + " quote(s) for L" + lvl + " / " + (qid || "question") + "." : "Showing every quote; use This level only to match the header level."}</div>`;
+        const qCount = (Array.isArray(appData.questions) ? appData.questions : []).length;
+        const activeN = (app.getActiveLevels ? app.getActiveLevels() : []).length;
+        const hintEl = document.getElementById("quotes-bank-exam-toolbar-hint");
+        if(hintEl) {
+            let hint = "Use <strong>Sync Level Bank from focus questions</strong> once after import (maps L1→Q1, L2→Q2, …). Then <strong>Link all quotes to questions</strong> so each quote matches the Level Bank row. Change the header <strong>level</strong> to filter this list.";
+            if(activeN < qCount) {
+                hint += " You have <strong>" + qCount + " focus questions</strong> but only <strong>" + activeN + " active level(s)</strong> — run Sync Level Bank to enable L2, L3, … in the header.";
+            }
+            hintEl.innerHTML = hint;
+        }
+        const statusEl = document.getElementById("quotes-bank-exam-status");
+        if(statusEl) {
+            statusEl.textContent = scope === "current"
+                ? "Level L" + lvl + " → " + (qid || "question") + ". " + matchN + " quote(s) shown for this level."
+                : "Showing all quotes. Use This level only to match the header level.";
+        }
         const curBtn = document.getElementById("quotes-exam-scope-current");
         const allBtn = document.getElementById("quotes-exam-scope-all");
         if(curBtn) { curBtn.classList.toggle("btn-primary", scope === "current"); curBtn.classList.toggle("btn-outline", scope !== "current"); }
