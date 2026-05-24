@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T06:30:00">
+<meta name="architect-build" content="2026-05-24T07:00:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -22547,14 +22547,8 @@ const admin = {
         if(useLiveEditors) {
             const h1 = document.getElementById("c2-passage-intro-line1");
             const h2 = document.getElementById("c2-passage-intro-line2");
-            if(h1 && h1.getAttribute("contenteditable") === "true") {
-                const live1 = String(h1.innerHTML || "").trim();
-                if(live1) line1 = live1;
-            }
-            if(h2 && h2.getAttribute("contenteditable") === "true") {
-                const live2 = String(h2.innerHTML || "").trim();
-                if(live2) line2 = live2;
-            }
+            if(h1 && h1.getAttribute("contenteditable") === "true") line1 = String(h1.innerHTML || "").trim();
+            if(h2 && h2.getAttribute("contenteditable") === "true") line2 = String(h2.innerHTML || "").trim();
         }
         return { line1: line1, line2: line2 };
     },
@@ -22563,6 +22557,13 @@ const admin = {
         if(!modal || !modal.classList.contains("open")) return;
         if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(architectC2SourceView || "21st");
     },
+    /** Flush intro line editors into layout for the active century (no pooled body required). */
+    syncC2IntroLinesFromEditors: function() {
+        if(!appData || !appData.component2Layout) return;
+        const v = architectC2SourceView || "21st";
+        if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(v);
+        if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+    },
     /** Push current C2 passage (header view + layout) into the Lab / Quote Select columns. */
     refreshC2LabPassageDisplay: function() {
         if(!appData || appData.component !== 2 || !admin.getArchitectC2SourceForDisplay) return;
@@ -22570,6 +22571,7 @@ const admin = {
         if(!String(disp).trim()) return;
         if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(disp);
         if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
+        if(typeof ui.renderLab === "function") ui.renderLab(disp);
         if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection();
     },
     /** Lab / Quote Select: per-line B/I fix — never run display sanitize on both intro &lt;p&gt;s at once (that can merge them). */
@@ -24329,7 +24331,12 @@ const admin = {
             const el = document.getElementById("c2-pooled-editor");
             if(el && el.getAttribute("contenteditable") === "true") {
                 admin.syncC2PooledDataFromEditor({ rewriteEditor: true });
+            } else if(typeof admin.syncC2IntroLinesFromEditors === "function") {
+                admin.syncC2IntroLinesFromEditors();
+            } else if(typeof admin.refreshC2LabPassageDisplay === "function") {
+                admin.refreshC2LabPassageDisplay();
             }
+            if(typeof app.save === "function") app.save();
             return;
         }
         const ai = document.getElementById("ai-input");
@@ -24474,43 +24481,26 @@ const admin = {
     },
     syncC2PooledDataFromEditor: function(opts) {
         if(!appData || !appData.component2Layout || typeof appData.component2Layout !== "object") return;
-        const el = document.getElementById("c2-pooled-editor");
-        if(!el || el.getAttribute("contenteditable") !== "true") return;
-        const html = app.sanitizeSourceHtml(el.innerHTML) || "";
         const v = architectC2SourceView || "21st";
-        if(v === "21st") appData.component2Layout.resourcePaperText = html;
-        else appData.component2Layout.questionPaperPage3Text = html;
-        const h1 = document.getElementById("c2-passage-intro-line1");
-        const h2 = document.getElementById("c2-passage-intro-line2");
-        if(h1 && h1.getAttribute("contenteditable") === "true") {
-            const i1 = (function() {
-                const raw = h1.innerHTML || "";
-                const out = admin.repairC2HeaderFragmentHtml(raw);
-                if(out !== raw) { try { h1.innerHTML = out; } catch(e) {} }
-                return out;
-            })();
-            const i2 = h2 && h2.getAttribute("contenteditable") === "true" ? (function() {
-                const raw = h2.innerHTML || "";
-                const out = admin.repairC2HeaderFragmentHtml(raw);
-                if(out !== raw) { try { h2.innerHTML = out; } catch(e) {} }
-                return out;
-            })() : "";
-            if(v === "21st") {
-                appData.component2Layout.resourceHeadLine1 = i1;
-                appData.component2Layout.resourceHeadLine2 = i2;
-            } else {
-                appData.component2Layout.nineteenthHeadLine1 = i1;
-                appData.component2Layout.nineteenthHeadLine2 = i2;
-            }
+        const modal = document.getElementById("modal-admin");
+        const wrap = document.getElementById("source-text-c2-wrap");
+        const c2SuiteActive = modal && modal.classList.contains("open") && wrap && !wrap.classList.contains("hidden");
+        if(c2SuiteActive && typeof admin.flushC2IntroLinesToLayoutForView === "function") {
+            admin.flushC2IntroLinesToLayoutForView(v);
         }
-        if(opts && opts.rewriteEditor) {
-            el.innerHTML = html;
+        const el = document.getElementById("c2-pooled-editor");
+        if(el && el.getAttribute("contenteditable") === "true" && c2SuiteActive) {
+            const html = app.sanitizeSourceHtml(el.innerHTML) || "";
+            if(v === "21st") appData.component2Layout.resourcePaperText = html;
+            else appData.component2Layout.questionPaperPage3Text = html;
+            if(opts && opts.rewriteEditor) el.innerHTML = html;
         }
         if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
         else {
             const disp = admin.getArchitectC2SourceForDisplay ? admin.getArchitectC2SourceForDisplay() : "";
             app.syncLessonSourceCanonical(disp);
             if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
+            if(typeof ui.renderLab === "function") ui.renderLab(disp);
         }
         if(admin.syncAiQuoteCountFromLevelBank) admin.syncAiQuoteCountFromLevelBank();
         app.save();
@@ -24579,10 +24569,8 @@ const admin = {
             if(introTimer) clearTimeout(introTimer);
             introTimer = setTimeout(() => {
                 try {
-                    const v = architectC2SourceView || "21st";
-                    if(typeof admin.flushC2IntroLinesToLayoutForView === "function") admin.flushC2IntroLinesToLayoutForView(v);
-                    if(typeof admin.syncC2PooledDataFromEditor === "function") admin.syncC2PooledDataFromEditor();
-                    else if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+                    if(typeof admin.syncC2IntroLinesFromEditors === "function") admin.syncC2IntroLinesFromEditors();
+                    else if(typeof admin.syncC2PooledDataFromEditor === "function") admin.syncC2PooledDataFromEditor();
                 } catch(eI) {}
                 introTimer = null;
             }, 320);
@@ -24620,7 +24608,10 @@ const admin = {
             he.addEventListener("keydown", introKeydown(he));
             he.addEventListener("blur", () => {
                 if(introTimer) { clearTimeout(introTimer); introTimer = null; }
-                try { admin.syncC2PooledDataFromEditor({ rewriteEditor: false }); } catch(eB) {}
+                try {
+                    if(typeof admin.syncC2IntroLinesFromEditors === "function") admin.syncC2IntroLinesFromEditors();
+                    else if(typeof admin.syncC2PooledDataFromEditor === "function") admin.syncC2PooledDataFromEditor({ rewriteEditor: false });
+                } catch(eB) {}
             });
         });
     },
@@ -24768,7 +24759,12 @@ const admin = {
     /** Optional two intro lines (HTML fragments) + main passage body for the current 21st/19th view. */
     mergeC2HeadAndBody: function(line1Html, line2Html, bodyHtml) {
         const head = admin.buildC2HeadProseHtml ? admin.buildC2HeadProseHtml(line1Html, line2Html) : "";
-        return head + String(bodyHtml || "").trim();
+        let body = String(bodyHtml || "").trim();
+        if(head && body && /\barchitect-passage-head-prose\b/i.test(body) && admin.extractC2PassageHeadFromMergedHtml) {
+            const split = admin.extractC2PassageHeadFromMergedHtml(body);
+            if(split && split.head) body = (split.body || "").trim();
+        }
+        return head + body;
     },
     getArchitectC2SourceForDisplay: function() {
         const view = architectC2SourceView || "21st";
