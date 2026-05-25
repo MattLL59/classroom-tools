@@ -1419,7 +1419,7 @@
                                 <label style="display:flex; align-items:center; gap:6px;">View level
                                     <select id="quotes-bank-view-level" onchange="admin.setQuotesBankViewLevel(parseInt(this.value,10))" style="padding:2px 6px;"></select>
                                 </label>
-                                <span id="quotes-bank-view-question" style="opacity:0.88; max-width:min(420px,100%);"></span>
+                                <span id="quotes-bank-view-question" style="display:block; flex:1 1 280px; opacity:0.88; max-width:100%; font-size:0.78rem; line-height:1.4;"></span>
                             </div>
                             <p id="quotes-bank-mode-hint" style="margin:0; opacity:0.9; font-size:0.78rem;"></p>
                         </div>
@@ -3639,6 +3639,64 @@ const app = {
         const idLab = q.id ? String(q.id).toUpperCase() : "";
         const tail = p ? (p.length > 72 ? p.slice(0, 69) + "…" : p) : "";
         return idLab + (tail ? ": " + tail : "");
+    },
+    /** Level used when showing a quote's focus question in Quote bank (view level when filtered, else the quote's level). */
+    getQuoteItemDisplayLevel: function(item, viewLevel) {
+        const bank = parseInt(viewLevel, 10);
+        const v = (!isNaN(bank) && bank >= 1) ? bank : (app.getQuotesBankViewLevel ? app.getQuotesBankViewLevel() : 1);
+        if(!item) return v;
+        const levels = Array.isArray(item.levels) ? item.levels : [];
+        if(typeof admin !== "undefined" && admin.quotesBankExamScope !== "all" && levels.includes(v)) return v;
+        if(levels.length === 1) return levels[0];
+        if(levels.includes(v)) return v;
+        return levels.length ? levels[0] : v;
+    },
+    getQuoteItemQuestionId: function(item, level) {
+        if(!item) return "";
+        const norm = app.normalizeQuestionId;
+        const lvl = parseInt(level, 10) || 1;
+        const qids = Array.isArray(item.questionIds) ? item.questionIds : [];
+        if(qids.length) return qids[0];
+        return app.getLevelBankQuestionIdForLevel(lvl) || "";
+    },
+    getQuotesBankQuestionBannerHtml: function(levelOrQid, opts) {
+        opts = opts || {};
+        const norm = app.normalizeQuestionId;
+        let lvl = parseInt(opts.level, 10);
+        let qid = "";
+        let prompt = "";
+        if(typeof levelOrQid === "number" || (levelOrQid != null && /^\d+$/.test(String(levelOrQid)))) {
+            lvl = parseInt(levelOrQid, 10) || 1;
+            qid = app.getLevelBankQuestionIdForLevel(lvl) || ("q" + lvl);
+            prompt = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(lvl) : (app.getQuestionForLevel(lvl) || "");
+        } else {
+            qid = String(levelOrQid || "").trim();
+            const questions = Array.isArray(appData.questions) ? appData.questions : [];
+            const q = questions.find(qq => qq && norm(qq.id) === norm(qid));
+            prompt = q && typeof q.prompt === "string" ? q.prompt : "";
+            if(!String(prompt).trim() && qid) {
+                const active = app.getActiveLevels ? app.getActiveLevels() : [];
+                for(let i = 0; i < active.length; i++) {
+                    const l = active[i];
+                    if(norm(app.getLevelBankQuestionIdForLevel(l)) === norm(qid)) {
+                        lvl = l;
+                        prompt = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(l) : (app.getQuestionForLevel(l) || "");
+                        break;
+                    }
+                }
+            }
+        }
+        const clean = app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(prompt) : prompt;
+        const text = String(clean || prompt || "").replace(/\s+/g, " ").trim();
+        const max = opts.maxLen != null ? opts.maxLen : 220;
+        const snippet = text.length > max ? text.slice(0, max - 1) + "…" : text;
+        const idLab = qid ? String(qid).toUpperCase() : "";
+        const lvlNum = !isNaN(lvl) && lvl >= 1 ? lvl : null;
+        const lvlLab = lvlNum ? ("L" + lvlNum) : "Question";
+        const body = snippet
+            ? `<div style="margin-top:4px; opacity:0.92;">${app.escapeHtml(snippet)}</div>`
+            : `<div style="margin-top:4px; opacity:0.65; font-style:italic;">No focus question text — sync Level Bank or add a prompt in Editing Suite.</div>`;
+        return `<div class="quotes-bank-item-question" style="font-size:0.78rem; line-height:1.4; margin:0 0 8px 0; padding:6px 8px; border-left:3px solid var(--accent, #673ab7); background:rgba(103,58,183,0.06); border-radius:0 4px 4px 0;"><strong>${app.escapeHtml(lvlLab)}</strong>${idLab ? ` · <span style="opacity:0.85;">${app.escapeHtml(idLab)}</span>` : ""}${body}</div>`;
     },
     /** Whether a quote bank row belongs to the Level Bank question for this level (exam layout). */
     quoteItemMatchesLevelBankQuestion: function(item, level) {
@@ -20200,12 +20258,7 @@ const admin = {
     setQuotesBankViewLevel: function(lvl) {
         const n = parseInt(lvl, 10) || 1;
         admin.quotesBankViewLevel = n;
-        if(app.isExamTrainingMode && app.isExamTrainingMode()) {
-            if(app.setLevel) app.setLevel(n);
-            return;
-        }
-        admin.renderQuotesBank();
-        if(ui.renderSelection) ui.renderSelection();
+        if(app.setLevel) app.setLevel(n);
     },
     setExamTrainingMode: function(on) {
         if(!appData.settings) appData.settings = {};
@@ -25888,16 +25941,21 @@ const admin = {
         }
         const qEl = document.getElementById("quotes-bank-view-question");
         const qid = app.getLevelBankQuestionIdForLevel(viewLvl);
+        const viewPrompt = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(viewLvl) : (app.getQuestionForLevel(viewLvl) || "");
         if(qEl) {
-            qEl.textContent = exam && qid
-                ? "→ " + app.getQuestionLabelShort(qid)
-                : (exam ? "" : "(optional question links per quote below)");
+            const snippet = String(viewPrompt || "").replace(/\s+/g, " ").trim();
+            const short = snippet.length > 240 ? snippet.slice(0, 237) + "…" : snippet;
+            if(qid || short) {
+                qEl.innerHTML = `<strong>L${viewLvl}</strong>${qid ? " · " + app.escapeHtml(String(qid).toUpperCase()) : ""}${short ? `<div style="margin-top:2px;">${app.escapeHtml(short)}</div>` : ""}`;
+            } else {
+                qEl.innerHTML = `<span style="opacity:0.7;">No question for L${viewLvl} — run <strong>Sync Level Bank from focus questions</strong>.</span>`;
+            }
         }
         const hintEl = document.getElementById("quotes-bank-mode-hint");
         if(hintEl) {
             hintEl.innerHTML = exam
-                ? "Exam: changing <strong>View level</strong> also updates the header level and filters quotes for that question. Each quote row is tied to one level + one question."
-                : "Differentiated: <strong>View level</strong> only filters the list (header level is separate). Tick multiple levels on a quote to reuse it across tiers; set per-level behaviour in Level Bank.";
+                ? "Exam: <strong>View level</strong> updates the header level, Quote Select, and the quote list for that question. Each quote row is tied to one level + one question."
+                : "Differentiated: <strong>View level</strong> updates the header level and filters the bank; each card shows the focus question for that quote’s level(s). Tick multiple levels to reuse a quote across tiers.";
         }
         const examBar = document.getElementById("quotes-bank-exam-toolbar");
         const diffBar = document.getElementById("quotes-bank-diff-toolbar");
@@ -26030,15 +26088,18 @@ const admin = {
             const distractors = Array.isArray(item.distractors) ? item.distractors.map(d => app.stripLineNumbersFromQuote(d.quote || "")).filter(Boolean).join("\n") : "";
             const inSource = !sourceText.trim() || app.quoteInSource(quote, sourceText);
             const itemLvl = Array.isArray(item.levels) && item.levels.length ? item.levels[0] : null;
-            const linkedQ = itemLvl ? app.getLevelBankQuestionIdForLevel(itemLvl) : "";
-            const qBadge = examLink && linkedQ ? `<span style="font-size:0.75rem; opacity:0.8; font-weight:400;"> · ${app.escapeHtml(String(linkedQ).toUpperCase())}</span>` : "";
+            const displayLvl = app.getQuoteItemDisplayLevel ? app.getQuoteItemDisplayLevel(item, bankLvl) : (itemLvl || bankLvl);
+            const qBanner = app.getQuotesBankQuestionBannerHtml
+                ? app.getQuotesBankQuestionBannerHtml(displayLvl, { level: displayLvl })
+                : "";
             const levelRow = examLink
                 ? `<div class="input-group"><label>Level → question</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="radio" name="quote-bank-lvl-${idx}" ${itemLvl === l ? "checked" : ""} onchange="admin.setQuoteExamLevel(${idx},${l})"></label>`).join(" ")}</div><div style="font-size:0.76rem; opacity:0.82; margin-top:4px;">Pick <strong>one</strong> level — the focus question is set automatically from Level Bank.</div></div>`
                 : `<div class="input-group"><label>Level(s)</label><div class="level-checks">${levels.map(l => `<label>L${l} <input type="checkbox" ${(Array.isArray(item.levels) && item.levels.includes(l)) ? "checked" : ""} onchange="admin.togQuoteLevel(${idx},${l})"></label>`).join(" ")}</div></div>`;
             if(compact) {
                 return `
                 <div class="quote-editor" id="quotes-bank-item-${idx}">
-                    <div class="editor-header">#${idx+1}${qBadge} <button class="btn btn-danger btn-small" onclick="admin.delQuoteItem(${idx})">Del</button></div>
+                    <div class="editor-header">#${idx+1} <button class="btn btn-danger btn-small" onclick="admin.delQuoteItem(${idx})">Del</button></div>
+                    ${qBanner}
                     <div class="input-group"><label>Quote</label><input value="${app.escapeHtml(app.stripLineNumbersFromQuote(quote))}" onchange="admin.updateQuoteItem(${idx}, 'quote', this.value)"></div>
                     ${inSource ? "" : `<div style="font-size:0.8rem; color:var(--error); margin-bottom:6px;">Not in passage</div>`}
                     ${item.correct === false ? `<div class="input-group"><label>Bad quote</label><span style="font-size:0.85rem;">Wrong-option line for MC</span></div>` : `<div class="input-group"><label>Point</label><textarea onchange="admin.updateQuoteItem(${idx}, 'reasons', this.value)" style="height:42px;" placeholder="One line">${app.escapeHtml(reasons)}</textarea></div>`}
@@ -26058,6 +26119,7 @@ const admin = {
             return `
                 <div class="quote-editor" id="quotes-bank-item-${idx}">
                     <div class="editor-header">#${idx+1} <button class="btn btn-danger btn-small" onclick="admin.delQuoteItem(${idx})">Del</button></div>
+                    ${qBanner}
                     <div class="input-group"><label>Quote</label><input value="${app.escapeHtml(app.stripLineNumbersFromQuote(quote))}" onchange="admin.updateQuoteItem(${idx}, 'quote', this.value)"></div>
                     ${inSource ? "" : `<div style="font-size:0.8rem; color:var(--error); margin-bottom:6px;">Not found in passage — check spelling or formatting.</div>`}
                     <div class="input-group"><label>Good quote (strong evidence)</label><label style="display:flex; align-items:center; gap:6px; font-size:0.9rem;"><input type="checkbox" ${item.correct !== false ? "checked" : ""} onchange="admin.updateQuoteItem(${idx}, 'correct', this.checked)"> Yes</label></div>
