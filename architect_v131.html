@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T07:45:00">
+<meta name="architect-build" content="2026-05-24T08:15:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -3659,43 +3659,87 @@ const app = {
         if(qids.length) return qids[0];
         return app.getLevelBankQuestionIdForLevel(lvl) || "";
     },
+    /**
+     * Resolve focus-question wording for a level (Level Bank assignment, per-row prompts, or pasted multi-part blob).
+     * Mirrors Level Bank dropdown labels and {@link app.syncSelectionQuestionFromLevel}.
+     */
+    getFocusQuestionPromptForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const norm = app.normalizeQuestionId;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const ids = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvl) : [];
+        const currentId = (ids && ids.length ? ids[0] : "") || app.getLevelBankQuestionIdForLevel(lvl) || ("q" + lvl);
+        const q = questions.find(qq => qq && norm(qq.id) === norm(currentId));
+        let raw = q && typeof q.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : "";
+        if(raw && ids.length > 1 && app.extractCurrentQuestionFromPrompt) {
+            const eachRow = ids.every(id => {
+                const row = questions.find(qq => qq && norm(qq.id) === norm(id));
+                return row && typeof row.prompt === "string" && row.prompt.trim();
+            });
+            if(!eachRow) raw = app.extractCurrentQuestionFromPrompt(raw, currentId, ids) || raw;
+        }
+        if(!raw) {
+            const globalPrompt = String((appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "").trim();
+            const allIds = questions.map(qq => qq && qq.id).filter(Boolean);
+            if(globalPrompt && currentId) {
+                raw = app.extractCurrentQuestionFromPrompt(globalPrompt, currentId, allIds.length ? allIds : ids)
+                    || app.extractQuestionSegmentByLevel(globalPrompt, lvl)
+                    || "";
+            }
+            if(!raw && globalPrompt) {
+                const qi = questions.findIndex(qq => qq && norm(qq.id) === norm(currentId));
+                if(qi >= 0) raw = app.extractQuestionSegmentByLevel(globalPrompt, qi + 1) || "";
+                if(!raw) raw = app.extractQuestionSegmentByLevel(globalPrompt, lvl) || "";
+            }
+        }
+        if(!raw && app.getQuestionForLevel) raw = String(app.getQuestionForLevel(lvl) || "").trim();
+        if(!raw && currentId && app.getQuestionLabelShort) {
+            const lab = app.getQuestionLabelShort(currentId);
+            const colon = lab.indexOf(": ");
+            if(colon >= 0) raw = lab.slice(colon + 2).trim();
+        }
+        const cleaned = app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(raw) : raw;
+        return String((cleaned && cleaned.trim()) || raw || "").trim();
+    },
     getQuotesBankQuestionBannerHtml: function(levelOrQid, opts) {
         opts = opts || {};
         const norm = app.normalizeQuestionId;
         let lvl = parseInt(opts.level, 10);
         let qid = "";
-        let prompt = "";
         if(typeof levelOrQid === "number" || (levelOrQid != null && /^\d+$/.test(String(levelOrQid)))) {
             lvl = parseInt(levelOrQid, 10) || 1;
             qid = app.getLevelBankQuestionIdForLevel(lvl) || ("q" + lvl);
-            prompt = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(lvl) : (app.getQuestionForLevel(lvl) || "");
         } else {
             qid = String(levelOrQid || "").trim();
-            const questions = Array.isArray(appData.questions) ? appData.questions : [];
-            const q = questions.find(qq => qq && norm(qq.id) === norm(qid));
-            prompt = q && typeof q.prompt === "string" ? q.prompt : "";
-            if(!String(prompt).trim() && qid) {
+            if(qid) {
                 const active = app.getActiveLevels ? app.getActiveLevels() : [];
                 for(let i = 0; i < active.length; i++) {
-                    const l = active[i];
-                    if(norm(app.getLevelBankQuestionIdForLevel(l)) === norm(qid)) {
-                        lvl = l;
-                        prompt = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(l) : (app.getQuestionForLevel(l) || "");
+                    if(norm(app.getLevelBankQuestionIdForLevel(active[i])) === norm(qid)) {
+                        lvl = active[i];
                         break;
                     }
                 }
             }
         }
-        const clean = app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(prompt) : prompt;
-        const text = String(clean || prompt || "").replace(/\s+/g, " ").trim();
+        const prompt = !isNaN(lvl) && lvl >= 1 && app.getFocusQuestionPromptForLevel
+            ? app.getFocusQuestionPromptForLevel(lvl)
+            : (qid && app.getQuestionLabelShort ? (() => {
+                const lab = app.getQuestionLabelShort(qid);
+                const colon = lab.indexOf(": ");
+                return colon >= 0 ? lab.slice(colon + 2).trim() : "";
+            })() : "");
+        const text = String(prompt || "").replace(/\s+/g, " ").trim();
         const max = opts.maxLen != null ? opts.maxLen : 220;
         const snippet = text.length > max ? text.slice(0, max - 1) + "…" : text;
         const idLab = qid ? String(qid).toUpperCase() : "";
         const lvlNum = !isNaN(lvl) && lvl >= 1 ? lvl : null;
         const lvlLab = lvlNum ? ("L" + lvlNum) : "Question";
+        const emptyHint = idLab
+            ? `Prompt text is missing for <strong>${app.escapeHtml(idLab)}</strong> — open <strong>Editing Suite → Questions</strong> or re-run <strong>Sync Level Bank from focus questions</strong>.`
+            : "No focus question is linked for this level — assign a question in <strong>Level Bank</strong>.";
         const body = snippet
             ? `<div style="margin-top:4px; opacity:0.92;">${app.escapeHtml(snippet)}</div>`
-            : `<div style="margin-top:4px; opacity:0.65; font-style:italic;">No focus question text — sync Level Bank or add a prompt in Editing Suite.</div>`;
+            : `<div style="margin-top:4px; opacity:0.65; font-style:italic;">${emptyHint}</div>`;
         return `<div class="quotes-bank-item-question" style="font-size:0.78rem; line-height:1.4; margin:0 0 8px 0; padding:6px 8px; border-left:3px solid var(--accent, #673ab7); background:rgba(103,58,183,0.06); border-radius:0 4px 4px 0;"><strong>${app.escapeHtml(lvlLab)}</strong>${idLab ? ` · <span style="opacity:0.85;">${app.escapeHtml(idLab)}</span>` : ""}${body}</div>`;
     },
     /** Whether a quote bank row belongs to the Level Bank question for this level (exam layout). */
@@ -3965,6 +4009,17 @@ const app = {
             const byIdx = questions[lvl - 1];
             if(byIdx && typeof byIdx.prompt === "string" && String(byIdx.prompt).trim()) return ensureSingle(String(byIdx.prompt).trim()) || String(byIdx.prompt).trim();
             const globalPrompt = (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "";
+            const allIds = questions.map(qq => qq && qq.id).filter(Boolean);
+            const targetId = currentId || ids[0];
+            if(globalPrompt && targetId && app.extractCurrentQuestionFromPrompt) {
+                const fromPipe = app.extractCurrentQuestionFromPrompt(globalPrompt, targetId, allIds.length ? allIds : ids);
+                if(fromPipe && String(fromPipe).trim()) return String(fromPipe).trim();
+            }
+            if(globalPrompt && app.extractQuestionSegmentByLevel) {
+                const qi = questions.findIndex(qq => qq && norm(qq.id) === norm(targetId));
+                const seg = app.extractQuestionSegmentByLevel(globalPrompt, qi >= 0 ? (qi + 1) : lvl);
+                if(seg && String(seg).trim()) return String(seg).trim();
+            }
             return ensureSingle(globalPrompt) || globalPrompt;
         }
         const byIndex = questions[lvl - 1];
@@ -3978,30 +4033,30 @@ const app = {
     /** Question text for student UI when Level Bank / id mapping leaves getQuestionForLevel empty. */
     getStudentFacingQuestionText: function(level) {
         const lvl = parseInt(level, 10) || 1;
+        if(app.getFocusQuestionPromptForLevel) {
+            const focused = app.getFocusQuestionPromptForLevel(lvl);
+            if(focused) return focused;
+        }
         let raw = String(app.getQuestionForLevel(lvl) || "").trim();
         if(!raw) {
             const questions = Array.isArray(appData.questions) ? appData.questions : [];
-            const byIdx = questions[lvl - 1];
-            if(byIdx && typeof byIdx.prompt === "string" && String(byIdx.prompt).trim()) raw = String(byIdx.prompt).trim();
+            const ids = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvl) : [];
+            const currentId = ids && ids[0] ? ids[0] : ("q" + lvl);
+            const norm = app.normalizeQuestionId;
+            const byId = questions.find(qq => qq && norm(qq.id) === norm(currentId));
+            if(byId && typeof byId.prompt === "string" && String(byId.prompt).trim()) raw = String(byId.prompt).trim();
             if(!raw) {
-                const byId = questions.find(qq => qq && String(qq.id || "").replace(/^q0?/i, "q").toLowerCase() === "q" + lvl);
-                if(byId && typeof byId.prompt === "string" && String(byId.prompt).trim()) raw = String(byId.prompt).trim();
-            }
-            if(!raw) {
-                for(let i = 0; i < questions.length; i++) {
-                    const p = questions[i] && questions[i].prompt;
-                    if(p && String(p).trim()) {
-                        raw = String(p).trim();
-                        break;
-                    }
+                const globalPrompt = String((appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "").trim();
+                const allIds = questions.map(qq => qq && qq.id).filter(Boolean);
+                if(globalPrompt && currentId) {
+                    raw = app.extractCurrentQuestionFromPrompt(globalPrompt, currentId, allIds.length ? allIds : ids)
+                        || app.extractQuestionSegmentByLevel(globalPrompt, lvl)
+                        || "";
                 }
             }
         }
-        if(!raw) {
-            raw = String((appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "").trim();
-        }
         const cleaned = app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(raw) : raw;
-        return String(cleaned || raw || "").trim();
+        return String((cleaned && cleaned.trim()) || raw || "").trim();
     },
     /** C2: short passage label from Level Bank → C2 texts (and optional rubric title on the assigned focus question). */
     getC2PassageHintForLevel: function(level) {
@@ -25941,7 +25996,7 @@ const admin = {
         }
         const qEl = document.getElementById("quotes-bank-view-question");
         const qid = app.getLevelBankQuestionIdForLevel(viewLvl);
-        const viewPrompt = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(viewLvl) : (app.getQuestionForLevel(viewLvl) || "");
+        const viewPrompt = app.getFocusQuestionPromptForLevel ? app.getFocusQuestionPromptForLevel(viewLvl) : (app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(viewLvl) : (app.getQuestionForLevel(viewLvl) || ""));
         if(qEl) {
             const snippet = String(viewPrompt || "").replace(/\s+/g, " ").trim();
             const short = snippet.length > 240 ? snippet.slice(0, 237) + "…" : snippet;
@@ -26047,6 +26102,7 @@ const admin = {
         if(!appData) { wrap.innerHTML = "<div style='opacity:0.7;'>Load a lesson first.</div>"; return; }
         admin.ensureSelectionData();
         if(admin.quotesBankViewLevel == null) admin.quotesBankViewLevel = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
+        if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
         if(admin.renderQuotesBankModeBar) admin.renderQuotesBankModeBar();
         if(admin.renderQuotesBankExamToolbar) admin.renderQuotesBankExamToolbar();
         if(admin.renderQuotesBankDiffToolbar) admin.renderQuotesBankDiffToolbar();
