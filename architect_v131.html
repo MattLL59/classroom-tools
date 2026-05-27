@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T09:30:00">
+<meta name="architect-build" content="2026-05-24T09:45:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -14704,22 +14704,11 @@ const app = {
         if(typeof ui !== "undefined" && ui.applyPassageScopeAfterUserStateHydrate) ui.applyPassageScopeAfterUserStateHydrate();
 
         try {
-            const sigBefore = app.getLessonPersistSignature ? app.getLessonPersistSignature(appData) : "";
-            if(app.mergeQuestionsFromBackupIfMissing) app.mergeQuestionsFromBackupIfMissing(appData);
+            if(app.mergeLessonExtractCacheOnLoad && app.mergeLessonExtractCacheOnLoad(appData)) app._extractCacheMergedOnLoad = true;
             app.normalizeLessonQuestionsAfterRepair(appData, null);
-            if(app.mergeLessonExtractCacheOnLoad) app.mergeLessonExtractCacheOnLoad(appData);
             if(typeof admin !== "undefined" && admin.ensureMarkSchemeParsedFromLayout) admin.ensureMarkSchemeParsedFromLayout();
             if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
-            if(!appData.isStandalone && app.getLessonPersistSignature && sigBefore !== app.getLessonPersistSignature(appData)) app._initSaveNeeded = true;
         } catch(eNorm) {}
-
-        if(!appData.isStandalone && document.getElementById("modal-admin")) {
-            const runAdminSync = function() {
-                try { if(typeof admin !== "undefined" && admin.syncUI) admin.syncUI(); } catch(eAdm) {}
-            };
-            if(typeof requestIdleCallback === "function") requestIdleCallback(runAdminSync, { timeout: 4000 });
-            else setTimeout(runAdminSync, 150);
-        }
 
         if(!appData.isStandalone) {
             window.addEventListener("beforeunload", function() {
@@ -14746,6 +14735,17 @@ const app = {
             const detail = (e && e.stack) ? (e.message + "\n\n" + e.stack) : String(e);
             if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash(detail);
             else document.getElementById("emergency-reset").style.display = "block";
+        }
+        if(!appData.isStandalone && document.getElementById("modal-admin")) {
+            const runAdminSync = function() {
+                if(typeof ui !== "undefined" && ui._initInProgress) {
+                    setTimeout(runAdminSync, 50);
+                    return;
+                }
+                try { if(typeof admin !== "undefined" && admin.syncUI) admin.syncUI(); } catch(eAdm) {}
+            };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(runAdminSync, { timeout: 4000 });
+            else setTimeout(runAdminSync, 100);
         }
         document.body.classList.add("tsa-init-done");
     },
@@ -15269,22 +15269,7 @@ const app = {
     },
 
     _initSaveNeeded: false,
-    /** Cheap signature to detect lesson edits that need a storage flush after init (avoid full save on every boot). */
-    getLessonPersistSignature: function(data) {
-        const d = data || appData;
-        if(!d) return "";
-        const qn = Array.isArray(d.questions) ? d.questions.length : 0;
-        let qChars = 0;
-        if(Array.isArray(d.questions)) {
-            for(let i = 0; i < d.questions.length; i++) {
-                const p = d.questions[i] && d.questions[i].prompt;
-                if(typeof p === "string") qChars += p.length;
-            }
-        }
-        const msT = (d.component2Layout && d.component2Layout.markSchemeText) ? String(d.component2Layout.markSchemeText).length : 0;
-        const msK = (d.markScheme && typeof d.markScheme === "object") ? Object.keys(d.markScheme).length : 0;
-        return qn + ":" + qChars + "|" + msT + "|" + msK;
-    },
+    _extractCacheMergedOnLoad: false,
     /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
     getLessonCacheFingerprint: function(data) {
         const d = data || appData;
@@ -15329,18 +15314,19 @@ const app = {
     },
     /** Restores questions and mark scheme from browser cache when the main lesson JSON lost them on reload. */
     mergeLessonExtractCacheOnLoad: function(safe) {
-        if(!safe || safe.isStandalone) return;
+        if(!safe || safe.isStandalone) return false;
         let b = null;
         try {
             const raw = localStorage.getItem("tsa_v5_1_lesson_extract_cache") || localStorage.getItem("tsa_v5_1_questions_backup");
-            if(!raw) return;
+            if(!raw) return false;
             b = JSON.parse(raw);
-        } catch(e) { return; }
-        if(!b) return;
+        } catch(e) { return false; }
+        if(!b) return false;
         const fp = b.fingerprint || "";
         const curFp = app.getLessonCacheFingerprint(safe);
         const fpOk = !fp || fp === curFp || (fp.split("|")[0] === curFp.split("|")[0] && fp.split("|")[0] !== "untitled");
-        if(!fpOk) return;
+        if(!fpOk) return false;
+        let changed = false;
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const sortQid = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
         if(Array.isArray(b.questions) && b.questions.length) {
@@ -15355,13 +15341,13 @@ const app = {
                 const ex = byId.get(k);
                 if(!ex) {
                     const row = JSON.parse(JSON.stringify(q));
-                    if(row.id) byId.set(k, row);
+                    if(row.id) { byId.set(k, row); changed = true; }
                 } else {
-                    if(!String(ex.prompt || "").trim() && p) ex.prompt = q.prompt;
-                    if(!ex.lineRef && q.lineRef) ex.lineRef = q.lineRef;
-                    if(!ex.answerPassageExcerpt && q.answerPassageExcerpt) ex.answerPassageExcerpt = q.answerPassageExcerpt;
-                    if(q.c2Source && !ex.c2Source) ex.c2Source = q.c2Source;
-                    if(q.includeInWorksheet === true) ex.includeInWorksheet = true;
+                    if(!String(ex.prompt || "").trim() && p) { ex.prompt = q.prompt; changed = true; }
+                    if(!ex.lineRef && q.lineRef) { ex.lineRef = q.lineRef; changed = true; }
+                    if(!ex.answerPassageExcerpt && q.answerPassageExcerpt) { ex.answerPassageExcerpt = q.answerPassageExcerpt; changed = true; }
+                    if(q.c2Source && !ex.c2Source) { ex.c2Source = q.c2Source; changed = true; }
+                    if(q.includeInWorksheet === true) { ex.includeInWorksheet = true; changed = true; }
                 }
             });
             if(byId.size) {
@@ -15373,29 +15359,45 @@ const app = {
         const msText = String(b.markSchemeText || "").trim();
         if(msText) {
             if(!safe.component2Layout || typeof safe.component2Layout !== "object") safe.component2Layout = {};
-            if(!String(safe.component2Layout.markSchemeText || "").trim()) safe.component2Layout.markSchemeText = msText;
+            if(!String(safe.component2Layout.markSchemeText || "").trim()) { safe.component2Layout.markSchemeText = msText; changed = true; }
         }
         const hasMs = b.markScheme && typeof b.markScheme === "object" && Object.keys(b.markScheme).length;
         const curMs = safe.markScheme && typeof safe.markScheme === "object" && Object.keys(safe.markScheme).length;
-        if(hasMs && !curMs) safe.markScheme = JSON.parse(JSON.stringify(b.markScheme));
+        if(hasMs && !curMs) { safe.markScheme = JSON.parse(JSON.stringify(b.markScheme)); changed = true; }
         if(!hasMs && msText && typeof app.parseMarkSchemeFromText === "function") {
             const parsed = app.parseMarkSchemeFromText(msText);
-            if(parsed && Object.keys(parsed).length) safe.markScheme = parsed;
+            if(parsed && Object.keys(parsed).length) { safe.markScheme = parsed; changed = true; }
         }
+        return changed;
     },
     mergeQuestionsFromBackupIfMissing: function(safe) {
         if(app.mergeLessonExtractCacheOnLoad) app.mergeLessonExtractCacheOnLoad(safe);
     },
     save: function(opts) {
         opts = opts || {};
-        if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
-        if(!appData.isStandalone) {
-            localStorage.setItem('tsa_v5_1_data', JSON.stringify(appData));
-            if(app.saveLessonExtractCache && !opts.skipExtractCache) app.saveLessonExtractCache();
-        } else {
-            app.persistStandaloneMutableLesson();
+        try {
+            if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
+            if(!appData.isStandalone) {
+                try {
+                    localStorage.setItem('tsa_v5_1_data', JSON.stringify(appData));
+                } catch(eStore) {
+                    console.warn("Lesson save failed (storage full or blocked):", eStore);
+                }
+                if(app.saveLessonExtractCache && !opts.skipExtractCache) {
+                    try { app.saveLessonExtractCache(); } catch(eCache) {}
+                }
+            } else {
+                app.persistStandaloneMutableLesson();
+            }
+            try {
+                localStorage.setItem(app.getStateKey(), JSON.stringify(userState));
+            } catch(eState) {
+                console.warn("State save failed:", eState);
+            }
+        } catch(eSave) {
+            console.warn("Save failed:", eSave);
+            return;
         }
-        localStorage.setItem(app.getStateKey(), JSON.stringify(userState));
         if(!opts.silent) {
             const saveEl = document.getElementById('save-status');
             if(saveEl) {
@@ -15404,6 +15406,22 @@ const app = {
             }
         }
         if(!opts.skipRender && typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+    },
+    /** After init: persist extract cache immediately; full lesson write only when needed and deferred. */
+    flushInitPersistence: function() {
+        const needExtract = !!app._extractCacheMergedOnLoad;
+        const needFull = !!app._initSaveNeeded;
+        app._extractCacheMergedOnLoad = false;
+        app._initSaveNeeded = false;
+        if(needExtract && app.saveLessonExtractCache) {
+            try { app.saveLessonExtractCache(); } catch(e) {}
+        }
+        if(!needFull || appData.isStandalone) return;
+        const run = function() {
+            try { app.save({ skipRender: true, silent: true, skipExtractCache: true }); } catch(e) {}
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 8000 });
+        else setTimeout(run, 250);
     },
 
     updateEssay: function(text) {
@@ -16226,9 +16244,8 @@ const ui = {
                 app._initSaveNeeded = true;
             }
         } catch(eBake) {}
-        if(app._initSaveNeeded && typeof app.save === "function") {
-            app._initSaveNeeded = false;
-            try { app.save({ skipRender: true, silent: true }); } catch(eSaveInit) {}
+        if((app._initSaveNeeded || app._extractCacheMergedOnLoad) && typeof app.flushInitPersistence === "function") {
+            app.flushInitPersistence();
         }
         ui._initInProgress = false;
         document.body.classList.add("tsa-init-done");
