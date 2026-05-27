@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T08:45:00">
+<meta name="architect-build" content="2026-05-24T09:30:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -14704,13 +14704,22 @@ const app = {
         if(typeof ui !== "undefined" && ui.applyPassageScopeAfterUserStateHydrate) ui.applyPassageScopeAfterUserStateHydrate();
 
         try {
+            const sigBefore = app.getLessonPersistSignature ? app.getLessonPersistSignature(appData) : "";
             if(app.mergeQuestionsFromBackupIfMissing) app.mergeQuestionsFromBackupIfMissing(appData);
             app.normalizeLessonQuestionsAfterRepair(appData, null);
             if(app.mergeLessonExtractCacheOnLoad) app.mergeLessonExtractCacheOnLoad(appData);
             if(typeof admin !== "undefined" && admin.ensureMarkSchemeParsedFromLayout) admin.ensureMarkSchemeParsedFromLayout();
             if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
-            if(!appData.isStandalone && typeof app.save === "function") app.save();
+            if(!appData.isStandalone && app.getLessonPersistSignature && sigBefore !== app.getLessonPersistSignature(appData)) app._initSaveNeeded = true;
         } catch(eNorm) {}
+
+        if(!appData.isStandalone && document.getElementById("modal-admin")) {
+            const runAdminSync = function() {
+                try { if(typeof admin !== "undefined" && admin.syncUI) admin.syncUI(); } catch(eAdm) {}
+            };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(runAdminSync, { timeout: 4000 });
+            else setTimeout(runAdminSync, 150);
+        }
 
         if(!appData.isStandalone) {
             window.addEventListener("beforeunload", function() {
@@ -14762,7 +14771,6 @@ const app = {
             if(!q) continue;
             const key = app.quoteKey(q);
             if(seen.has(key)) continue;
-            if(deduped.some(ex => app.quoteIsMostlySame && app.quoteIsMostlySame(q, ex.quote || ex.original))) continue;
             seen.add(key);
             deduped.push(item);
         }
@@ -15260,6 +15268,23 @@ const app = {
         return safe;
     },
 
+    _initSaveNeeded: false,
+    /** Cheap signature to detect lesson edits that need a storage flush after init (avoid full save on every boot). */
+    getLessonPersistSignature: function(data) {
+        const d = data || appData;
+        if(!d) return "";
+        const qn = Array.isArray(d.questions) ? d.questions.length : 0;
+        let qChars = 0;
+        if(Array.isArray(d.questions)) {
+            for(let i = 0; i < d.questions.length; i++) {
+                const p = d.questions[i] && d.questions[i].prompt;
+                if(typeof p === "string") qChars += p.length;
+            }
+        }
+        const msT = (d.component2Layout && d.component2Layout.markSchemeText) ? String(d.component2Layout.markSchemeText).length : 0;
+        const msK = (d.markScheme && typeof d.markScheme === "object") ? Object.keys(d.markScheme).length : 0;
+        return qn + ":" + qChars + "|" + msT + "|" + msK;
+    },
     /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
     getLessonCacheFingerprint: function(data) {
         const d = data || appData;
@@ -15361,18 +15386,24 @@ const app = {
     mergeQuestionsFromBackupIfMissing: function(safe) {
         if(app.mergeLessonExtractCacheOnLoad) app.mergeLessonExtractCacheOnLoad(safe);
     },
-    save: function() {
+    save: function(opts) {
+        opts = opts || {};
         if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
         if(!appData.isStandalone) {
             localStorage.setItem('tsa_v5_1_data', JSON.stringify(appData));
-            if(app.saveLessonExtractCache) app.saveLessonExtractCache();
+            if(app.saveLessonExtractCache && !opts.skipExtractCache) app.saveLessonExtractCache();
         } else {
             app.persistStandaloneMutableLesson();
         }
         localStorage.setItem(app.getStateKey(), JSON.stringify(userState));
-        document.getElementById('save-status').style.opacity = 1;
-        setTimeout(()=>document.getElementById('save-status').style.opacity=0, 800);
-        ui.renderLab();
+        if(!opts.silent) {
+            const saveEl = document.getElementById('save-status');
+            if(saveEl) {
+                saveEl.style.opacity = 1;
+                setTimeout(() => { saveEl.style.opacity = 0; }, 800);
+            }
+        }
+        if(!opts.skipRender && typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
     },
 
     updateEssay: function(text) {
@@ -16010,7 +16041,7 @@ const ui = {
             })();
             if(toSave) {
                 app.syncLessonSourceCanonical(toSave);
-                app.save();
+                app._initSaveNeeded = true;
             }
         }
         const sourceForDisplay = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
@@ -16099,12 +16130,12 @@ const ui = {
         if(hasSource && appData.selection && (!appData.selection.text || !appData.selection.text.source)) {
             if(!appData.selection.text) appData.selection.text = {};
             appData.selection.text.source = appData.sourceText;
-            app.save();
+            app._initSaveNeeded = true;
         }
         const anyFreeSelect = bank && Object.keys(bank).some(function(lvl) { return bank[lvl] && bank[lvl].freeSelectFromText === true; });
         if(modules.selection && appData.selection && !appData.selection.enabled && (anyFreeSelect || hasSource)) {
             appData.selection.enabled = true;
-            app.save();
+            app._initSaveNeeded = true;
         }
         const selItems = appData.selection && Array.isArray(appData.selection.items) ? appData.selection.items : [];
         const selectionAvailable = modules.selection && appData.selection && (selItems.length > 0 || hasSource) && appData.selection.enabled;
@@ -16137,12 +16168,7 @@ const ui = {
         });
         
         ui.showSplash();
-        
-        // Only sync admin UI if we are in Teacher Mode AND the element exists
-        // This is the check that prevents freezing!
-        if(!appData.isStandalone && document.getElementById('modal-admin')) {
-            admin.syncUI();
-        }
+
         if(app.syncAdminAiInputFromLesson && appData && appData.component !== 2) app.syncAdminAiInputFromLesson({ force: true });
 
         const modulesActive = modules;
@@ -16197,9 +16223,13 @@ const ui = {
                 if(stFix && aiFix && aiFix.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
                     app.setAiInputValue(String(stFix));
                 }
-                if(typeof app.save === "function") app.save();
+                app._initSaveNeeded = true;
             }
         } catch(eBake) {}
+        if(app._initSaveNeeded && typeof app.save === "function") {
+            app._initSaveNeeded = false;
+            try { app.save({ skipRender: true, silent: true }); } catch(eSaveInit) {}
+        }
         ui._initInProgress = false;
         document.body.classList.add("tsa-init-done");
     },
@@ -25388,7 +25418,8 @@ const admin = {
         if(questionsRepaired) {
             appData.question = (appData.questions[0] && appData.questions[0].prompt) || appData.question || "";
             if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
-            app.save();
+            if(typeof ui !== "undefined" && ui._initInProgress) app._initSaveNeeded = true;
+            else if(typeof app.save === "function") app.save({ skipRender: true });
             if(appData.component === 2 && appData.questions.length >= 2 && typeof admin.syncLevelBankC2TextsFromFocusQuestions === "function")
                 admin.syncLevelBankC2TextsFromFocusQuestions();
         }
