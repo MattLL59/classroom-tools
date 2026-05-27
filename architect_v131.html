@@ -4,11 +4,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<<<<<<< HEAD
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="architect-build" content="2026-05-24T08:30:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
+=======
+<meta name="architect-build" content="2026-05-24T08:45:00">
+>>>>>>> cursor/fix-v131-passage-slicing-f806
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -14706,9 +14710,27 @@ const app = {
         try {
             if(app.mergeQuestionsFromBackupIfMissing) app.mergeQuestionsFromBackupIfMissing(appData);
             app.normalizeLessonQuestionsAfterRepair(appData, null);
+            if(app.mergeLessonExtractCacheOnLoad) app.mergeLessonExtractCacheOnLoad(appData);
+            if(typeof admin !== "undefined" && admin.ensureMarkSchemeParsedFromLayout) admin.ensureMarkSchemeParsedFromLayout();
             if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
             if(!appData.isStandalone && typeof app.save === "function") app.save();
         } catch(eNorm) {}
+
+        if(!appData.isStandalone) {
+            window.addEventListener("beforeunload", function() {
+                try {
+                    if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
+                    if(typeof app.save === "function") app.save();
+                } catch(eUnload) {}
+            });
+            document.addEventListener("visibilitychange", function() {
+                if(document.visibilityState !== "hidden") return;
+                try {
+                    if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
+                    if(typeof app.save === "function") app.save();
+                } catch(eVis) {}
+            });
+        }
 
         if(ui._sendToBuilderGuard) ui._sendToBuilderGuard = false;
         try {
@@ -15233,35 +15255,74 @@ const app = {
         const dq = parseInt(safe.component2Layout.defaultQuestion, 10);
         safe.component2Layout.defaultQuestion = (dq >= 11 && dq <= 16) ? dq : 11;
         try { architectC2SourceView = safe.settings.architectC2SourceView; } catch(e) {}
+        if(safe.markScheme && typeof safe.markScheme !== "object") delete safe.markScheme;
+        if(safe.component2Layout && typeof safe.component2Layout.markSchemeText === "string" && safe.component2Layout.markSchemeText.trim()
+            && (!safe.markScheme || !Object.keys(safe.markScheme).length) && typeof app.parseMarkSchemeFromText === "function") {
+            const parsedMs = app.parseMarkSchemeFromText(safe.component2Layout.markSchemeText);
+            if(parsedMs && Object.keys(parsedMs).length) safe.markScheme = parsedMs;
+        }
         return safe;
     },
 
-    /** Persists focus questions separately so a new HTML build cannot wipe extracted prompts if main JSON is reset. */
-    saveQuestionsBackup: function() {
-        if(!appData || appData.isStandalone || !Array.isArray(appData.questions)) return;
+    /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
+    getLessonCacheFingerprint: function(data) {
+        const d = data || appData;
+        const title = (d && d.meta && d.meta.title) ? String(d.meta.title).trim().toLowerCase() : "";
+        const st = (d && d.sourceText) ? String(d.sourceText) : "";
+        let h = 0;
+        const slice = st.slice(0, 800);
+        for(let i = 0; i < slice.length; i++) h = ((h << 5) - h + slice.charCodeAt(i)) | 0;
+        return (title || "untitled") + "|" + st.length + "|" + h;
+    },
+    /** Persists focus questions + mark scheme in localStorage (same browser) so reload keeps extract work like passage text. */
+    saveLessonExtractCache: function() {
+        if(!appData || appData.isStandalone) return;
         try {
-            localStorage.setItem("tsa_v5_1_questions_backup", JSON.stringify({
-                questions: JSON.parse(JSON.stringify(appData.questions)),
+            const payload = {
+                fingerprint: app.getLessonCacheFingerprint(appData),
+                savedAt: Date.now(),
+                questions: JSON.parse(JSON.stringify(appData.questions || [])),
                 question: typeof appData.question === "string" ? appData.question : "",
-                savedAt: Date.now()
+                markScheme: (appData.markScheme && typeof appData.markScheme === "object" && Object.keys(appData.markScheme).length)
+                    ? JSON.parse(JSON.stringify(appData.markScheme)) : null,
+                markSchemeText: (appData.component2Layout && appData.component2Layout.markSchemeText)
+                    ? String(appData.component2Layout.markSchemeText) : ""
+            };
+            localStorage.setItem("tsa_v5_1_lesson_extract_cache", JSON.stringify(payload));
+            localStorage.setItem("tsa_v5_1_questions_backup", JSON.stringify({
+                questions: payload.questions,
+                question: payload.question,
+                savedAt: payload.savedAt
             }));
         } catch(e) {}
     },
-    /** Restores question prompts from backup when current lesson has fewer filled rows than backup (e.g. after reloading a new file version). */
-    mergeQuestionsFromBackupIfMissing: function(safe) {
+    saveQuestionsBackup: function() {
+        if(app.saveLessonExtractCache) app.saveLessonExtractCache();
+    },
+    /** Flush focus-question inputs into appData before writing localStorage (if the list is on screen). */
+    persistLessonBeforeSave: function() {
+        if(typeof admin === "undefined" || !admin.syncQuestionsFromListCore) return;
+        const mounts = document.querySelectorAll(".questions-list-mount");
+        if(!mounts.length) return;
+        try { admin.syncQuestionsFromListCore(); } catch(e) {}
+    },
+    /** Restores questions and mark scheme from browser cache when the main lesson JSON lost them on reload. */
+    mergeLessonExtractCacheOnLoad: function(safe) {
         if(!safe || safe.isStandalone) return;
+        let b = null;
         try {
-            const raw = localStorage.getItem("tsa_v5_1_questions_backup");
+            const raw = localStorage.getItem("tsa_v5_1_lesson_extract_cache") || localStorage.getItem("tsa_v5_1_questions_backup");
             if(!raw) return;
-            const b = JSON.parse(raw);
-            if(!b || !Array.isArray(b.questions)) return;
-            const countPrompts = (arr) => (arr || []).filter(q => q && String(q.prompt || "").trim()).length;
-            if(countPrompts(b.questions) === 0) return;
-            const curN = countPrompts(safe.questions);
-            const bakN = countPrompts(b.questions);
-            if(curN >= bakN && curN > 0) return;
-            const sortQid = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
-            const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+            b = JSON.parse(raw);
+        } catch(e) { return; }
+        if(!b) return;
+        const fp = b.fingerprint || "";
+        const curFp = app.getLessonCacheFingerprint(safe);
+        const fpOk = !fp || fp === curFp || (fp.split("|")[0] === curFp.split("|")[0] && fp.split("|")[0] !== "untitled");
+        if(!fpOk) return;
+        const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const sortQid = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
+        if(Array.isArray(b.questions) && b.questions.length) {
             const byId = new Map();
             (safe.questions || []).forEach(q => {
                 if(q && q.id) byId.set(normId(q.id), Object.assign({}, q));
@@ -15272,23 +15333,43 @@ const app = {
                 const p = String(q.prompt || "").trim();
                 const ex = byId.get(k);
                 if(!ex) {
-                    const row = { id: q.id, prompt: typeof q.prompt === "string" ? q.prompt : "" };
-                    if(q.includeInWorksheet === false) row.includeInWorksheet = false;
-                    byId.set(k, row);
-                } else if(!String(ex.prompt || "").trim() && p) {
-                    ex.prompt = q.prompt;
-                    if(q.includeInWorksheet === false) ex.includeInWorksheet = false;
+                    const row = JSON.parse(JSON.stringify(q));
+                    if(row.id) byId.set(k, row);
+                } else {
+                    if(!String(ex.prompt || "").trim() && p) ex.prompt = q.prompt;
+                    if(!ex.lineRef && q.lineRef) ex.lineRef = q.lineRef;
+                    if(!ex.answerPassageExcerpt && q.answerPassageExcerpt) ex.answerPassageExcerpt = q.answerPassageExcerpt;
+                    if(q.c2Source && !ex.c2Source) ex.c2Source = q.c2Source;
+                    if(q.includeInWorksheet === true) ex.includeInWorksheet = true;
                 }
             });
-            safe.questions = Array.from(byId.values()).sort((a, b) => sortQid(a.id) - sortQid(b.id));
-            if(String(b.question || "").trim() && !String(safe.question || "").trim()) safe.question = b.question;
-            else if(safe.questions[0] && String(safe.questions[0].prompt || "").trim()) safe.question = safe.questions[0].prompt;
-        } catch(e) {}
+            if(byId.size) {
+                safe.questions = Array.from(byId.values()).sort((a, b) => sortQid(a.id) - sortQid(b.id));
+                if(safe.questions[0] && String(safe.questions[0].prompt || "").trim()) safe.question = safe.questions[0].prompt;
+                else if(String(b.question || "").trim()) safe.question = b.question;
+            }
+        }
+        const msText = String(b.markSchemeText || "").trim();
+        if(msText) {
+            if(!safe.component2Layout || typeof safe.component2Layout !== "object") safe.component2Layout = {};
+            if(!String(safe.component2Layout.markSchemeText || "").trim()) safe.component2Layout.markSchemeText = msText;
+        }
+        const hasMs = b.markScheme && typeof b.markScheme === "object" && Object.keys(b.markScheme).length;
+        const curMs = safe.markScheme && typeof safe.markScheme === "object" && Object.keys(safe.markScheme).length;
+        if(hasMs && !curMs) safe.markScheme = JSON.parse(JSON.stringify(b.markScheme));
+        if(!hasMs && msText && typeof app.parseMarkSchemeFromText === "function") {
+            const parsed = app.parseMarkSchemeFromText(msText);
+            if(parsed && Object.keys(parsed).length) safe.markScheme = parsed;
+        }
+    },
+    mergeQuestionsFromBackupIfMissing: function(safe) {
+        if(app.mergeLessonExtractCacheOnLoad) app.mergeLessonExtractCacheOnLoad(safe);
     },
     save: function() {
+        if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
         if(!appData.isStandalone) {
             localStorage.setItem('tsa_v5_1_data', JSON.stringify(appData));
-            if(app.saveQuestionsBackup) app.saveQuestionsBackup();
+            if(app.saveLessonExtractCache) app.saveLessonExtractCache();
         } else {
             app.persistStandaloneMutableLesson();
         }
