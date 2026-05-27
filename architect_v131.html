@@ -7,7 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T10:15:00">
+<meta name="architect-build" content="2026-05-24T10:30:00">
+<meta name="architect-deploy" content="9c51d51">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -893,9 +894,20 @@
     .pick-title { font-size: 1.4rem; font-weight: 800; color: var(--primary); }
 
     #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; background: #d32f2f; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; }
+    #architect-deploy-ribbon {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
+        background: #004d40; color: #e0f2f1; font-size: 0.78rem; line-height: 1.35;
+        padding: 6px 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    #architect-deploy-ribbon a { color: #80cbc4; }
+    #architect-deploy-ribbon.deploy-mismatch { background: #b71c1c; color: #fff; }
+    body.architect-ribbon-visible { padding-top: 34px; }
+    body.architect-ribbon-visible header.no-print { margin-top: 0; }
 </style>
 </head>
 <body>
+
+    <div id="architect-deploy-ribbon" role="status" aria-live="polite">Loading deploy info…</div>
 
     <div id="save-status" style="position:fixed; top:10px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:white; padding:5px 15px; border-radius:20px; font-size:0.8rem; opacity:0; transition:0.3s; z-index:3000;">💾 Saved</div>
 
@@ -903,7 +915,8 @@
         <h2>⚠️ App Crashed</h2>
         <p id="crash-summary">Something went wrong while loading or running the app (this is not always corrupted saved data).</p>
         <pre id="crash-detail" style="display:none; text-align:left; max-width:min(92vw,520px); max-height:40vh; overflow:auto; font-size:0.7rem; white-space:pre-wrap; background:rgba(0,0,0,0.25); padding:8px; border-radius:4px; margin-top:8px;"></pre>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="localStorage.clear(); location.reload();">Emergency Reset</button>
+        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="if(typeof app.clearLessonStorageOnly==='function')app.clearLessonStorageOnly(); else { localStorage.removeItem('tsa_v5_1_data'); location.reload(); }">Reset lesson data only</button>
+        <button class="btn btn-outline" style="background:white; color:black; margin-top:6px;" onclick="localStorage.clear(); location.reload();">Emergency Reset (clear all site data)</button>
     </div>
 
     <div id="celebration-overlay" class="celebration hidden">
@@ -960,16 +973,32 @@
     (function() {
         try {
             var el = document.getElementById("arch-build-stamp");
+            var rib = document.getElementById("architect-deploy-ribbon");
             var m = document.querySelector("meta[name=\"architect-build\"]");
+            var dep = document.querySelector("meta[name=\"architect-deploy\"]");
             var rev = document.querySelector("meta[name=\"architect-rev\"]");
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
+            var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524103000";
             if(el) {
-                if(raw) el.textContent = "v131 · " + raw;
+                if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
                 var tip = "Build: " + (raw || "unset");
+                if(commit) tip += " · git " + commit;
                 if(revRaw) tip += " · rev " + revRaw;
-                el.title = tip + ". If this does not match after Ctrl+Shift+R, you are not on the latest architect_v131.html (check main branch / re-export Student App).";
+                el.title = tip + ". Must match green deploy bar at top. Wrong copy = old file, student export, or file:// — not GitHub Pages.";
+            }
+            if(rib) {
+                document.body.classList.add("architect-ribbon-visible");
+                rib.innerHTML = "GitHub Pages build <strong>" + (raw || "?") + "</strong>" + (commit ? " · commit <strong>" + commit + "</strong>" : "") + " · <a href=\"" + pagesUrl + "\" target=\"_blank\" rel=\"noopener\">open canonical link</a> · <a href=\"architect-version.json?t=" + Date.now() + "\" target=\"_blank\" rel=\"noopener\">version.json</a>";
+                fetch("architect-version.json?t=" + Date.now()).then(function(r) { return r.json(); }).then(function(j) {
+                    if(!j || !j.build) return;
+                    if(j.build !== raw) {
+                        rib.classList.add("deploy-mismatch");
+                        rib.innerHTML = "Wrong copy loaded: this file says <strong>" + raw + "</strong> but Pages serves <strong>" + j.build + "</strong> · <a href=\"" + (j.pagesUrl || pagesUrl) + "\">use " + j.pagesUrl + "</a>";
+                    }
+                }).catch(function() {});
             }
         } catch(eB) {}
     })();
@@ -14643,8 +14672,17 @@ const app = {
             // NORMAL TEACHER MODE - always repair a copy so defaultData is never mutated
             const d = localStorage.getItem('tsa_v5_1_data');
             if(d) {
-                try { appData = app.repair(JSON.parse(d)); } 
-                catch(e) { appData = app.repair(JSON.parse(JSON.stringify(defaultData))); }
+                try {
+                    if(d.length > 6000000 && typeof window.__tsaShowCrash === "function") {
+                        window.__tsaShowCrash("Saved lesson data is very large (" + Math.round(d.length / 1000000) + " MB). Try Reset lesson data only on the red panel, or clear tsa_v5_1_data in DevTools → Application.");
+                    }
+                    appData = app.repair(JSON.parse(d));
+                } catch(e) {
+                    if(typeof window.__tsaShowCrash === "function") {
+                        window.__tsaShowCrash("Could not load saved lesson.\n\n" + (e && e.message ? e.message : String(e)) + "\n\nTry Reset lesson data only (keeps other settings) or Emergency Reset.");
+                    }
+                    appData = app.repair(JSON.parse(JSON.stringify(defaultData)));
+                }
             } else if (typeof teacherConfig !== "undefined") {
                 appData = app.repair(JSON.parse(JSON.stringify(teacherConfig)));
             } else {
@@ -15269,6 +15307,14 @@ const app = {
 
     _initSaveNeeded: false,
     _extractCacheMergedOnLoad: false,
+    clearLessonStorageOnly: function() {
+        try {
+            localStorage.removeItem("tsa_v5_1_data");
+            localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
+            localStorage.removeItem("tsa_v5_1_questions_backup");
+        } catch(e) {}
+        location.reload();
+    },
     /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
     getLessonCacheFingerprint: function(data) {
         const d = data || appData;
