@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T10:00:00">
+<meta name="architect-build" content="2026-05-24T10:15:00">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -680,6 +680,9 @@
     @keyframes shake { 10%, 90% { transform: translate3d(-1px, 0, 0); } 20%, 80% { transform: translate3d(2px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-4px, 0, 0); } 40%, 60% { transform: translate3d(4px, 0, 0); } }
     @keyframes highlight-pulse { 0% { box-shadow: 0 0 0 0 rgba(0, 150, 136, 0.4); } 50% { box-shadow: 0 0 0 6px rgba(0, 150, 136, 0); } 100% { box-shadow: 0 0 0 0 rgba(0, 150, 136, 0); } }
     .hidden { display: none !important; }
+    /* Admin tabs: only one panel visible; edit is default until initTabs runs */
+    #modal-admin .admin-tab { display: none; }
+    #modal-admin .admin-tab:not(.hidden) { display: block; }
     
     .theme-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: bold; }
     input[type="color"] { border: none; width: 40px; height: 40px; cursor: pointer; background: none; }
@@ -950,7 +953,7 @@
             <button class="icon-btn" onclick="ui.openModal('modal-help')">❓</button>
             <button class="icon-btn" onclick="ui.openModal('modal-theme')" title="Colors">🎨</button>
             <select id="level-selector" class="level-select" onchange="app.setLevel(this.value)"></select>
-            <button class="icon-btn" id="btn-admin" onclick="ui.openAdmin()">Data</button>
+            <button class="icon-btn" id="btn-admin" onclick="ui.openAdmin()" title="Teacher settings — opens Editing Suite">Data</button>
         </div>
     </header>
     <script>
@@ -1236,12 +1239,12 @@
             <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="ui.openModal('modal-manual')" title="Instruction manual">?</button> <button class="icon-btn" onclick="ui.closeModal('modal-admin')">✕</button></div>
             <div class="modal-body">
                 <div class="tab-bar" id="admin-tabs">
-                    <button class="btn btn-outline btn-small tab-btn" data-tab="reward">Reward</button>
-                    <button class="btn btn-outline btn-small tab-btn" data-tab="edit">Editing Suite</button>
-                    <button class="btn btn-outline btn-small tab-btn" data-tab="ai">Load & AI</button>
-                    <button class="btn btn-outline btn-small tab-btn" data-tab="export">Lobby</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward" onclick="admin.goAdminTab('reward')">Reward</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn active" data-tab="edit" onclick="admin.goAdminTab('edit')">Editing Suite</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai" onclick="admin.goAdminTab('ai')">Load & AI</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export" onclick="admin.goAdminTab('export')">Lobby</button>
                 </div>
-                <div class="admin-tab" data-tab="reward">
+                <div class="admin-tab hidden" data-tab="reward">
                 <details class="admin-section" open>
                     <summary class="admin-h">🎁 Reward (Level Complete)</summary>
                     <p style="font-size:0.85rem; opacity:0.8; margin:0 0 12px 0;">After a level is completed, students may see a <strong>Play Reward</strong> button that opens your link (optional time limit and frequency below).</p>
@@ -1534,7 +1537,7 @@
                 </details>
                 </div>
 
-                <div class="admin-tab" data-tab="ai">
+                <div class="admin-tab hidden" data-tab="ai">
                 
                 <details class="guide-box">
                     <summary>Teacher Guide (Click to collapse)</summary>
@@ -1733,7 +1736,7 @@
                 </div>
                 </div>
 
-                <div class="admin-tab" data-tab="export">
+                <div class="admin-tab hidden" data-tab="export">
                 <details class="admin-section" open>
                     <summary class="admin-h">📄 Import past paper</summary>
                     <details class="lobby-help-details">
@@ -14742,6 +14745,7 @@ const app = {
         if(!appData || appData.isStandalone || typeof admin === "undefined") return;
         if(!document.getElementById("modal-admin")) return;
         try { if(admin.initTabs) admin.initTabs(); } catch(e1) {}
+        try { if(admin.activateAdminTab) admin.activateAdminTab("edit"); } catch(e1b) {}
         try { if(admin.syncUI) admin.syncUI(); } catch(e2) {}
     },
     isImportingPdf: false,
@@ -16948,23 +16952,22 @@ const ui = {
     
     openAdmin: () => {
         ui._pauseSelectionGate = true;
-        try {
-            if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
-            else if(typeof admin !== "undefined" && admin.initTabs) admin.initTabs();
-        } catch(ePrep) {}
         ui.openModal("modal-admin");
-        if(typeof admin !== "undefined" && admin.setTab) {
-            try { admin.setTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
-        }
+        try {
+            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+            else if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
+        } catch(ePrep) {}
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         const run = () => {
             try {
+                if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
                 if(admin.renderAll) admin.renderAll();
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
-                    if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
+                    if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
                     if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
+                    if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
                 } catch(e2) { console.error(e2); }
             }
         };
@@ -22523,50 +22526,74 @@ const admin = {
             alert("Could not re-extract mark scheme: " + (e.message || String(e)));
         }
     },
+    /** Switch Teacher Settings tab (works even if initTabs has not run yet). */
+    activateAdminTab: function(key) {
+        const modal = document.getElementById("modal-admin");
+        if(!modal) return;
+        const valid = { reward: 1, edit: 1, ai: 1, export: 1 };
+        let k = valid[key] ? key : "edit";
+        try {
+            const saved = localStorage.getItem("tsa_admin_tab");
+            if(!key && valid[saved]) k = saved;
+            if(saved === "controls") k = "reward";
+        } catch(eLs) {}
+        const buttons = Array.from(modal.querySelectorAll("#admin-tabs .tab-btn"));
+        const tabs = Array.from(modal.querySelectorAll(".admin-tab"));
+        buttons.forEach(b => b.classList.toggle("active", b.dataset.tab === k));
+        tabs.forEach(t => t.classList.toggle("hidden", t.dataset.tab !== k));
+        try { localStorage.setItem("tsa_admin_tab", k); } catch(eStore) {}
+        try {
+            if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+            if(k === "edit" && appData && appData.component === 2 && typeof admin.fillC2PooledEditorFromLayout === "function") {
+                admin.fillC2PooledEditorFromLayout();
+            }
+            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+        } catch(eSync) {}
+    },
+    goAdminTab: function(key) {
+        if(!admin.tabsBound && admin.initTabs) {
+            try { admin.initTabs(); } catch(e) {}
+        }
+        admin.activateAdminTab(key);
+    },
     initTabs: () => {
-        if(admin.tabsBound) return;
         const wrap = document.getElementById("admin-tabs");
         if(!wrap) return;
-        const buttons = Array.from(wrap.querySelectorAll(".tab-btn"));
-        const tabs = Array.from(document.querySelectorAll(".admin-tab"));
-        const activate = (key) => {
-            buttons.forEach(b => b.classList.toggle("active", b.dataset.tab === key));
-            tabs.forEach(t => t.classList.toggle("hidden", t.dataset.tab !== key));
-            localStorage.setItem("tsa_admin_tab", key);
-        };
-        admin.setTab = (key) => {
-            if(!buttons.length || !tabs.length) return;
-            activate(key);
-            if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
-            if(key === "edit" && appData && appData.component === 2 && typeof admin.fillC2PooledEditorFromLayout === "function")
-                admin.fillC2PooledEditorFromLayout();
-        };
-        buttons.forEach(btn => {
-            btn.addEventListener("click", () => {
-                activate(btn.dataset.tab);
-                if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+        admin.setTab = (key) => admin.activateAdminTab(key);
+        if(!admin.tabsBound) {
+            const buttons = Array.from(wrap.querySelectorAll(".tab-btn"));
+            buttons.forEach(btn => {
+                if(btn.dataset.tabClickBound) return;
+                btn.dataset.tabClickBound = "1";
+                btn.addEventListener("click", () => admin.activateAdminTab(btn.dataset.tab));
             });
-        });
-        let saved = localStorage.getItem("tsa_admin_tab");
-        if(saved === "controls") { saved = "reward"; localStorage.setItem("tsa_admin_tab", "reward"); }
-        activate(saved || "edit");
-        if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
-        admin.tabsBound = true;
+            admin.tabsBound = true;
+        }
+        let saved = "edit";
+        try {
+            saved = localStorage.getItem("tsa_admin_tab") || "edit";
+            if(saved === "controls") saved = "reward";
+            if(saved !== "reward" && saved !== "edit" && saved !== "ai" && saved !== "export") saved = "edit";
+        } catch(e) { saved = "edit"; }
+        admin.activateAdminTab(saved);
     },
     renderAll: function() {
-        admin.syncUI();
-        admin.bindAiAutoPrompt();
-        admin.ensureAiStepVisible();
-        admin.refreshTemplateDisplay();
-        admin.renderQuotesBank();
-        admin.renderSelectionEditor();
-        admin.renderGlobalList();
-        const lvl = typeof currentConfigLevel === 'number' ? currentConfigLevel : 1;
-        admin.renderConfig(lvl);
-        admin.renderLevelBank();
-        admin.initTabs();
-        if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta();
-        if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh();
+        try { admin.initTabs(); } catch(eTabs) {}
+        try { admin.syncUI(); } catch(eSync) {}
+        try { admin.bindAiAutoPrompt(); } catch(eAi) {}
+        try { admin.ensureAiStepVisible(); } catch(eStep) {}
+        try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
+        try { admin.renderQuotesBank(); } catch(eQb) {}
+        try { admin.renderSelectionEditor(); } catch(eSel) {}
+        try { admin.renderGlobalList(); } catch(eGl) {}
+        try {
+            const lvl = typeof currentConfigLevel === "number" ? currentConfigLevel : 1;
+            admin.renderConfig(lvl);
+            admin.renderLevelBank();
+        } catch(eLb) {}
+        try { if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
+        try { if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
+        try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
     },
     ensureSelectionData: () => {
         if(!appData.selection || typeof appData.selection !== "object") {
@@ -31595,6 +31622,15 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     }
 };
 
+(function() {
+    const bootTabs = function() {
+        try {
+            if(typeof admin !== "undefined" && admin.initTabs) admin.initTabs();
+        } catch(e) {}
+    };
+    if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootTabs);
+    else bootTabs();
+})();
 window.onload = app.init;
 </script>
 </body>
