@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T11:00:00">
-<meta name="architect-deploy" content="oom-light-init">
+<meta name="architect-build" content="2026-05-24T11:30:00">
+<meta name="architect-deploy" content="json-import-oom-fix">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -894,7 +894,9 @@
     .pick-screen.hidden { opacity: 0; pointer-events: none; }
     .pick-title { font-size: 1.4rem; font-weight: 800; color: var(--primary); }
 
-    #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; background: #d32f2f; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; }
+    #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483640; background: #d32f2f; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; pointer-events: auto; max-width: min(96vw, 520px); }
+    #emergency-reset .btn { pointer-events: auto; cursor: pointer; position: relative; z-index: 1; }
+    #emergency-reset a { color: #ffecb3; text-decoration: underline; pointer-events: auto; }
     #architect-deploy-ribbon {
         position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
         background: #004d40; color: #e0f2f1; font-size: 0.78rem; line-height: 1.35;
@@ -913,12 +915,104 @@
     <div id="save-status" style="position:fixed; top:10px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:white; padding:5px 15px; border-radius:20px; font-size:0.8rem; opacity:0; transition:0.3s; z-index:3000;">💾 Saved</div>
 
     <div id="emergency-reset">
-        <h2>⚠️ App Crashed</h2>
+        <h2>⚠️ App Crashed or frozen</h2>
         <p id="crash-summary">Something went wrong while loading or running the app (this is not always corrupted saved data).</p>
+        <p id="crash-manual" style="font-size:0.82rem;line-height:1.45;margin:10px 0 0 0;text-align:left;opacity:0.95;">
+            If buttons do nothing: use your browser menu → <strong>Settings → Privacy → Clear browsing data</strong> → only <strong>Cached images/files</strong> and <strong>Site data</strong> for this site (<code>mattll59.github.io</code>). Or open
+            <a id="crash-recovery-link" href="architect_v131.html?recovery=1&amp;b=1">recovery mode</a> (skips loading the saved lesson).
+        </p>
         <pre id="crash-detail" style="display:none; text-align:left; max-width:min(92vw,520px); max-height:40vh; overflow:auto; font-size:0.7rem; white-space:pre-wrap; background:rgba(0,0,0,0.25); padding:8px; border-radius:4px; margin-top:8px;"></pre>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="if(typeof app.clearLessonStorageOnly==='function')app.clearLessonStorageOnly(); else { localStorage.removeItem('tsa_v5_1_data'); location.reload(); }">Reset lesson data only</button>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:6px;" onclick="localStorage.clear(); location.reload();">Emergency Reset (clear all site data)</button>
+        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:10px;" id="btn-reset-lesson-only">Reset lesson data only</button>
+        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:6px;" id="btn-emergency-reset-all">Emergency reset (clear all site data)</button>
+        <button type="button" class="btn btn-outline" style="background:#fff8e1; color:#333; margin-top:6px; display:none;" id="btn-load-heavy-lesson">Load saved lesson anyway (may crash)</button>
     </div>
+    <script>
+    (function() {
+        function reloadFresh() {
+            try {
+                var u = new URL(location.href);
+                u.searchParams.set("b", String(Date.now()));
+                u.searchParams.delete("recovery");
+                location.replace(u.toString());
+            } catch(eU) {
+                location.reload();
+            }
+        }
+        window.__tsaResetLessonOnly = function() {
+            try {
+                localStorage.removeItem("tsa_v5_1_data");
+                localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
+                localStorage.removeItem("tsa_v5_1_questions_backup");
+            } catch(e) {}
+            reloadFresh();
+        };
+        window.__tsaEmergencyResetAll = function() {
+            try { localStorage.clear(); } catch(e) {}
+            reloadFresh();
+        };
+        window.__tsaShowCrashEarly = function(detail) {
+            try {
+                var splash = document.getElementById("splash-screen");
+                var celeb = document.getElementById("celebration-overlay");
+                var intro = document.getElementById("intro-text-screen");
+                var pick = document.getElementById("pick-quote-screen");
+                if(splash) { splash.classList.add("hidden"); splash.style.display = "none"; }
+                if(celeb) celeb.classList.add("hidden");
+                if(intro) intro.classList.add("hidden");
+                if(pick) pick.classList.add("hidden");
+                var box = document.getElementById("emergency-reset");
+                var pre = document.getElementById("crash-detail");
+                var sum = document.getElementById("crash-summary");
+                var dStr = detail != null ? String(detail) : "";
+                var oom = /out of memory|invalid string length|allocation failed|array buffer allocation/i.test(dStr);
+                if(sum && oom) {
+                    sum.textContent = "Out of memory (OOM): the browser ran out of RAM loading your saved lesson — usually a very large passage. Use Reset lesson data only below.";
+                }
+                if(pre && dStr) { pre.style.display = "block"; pre.textContent = dStr; }
+                if(box) box.style.display = "block";
+            } catch(e) {}
+        };
+        function bindRecoveryButtons() {
+            var b1 = document.getElementById("btn-reset-lesson-only");
+            var b2 = document.getElementById("btn-emergency-reset-all");
+            if(b1 && !b1.dataset.bound) { b1.dataset.bound = "1"; b1.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaResetLessonOnly(); }); }
+            if(b2 && !b2.dataset.bound) { b2.dataset.bound = "1"; b2.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaEmergencyResetAll(); }); }
+            var rec = document.getElementById("crash-recovery-link");
+            if(rec) {
+                try {
+                    var ru = new URL(location.href);
+                    ru.searchParams.set("recovery", "1");
+                    ru.searchParams.set("b", String(Date.now()));
+                    rec.href = ru.pathname + ru.search + ru.hash;
+                } catch(eL) { rec.href = "architect_v131.html?recovery=1&b=1"; }
+            }
+        }
+        if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindRecoveryButtons);
+        else bindRecoveryButtons();
+        try {
+            if(/\brecovery=1\b/i.test(location.search)) window.__tsaSkipLessonLoad = true;
+            var raw = localStorage.getItem("tsa_v5_1_data");
+            if(raw && raw.length > 900000 && !window.__tsaSkipLessonLoad) {
+                window.__tsaDeferHeavyLessonGate = true;
+                window.__tsaShowCrashEarly("Saved lesson is about " + (Math.round(raw.length / 102400) / 10) + " MB. Loading it may freeze or crash the tab. Choose Reset lesson data only, open recovery mode, or Load anyway.");
+                var loadBtn = document.getElementById("btn-load-heavy-lesson");
+                if(loadBtn) {
+                    loadBtn.style.display = "block";
+                    if(!loadBtn.dataset.bound) {
+                        loadBtn.dataset.bound = "1";
+                        loadBtn.addEventListener("click", function() {
+                            window.__tsaUserConfirmedHeavyLoad = true;
+                            window.__tsaDeferHeavyLessonGate = false;
+                            var box = document.getElementById("emergency-reset");
+                            if(box) box.style.display = "none";
+                            if(typeof app !== "undefined" && app.init) app.init();
+                        });
+                    }
+                }
+            }
+        } catch(eCh) {}
+    })();
+    </script>
 
     <div id="celebration-overlay" class="celebration hidden">
         <div class="celebration-confetti" id="celebration-confetti"></div>
@@ -981,7 +1075,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524104500";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524113000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -7301,6 +7395,7 @@ const app = {
      * After Load JSON / unified paste: sync Insert width controls + `--exam-passage-max-width` from {@link appData.meta}, then rebuild C1 booklet HTML from canonical so row splits match saved **pdfInsertWidthCh** (avoids dashed line at Nch while rows were wrapped tighter, and makes slider changes affect layout again via {@link resyncC1PassageEditorWithInsertWidth}).
      */
     finishC1PassageLayoutAfterLessonLoad: function() {
+        if(app._passageDisplaysDeferred || app._heavyLessonOnLoad) return;
         if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
         if(typeof app.syncPassageMergeOrphanHangCheckboxFromMeta === "function") app.syncPassageMergeOrphanHangCheckboxFromMeta();
         if(typeof app.syncPassageStrictInsertEdgeCheckboxFromMeta === "function") app.syncPassageStrictInsertEdgeCheckboxFromMeta();
@@ -14634,19 +14729,9 @@ const app = {
     },
     init: function() {
         window.__tsaShowCrash = function(detail) {
-            try {
+            if(typeof window.__tsaShowCrashEarly === "function") window.__tsaShowCrashEarly(detail);
+            else try {
                 const box = document.getElementById("emergency-reset");
-                const pre = document.getElementById("crash-detail");
-                const sum = document.getElementById("crash-summary");
-                const dStr = detail != null ? (typeof detail === "string" ? detail : String(detail)) : "";
-                const oom = /out of memory|invalid string length|allocation failed|array buffer allocation/i.test(dStr);
-                if(sum && oom) {
-                    sum.textContent = "The browser ran out of memory loading this lesson (usually a very large saved passage). Use Reset lesson data only below, or clear tsa_v5_1_data in DevTools → Application. Your question extract may remain in tsa_v5_1_lesson_extract_cache.";
-                }
-                if(pre && detail) {
-                    pre.style.display = "block";
-                    pre.textContent = dStr;
-                }
                 if(box) box.style.display = "block";
             } catch(e) {}
         };
@@ -14671,6 +14756,8 @@ const app = {
         // CHECK FOR INJECTED STANDALONE DATA
         if (typeof window.STANDALONE_LESSON !== 'undefined') {
             appData = app.repair(window.STANDALONE_LESSON);
+            app._heavyLessonOnLoad = app.isHeavyLesson(appData);
+            if(app._heavyLessonOnLoad) app._passageDisplaysDeferred = true;
             appData.isStandalone = true;
             delete document.body.dataset.freeSelectSelectBound;
             delete document.body.dataset.freeSelectMouseBound;
@@ -14678,6 +14765,10 @@ const app = {
             const mod = document.getElementById('modal-admin'); if(mod) mod.remove();
             document.querySelectorAll('.modal.open').forEach(m => m.classList.remove('open'));
 
+        } else if(window.__tsaSkipLessonLoad) {
+            appData = app.repair(JSON.parse(JSON.stringify(defaultData)));
+            app._heavyLessonOnLoad = false;
+            app._passageDisplaysDeferred = false;
         } else {
             // NORMAL TEACHER MODE - always repair a copy so defaultData is never mutated
             const d = localStorage.getItem('tsa_v5_1_data');
@@ -15349,6 +15440,7 @@ const app = {
     _extractCacheMergedOnLoad: false,
     _heavyLessonOnLoad: false,
     _passageDisplaysDeferred: false,
+    _importInProgress: false,
     HEAVY_SOURCE_CHARS: 90000,
     HEAVY_STORAGE_BYTES: 1100000,
     HEAVY_REPAIR_SOURCE_CHARS: 180000,
@@ -15401,13 +15493,104 @@ const app = {
         if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 4000 });
         else setTimeout(run, 120);
     },
-    clearLessonStorageOnly: function() {
+    /** Lightweight prev snapshot for import merge — avoids cloning a huge lesson in RAM. */
+    shallowLessonSnapshotForImport: function(data) {
+        if(!data || typeof data !== "object") return null;
+        const snap = {
+            component: data.component,
+            sourceTextLen: typeof data.sourceText === "string" ? data.sourceText.length : 0,
+            questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef }) : [],
+            question: typeof data.question === "string" ? data.question : "",
+            meta: data.meta && typeof data.meta === "object" ? { title: data.meta.title } : {}
+        };
+        if(data.component2Layout && typeof data.component2Layout === "object") {
+            snap.component2Layout = {
+                resourcePaperText: String(data.component2Layout.resourcePaperText || "").slice(0, 200),
+                questionPaperPage3Text: String(data.component2Layout.questionPaperPage3Text || "").slice(0, 200)
+            };
+        }
+        if(typeof data.sourceText === "string" && data.sourceText.length <= 120000) snap.sourceText = data.sourceText;
+        return snap;
+    },
+    prepareImportedLesson: function(safe) {
+        if(safe) app.dedupeLessonPassageInMemory(safe);
+        app._heavyLessonOnLoad = app.isHeavyLesson(safe || appData);
+        app._passageDisplaysDeferred = !!app._heavyLessonOnLoad;
+    },
+    looksLikeSavedConfigExport: function(o) {
+        return !!(o && typeof o === "object" && o.settings && typeof o.settings === "object"
+            && (Array.isArray(o.questions) || typeof o.sourceText === "string" || Array.isArray(o.items)));
+    },
+    afterLessonImportUi: function(opts) {
+        opts = opts || {};
+        app._importInProgress = true;
+        app.prepareImportedLesson(appData);
         try {
-            localStorage.removeItem("tsa_v5_1_data");
-            localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
-            localStorage.removeItem("tsa_v5_1_questions_backup");
-        } catch(e) {}
-        location.reload();
+            if(typeof app.save === "function") app.save({ skipRender: true, silent: true, skipExtractCache: !!app._heavyLessonOnLoad });
+        } catch(eSave) {}
+        app._suppressAdminInputFlushOnce = true;
+        try {
+            if(opts.applyPassageScope && typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
+            if(typeof ui !== "undefined" && ui.init) ui.init();
+        } finally {
+            app._suppressAdminInputFlushOnce = false;
+        }
+        const finish = function() {
+            try {
+                if(opts.postImportAdmin && typeof admin !== "undefined") {
+                    if(admin.ensureSelectionData) admin.ensureSelectionData();
+                    if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
+                    if(admin.autoAssignSelectionLevels) admin.autoAssignSelectionLevels(false);
+                    if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+                    const runFill = function() {
+                        try { if(admin.autoFillDistractors) admin.autoFillDistractors(); } catch(eF) {}
+                    };
+                    if(typeof requestIdleCallback === "function") requestIdleCallback(runFill, { timeout: 4000 });
+                    else setTimeout(runFill, 200);
+                }
+                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll({ importPass: true });
+            } catch(eA) {}
+            app._importInProgress = false;
+            const stLen = appData && typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
+            const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
+            if(app._heavyLessonOnLoad || app._passageDisplaysDeferred) {
+                if(!opts.silentHeavyMsg) {
+                    setTimeout(function() {
+                        alert("Lesson loaded (" + Math.round(stLen / 1000) + "k chars passage, " + itemN + " quotes). Open Data → Editing Suite or Quote Select to view the passage — loading everything at once can crash the tab.");
+                    }, 80);
+                }
+                return;
+            }
+            if(!opts.skipPassageRelayout) {
+                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+                else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
+                    if(typeof app.setAiInputValue === "function") app.setAiInputValue(appData.sourceText);
+                    if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+                }
+                if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+                if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+            }
+            if(!opts.silentHeavyMsg && opts.isConfigFile) {
+                setTimeout(function() {
+                    alert("Settings loaded from config.json (" + itemN + " quotes). Level bank and lesson settings are restored. Open Data → Editing Suite to edit the passage.");
+                }, 60);
+            }
+        };
+        if(app._heavyLessonOnLoad) {
+            if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2500 });
+            else setTimeout(finish, 150);
+        } else finish();
+    },
+    clearLessonStorageOnly: function() {
+        if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
+        else {
+            try {
+                localStorage.removeItem("tsa_v5_1_data");
+                localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
+                localStorage.removeItem("tsa_v5_1_questions_backup");
+            } catch(e) {}
+            location.reload();
+        }
     },
     /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
     getLessonCacheFingerprint: function(data) {
@@ -17104,7 +17287,7 @@ const ui = {
             if(el) el.classList.add("hidden");
         });
         const er = document.getElementById("emergency-reset");
-        if(er && er.style.display !== "block") er.style.display = "none";
+        if(er && er.style.display !== "block" && !window.__tsaDeferHeavyLessonGate) er.style.display = "none";
     },
     openAdminSafe: function(ev) {
         if(ev && ev.preventDefault) ev.preventDefault();
@@ -22784,7 +22967,9 @@ const admin = {
         } catch(e) { saved = "edit"; }
         admin.activateAdminTab(saved);
     },
-    renderAll: function() {
+    renderAll: function(opts) {
+        opts = opts || {};
+        const importLite = !!(opts.importPass || app._importInProgress);
         try { admin.initTabs(); } catch(eTabs) {}
         try { admin.syncUI(); } catch(eSync) {}
         try { admin.bindAiAutoPrompt(); } catch(eAi) {}
@@ -22798,6 +22983,10 @@ const admin = {
             admin.renderConfig(lvl);
             admin.renderLevelBank();
         } catch(eLb) {}
+        if(importLite) {
+            try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
+            return;
+        }
         try { if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
         try { if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
         try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
@@ -22833,7 +23022,10 @@ const admin = {
             }
             if(needsSync) {
                 appData.selection.text.source = appData.sourceText;
-                if(typeof app.save === "function") app.save();
+                if(typeof app.save === "function") {
+                    const saveOpts = (ui._initInProgress || app._importInProgress) ? { skipRender: true, silent: true } : {};
+                    app.save(saveOpts);
+                }
             }
         }
         const bank = app.getLevelBank();
@@ -28157,8 +28349,10 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                     }));
                 }
                 const prevKey = appData && appData.meta ? app.getStateKeyForMeta(appData.meta) : "";
-                const prev = appData ? JSON.parse(JSON.stringify(appData)) : null;
+                const prevHeavy = app.isHeavyLesson(lesson);
+                const prev = prevHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
                 const safe = app.repair(lesson);
+                app.prepareImportedLesson(safe);
                 app.normalizeLessonQuestionsAfterRepair(safe, prev);
                 if(prevKey) localStorage.removeItem(prevKey);
                 if(safe && safe.settings) {
@@ -28293,22 +28487,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 : [1];
             userState.level = activeLevels[0];
             if(lesson && typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
-            app.save();
-            app._suppressAdminInputFlushOnce = true;
-            try {
-                if(typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
-                ui.init();
-            } finally {
-                app._suppressAdminInputFlushOnce = false;
-            }
-            if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
-            else if(appData.sourceText && appData.sourceText.trim()) {
-                app.setAiInputValue(appData.sourceText);
-                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
-            }
-            admin.renderAll();
-            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+            app.afterLessonImportUi({ applyPassageScope: true });
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON.";
             alert("Invalid JSON: " + msg);
@@ -28808,16 +28987,16 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                 userState.selectionEliminated = [];
                 userState.selectionChosen = [];
                 userState.labCompleted = false;
-                app.save();
-                ui.init();
-                admin.renderAll();
+                app.afterLessonImportUi({ silentHeavyMsg: true });
                 return;
             }
-            const prev = appData ? JSON.parse(JSON.stringify(appData)) : null;
-            const prevKey = prev && prev.meta ? app.getStateKeyForMeta(prev.meta) : "";
             const payload = admin.unwrapLessonObjectForImport(j);
             const incomingRawItemCount = Array.isArray(payload.items) ? payload.items.length : 0;
-            const safe = app.repair(j);
+            const safe = app.repair(payload);
+            const prevHeavy = app.isHeavyLesson(safe);
+            const prev = prevHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
+            const prevKey = prev && prev.meta ? app.getStateKeyForMeta(prev.meta) : "";
+            app.prepareImportedLesson(safe);
             const aiText = (app.getAiInputValue() || "").trim();
             admin.syncQuestionsFromList();
             const aiQuestion = (appData.questions && appData.questions[0]) ? appData.questions[0].prompt : (appData.question || "");
@@ -28926,10 +29105,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             }
             admin.applyModelAnswersFromItems({ overwrite: true, generate: false });
             admin.populateAnalysisBanksFromLessonItems({ silent: true });
-            app.save();
-            ui.init();
-            ui.renderLab();
-            admin.renderAll();
+            app.afterLessonImportUi();
             if(exportAfter) admin.exportStandalone();
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON or corrupted file.";
@@ -31763,35 +31939,19 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 parsed = app.convertPastPaperToLesson(parsed);
             }
             try {
-                const prevFileSnapshot = appData ? JSON.parse(JSON.stringify(appData)) : null;
+                const isConfig = app.looksLikeSavedConfigExport(parsed);
+                const fileHeavy = text.length > 700000 || app.isHeavyLesson(parsed);
+                const prevFileSnapshot = fileHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
                 appData = app.repair(parsed);
-                if(appData && appData.component !== 2 && typeof app.lessonExportNormalizeStructuredPassage === "function" && appData.sourceText && String(appData.sourceText).trim().startsWith("{")) {
-                    const nrmImp = app.lessonExportNormalizeStructuredPassage(appData.sourceText);
-                    if(nrmImp && String(nrmImp).trim() !== String(appData.sourceText || "").trim()) appData.sourceText = nrmImp;
-                }
                 app.normalizeLessonQuestionsAfterRepair(appData, prevFileSnapshot);
                 userState = { score: 0, level: 1, view: "", essay: "", questionEssays: {}, completed: [], completedLevels: [], filter: "all", showDone: false, selectionCompleted: false, selectionStage: 1, selectionKey: "", selectionProgress: {}, selectionJustification: {}, selectionEliminated: [], labCompleted: false, currentQuestionIndexByLevel: {}, deskCommitByLevel: {}, teacherMarksByLevel: {} };
-                app.save();
-                app._suppressAdminInputFlushOnce = true;
-                try {
-                    ui.init();
-                } finally {
-                    app._suppressAdminInputFlushOnce = false;
-                }
-                admin.ensureSelectionData && admin.ensureSelectionData();
-                admin.syncLevelBankForPastPaperQuestions && admin.syncLevelBankForPastPaperQuestions();
-                admin.autoAssignSelectionLevels && admin.autoAssignSelectionLevels(false);
-                admin.autoFillDistractors && admin.autoFillDistractors();
-                admin.autoAssignLevelsByLineRangeIfApplicable && admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
                 if(typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
-                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
-                else if(appData.sourceText && appData.sourceText.trim()) {
-                    app.setAiInputValue(appData.sourceText);
-                    if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
-                }
-                admin.renderAll();
-                if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-                if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+                app.afterLessonImportUi({
+                    postImportAdmin: true,
+                    isConfigFile: isConfig,
+                    skipPassageRelayout: isConfig,
+                    silentHeavyMsg: false
+                });
                 input.value = "";
             } catch(err) {
                 const cleaned = app.cleanSourceText(text);
@@ -31838,7 +31998,17 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootTabs);
     else bootTabs();
 })();
-window.onload = app.init;
+window.__tsaBootArchitect = function() {
+    if(window.__tsaDeferHeavyLessonGate && !window.__tsaUserConfirmedHeavyLoad) return;
+    try { app.init(); } catch(eBoot) {
+        if(typeof window.__tsaShowCrashEarly === "function") {
+            window.__tsaShowCrashEarly((eBoot && eBoot.message ? eBoot.message : String(eBoot)) + (eBoot && eBoot.stack ? "\n\n" + eBoot.stack : ""));
+        }
+    }
+};
+window.onload = function() {
+    setTimeout(window.__tsaBootArchitect, window.__tsaDeferHeavyLessonGate ? 0 : 60);
+};
 </script>
 </body>
 </html>
