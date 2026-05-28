@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T10:30:00">
-<meta name="architect-deploy" content="8e8bb0f">
+<meta name="architect-build" content="2026-05-24T10:45:00">
+<meta name="architect-deploy" content="data-btn-fix">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -364,7 +364,7 @@
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
 
     /* --- 2. HEADER --- */
-    header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 100; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 10050; position: relative; flex-shrink: 0; border-bottom: 1px solid var(--border); }
     h1 { margin: 0; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 8px; font-weight: 800; }
     .score-badge { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; }
     .header-controls { display: flex; gap: 8px; align-items: center; }
@@ -608,7 +608,7 @@
     }
     #modal-admin .modal-body, #modal-admin .modal-content { background: var(--bg); }
     /* Tall admin: flex item min-height:auto can block max-height + inner scroll; force a bounded column */
-    #modal-admin.modal.open { align-items: center; align-content: flex-start; padding: 10px 0; box-sizing: border-box; }
+    #modal-admin.modal.open { align-items: center; align-content: flex-start; padding: 10px 0; box-sizing: border-box; z-index: 10050 !important; }
     #modal-admin .modal-content {
         max-height: min(92vh, 100dvh - 24px);
         min-height: 0;
@@ -867,7 +867,8 @@
 
     @media print { .no-print { display: none; } }
     
-    .celebration { position: fixed; inset: 0; background: rgba(12, 24, 28, 0.92); z-index: 2500; display: flex; align-items: center; justify-content: center; flex-direction: column; color: white; text-align: center; }
+  .celebration { position: fixed; inset: 0; background: rgba(12, 24, 28, 0.92); z-index: 2500; display: flex; align-items: center; justify-content: center; flex-direction: column; color: white; text-align: center; pointer-events: none; }
+    .celebration-inner, .celebration-actions, .celebration-confetti { pointer-events: auto; }
     .celebration.hidden { display: none; }
     .celebration-inner { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); padding: 20px; border-radius: 12px; max-width: 320px; width: 90%; }
     .celebration-inner.celebration-final { max-width: 420px; padding: 28px; border-radius: 16px; border: 2px solid rgba(255,215,0,0.4); box-shadow: 0 0 40px rgba(255,215,0,0.15); }
@@ -966,7 +967,7 @@
             <button class="icon-btn" onclick="ui.openModal('modal-help')">❓</button>
             <button class="icon-btn" onclick="ui.openModal('modal-theme')" title="Colors">🎨</button>
             <select id="level-selector" class="level-select" onchange="app.setLevel(this.value)"></select>
-            <button class="icon-btn" id="btn-admin" onclick="ui.openAdmin()" title="Teacher settings — opens Editing Suite">Data</button>
+            <button class="icon-btn" id="btn-admin" onclick="ui.openAdminSafe(event)" title="Teacher settings (Editing Suite) — also try if a popup is stuck: Esc">Data</button>
         </div>
     </header>
     <script>
@@ -980,7 +981,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524103000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524104500";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -16298,7 +16299,8 @@ const ui = {
             }
         } finally {
             ui._initInProgress = false;
-            if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
+            if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
+            else if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
             document.body.classList.add("tsa-init-done");
             if((app._initSaveNeeded || app._extractCacheMergedOnLoad) && typeof app.flushInitPersistence === "function") {
                 try { app.flushInitPersistence(); } catch(eFlush) {}
@@ -16945,25 +16947,54 @@ const ui = {
         const modal = document.getElementById(id);
         if(modal) modal.classList.add("open");
         if(id === "modal-source") { /* modal removed – no-op */ }
-        if(id === "modal-admin" && typeof app.applyExamPassageInsertWidthCh === "function") {
-            app.applyExamPassageInsertWidthCh({ skipDomSync: true });
-        }
-        if(id === "modal-admin" && typeof admin !== "undefined" && admin.syncSourceEditorMode) admin.syncSourceEditorMode();
-        if(id === "modal-admin" && typeof admin !== "undefined" && admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
-        if(id === "modal-admin" && typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
-        if(id === "modal-admin" && typeof app.syncWJECAnchorInputsFromMeta === "function") app.syncWJECAnchorInputsFromMeta();
-        if(id === "modal-admin" && appData && appData.component !== 2) {
+        if(id !== "modal-admin") return;
+        const runAdminModalSync = function() {
             try {
-                if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage() && appData.sourceText) {
-                    const aiM = document.getElementById("ai-input");
-                    if(aiM && aiM.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
-                        app.setAiInputValue(String(appData.sourceText));
+                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+                if(typeof admin !== "undefined" && admin.syncSourceEditorMode) admin.syncSourceEditorMode();
+                if(typeof admin !== "undefined" && admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
+                if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
+                if(typeof app.syncWJECAnchorInputsFromMeta === "function") app.syncWJECAnchorInputsFromMeta();
+                if(appData && appData.component !== 2) {
+                    if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage() && appData.sourceText) {
+                        const aiM = document.getElementById("ai-input");
+                        if(aiM && aiM.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
+                            app.setAiInputValue(String(appData.sourceText));
+                        }
                     }
-                    if(typeof app.save === "function") app.save();
+                    if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true });
                 }
-            } catch(eOp) {}
+            } catch(eModal) { console.warn("Admin modal sync deferred path failed:", eModal); }
+        };
+        if(typeof requestAnimationFrame === "function") requestAnimationFrame(runAdminModalSync);
+        else setTimeout(runAdminModalSync, 0);
+    },
+    dismissBlockingOverlays: function() {
+        if(typeof ui.closeCelebration === "function") ui.closeCelebration();
+        if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
+        ["intro-text-screen", "pick-quote-screen"].forEach(function(id) {
+            const el = document.getElementById(id);
+            if(el) el.classList.add("hidden");
+        });
+        const er = document.getElementById("emergency-reset");
+        if(er && er.style.display !== "block") er.style.display = "none";
+    },
+    openAdminSafe: function(ev) {
+        if(ev && ev.preventDefault) ev.preventDefault();
+        if(ev && ev.stopPropagation) ev.stopPropagation();
+        try {
+            if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
+            if(typeof ui.openAdmin === "function") ui.openAdmin();
+            else {
+                const m = document.getElementById("modal-admin");
+                if(m) m.classList.add("open");
+            }
+        } catch(e) {
+            console.error("openAdminSafe:", e);
+            const m = document.getElementById("modal-admin");
+            if(m) m.classList.add("open");
+            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
         }
-        if(id === "modal-admin" && app.syncAdminAiInputFromLesson && appData && appData.component !== 2) app.syncAdminAiInputFromLesson({ force: true });
     },
     closeModal: (id) => {
         if(id === "modal-admin" && !appData.isStandalone && admin.ensureActiveSourcePersisted) {
@@ -16997,6 +17028,7 @@ const ui = {
     },
     
     openAdmin: () => {
+        if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
         ui.openModal("modal-admin");
         try {
@@ -20369,7 +20401,8 @@ const ui = {
     },
 
     closeCelebration: function() {
-        document.getElementById("celebration-overlay").classList.add("hidden");
+        const overlay = document.getElementById("celebration-overlay");
+        if(overlay) overlay.classList.add("hidden");
     },
 
     forceHideSplash: function() {
