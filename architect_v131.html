@@ -7395,6 +7395,7 @@ const app = {
      * After Load JSON / unified paste: sync Insert width controls + `--exam-passage-max-width` from {@link appData.meta}, then rebuild C1 booklet HTML from canonical so row splits match saved **pdfInsertWidthCh** (avoids dashed line at Nch while rows were wrapped tighter, and makes slider changes affect layout again via {@link resyncC1PassageEditorWithInsertWidth}).
      */
     finishC1PassageLayoutAfterLessonLoad: function() {
+        if(app._passageDisplaysDeferred || app._heavyLessonOnLoad) return;
         if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
         if(typeof app.syncPassageMergeOrphanHangCheckboxFromMeta === "function") app.syncPassageMergeOrphanHangCheckboxFromMeta();
         if(typeof app.syncPassageStrictInsertEdgeCheckboxFromMeta === "function") app.syncPassageStrictInsertEdgeCheckboxFromMeta();
@@ -15490,6 +15491,68 @@ const app = {
         const run = () => { try { app.finishDeferredPassageHydration(); } catch(e) {} };
         if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 4000 });
         else setTimeout(run, 120);
+    },
+    /** Lightweight prev snapshot for import merge — avoids cloning a huge lesson in RAM. */
+    shallowLessonSnapshotForImport: function(data) {
+        if(!data || typeof data !== "object") return null;
+        const snap = {
+            component: data.component,
+            sourceTextLen: typeof data.sourceText === "string" ? data.sourceText.length : 0,
+            questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef }) : [],
+            question: typeof data.question === "string" ? data.question : "",
+            meta: data.meta && typeof data.meta === "object" ? { title: data.meta.title } : {}
+        };
+        if(data.component2Layout && typeof data.component2Layout === "object") {
+            snap.component2Layout = {
+                resourcePaperText: String(data.component2Layout.resourcePaperText || "").slice(0, 200),
+                questionPaperPage3Text: String(data.component2Layout.questionPaperPage3Text || "").slice(0, 200)
+            };
+        }
+        if(typeof data.sourceText === "string" && data.sourceText.length <= 120000) snap.sourceText = data.sourceText;
+        return snap;
+    },
+    prepareImportedLesson: function(safe) {
+        if(safe) app.dedupeLessonPassageInMemory(safe);
+        app._heavyLessonOnLoad = app.isHeavyLesson(safe || appData);
+        app._passageDisplaysDeferred = !!app._heavyLessonOnLoad;
+    },
+    afterLessonImportUi: function(opts) {
+        opts = opts || {};
+        app.prepareImportedLesson(appData);
+        try {
+            if(typeof app.save === "function") app.save({ skipRender: true, silent: true, skipExtractCache: !!app._heavyLessonOnLoad });
+        } catch(eSave) {}
+        app._suppressAdminInputFlushOnce = true;
+        try {
+            if(opts.applyPassageScope && typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
+            if(typeof ui !== "undefined" && ui.init) ui.init();
+        } finally {
+            app._suppressAdminInputFlushOnce = false;
+        }
+        const finish = function() {
+            try {
+                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll();
+            } catch(eA) {}
+            if(app._heavyLessonOnLoad || app._passageDisplaysDeferred) {
+                if(!opts.silentHeavyMsg) {
+                    setTimeout(function() {
+                        alert("Lesson loaded. The passage is large — open Data → Editing Suite or Quote Select to view it (building everything at once can crash the tab).");
+                    }, 80);
+                }
+                return;
+            }
+            if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+            else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
+                if(typeof app.setAiInputValue === "function") app.setAiInputValue(appData.sourceText);
+                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+            }
+            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+        };
+        if(app._heavyLessonOnLoad) {
+            if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2500 });
+            else setTimeout(finish, 150);
+        } else finish();
     },
     clearLessonStorageOnly: function() {
         if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
@@ -28250,8 +28313,10 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                     }));
                 }
                 const prevKey = appData && appData.meta ? app.getStateKeyForMeta(appData.meta) : "";
-                const prev = appData ? JSON.parse(JSON.stringify(appData)) : null;
+                const prevHeavy = app.isHeavyLesson(lesson);
+                const prev = prevHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
                 const safe = app.repair(lesson);
+                app.prepareImportedLesson(safe);
                 app.normalizeLessonQuestionsAfterRepair(safe, prev);
                 if(prevKey) localStorage.removeItem(prevKey);
                 if(safe && safe.settings) {
@@ -28386,22 +28451,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 : [1];
             userState.level = activeLevels[0];
             if(lesson && typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
-            app.save();
-            app._suppressAdminInputFlushOnce = true;
-            try {
-                if(typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
-                ui.init();
-            } finally {
-                app._suppressAdminInputFlushOnce = false;
-            }
-            if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
-            else if(appData.sourceText && appData.sourceText.trim()) {
-                app.setAiInputValue(appData.sourceText);
-                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
-            }
-            admin.renderAll();
-            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+            app.afterLessonImportUi({ applyPassageScope: true });
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON.";
             alert("Invalid JSON: " + msg);
@@ -28901,16 +28951,16 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                 userState.selectionEliminated = [];
                 userState.selectionChosen = [];
                 userState.labCompleted = false;
-                app.save();
-                ui.init();
-                admin.renderAll();
+                app.afterLessonImportUi({ silentHeavyMsg: true });
                 return;
             }
-            const prev = appData ? JSON.parse(JSON.stringify(appData)) : null;
-            const prevKey = prev && prev.meta ? app.getStateKeyForMeta(prev.meta) : "";
             const payload = admin.unwrapLessonObjectForImport(j);
             const incomingRawItemCount = Array.isArray(payload.items) ? payload.items.length : 0;
-            const safe = app.repair(j);
+            const safe = app.repair(payload.lesson != null ? payload : j);
+            const prevHeavy = app.isHeavyLesson(safe);
+            const prev = prevHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
+            const prevKey = prev && prev.meta ? app.getStateKeyForMeta(prev.meta) : "";
+            app.prepareImportedLesson(safe);
             const aiText = (app.getAiInputValue() || "").trim();
             admin.syncQuestionsFromList();
             const aiQuestion = (appData.questions && appData.questions[0]) ? appData.questions[0].prompt : (appData.question || "");
@@ -29019,10 +29069,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             }
             admin.applyModelAnswersFromItems({ overwrite: true, generate: false });
             admin.populateAnalysisBanksFromLessonItems({ silent: true });
-            app.save();
-            ui.init();
-            ui.renderLab();
-            admin.renderAll();
+            app.afterLessonImportUi();
             if(exportAfter) admin.exportStandalone();
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON or corrupted file.";
@@ -31856,35 +31903,23 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 parsed = app.convertPastPaperToLesson(parsed);
             }
             try {
-                const prevFileSnapshot = appData ? JSON.parse(JSON.stringify(appData)) : null;
+                const fileHeavy = text.length > 700000 || app.isHeavyLesson(parsed);
+                const prevFileSnapshot = fileHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
                 appData = app.repair(parsed);
-                if(appData && appData.component !== 2 && typeof app.lessonExportNormalizeStructuredPassage === "function" && appData.sourceText && String(appData.sourceText).trim().startsWith("{")) {
+                app.prepareImportedLesson(appData);
+                if(!app._heavyLessonOnLoad && appData && appData.component !== 2 && typeof app.lessonExportNormalizeStructuredPassage === "function" && appData.sourceText && String(appData.sourceText).trim().startsWith("{")) {
                     const nrmImp = app.lessonExportNormalizeStructuredPassage(appData.sourceText);
                     if(nrmImp && String(nrmImp).trim() !== String(appData.sourceText || "").trim()) appData.sourceText = nrmImp;
                 }
                 app.normalizeLessonQuestionsAfterRepair(appData, prevFileSnapshot);
                 userState = { score: 0, level: 1, view: "", essay: "", questionEssays: {}, completed: [], completedLevels: [], filter: "all", showDone: false, selectionCompleted: false, selectionStage: 1, selectionKey: "", selectionProgress: {}, selectionJustification: {}, selectionEliminated: [], labCompleted: false, currentQuestionIndexByLevel: {}, deskCommitByLevel: {}, teacherMarksByLevel: {} };
-                app.save();
-                app._suppressAdminInputFlushOnce = true;
-                try {
-                    ui.init();
-                } finally {
-                    app._suppressAdminInputFlushOnce = false;
-                }
                 admin.ensureSelectionData && admin.ensureSelectionData();
                 admin.syncLevelBankForPastPaperQuestions && admin.syncLevelBankForPastPaperQuestions();
                 admin.autoAssignSelectionLevels && admin.autoAssignSelectionLevels(false);
                 admin.autoFillDistractors && admin.autoFillDistractors();
                 admin.autoAssignLevelsByLineRangeIfApplicable && admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
                 if(typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
-                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
-                else if(appData.sourceText && appData.sourceText.trim()) {
-                    app.setAiInputValue(appData.sourceText);
-                    if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
-                }
-                admin.renderAll();
-                if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-                if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+                app.afterLessonImportUi();
                 input.value = "";
             } catch(err) {
                 const cleaned = app.cleanSourceText(text);
