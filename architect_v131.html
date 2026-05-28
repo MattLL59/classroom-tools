@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T13:15:00">
-<meta name="architect-deploy" content="safe-boot-oom">
+<meta name="architect-build" content="2026-05-24T13:30:00">
+<meta name="architect-deploy" content="past-paper-safe">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524121500";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524133000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -15527,6 +15527,7 @@ const app = {
     DEFER_PASSAGE_ITEMS: 12,
     MAX_GOOD_QUOTES_ON_LOAD: 80,
     MAX_LESSON_ITEMS: 200,
+    MAX_QUOTES_BANK_RENDER: 28,
     isHeavyLesson: function(data, opts) {
         opts = opts || {};
         const d = data || appData;
@@ -15627,6 +15628,8 @@ const app = {
     },
     loadAdminPassageOnDemand: function() {
         if(!appData || appData.component === 2) return;
+        const stLen = typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
+        if(stLen > 50000 && !confirm("This passage is about " + Math.round(stLen / 1000) + "k characters. Loading it in the editor may crash the browser. Continue anyway?")) return;
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         const el = document.getElementById("ai-input");
@@ -15735,7 +15738,8 @@ const app = {
         app._suppressAdminInputFlushOnce = true;
         try {
             if(opts.applyPassageScope && typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
-            if(typeof ui !== "undefined" && ui.init) ui.init();
+            if(app._passageDisplaysDeferred && typeof app.refreshLessonChromeLite === "function") app.refreshLessonChromeLite({ skipPassage: true });
+            else if(typeof ui !== "undefined" && ui.init) ui.init();
         } finally {
             app._suppressAdminInputFlushOnce = false;
         }
@@ -15757,7 +15761,7 @@ const app = {
             app._importInProgress = false;
             const stLen = appData && typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
             const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
-            if(!opts.skipPassageRelayout) {
+            if(!opts.skipPassageRelayout && !app._passageDisplaysDeferred) {
                 if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
                 else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
                     if(typeof app.setAiInputValue === "function") app.setAiInputValue(appData.sourceText);
@@ -15776,6 +15780,83 @@ const app = {
             if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2500 });
             else setTimeout(finish, 150);
         } else finish();
+    },
+    /** Update titles, level bar, question banner — no full ui.init or passage HTML rebuild. */
+    refreshLessonChromeLite: function(opts) {
+        opts = opts || {};
+        if(typeof ui === "undefined" || !appData) return;
+        const title = appData.meta && appData.meta.title ? appData.meta.title : "";
+        const lbl = document.getElementById("lbl-title");
+        if(lbl) lbl.innerText = title;
+        const lblDesk = document.getElementById("lbl-title-desk");
+        if(lblDesk) lblDesk.innerText = title;
+        const essayTopic = document.getElementById("essay-topic-banner");
+        if(essayTopic) {
+            const essayBody = essayTopic.querySelector(".question-banner-content");
+            if(title) {
+                essayTopic.classList.remove("hidden");
+                if(essayBody) essayBody.innerHTML = `<strong>Topic:</strong> ${app.escapeHtml(title)}`;
+            } else {
+                essayTopic.classList.add("hidden");
+                if(essayBody) essayBody.innerHTML = "";
+            }
+        }
+        const levelSelect = document.getElementById("level-selector");
+        if(levelSelect && typeof app.getActiveLevels === "function") {
+            const levels = app.getActiveLevels();
+            levelSelect.innerHTML = levels.map(n => `<option value="${n}">Lvl ${n}</option>`).join("");
+            if(levels.length && !levels.includes(userState.level)) userState.level = levels[0];
+            levelSelect.value = userState.level;
+        }
+        if(ui.renderQuestionBanner) ui.renderQuestionBanner();
+        if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
+        const skipPass = opts.skipPassage !== false && app._passageDisplaysDeferred;
+        if(skipPass) {
+            if(ui.renderLab) ui.renderLab(null, { skipPassage: true });
+            if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: true });
+        } else {
+            if(ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+            if(ui.renderLab) ui.renderLab();
+            if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
+        }
+    },
+    /** After Lobby Extract text / questions — avoid ui.init + setAiInputValue storm that OOMs. */
+    afterPastPaperExtractUi: function(opts) {
+        opts = opts || {};
+        app.prepareImportedLesson(appData);
+        app._deferAdminPassageUntilDemand = !!(app._passageDisplaysDeferred || (app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration()));
+        if(app._deferAdminPassageUntilDemand && app.setAdminPassageDeferredPlaceholder) app.setAdminPassageDeferredPlaceholder();
+        app._importInProgress = true;
+        app._suppressAdminInputFlushOnce = true;
+        try {
+            if(typeof app.refreshLessonChromeLite === "function") app.refreshLessonChromeLite({ skipPassage: app._passageDisplaysDeferred });
+        } finally {
+            app._suppressAdminInputFlushOnce = false;
+        }
+        const finish = function() {
+            try {
+                if(opts.includeQuestions && typeof admin !== "undefined") {
+                    if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
+                    if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+                }
+                if(typeof admin !== "undefined") {
+                    if(admin.refreshQuestionsList) admin.refreshQuestionsList();
+                    if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
+                    if(admin.renderAll) admin.renderAll({ importPass: true });
+                }
+                if(!app._passageDisplaysDeferred && !opts.loadAsComponent2 && appData && appData.sourceText && String(appData.sourceText).trim()) {
+                    if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+                }
+                if(opts.loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function") {
+                    admin.loadC2PassagesIntoEditor({ goToEditTab: false, skipPassageRefresh: !!app._passageDisplaysDeferred });
+                }
+            } catch(eF) {
+                console.warn("afterPastPaperExtractUi:", eF);
+            }
+            app._importInProgress = false;
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2000 });
+        else setTimeout(finish, 80);
     },
     clearLessonStorageOnly: function() {
         if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
@@ -16441,6 +16522,16 @@ const ui = {
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
     },
     refreshSourceDisplay: function(overrideContent) {
+        if(app._passageDisplaysDeferred && app.getPassageDeferPlaceholderHtml) {
+            const ph = app.getPassageDeferPlaceholderHtml();
+            const inline = document.getElementById("source-inline");
+            const inlineSelect = document.getElementById("source-inline-select");
+            const introText = document.getElementById("intro-text");
+            if(inline) inline.innerHTML = ph;
+            if(inlineSelect) inlineSelect.innerHTML = ph;
+            if(introText) introText.innerHTML = ph;
+            return;
+        }
         try {
             /** Lab/intro refresh must apply saved {@link meta.pdfInsertWidthCh} only — full DOM sync here re-read Insert width while focus is on Booklet line (or another control) and can collapse ch or fight booklet-only updates. */
             if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
@@ -18824,7 +18915,9 @@ const ui = {
         });
     },
 
-    renderSelection: function(overrideCanon) {
+    renderSelection: function(overrideCanon, opts) {
+        opts = opts || {};
+        if(opts.skipPassage == null && app._passageDisplaysDeferred) opts.skipPassage = true;
         const cont = document.getElementById("selection-area");
         const passageCanonOverride = (overrideCanon != null && String(overrideCanon).trim()) ? String(overrideCanon).trim() : "";
         if(!cont) return;
@@ -18930,7 +19023,11 @@ const ui = {
         const inlineSelect = document.getElementById("source-inline-select");
         const selWrap = document.getElementById("source-inline-select-wrap");
         if(inlineSelect) {
-            if(hasSource) {
+            if(opts.skipPassage && app.getPassageDeferPlaceholderHtml) {
+                const ph = app.getPassageDeferPlaceholderHtml();
+                inlineSelect.innerHTML = ph;
+                if(selWrap) ui.syncPassageLineLayoutShell(selWrap, inlineSelect, ph);
+            } else if(hasSource) {
                 const warn = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
                 let scopeSel = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
                 const bundle = typeof app.buildPassagePaneHtmlForLevel === "function"
@@ -22767,27 +22864,35 @@ const admin = {
                 appData.selection.question.prompt = "";
             }
         }
-        app.save();
-        ui.init();
-        if(!loadAsComponent2) {
-            /** Pass canonical source (incl. v2 JSON) — not formatSourceHtml output, or setAiInputValue strips structure and gutters collapse when rebuilding the editor from HTML/plain. */
-            app.setAiInputValue((appData.sourceText != null && String(appData.sourceText).trim() !== "" ? appData.sourceText : combined).trim());
+        app.save({ skipRender: true, silent: true });
+        if(typeof app.afterPastPaperExtractUi === "function") {
+            app.afterPastPaperExtractUi({
+                includeQuestions: includeQuestions,
+                loadAsComponent2: loadAsComponent2
+            });
+        } else {
+            ui.init();
+            if(!loadAsComponent2) {
+                app.setAiInputValue((appData.sourceText != null && String(appData.sourceText).trim() !== "" ? appData.sourceText : combined).trim());
+            }
+            if(includeQuestions) {
+                admin.syncLevelBankForPastPaperQuestions();
+                admin.autoAssignLevelsByLineRangeIfApplicable();
+            }
+            admin.refreshQuestionsList();
+            admin.renderAll();
+            if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
+                admin.loadC2PassagesIntoEditor({ goToEditTab: false });
         }
-        if(includeQuestions) {
-            admin.syncLevelBankForPastPaperQuestions();
-            admin.autoAssignLevelsByLineRangeIfApplicable();
-        }
-            try {
-                if(app._lastPdfDebug && app._lastPdfDebug.kind === "pastPaper") {
-                    app._lastPdfDebug.questions = {
-                        detectedCount: Array.isArray(appData.questions) ? appData.questions.length : 0,
-                        restrictFallbacks: !!restrictQFallbacks,
-                        usedSectionText: (questionsSectionText || "").trim().slice(0, 220)
-                    };
-                }
-            } catch(eQDbg) {}
-        admin.refreshQuestionsList();
-        admin.renderAll();
+        try {
+            if(app._lastPdfDebug && app._lastPdfDebug.kind === "pastPaper") {
+                app._lastPdfDebug.questions = {
+                    detectedCount: Array.isArray(appData.questions) ? appData.questions.length : 0,
+                    restrictFallbacks: !!restrictQFallbacks,
+                    usedSectionText: (questionsSectionText || "").trim().slice(0, 220)
+                };
+            }
+        } catch(eQDbg) {}
         if(true) {
             const m = document.getElementById("modal-admin");
             if(m && !m.classList.contains("open")) ui.openModal("modal-admin");
@@ -22795,12 +22900,10 @@ const admin = {
         const resMissing = !!(files.resource && !String(resourcePassageText || "").trim());
         if(includeQuestions) {
             const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
-            alert("Past paper text loaded." + (qCount >= 2 ? " " + qCount + " Section A reading questions were detected and added to the question bank." : qCount === 1 ? " One focus question was detected (the app already retried the full extract and all Questions-PDF pages if needed). If you expected more parts, set the correct Section A reading page(s) (e.g. 1-2) and click Extract questions." : " No Section A reading questions were split — use Load & AI to paste prompts, set Section A reading page(s), click Extract questions, or use Load JSON.") + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : ""));
+            alert("Past paper text loaded." + (qCount >= 2 ? " " + qCount + " Section A reading questions were detected and added to the question bank." : qCount === 1 ? " One focus question was detected (the app already retried the full extract and all Questions-PDF pages if needed). If you expected more parts, set the correct Section A reading page(s) (e.g. 1-2) and click Extract questions." : " No Section A reading questions were split — use Load & AI to paste prompts, set Section A reading page(s), click Extract questions, or use Load JSON.") + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : "") + (app._passageDisplaysDeferred ? "\n\nPassage display is deferred to save memory — open Quote Select or use Load passage in editor when you need the full layout." : ""));
         } else {
-            alert("Extract text: PDFs cached; resource, questions-PDF layout text, and mark scheme updated." + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : " Click Extract questions to fill the question bank from the Questions PDF (Section A reading pages).") + (loadAsComponent2 ? "\n\nOpen Editing Suite → Component 2 — passages to edit (or click Load from lesson there)." : ""));
+            alert("Extract text: PDFs cached; resource, questions-PDF passages (C2 layout), and mark scheme updated." + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : " Click Extract questions to fill the question bank from the Questions PDF (Section A reading pages).") + (loadAsComponent2 ? "\n\nOpen Editing Suite → Component 2 — passages to edit (or click Load from lesson there)." : "") + (app._passageDisplaysDeferred ? "\n\nFull passage layout was not built in the browser (memory limit). Text is saved — use Load passage in editor or Quote Select when ready." : ""));
         }
-        if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
-            admin.loadC2PassagesIntoEditor({ goToEditTab: false });
     },
     reExtractQuestionsFromPages: async function() {
         const f = admin.pastPaperFiles && admin.pastPaperFiles.questions;
@@ -23211,6 +23314,12 @@ const admin = {
     },
     scheduleDeferredAdminPanels: function() {
         const qb = document.getElementById("quotes-bank-list");
+        const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
+        if(qb && itemN > 40) {
+            qb.innerHTML = "<div style=\"opacity:0.85;padding:10px 0;line-height:1.45;\"><strong>Quote bank (" + itemN + " rows)</strong> — full list not drawn at once (memory limit). Use <strong>All levels</strong> filters, compact view, or edit via Load &amp; AI JSON. Questions and Level Bank above still work.</div>";
+            app._adminLiteOpen = false;
+            return;
+        }
         if(qb && !qb.querySelector(".architect-admin-panels-loading")) {
             qb.innerHTML = "<div class=\"architect-admin-panels-loading\" style=\"opacity:0.7;padding:8px 0;\">Loading quote bank…</div>";
         }
@@ -23219,9 +23328,6 @@ const admin = {
             try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) { console.warn("deferred renderQuotesBank:", eQb); }
             try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
             try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
-            if(!app._deferAdminPassageUntilDemand && appData && appData.component !== 2 && app.syncAdminAiInputFromLesson && app._isC1PassageEditorsVisuallyEmpty && app._isC1PassageEditorsVisuallyEmpty()) {
-                try { app.syncAdminAiInputFromLesson({ force: false }); } catch(ePass) {}
-            }
         };
         if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3500 });
         else setTimeout(run, 100);
@@ -23717,7 +23823,7 @@ const admin = {
                 try { d.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
             }
         }
-        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
+        if(typeof ui.refreshSourceDisplay === "function" && !opts.skipPassageRefresh) ui.refreshSourceDisplay();
         return true;
     },
     tightenActiveC2PassageLayoutFromEditor: function() {
@@ -27016,6 +27122,17 @@ const admin = {
         }
         const goodList = indexed.filter(x => x.item.correct !== false);
         const badList = indexed.filter(x => x.item.correct === false);
+        const maxRender = app.MAX_QUOTES_BANK_RENDER || 28;
+        const totalShown = goodList.length + badList.length;
+        let capNote = "";
+        let goodRender = goodList;
+        let badRender = badList;
+        if(totalShown > maxRender) {
+            capNote = `<div style="opacity:0.85;padding:8px 10px;margin-bottom:10px;border:1px dashed var(--border);border-radius:6px;font-size:0.82rem;">Showing first ${maxRender} of ${totalShown} quote rows (memory limit). Use filter buttons or compact view.</div>`;
+            goodRender = goodList.slice(0, Math.min(goodList.length, maxRender));
+            const remain = maxRender - goodRender.length;
+            badRender = remain > 0 ? badList.slice(0, remain) : [];
+        }
         const compact = app.usesQuotesBankCompactView && app.usesQuotesBankCompactView();
         const levels = app.getActiveLevels().length ? app.getActiveLevels() : [1,2,3];
         const questionOptionsForQuote = (item) => {
@@ -27112,9 +27229,9 @@ const admin = {
         const badHdr = quotaHdr && quotaHdr.badTarget > 0
             ? `Bad quotes (${badList.length} in bank · target ${quotaHdr.badCount}/${quotaHdr.badTarget} for L${bankLvl})`
             : `Bad quotes (${badList.length})`;
-        const goodSection = showGood ? `<div style="margin-bottom:16px;"><div class="admin-h" style="margin-bottom:8px;">${goodHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${goodList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "good" ? (examEmptyHint || "<div style='opacity:0.7;'>No good quotes. Add a quote and check Good quote, or switch filter to All.</div>") : "");
-        const badSection = showBad ? `<div><div class="admin-h" style="margin-bottom:8px;">${badHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${badList.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "bad" ? (examEmptyHint || "<div style='opacity:0.7;'>No bad quotes. Use + Add bad quote or uncheck Good quote, or switch filter to All.</div>") : "");
-        wrap.innerHTML = f === "bad" ? badSection : (goodSection + badSection) || (examEmptyHint || "<div style='opacity:0.7;'>No quotes match the filter.</div>");
+        const goodSection = showGood ? `<div style="margin-bottom:16px;"><div class="admin-h" style="margin-bottom:8px;">${goodHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${goodRender.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "good" ? (examEmptyHint || "<div style='opacity:0.7;'>No good quotes. Add a quote and check Good quote, or switch filter to All.</div>") : "");
+        const badSection = showBad ? `<div><div class="admin-h" style="margin-bottom:8px;">${badHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${badRender.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>` : (f === "bad" ? (examEmptyHint || "<div style='opacity:0.7;'>No bad quotes. Use + Add bad quote or uncheck Good quote, or switch filter to All.</div>") : "");
+        wrap.innerHTML = capNote + (f === "bad" ? badSection : (goodSection + badSection) || (examEmptyHint || "<div style='opacity:0.7;'>No quotes match the filter.</div>"));
         if(document.getElementById("quotes-filter-all")) { ["all","good","bad"].forEach(function(id){ var b=document.getElementById("quotes-filter-"+id); if(b){ var active=(id==="all"&&f==="all")||(id==="good"&&f==="good")||(id==="bad"&&f==="bad"); b.classList.toggle("btn-primary",active); b.classList.toggle("btn-outline",!active); } }); }
         } catch(eQb) {
             console.error("Quote bank render failed:", eQb);
