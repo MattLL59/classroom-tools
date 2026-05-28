@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T12:45:00">
-<meta name="architect-deploy" content="esc-admin-safe">
+<meta name="architect-build" content="2026-05-24T13:00:00">
+<meta name="architect-deploy" content="data-button-visible">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -535,7 +535,7 @@
     #modal-admin.modal {
         backdrop-filter: none !important;
         -webkit-backdrop-filter: none !important;
-        background: rgba(15, 24, 28, 0.28);
+        background: rgba(15, 24, 28, 0.45);
     }
     .modal.open { display: flex; }
     .modal-content { background: var(--bg); width: 95%; max-width: 900px; max-height: 95vh; border-radius: 10px; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.3); overflow: hidden; color: var(--text); opacity: 1; }
@@ -608,7 +608,18 @@
     }
     #modal-admin .modal-body, #modal-admin .modal-content { background: var(--bg); }
     /* Tall admin: flex item min-height:auto can block max-height + inner scroll; force a bounded column */
-    #modal-admin.modal.open { align-items: center; align-content: flex-start; padding: 10px 0; box-sizing: border-box; z-index: 10050 !important; }
+    #modal-admin.modal.open {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        align-items: center;
+        align-content: flex-start;
+        padding: 52px 0 10px 0;
+        box-sizing: border-box;
+        z-index: 10200 !important;
+        background: rgba(15, 24, 28, 0.62);
+    }
     #modal-admin .modal-content {
         max-height: min(92vh, 100dvh - 24px);
         min-height: 0;
@@ -1042,9 +1053,35 @@
             <button class="icon-btn" onclick="ui.openModal('modal-help')">❓</button>
             <button class="icon-btn" onclick="ui.openModal('modal-theme')" title="Colors">🎨</button>
             <select id="level-selector" class="level-select" onchange="app.setLevel(this.value)"></select>
-            <button class="icon-btn" id="btn-admin" onclick="ui.openAdminSafe(event)" title="Teacher settings (Editing Suite). Press Esc to close settings if the panel is in the way.">Data</button>
+            <button type="button" class="icon-btn" id="btn-admin" title="Teacher settings (Editing Suite). Press Esc or ✕ to close.">Data</button>
         </div>
     </header>
+    <script>
+    (function() {
+        function openTeacherSettingsFromHeader(ev) {
+            if(ev) { ev.preventDefault(); ev.stopPropagation(); }
+            try {
+                if(typeof ui !== "undefined" && ui.showTeacherSettings) { ui.showTeacherSettings(ev); return; }
+                if(typeof ui !== "undefined" && ui.openAdminSafe) { ui.openAdminSafe(ev); return; }
+            } catch(e) { console.error("Data button:", e); }
+            var m = document.getElementById("modal-admin");
+            if(m) {
+                m.classList.add("open");
+                m.style.display = "flex";
+                m.style.visibility = "visible";
+                m.style.pointerEvents = "auto";
+            } else {
+                alert("Settings panel is still loading. Wait a few seconds and try again, or hard-refresh the page.");
+            }
+        }
+        var btnAdmEarly = document.getElementById("btn-admin");
+        if(btnAdmEarly && !btnAdmEarly.dataset.boundOpen) {
+            btnAdmEarly.dataset.boundOpen = "1";
+            btnAdmEarly.addEventListener("click", openTeacherSettingsFromHeader);
+        }
+        window.__tsaOpenTeacherSettings = openTeacherSettingsFromHeader;
+    })();
+    </script>
     <script>
     (function() {
         try {
@@ -16680,7 +16717,17 @@ const ui = {
             }
             try {
                 const btnAdm = document.getElementById("btn-admin");
-                if(btnAdm) { btnAdm.disabled = false; btnAdm.style.pointerEvents = "auto"; }
+                if(btnAdm) {
+                    btnAdm.disabled = false;
+                    btnAdm.style.pointerEvents = "auto";
+                    if(!btnAdm.dataset.boundOpen) {
+                        btnAdm.dataset.boundOpen = "1";
+                        btnAdm.addEventListener("click", function(ev) {
+                            if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings(ev);
+                            else if(typeof window.__tsaOpenTeacherSettings === "function") window.__tsaOpenTeacherSettings(ev);
+                        });
+                    }
+                }
             } catch(eBtn) {}
             if(typeof app.ensureAdminReady === "function") {
                 try { app.ensureAdminReady(); } catch(eAdm) {}
@@ -17390,25 +17437,60 @@ const ui = {
             app._adminLiteOpen = false;
         }
     },
-    openAdminSafe: function(ev) {
+    isAdminModalVisible: function() {
+        const adm = document.getElementById("modal-admin");
+        if(!adm || !adm.classList.contains("open")) return false;
+        try {
+            const st = window.getComputedStyle(adm);
+            return st.display !== "none" && st.visibility !== "hidden" && st.opacity !== "0";
+        } catch(e) {
+            return true;
+        }
+    },
+    showAdminModalShell: function() {
+        const adm = document.getElementById("modal-admin");
+        if(!adm) return false;
+        adm.classList.add("open");
+        adm.style.display = "flex";
+        adm.style.visibility = "visible";
+        adm.style.opacity = "1";
+        adm.style.pointerEvents = "auto";
+        adm.setAttribute("aria-hidden", "false");
+        try {
+            if(typeof admin !== "undefined" && admin.activateAdminTab) admin.activateAdminTab("edit");
+            else if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+        } catch(eTab) {}
+        const body = adm.querySelector(".modal-body");
+        if(body && body.scrollTop === 0) body.scrollTop = 0;
+        return true;
+    },
+    /** Data button — always opens Teacher Settings (close with ✕ or Esc only). */
+    showTeacherSettings: function(ev) {
         if(ev && ev.preventDefault) ev.preventDefault();
         if(ev && ev.stopPropagation) ev.stopPropagation();
         const adm = document.getElementById("modal-admin");
-        if(adm && adm.classList.contains("open")) {
-            if(typeof ui.closeAdminLite === "function") ui.closeAdminLite();
-            else if(typeof ui.closeModal === "function") ui.closeModal("modal-admin");
-            return;
+        if(adm && adm.classList.contains("open") && !(ui.isAdminModalVisible && ui.isAdminModalVisible())) {
+            adm.classList.remove("open");
         }
+        if(ui.isAdminModalVisible && ui.isAdminModalVisible()) return;
         try {
             if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
-            if(adm) adm.classList.add("open");
+            if(!ui.showAdminModalShell()) {
+                alert("Settings panel not found. Hard-refresh the page (Ctrl+Shift+R).");
+                return;
+            }
             if(typeof ui.openAdmin === "function") ui.openAdmin();
-            else if(adm) adm.classList.add("open");
+            else if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll({ openAdminPass: true });
         } catch(e) {
-            console.error("openAdminSafe:", e);
-            if(adm) adm.classList.add("open");
-            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+            console.error("showTeacherSettings:", e);
+            ui.showAdminModalShell();
+            try {
+                if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+            } catch(e2) {}
         }
+    },
+    openAdminSafe: function(ev) {
+        if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings(ev);
     },
     closeModal: (id) => {
         if(id === "modal-admin") {
@@ -17422,9 +17504,12 @@ const ui = {
     openAdmin: () => {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
-        app._adminLiteOpen = true;
-        app._deferAdminPassageUntilDemand = !!(app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration());
-        if(app._deferAdminPassageUntilDemand && app.setAdminPassageDeferredPlaceholder) app.setAdminPassageDeferredPlaceholder();
+        if(typeof ui.showAdminModalShell === "function") ui.showAdminModalShell();
+        if(typeof app !== "undefined" && app) {
+            app._adminLiteOpen = true;
+            app._deferAdminPassageUntilDemand = !!(app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration());
+            if(app._deferAdminPassageUntilDemand && app.setAdminPassageDeferredPlaceholder) app.setAdminPassageDeferredPlaceholder();
+        }
         try {
             if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
             if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
