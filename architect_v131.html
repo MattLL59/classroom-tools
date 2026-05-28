@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T11:15:00">
-<meta name="architect-deploy" content="recovery-ui-fix">
+<meta name="architect-build" content="2026-05-24T11:30:00">
+<meta name="architect-deploy" content="json-import-oom-fix">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1075,7 +1075,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524111500";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524113000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -15440,6 +15440,7 @@ const app = {
     _extractCacheMergedOnLoad: false,
     _heavyLessonOnLoad: false,
     _passageDisplaysDeferred: false,
+    _importInProgress: false,
     HEAVY_SOURCE_CHARS: 90000,
     HEAVY_STORAGE_BYTES: 1100000,
     HEAVY_REPAIR_SOURCE_CHARS: 180000,
@@ -15516,8 +15517,13 @@ const app = {
         app._heavyLessonOnLoad = app.isHeavyLesson(safe || appData);
         app._passageDisplaysDeferred = !!app._heavyLessonOnLoad;
     },
+    looksLikeSavedConfigExport: function(o) {
+        return !!(o && typeof o === "object" && o.settings && typeof o.settings === "object"
+            && (Array.isArray(o.questions) || typeof o.sourceText === "string" || Array.isArray(o.items)));
+    },
     afterLessonImportUi: function(opts) {
         opts = opts || {};
+        app._importInProgress = true;
         app.prepareImportedLesson(appData);
         try {
             if(typeof app.save === "function") app.save({ skipRender: true, silent: true, skipExtractCache: !!app._heavyLessonOnLoad });
@@ -15531,23 +15537,44 @@ const app = {
         }
         const finish = function() {
             try {
-                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll();
+                if(opts.postImportAdmin && typeof admin !== "undefined") {
+                    if(admin.ensureSelectionData) admin.ensureSelectionData();
+                    if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
+                    if(admin.autoAssignSelectionLevels) admin.autoAssignSelectionLevels(false);
+                    if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+                    const runFill = function() {
+                        try { if(admin.autoFillDistractors) admin.autoFillDistractors(); } catch(eF) {}
+                    };
+                    if(typeof requestIdleCallback === "function") requestIdleCallback(runFill, { timeout: 4000 });
+                    else setTimeout(runFill, 200);
+                }
+                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll({ importPass: true });
             } catch(eA) {}
+            app._importInProgress = false;
+            const stLen = appData && typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
+            const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
             if(app._heavyLessonOnLoad || app._passageDisplaysDeferred) {
                 if(!opts.silentHeavyMsg) {
                     setTimeout(function() {
-                        alert("Lesson loaded. The passage is large — open Data → Editing Suite or Quote Select to view it (building everything at once can crash the tab).");
+                        alert("Lesson loaded (" + Math.round(stLen / 1000) + "k chars passage, " + itemN + " quotes). Open Data → Editing Suite or Quote Select to view the passage — loading everything at once can crash the tab.");
                     }, 80);
                 }
                 return;
             }
-            if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
-            else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
-                if(typeof app.setAiInputValue === "function") app.setAiInputValue(appData.sourceText);
-                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+            if(!opts.skipPassageRelayout) {
+                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+                else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
+                    if(typeof app.setAiInputValue === "function") app.setAiInputValue(appData.sourceText);
+                    if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
+                }
+                if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+                if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
             }
-            if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+            if(!opts.silentHeavyMsg && opts.isConfigFile) {
+                setTimeout(function() {
+                    alert("Settings loaded from config.json (" + itemN + " quotes). Level bank and lesson settings are restored. Open Data → Editing Suite to edit the passage.");
+                }, 60);
+            }
         };
         if(app._heavyLessonOnLoad) {
             if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2500 });
@@ -22940,7 +22967,9 @@ const admin = {
         } catch(e) { saved = "edit"; }
         admin.activateAdminTab(saved);
     },
-    renderAll: function() {
+    renderAll: function(opts) {
+        opts = opts || {};
+        const importLite = !!(opts.importPass || app._importInProgress);
         try { admin.initTabs(); } catch(eTabs) {}
         try { admin.syncUI(); } catch(eSync) {}
         try { admin.bindAiAutoPrompt(); } catch(eAi) {}
@@ -22954,6 +22983,10 @@ const admin = {
             admin.renderConfig(lvl);
             admin.renderLevelBank();
         } catch(eLb) {}
+        if(importLite) {
+            try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
+            return;
+        }
         try { if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
         try { if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
         try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
@@ -22989,7 +23022,10 @@ const admin = {
             }
             if(needsSync) {
                 appData.selection.text.source = appData.sourceText;
-                if(typeof app.save === "function") app.save();
+                if(typeof app.save === "function") {
+                    const saveOpts = (ui._initInProgress || app._importInProgress) ? { skipRender: true, silent: true } : {};
+                    app.save(saveOpts);
+                }
             }
         }
         const bank = app.getLevelBank();
@@ -28956,7 +28992,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             }
             const payload = admin.unwrapLessonObjectForImport(j);
             const incomingRawItemCount = Array.isArray(payload.items) ? payload.items.length : 0;
-            const safe = app.repair(payload.lesson != null ? payload : j);
+            const safe = app.repair(payload);
             const prevHeavy = app.isHeavyLesson(safe);
             const prev = prevHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
             const prevKey = prev && prev.meta ? app.getStateKeyForMeta(prev.meta) : "";
@@ -31903,23 +31939,19 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                 parsed = app.convertPastPaperToLesson(parsed);
             }
             try {
+                const isConfig = app.looksLikeSavedConfigExport(parsed);
                 const fileHeavy = text.length > 700000 || app.isHeavyLesson(parsed);
                 const prevFileSnapshot = fileHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
                 appData = app.repair(parsed);
-                app.prepareImportedLesson(appData);
-                if(!app._heavyLessonOnLoad && appData && appData.component !== 2 && typeof app.lessonExportNormalizeStructuredPassage === "function" && appData.sourceText && String(appData.sourceText).trim().startsWith("{")) {
-                    const nrmImp = app.lessonExportNormalizeStructuredPassage(appData.sourceText);
-                    if(nrmImp && String(nrmImp).trim() !== String(appData.sourceText || "").trim()) appData.sourceText = nrmImp;
-                }
                 app.normalizeLessonQuestionsAfterRepair(appData, prevFileSnapshot);
                 userState = { score: 0, level: 1, view: "", essay: "", questionEssays: {}, completed: [], completedLevels: [], filter: "all", showDone: false, selectionCompleted: false, selectionStage: 1, selectionKey: "", selectionProgress: {}, selectionJustification: {}, selectionEliminated: [], labCompleted: false, currentQuestionIndexByLevel: {}, deskCommitByLevel: {}, teacherMarksByLevel: {} };
-                admin.ensureSelectionData && admin.ensureSelectionData();
-                admin.syncLevelBankForPastPaperQuestions && admin.syncLevelBankForPastPaperQuestions();
-                admin.autoAssignSelectionLevels && admin.autoAssignSelectionLevels(false);
-                admin.autoFillDistractors && admin.autoFillDistractors();
-                admin.autoAssignLevelsByLineRangeIfApplicable && admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
                 if(typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
-                app.afterLessonImportUi();
+                app.afterLessonImportUi({
+                    postImportAdmin: true,
+                    isConfigFile: isConfig,
+                    skipPassageRelayout: isConfig,
+                    silentHeavyMsg: false
+                });
                 input.value = "";
             } catch(err) {
                 const cleaned = app.cleanSourceText(text);
