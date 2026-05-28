@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T12:30:00">
-<meta name="architect-deploy" content="data-open-safe">
+<meta name="architect-build" content="2026-05-24T12:45:00">
+<meta name="architect-deploy" content="esc-admin-safe">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -364,7 +364,7 @@
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.3s, color 0.3s; }
 
     /* --- 2. HEADER --- */
-    header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 10050; position: relative; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: var(--card); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 10100; position: relative; flex-shrink: 0; border-bottom: 1px solid var(--border); }
     h1 { margin: 0; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 8px; font-weight: 800; }
     .score-badge { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; }
     .header-controls { display: flex; gap: 8px; align-items: center; }
@@ -1042,7 +1042,7 @@
             <button class="icon-btn" onclick="ui.openModal('modal-help')">❓</button>
             <button class="icon-btn" onclick="ui.openModal('modal-theme')" title="Colors">🎨</button>
             <select id="level-selector" class="level-select" onchange="app.setLevel(this.value)"></select>
-            <button class="icon-btn" id="btn-admin" onclick="ui.openAdminSafe(event)" title="Teacher settings (Editing Suite) — also try if a popup is stuck: Esc">Data</button>
+            <button class="icon-btn" id="btn-admin" onclick="ui.openAdminSafe(event)" title="Teacher settings (Editing Suite). Press Esc to close settings if the panel is in the way.">Data</button>
         </div>
     </header>
     <script>
@@ -14842,12 +14842,26 @@ const app = {
                 window.__tsaEscBound = true;
                 document.addEventListener("keydown", function(ev) {
                     if(ev.key !== "Escape") return;
-                    const adm = document.getElementById("modal-admin");
-                    if(adm && adm.classList.contains("open")) {
-                        if(typeof ui.closeModal === "function") ui.closeModal("modal-admin");
-                        return;
+                    try {
+                        const modalIds = ["modal-admin", "modal-help", "modal-theme", "modal-wizard", "modal-manual"];
+                        for(let i = 0; i < modalIds.length; i++) {
+                            const mid = modalIds[i];
+                            const m = document.getElementById(mid);
+                            if(!m || !m.classList.contains("open")) continue;
+                            ev.preventDefault();
+                            if(mid === "modal-admin" && typeof ui.closeAdminLite === "function") ui.closeAdminLite();
+                            else if(typeof ui.closeModal === "function") ui.closeModal(mid);
+                            return;
+                        }
+                        if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
+                    } catch(eEsc) {
+                        console.warn("Escape handler:", eEsc);
+                        try {
+                            const adm = document.getElementById("modal-admin");
+                            if(adm) adm.classList.remove("open");
+                        } catch(e2) {}
+                        if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
                     }
-                    if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
                 });
             }
             window.addEventListener("beforeunload", function() {
@@ -17330,59 +17344,79 @@ const ui = {
     dismissBlockingOverlays: function() {
         if(typeof ui.closeCelebration === "function") ui.closeCelebration();
         if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
-        ["intro-text-screen", "pick-quote-screen"].forEach(function(id) {
+        ["splash-screen", "intro-text-screen", "pick-quote-screen"].forEach(function(id) {
             const el = document.getElementById(id);
-            if(el) el.classList.add("hidden");
+            if(el) {
+                el.classList.add("hidden");
+                el.style.pointerEvents = "none";
+            }
         });
         const er = document.getElementById("emergency-reset");
         if(er && er.style.display !== "block" && !window.__tsaDeferHeavyLessonGate) er.style.display = "none";
     },
+    /** True when admin passage was not loaded (placeholder) — skip heavy persist/refresh on close. */
+    _adminCloseSkipsPassageWork: function() {
+        if(app._deferAdminPassageUntilDemand) return true;
+        if(!app._adminPassageHydrateDone) return true;
+        const ai = document.getElementById("ai-input");
+        if(ai && ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder")) return true;
+        if(app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration()) return true;
+        return false;
+    },
+    closeAdminLite: function() {
+        try {
+            const el = document.getElementById("modal-admin");
+            if(el) el.classList.remove("open");
+            ui._pauseSelectionGate = false;
+            app._adminLiteOpen = false;
+            const skipHeavy = ui._adminCloseSkipsPassageWork && ui._adminCloseSkipsPassageWork();
+            if(!skipHeavy && appData && !appData.isStandalone && admin && admin.ensureActiveSourcePersisted) {
+                try { admin.ensureActiveSourcePersisted(); } catch(ePers) { console.warn("ensureActiveSourcePersisted:", ePers); }
+            }
+            if(skipHeavy || !appData || appData.isStandalone) return;
+            const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+            try {
+                if(ui.activeQuoteId) {
+                    const item = appData.items.find(i => i.id === ui.activeQuoteId);
+                    if(item) ui.runBuilder(item);
+                }
+                if(userState.view === "desk" && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+            } catch(eUi) { console.warn("closeAdminLite ui:", eUi); }
+        } catch(eClose) {
+            console.warn("closeAdminLite:", eClose);
+            const el = document.getElementById("modal-admin");
+            if(el) el.classList.remove("open");
+            ui._pauseSelectionGate = false;
+            app._adminLiteOpen = false;
+        }
+    },
     openAdminSafe: function(ev) {
         if(ev && ev.preventDefault) ev.preventDefault();
         if(ev && ev.stopPropagation) ev.stopPropagation();
+        const adm = document.getElementById("modal-admin");
+        if(adm && adm.classList.contains("open")) {
+            if(typeof ui.closeAdminLite === "function") ui.closeAdminLite();
+            else if(typeof ui.closeModal === "function") ui.closeModal("modal-admin");
+            return;
+        }
         try {
             if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
+            if(adm) adm.classList.add("open");
             if(typeof ui.openAdmin === "function") ui.openAdmin();
-            else {
-                const m = document.getElementById("modal-admin");
-                if(m) m.classList.add("open");
-            }
+            else if(adm) adm.classList.add("open");
         } catch(e) {
             console.error("openAdminSafe:", e);
-            const m = document.getElementById("modal-admin");
-            if(m) m.classList.add("open");
+            if(adm) adm.classList.add("open");
             if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
         }
     },
     closeModal: (id) => {
-        if(id === "modal-admin" && !appData.isStandalone && admin.ensureActiveSourcePersisted) {
-            admin.ensureActiveSourcePersisted();
+        if(id === "modal-admin") {
+            if(typeof ui.closeAdminLite === "function") { ui.closeAdminLite(); return; }
         }
         const el = document.getElementById(id);
         if(el) el.classList.remove("open");
         if(id === 'modal-source') { ui.stopReader(); }
-        if(id === 'modal-admin' && !appData.isStandalone) {
-            ui._pauseSelectionGate = false;
-            /** Do not call bare {@link refreshSourceDisplay}() — it can fall back to stale selection/plain and wipe gutters Sync just painted in Lab. */
-            const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
-            if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(stClose);
-            else {
-                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(stClose);
-                if(ui.renderLab) ui.renderLab(stClose);
-                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(stClose);
-            }
-            if(typeof requestAnimationFrame === "function") {
-                requestAnimationFrame(function() {
-                    const st2 = appData && typeof appData.sourceText === "string" ? appData.sourceText : stClose;
-                    if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(st2);
-                });
-            }
-            if(ui.activeQuoteId) {
-                const item = appData.items.find(i=>i.id===ui.activeQuoteId);
-                if(item) ui.runBuilder(item); 
-            }
-            if(userState.view === "desk" && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
-        }
     },
     
     openAdmin: () => {
@@ -20768,11 +20802,11 @@ const ui = {
 
     forceHideSplash: function() {
         const splash = document.getElementById("splash-screen");
-        if(splash) splash.classList.add("hidden");
+        if(splash) { splash.classList.add("hidden"); splash.style.pointerEvents = "none"; }
         const intro = document.getElementById("intro-text-screen");
         const pick = document.getElementById("pick-quote-screen");
-        if(intro) intro.classList.add("hidden");
-        if(pick) pick.classList.add("hidden");
+        if(intro) { intro.classList.add("hidden"); intro.style.pointerEvents = "none"; }
+        if(pick) { pick.classList.add("hidden"); pick.style.pointerEvents = "none"; }
     },
     showSplash: function() {
         const splash = document.getElementById("splash-screen");
@@ -25195,6 +25229,7 @@ const admin = {
         }
         const ai = document.getElementById("ai-input");
         if(ai && ai.getAttribute("contenteditable") === "true") {
+            if(ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder")) return;
             const txt = (typeof app.mergeC1IntroHeaderAndAiInputHtml === "function" ? app.mergeC1IntroHeaderAndAiInputHtml() : (ai.innerHTML || "")).trim();
             if(txt && !app.isLikelyJson(txt)) {
                 /** Always editorPassageToStoredCanonical (v2 JSON when possible). Do not save serializeNumberedSourceLayoutToPlain first — plain overwrites JSON, formatSourceHtml misses parseNumberedPlainSourceLines, plainProseToSyntheticNumberedEntries collapses to few rows and only ~5/10 show in the margin. */
