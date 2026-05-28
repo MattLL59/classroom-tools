@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T11:45:00">
-<meta name="architect-deploy" content="config-import-fix">
+<meta name="architect-build" content="2026-05-24T12:00:00">
+<meta name="architect-deploy" content="data-btn-passage-fix">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1075,7 +1075,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524114500";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524120000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -15472,15 +15472,43 @@ const app = {
             <div>Your lesson saved successfully. The full exam passage is not built at startup (that was causing out-of-memory crashes). Open <strong>Quote Select</strong> or <strong>Data → Editing Suite</strong> to load it. Questions and quotes still work.</div>
         </div>`;
     },
-    finishDeferredPassageHydration: function() {
+    _adminPassageHydrateDone: false,
+    _adminPassageHydrateInFlight: false,
+    /** Data button only: load #ai-input passage without rebuilding Lab + Quote Select (avoids triple sync crash). */
+    hydratePassageForAdminEditor: function() {
+        if(app._adminPassageHydrateDone || app._adminPassageHydrateInFlight) return;
+        if(!appData || appData.component === 2) return;
+        const run = function() {
+            if(app._adminPassageHydrateInFlight || app._adminPassageHydrateDone) return;
+            app._adminPassageHydrateInFlight = true;
+            try {
+                if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true });
+                app._adminPassageHydrateDone = true;
+            } catch(eSync) {
+                console.warn("Admin passage hydrate failed:", eSync);
+            } finally {
+                app._adminPassageHydrateInFlight = false;
+            }
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2500 });
+        else setTimeout(run, 80);
+    },
+    finishDeferredPassageHydration: function(opts) {
+        opts = opts || {};
         if(!app._passageDisplaysDeferred) return;
+        if(opts.adminEditorOnly) {
+            app.hydratePassageForAdminEditor();
+            return;
+        }
         app._passageDisplaysDeferred = false;
         try {
-            if(app.syncAdminAiInputFromLesson && appData && appData.component !== 2) app.syncAdminAiInputFromLesson({ force: true });
+            if(!app._adminPassageHydrateDone && app.syncAdminAiInputFromLesson && appData && appData.component !== 2) {
+                app.syncAdminAiInputFromLesson({ force: true });
+                app._adminPassageHydrateDone = true;
+            }
         } catch(eSync) {}
         try {
-            if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
-            else if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
+            if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
             if(typeof ui.renderLab === "function") ui.renderLab();
             if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection();
         } catch(eHydr) {
@@ -15516,6 +15544,8 @@ const app = {
         if(safe) app.dedupeLessonPassageInMemory(safe);
         app._heavyLessonOnLoad = app.isHeavyLesson(safe || appData);
         app._passageDisplaysDeferred = !!app._heavyLessonOnLoad;
+        app._adminPassageHydrateDone = false;
+        app._adminPassageHydrateInFlight = false;
     },
     looksLikeSavedConfigExport: function(o) {
         return !!(o && typeof o === "object" && o.settings && typeof o.settings === "object"
@@ -16129,8 +16159,8 @@ const ui = {
      */
     refreshAllPassageDisplays: function(overrideCanon) {
         if(app._passageDisplaysDeferred && typeof app.finishDeferredPassageHydration === "function") {
-            app.finishDeferredPassageHydration();
-            return;
+            app.finishDeferredPassageHydration({ adminEditorOnly: !!(document.getElementById("modal-admin") && document.getElementById("modal-admin").classList.contains("open")) });
+            if(app._passageDisplaysDeferred) return;
         }
         const st = overrideCanon != null ? overrideCanon : (appData && typeof appData.sourceText === "string" ? appData.sourceText : "");
         try {
@@ -17266,13 +17296,17 @@ const ui = {
                 if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
                 if(typeof app.syncWJECAnchorInputsFromMeta === "function") app.syncWJECAnchorInputsFromMeta();
                 if(appData && appData.component !== 2) {
-                    if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage() && appData.sourceText) {
-                        const aiM = document.getElementById("ai-input");
-                        if(aiM && aiM.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
-                            app.setAiInputValue(String(appData.sourceText));
+                    if(app._passageDisplaysDeferred) {
+                        if(typeof app.hydratePassageForAdminEditor === "function") app.hydratePassageForAdminEditor();
+                    } else {
+                        if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage() && appData.sourceText) {
+                            const aiM = document.getElementById("ai-input");
+                            if(aiM && aiM.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
+                                app.setAiInputValue(String(appData.sourceText));
+                            }
                         }
+                        if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true });
                     }
-                    if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true });
                 }
             } catch(eModal) { console.warn("Admin modal sync deferred path failed:", eModal); }
         };
@@ -17341,7 +17375,7 @@ const ui = {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
         ui.openModal("modal-admin");
-        if(app._passageDisplaysDeferred && typeof app.scheduleDeferredPassageHydration === "function") app.scheduleDeferredPassageHydration();
+        if(app._passageDisplaysDeferred && typeof app.hydratePassageForAdminEditor === "function") app.hydratePassageForAdminEditor();
         try {
             if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
             else if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
@@ -17350,7 +17384,7 @@ const ui = {
         const run = () => {
             try {
                 if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAll) admin.renderAll();
+                if(admin.renderAll) admin.renderAll({ importPass: true, openAdminPass: true });
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
@@ -22969,7 +23003,7 @@ const admin = {
     },
     renderAll: function(opts) {
         opts = opts || {};
-        const importLite = !!(opts.importPass || app._importInProgress);
+        const importLite = !!(opts.importPass || opts.openAdminPass || app._importInProgress);
         try { admin.initTabs(); } catch(eTabs) {}
         try { admin.syncUI(); } catch(eSync) {}
         try { admin.bindAiAutoPrompt(); } catch(eAi) {}
