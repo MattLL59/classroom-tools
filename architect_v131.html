@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T12:00:00">
-<meta name="architect-deploy" content="data-btn-passage-fix">
+<meta name="architect-build" content="2026-05-24T12:15:00">
+<meta name="architect-deploy" content="stability-questions-cache">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -991,25 +991,6 @@
         else bindRecoveryButtons();
         try {
             if(/\brecovery=1\b/i.test(location.search)) window.__tsaSkipLessonLoad = true;
-            var raw = localStorage.getItem("tsa_v5_1_data");
-            if(raw && raw.length > 900000 && !window.__tsaSkipLessonLoad) {
-                window.__tsaDeferHeavyLessonGate = true;
-                window.__tsaShowCrashEarly("Saved lesson is about " + (Math.round(raw.length / 102400) / 10) + " MB. Loading it may freeze or crash the tab. Choose Reset lesson data only, open recovery mode, or Load anyway.");
-                var loadBtn = document.getElementById("btn-load-heavy-lesson");
-                if(loadBtn) {
-                    loadBtn.style.display = "block";
-                    if(!loadBtn.dataset.bound) {
-                        loadBtn.dataset.bound = "1";
-                        loadBtn.addEventListener("click", function() {
-                            window.__tsaUserConfirmedHeavyLoad = true;
-                            window.__tsaDeferHeavyLessonGate = false;
-                            var box = document.getElementById("emergency-reset");
-                            if(box) box.style.display = "none";
-                            if(typeof app !== "undefined" && app.init) app.init();
-                        });
-                    }
-                }
-            }
         } catch(eCh) {}
     })();
     </script>
@@ -1075,7 +1056,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524120000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524121500";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -7395,7 +7376,6 @@ const app = {
      * After Load JSON / unified paste: sync Insert width controls + `--exam-passage-max-width` from {@link appData.meta}, then rebuild C1 booklet HTML from canonical so row splits match saved **pdfInsertWidthCh** (avoids dashed line at Nch while rows were wrapped tighter, and makes slider changes affect layout again via {@link resyncC1PassageEditorWithInsertWidth}).
      */
     finishC1PassageLayoutAfterLessonLoad: function() {
-        if(app._passageDisplaysDeferred || app._heavyLessonOnLoad) return;
         if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
         if(typeof app.syncPassageMergeOrphanHangCheckboxFromMeta === "function") app.syncPassageMergeOrphanHangCheckboxFromMeta();
         if(typeof app.syncPassageStrictInsertEdgeCheckboxFromMeta === "function") app.syncPassageStrictInsertEdgeCheckboxFromMeta();
@@ -14756,8 +14736,6 @@ const app = {
         // CHECK FOR INJECTED STANDALONE DATA
         if (typeof window.STANDALONE_LESSON !== 'undefined') {
             appData = app.repair(window.STANDALONE_LESSON);
-            app._heavyLessonOnLoad = app.isHeavyLesson(appData);
-            if(app._heavyLessonOnLoad) app._passageDisplaysDeferred = true;
             appData.isStandalone = true;
             delete document.body.dataset.freeSelectSelectBound;
             delete document.body.dataset.freeSelectMouseBound;
@@ -14777,10 +14755,8 @@ const app = {
                     if(d.length > 6000000 && typeof window.__tsaShowCrash === "function") {
                         window.__tsaShowCrash("Saved lesson data is very large (" + Math.round(d.length / 1000000) + " MB). Try Reset lesson data only on the red panel, or clear tsa_v5_1_data in DevTools → Application.");
                     }
-                    app._heavyLessonOnLoad = d.length >= app.HEAVY_STORAGE_BYTES;
                     appData = app.repair(JSON.parse(d));
-                    if(!app._heavyLessonOnLoad) app._heavyLessonOnLoad = app.isHeavyLesson(appData, { rawBytes: d.length });
-                    if(app._heavyLessonOnLoad && app.dedupeLessonPassageInMemory) app.dedupeLessonPassageInMemory(appData);
+                    if(app.dedupeLessonPassageInMemory) app.dedupeLessonPassageInMemory(appData);
                 } catch(e) {
                     if(typeof window.__tsaShowCrash === "function") {
                         window.__tsaShowCrash("Could not load saved lesson.\n\n" + (e && e.message ? e.message : String(e)) + "\n\nTry Reset lesson data only (keeps other settings) or Emergency Reset.");
@@ -14850,13 +14826,15 @@ const app = {
 
         try {
             if(app.mergeLessonExtractCacheOnLoad && app.mergeLessonExtractCacheOnLoad(appData)) app._extractCacheMergedOnLoad = true;
-            if(!app._heavyLessonOnLoad) {
-                app.normalizeLessonQuestionsAfterRepair(appData, null);
-                if(typeof admin !== "undefined" && admin.ensureMarkSchemeParsedFromLayout) admin.ensureMarkSchemeParsedFromLayout();
-            }
+            app.normalizeLessonQuestionsAfterRepair(appData, null);
+            if(typeof admin !== "undefined" && admin.ensureMarkSchemeParsedFromLayout) admin.ensureMarkSchemeParsedFromLayout();
             if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
         } catch(eNorm) {}
-        if(app._heavyLessonOnLoad) app._passageDisplaysDeferred = true;
+        app._passageDisplaysDeferred = false;
+        app._heavyLessonOnLoad = false;
+        app._adminPassageHydrateDone = false;
+        app._adminPassageHydrateInFlight = false;
+        try { app.enforceLessonSizeLimits(appData, { alert: true, alertDelay: 1200 }); } catch(eLim) {}
 
         if(!appData.isStandalone) {
             if(!window.__tsaEscBound) {
@@ -14888,7 +14866,7 @@ const app = {
 
         if(ui._sendToBuilderGuard) ui._sendToBuilderGuard = false;
         try {
-            if(!app._heavyLessonOnLoad && typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
             if(typeof admin !== "undefined" && admin.derivePointsFromQuestions) admin.derivePointsFromQuestions();
             ui.init();
         } catch(e) {
@@ -14916,7 +14894,7 @@ const app = {
             const ent = bank[l];
             totalTarget += (ent && ent.quoteTarget != null) ? Math.max(1, parseInt(ent.quoteTarget, 10) || 4) : 4;
         }
-        const cap = Math.max(60, Math.min(120, totalTarget * 2));
+        const cap = Math.max(40, Math.min(app.MAX_GOOD_QUOTES_ON_LOAD || 80, totalTarget * 2));
         const good = safe.items.filter(i => i && i.correct !== false);
         const bad = safe.items.filter(i => !i || i.correct === false);
         if(good.length <= cap) return;
@@ -15433,6 +15411,7 @@ const app = {
             const parsedMs = app.parseMarkSchemeFromText(safe.component2Layout.markSchemeText);
             if(parsedMs && Object.keys(parsedMs).length) safe.markScheme = parsedMs;
         }
+        try { app.enforceLessonSizeLimits(safe, { alert: false }); } catch(eCap) {}
         return safe;
     },
 
@@ -15441,9 +15420,11 @@ const app = {
     _heavyLessonOnLoad: false,
     _passageDisplaysDeferred: false,
     _importInProgress: false,
-    HEAVY_SOURCE_CHARS: 90000,
-    HEAVY_STORAGE_BYTES: 1100000,
-    HEAVY_REPAIR_SOURCE_CHARS: 180000,
+    HEAVY_SOURCE_CHARS: 400000,
+    HEAVY_STORAGE_BYTES: 2500000,
+    HEAVY_REPAIR_SOURCE_CHARS: 350000,
+    MAX_GOOD_QUOTES_ON_LOAD: 80,
+    MAX_LESSON_ITEMS: 200,
     isHeavyLesson: function(data, opts) {
         opts = opts || {};
         const d = data || appData;
@@ -15451,11 +15432,32 @@ const app = {
         if(opts.rawBytes != null && opts.rawBytes >= app.HEAVY_STORAGE_BYTES) return true;
         const st = typeof d.sourceText === "string" ? d.sourceText : "";
         if(st.length >= app.HEAVY_SOURCE_CHARS) return true;
-        const sel = d.selection && d.selection.text && typeof d.selection.text.source === "string" ? d.selection.text.source : "";
-        if(sel.length >= app.HEAVY_SOURCE_CHARS) return true;
-        const items = Array.isArray(d.items) ? d.items.length : 0;
-        if(items > 350 && st.length > 40000) return true;
         return false;
+    },
+    /** Caps run on repair/import so AI dumps and huge quote banks cannot freeze the tab. */
+    enforceLessonSizeLimits: function(safe, opts) {
+        opts = opts || {};
+        if(!safe || typeof safe !== "object") return { trimmed: false, messages: [] };
+        const messages = [];
+        let trimmed = false;
+        if(Array.isArray(safe.items) && safe.items.length > app.MAX_LESSON_ITEMS) {
+            safe.items = safe.items.slice(0, app.MAX_LESSON_ITEMS);
+            trimmed = true;
+            messages.push("Quote list trimmed to " + app.MAX_LESSON_ITEMS + " rows (lesson was too large).");
+        }
+        app.reduceGoodQuotesToTargetsOnImport(safe);
+        const goodN = Array.isArray(safe.items) ? safe.items.filter(i => i && i.correct !== false).length : 0;
+        if(goodN >= app.MAX_GOOD_QUOTES_ON_LOAD - 1) {
+            messages.push("Quote bank has " + goodN + " evidence rows (max recommended " + app.MAX_GOOD_QUOTES_ON_LOAD + "). Use Level Bank targets or trim in Editing Suite.");
+        }
+        const st = typeof safe.sourceText === "string" ? safe.sourceText : "";
+        if(st.length > app.HEAVY_SOURCE_CHARS) {
+            messages.push("Passage text is very long (" + Math.round(st.length / 1000) + "k characters). Consider a shorter source or split papers.");
+        }
+        if(opts.alert && messages.length) {
+            setTimeout(function() { alert(messages.join("\n\n")); }, opts.alertDelay || 400);
+        }
+        return { trimmed, messages };
     },
     dedupeLessonPassageInMemory: function(safe) {
         if(!safe || !safe.selection || !safe.selection.text) return;
@@ -15541,9 +15543,12 @@ const app = {
         return snap;
     },
     prepareImportedLesson: function(safe) {
-        if(safe) app.dedupeLessonPassageInMemory(safe);
-        app._heavyLessonOnLoad = app.isHeavyLesson(safe || appData);
-        app._passageDisplaysDeferred = !!app._heavyLessonOnLoad;
+        if(safe) {
+            app.dedupeLessonPassageInMemory(safe);
+            app.enforceLessonSizeLimits(safe, { alert: false });
+        }
+        app._heavyLessonOnLoad = false;
+        app._passageDisplaysDeferred = false;
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
     },
@@ -15583,14 +15588,6 @@ const app = {
             app._importInProgress = false;
             const stLen = appData && typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
             const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
-            if(app._heavyLessonOnLoad || app._passageDisplaysDeferred) {
-                if(!opts.silentHeavyMsg) {
-                    setTimeout(function() {
-                        alert("Lesson loaded (" + Math.round(stLen / 1000) + "k chars passage, " + itemN + " quotes). Open Data → Editing Suite or Quote Select to view the passage — loading everything at once can crash the tab.");
-                    }, 80);
-                }
-                return;
-            }
             if(!opts.skipPassageRelayout) {
                 if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
                 else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
@@ -16275,16 +16272,6 @@ const ui = {
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
     },
     refreshSourceDisplay: function(overrideContent) {
-        if(app._passageDisplaysDeferred) {
-            const ph = app.getPassageDeferPlaceholderHtml ? app.getPassageDeferPlaceholderHtml() : "";
-            const inline = document.getElementById("source-inline");
-            const inlineSelect = document.getElementById("source-inline-select");
-            const introText = document.getElementById("intro-text");
-            if(inline) inline.innerHTML = ph;
-            if(inlineSelect) inlineSelect.innerHTML = ph;
-            if(introText) introText.innerHTML = ph;
-            return;
-        }
         try {
             /** Lab/intro refresh must apply saved {@link meta.pdfInsertWidthCh} only — full DOM sync here re-read Insert width while focus is on Booklet line (or another control) and can collapse ch or fight booklet-only updates. */
             if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
@@ -16462,25 +16449,19 @@ const ui = {
             const levels = app.getActiveLevels();
             levelSelect.innerHTML = levels.map(n => `<option value="${n}">Lvl ${n}</option>`).join("");
         }
-        const deferPassageInit = !!app._passageDisplaysDeferred;
         let dispBundleInit = null;
-        let dispPassageHtml = "";
-        if(deferPassageInit) {
-            dispPassageHtml = app.getPassageDeferPlaceholderHtml ? app.getPassageDeferPlaceholderHtml() : "";
-        } else {
-            const levInitDisp = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
-            const scopeInitDisp = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
-            dispPassageHtml = app.formatSourceHtml(sourceForDisplay);
-            if(typeof sourceForDisplay === "string" && typeof app.buildPassagePaneHtmlForLevel === "function") {
-                const lineWinInit = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levInitDisp) : null;
-                const paneOptsInit = { warnHtml: "", scope: scopeInitDisp };
-                if(lineWinInit) {
-                    paneOptsInit.lineRange = lineWinInit.lineRange;
-                    paneOptsInit.displayLineRange = lineWinInit.displayLineRange;
-                }
-                dispBundleInit = app.buildPassagePaneHtmlForLevel(levInitDisp, sourceForDisplay, paneOptsInit);
-                dispPassageHtml = dispBundleInit.html;
+        const levInitDisp = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
+        const scopeInitDisp = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+        let dispPassageHtml = app.formatSourceHtml(sourceForDisplay);
+        if(typeof sourceForDisplay === "string" && typeof app.buildPassagePaneHtmlForLevel === "function") {
+            const lineWinInit = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levInitDisp) : null;
+            const paneOptsInit = { warnHtml: "", scope: scopeInitDisp };
+            if(lineWinInit) {
+                paneOptsInit.lineRange = lineWinInit.lineRange;
+                paneOptsInit.displayLineRange = lineWinInit.displayLineRange;
             }
+            dispBundleInit = app.buildPassagePaneHtmlForLevel(levInitDisp, sourceForDisplay, paneOptsInit);
+            dispPassageHtml = dispBundleInit.html;
         }
         const inline = document.getElementById("source-inline");
         if(inline) {
@@ -16548,11 +16529,7 @@ const ui = {
             const sel = document.getElementById("level-selector");
             if(sel) { sel.value = lvl; sel.disabled = true; sel.title = "Practice mode locks the selected level"; }
         }
-        if(app._passageDisplaysDeferred) {
-            ui.renderLab(null, { skipPassage: true });
-        } else {
-            ui.renderLab();
-        }
+        ui.renderLab();
 
         document.querySelectorAll(".modal").forEach(modal => {
             if(modal.dataset.backdropBound) return;
@@ -16563,8 +16540,6 @@ const ui = {
         });
         
         ui.showSplash();
-
-        if(!app._passageDisplaysDeferred && app.syncAdminAiInputFromLesson && appData && appData.component !== 2) app.syncAdminAiInputFromLesson({ force: true });
 
         const modulesActive = modules;
         const selectNav = document.getElementById("nav-select");
@@ -16635,10 +16610,12 @@ const ui = {
             if((app._initSaveNeeded || app._extractCacheMergedOnLoad) && typeof app.flushInitPersistence === "function") {
                 try { app.flushInitPersistence(); } catch(eFlush) {}
             }
+            try {
+                const btnAdm = document.getElementById("btn-admin");
+                if(btnAdm) { btnAdm.disabled = false; btnAdm.style.pointerEvents = "auto"; }
+            } catch(eBtn) {}
             if(typeof app.ensureAdminReady === "function") {
-                const runAdm = () => { try { app.ensureAdminReady(); } catch(e) {} };
-                if(typeof requestIdleCallback === "function") requestIdleCallback(runAdm, { timeout: 3000 });
-                else setTimeout(runAdm, 80);
+                try { app.ensureAdminReady(); } catch(eAdm) {}
             }
         }
     },
@@ -17258,9 +17235,6 @@ const ui = {
         if(navEl) navEl.classList.add("active");
         userState.view = v;
         if(!appData.isStandalone && !ui._initInProgress) app.save();
-        if(app._passageDisplaysDeferred && (v === "select" || v === "desk") && typeof app.scheduleDeferredPassageHydration === "function") {
-            app.scheduleDeferredPassageHydration();
-        }
         if(v === "select") {
             ui.renderSelection();
         } else if(v === "desk") {
@@ -17295,17 +17269,13 @@ const ui = {
                 if(typeof admin !== "undefined" && admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
                 if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
                 if(typeof app.syncWJECAnchorInputsFromMeta === "function") app.syncWJECAnchorInputsFromMeta();
-                if(appData && appData.component !== 2) {
-                    if(app._passageDisplaysDeferred) {
-                        if(typeof app.hydratePassageForAdminEditor === "function") app.hydratePassageForAdminEditor();
-                    } else {
-                        if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage() && appData.sourceText) {
-                            const aiM = document.getElementById("ai-input");
-                            if(aiM && aiM.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
-                                app.setAiInputValue(String(appData.sourceText));
-                            }
-                        }
-                        if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true });
+                if(appData && appData.component !== 2 && app.syncAdminAiInputFromLesson && !app._adminPassageHydrateInFlight) {
+                    app._adminPassageHydrateInFlight = true;
+                    try {
+                        app.syncAdminAiInputFromLesson({ force: false });
+                    } catch(eSync) {
+                    } finally {
+                        app._adminPassageHydrateInFlight = false;
                     }
                 }
             } catch(eModal) { console.warn("Admin modal sync deferred path failed:", eModal); }
@@ -17374,17 +17344,16 @@ const ui = {
     openAdmin: () => {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
-        ui.openModal("modal-admin");
-        if(app._passageDisplaysDeferred && typeof app.hydratePassageForAdminEditor === "function") app.hydratePassageForAdminEditor();
         try {
+            if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
             if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-            else if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
         } catch(ePrep) {}
+        ui.openModal("modal-admin");
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         const run = () => {
             try {
                 if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAll) admin.renderAll({ importPass: true, openAdminPass: true });
+                if(admin.renderAll) admin.renderAll({ openAdminPass: true });
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
