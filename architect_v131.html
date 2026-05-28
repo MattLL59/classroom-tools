@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T11:00:00">
-<meta name="architect-deploy" content="oom-light-init">
+<meta name="architect-build" content="2026-05-24T11:15:00">
+<meta name="architect-deploy" content="recovery-ui-fix">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -894,7 +894,9 @@
     .pick-screen.hidden { opacity: 0; pointer-events: none; }
     .pick-title { font-size: 1.4rem; font-weight: 800; color: var(--primary); }
 
-    #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; background: #d32f2f; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; }
+    #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483640; background: #d32f2f; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; pointer-events: auto; max-width: min(96vw, 520px); }
+    #emergency-reset .btn { pointer-events: auto; cursor: pointer; position: relative; z-index: 1; }
+    #emergency-reset a { color: #ffecb3; text-decoration: underline; pointer-events: auto; }
     #architect-deploy-ribbon {
         position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
         background: #004d40; color: #e0f2f1; font-size: 0.78rem; line-height: 1.35;
@@ -913,12 +915,104 @@
     <div id="save-status" style="position:fixed; top:10px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:white; padding:5px 15px; border-radius:20px; font-size:0.8rem; opacity:0; transition:0.3s; z-index:3000;">💾 Saved</div>
 
     <div id="emergency-reset">
-        <h2>⚠️ App Crashed</h2>
+        <h2>⚠️ App Crashed or frozen</h2>
         <p id="crash-summary">Something went wrong while loading or running the app (this is not always corrupted saved data).</p>
+        <p id="crash-manual" style="font-size:0.82rem;line-height:1.45;margin:10px 0 0 0;text-align:left;opacity:0.95;">
+            If buttons do nothing: use your browser menu → <strong>Settings → Privacy → Clear browsing data</strong> → only <strong>Cached images/files</strong> and <strong>Site data</strong> for this site (<code>mattll59.github.io</code>). Or open
+            <a id="crash-recovery-link" href="architect_v131.html?recovery=1&amp;b=1">recovery mode</a> (skips loading the saved lesson).
+        </p>
         <pre id="crash-detail" style="display:none; text-align:left; max-width:min(92vw,520px); max-height:40vh; overflow:auto; font-size:0.7rem; white-space:pre-wrap; background:rgba(0,0,0,0.25); padding:8px; border-radius:4px; margin-top:8px;"></pre>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:10px;" onclick="if(typeof app.clearLessonStorageOnly==='function')app.clearLessonStorageOnly(); else { localStorage.removeItem('tsa_v5_1_data'); location.reload(); }">Reset lesson data only</button>
-        <button class="btn btn-outline" style="background:white; color:black; margin-top:6px;" onclick="localStorage.clear(); location.reload();">Emergency Reset (clear all site data)</button>
+        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:10px;" id="btn-reset-lesson-only">Reset lesson data only</button>
+        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:6px;" id="btn-emergency-reset-all">Emergency reset (clear all site data)</button>
+        <button type="button" class="btn btn-outline" style="background:#fff8e1; color:#333; margin-top:6px; display:none;" id="btn-load-heavy-lesson">Load saved lesson anyway (may crash)</button>
     </div>
+    <script>
+    (function() {
+        function reloadFresh() {
+            try {
+                var u = new URL(location.href);
+                u.searchParams.set("b", String(Date.now()));
+                u.searchParams.delete("recovery");
+                location.replace(u.toString());
+            } catch(eU) {
+                location.reload();
+            }
+        }
+        window.__tsaResetLessonOnly = function() {
+            try {
+                localStorage.removeItem("tsa_v5_1_data");
+                localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
+                localStorage.removeItem("tsa_v5_1_questions_backup");
+            } catch(e) {}
+            reloadFresh();
+        };
+        window.__tsaEmergencyResetAll = function() {
+            try { localStorage.clear(); } catch(e) {}
+            reloadFresh();
+        };
+        window.__tsaShowCrashEarly = function(detail) {
+            try {
+                var splash = document.getElementById("splash-screen");
+                var celeb = document.getElementById("celebration-overlay");
+                var intro = document.getElementById("intro-text-screen");
+                var pick = document.getElementById("pick-quote-screen");
+                if(splash) { splash.classList.add("hidden"); splash.style.display = "none"; }
+                if(celeb) celeb.classList.add("hidden");
+                if(intro) intro.classList.add("hidden");
+                if(pick) pick.classList.add("hidden");
+                var box = document.getElementById("emergency-reset");
+                var pre = document.getElementById("crash-detail");
+                var sum = document.getElementById("crash-summary");
+                var dStr = detail != null ? String(detail) : "";
+                var oom = /out of memory|invalid string length|allocation failed|array buffer allocation/i.test(dStr);
+                if(sum && oom) {
+                    sum.textContent = "Out of memory (OOM): the browser ran out of RAM loading your saved lesson — usually a very large passage. Use Reset lesson data only below.";
+                }
+                if(pre && dStr) { pre.style.display = "block"; pre.textContent = dStr; }
+                if(box) box.style.display = "block";
+            } catch(e) {}
+        };
+        function bindRecoveryButtons() {
+            var b1 = document.getElementById("btn-reset-lesson-only");
+            var b2 = document.getElementById("btn-emergency-reset-all");
+            if(b1 && !b1.dataset.bound) { b1.dataset.bound = "1"; b1.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaResetLessonOnly(); }); }
+            if(b2 && !b2.dataset.bound) { b2.dataset.bound = "1"; b2.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaEmergencyResetAll(); }); }
+            var rec = document.getElementById("crash-recovery-link");
+            if(rec) {
+                try {
+                    var ru = new URL(location.href);
+                    ru.searchParams.set("recovery", "1");
+                    ru.searchParams.set("b", String(Date.now()));
+                    rec.href = ru.pathname + ru.search + ru.hash;
+                } catch(eL) { rec.href = "architect_v131.html?recovery=1&b=1"; }
+            }
+        }
+        if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindRecoveryButtons);
+        else bindRecoveryButtons();
+        try {
+            if(/\brecovery=1\b/i.test(location.search)) window.__tsaSkipLessonLoad = true;
+            var raw = localStorage.getItem("tsa_v5_1_data");
+            if(raw && raw.length > 900000 && !window.__tsaSkipLessonLoad) {
+                window.__tsaDeferHeavyLessonGate = true;
+                window.__tsaShowCrashEarly("Saved lesson is about " + (Math.round(raw.length / 102400) / 10) + " MB. Loading it may freeze or crash the tab. Choose Reset lesson data only, open recovery mode, or Load anyway.");
+                var loadBtn = document.getElementById("btn-load-heavy-lesson");
+                if(loadBtn) {
+                    loadBtn.style.display = "block";
+                    if(!loadBtn.dataset.bound) {
+                        loadBtn.dataset.bound = "1";
+                        loadBtn.addEventListener("click", function() {
+                            window.__tsaUserConfirmedHeavyLoad = true;
+                            window.__tsaDeferHeavyLessonGate = false;
+                            var box = document.getElementById("emergency-reset");
+                            if(box) box.style.display = "none";
+                            if(typeof app !== "undefined" && app.init) app.init();
+                        });
+                    }
+                }
+            }
+        } catch(eCh) {}
+    })();
+    </script>
 
     <div id="celebration-overlay" class="celebration hidden">
         <div class="celebration-confetti" id="celebration-confetti"></div>
@@ -981,7 +1075,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524104500";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524111500";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -14634,19 +14728,9 @@ const app = {
     },
     init: function() {
         window.__tsaShowCrash = function(detail) {
-            try {
+            if(typeof window.__tsaShowCrashEarly === "function") window.__tsaShowCrashEarly(detail);
+            else try {
                 const box = document.getElementById("emergency-reset");
-                const pre = document.getElementById("crash-detail");
-                const sum = document.getElementById("crash-summary");
-                const dStr = detail != null ? (typeof detail === "string" ? detail : String(detail)) : "";
-                const oom = /out of memory|invalid string length|allocation failed|array buffer allocation/i.test(dStr);
-                if(sum && oom) {
-                    sum.textContent = "The browser ran out of memory loading this lesson (usually a very large saved passage). Use Reset lesson data only below, or clear tsa_v5_1_data in DevTools → Application. Your question extract may remain in tsa_v5_1_lesson_extract_cache.";
-                }
-                if(pre && detail) {
-                    pre.style.display = "block";
-                    pre.textContent = dStr;
-                }
                 if(box) box.style.display = "block";
             } catch(e) {}
         };
@@ -14671,6 +14755,8 @@ const app = {
         // CHECK FOR INJECTED STANDALONE DATA
         if (typeof window.STANDALONE_LESSON !== 'undefined') {
             appData = app.repair(window.STANDALONE_LESSON);
+            app._heavyLessonOnLoad = app.isHeavyLesson(appData);
+            if(app._heavyLessonOnLoad) app._passageDisplaysDeferred = true;
             appData.isStandalone = true;
             delete document.body.dataset.freeSelectSelectBound;
             delete document.body.dataset.freeSelectMouseBound;
@@ -14678,6 +14764,10 @@ const app = {
             const mod = document.getElementById('modal-admin'); if(mod) mod.remove();
             document.querySelectorAll('.modal.open').forEach(m => m.classList.remove('open'));
 
+        } else if(window.__tsaSkipLessonLoad) {
+            appData = app.repair(JSON.parse(JSON.stringify(defaultData)));
+            app._heavyLessonOnLoad = false;
+            app._passageDisplaysDeferred = false;
         } else {
             // NORMAL TEACHER MODE - always repair a copy so defaultData is never mutated
             const d = localStorage.getItem('tsa_v5_1_data');
@@ -15402,12 +15492,15 @@ const app = {
         else setTimeout(run, 120);
     },
     clearLessonStorageOnly: function() {
-        try {
-            localStorage.removeItem("tsa_v5_1_data");
-            localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
-            localStorage.removeItem("tsa_v5_1_questions_backup");
-        } catch(e) {}
-        location.reload();
+        if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
+        else {
+            try {
+                localStorage.removeItem("tsa_v5_1_data");
+                localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
+                localStorage.removeItem("tsa_v5_1_questions_backup");
+            } catch(e) {}
+            location.reload();
+        }
     },
     /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
     getLessonCacheFingerprint: function(data) {
@@ -31838,7 +31931,17 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootTabs);
     else bootTabs();
 })();
-window.onload = app.init;
+window.__tsaBootArchitect = function() {
+    if(window.__tsaDeferHeavyLessonGate && !window.__tsaUserConfirmedHeavyLoad) return;
+    try { app.init(); } catch(eBoot) {
+        if(typeof window.__tsaShowCrashEarly === "function") {
+            window.__tsaShowCrashEarly((eBoot && eBoot.message ? eBoot.message : String(eBoot)) + (eBoot && eBoot.stack ? "\n\n" + eBoot.stack : ""));
+        }
+    }
+};
+window.onload = function() {
+    setTimeout(window.__tsaBootArchitect, window.__tsaDeferHeavyLessonGate ? 0 : 60);
+};
 </script>
 </body>
 </html>
