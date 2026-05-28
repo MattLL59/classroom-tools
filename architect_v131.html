@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T12:15:00">
-<meta name="architect-deploy" content="stability-questions-cache">
+<meta name="architect-build" content="2026-05-24T12:30:00">
+<meta name="architect-deploy" content="data-open-safe">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -5816,6 +5816,7 @@ const app = {
     syncAdminAiInputFromLesson: function(opts) {
         opts = opts || {};
         if(!appData || appData.component === 2) return;
+        if(app._deferAdminPassageUntilDemand && !opts.force && !opts.userDemand) return;
         const el = document.getElementById("ai-input");
         if(!el || el.getAttribute("contenteditable") !== "true") return;
         /** Snapshot before any lesson sync: force-sync must not rebuild from stale appData.sourceText while #ai-input still holds exam gutters (openModal / tab sync). */
@@ -15476,8 +15477,61 @@ const app = {
     },
     _adminPassageHydrateDone: false,
     _adminPassageHydrateInFlight: false,
+    _deferAdminPassageUntilDemand: false,
+    _adminLiteOpen: false,
+    ADMIN_PASSAGE_DEFER_CHARS: 28000,
+    /** Skip building exam gutters in #ai-input on Data open (large passage / big quote bank). */
+    shouldDeferAdminPassageHydration: function() {
+        if(!appData || appData.component === 2) return false;
+        const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
+        if(st.length >= app.ADMIN_PASSAGE_DEFER_CHARS) return true;
+        if(st.length > 6000 && app.isStructuredPassageSource && app.isStructuredPassageSource(st)) return true;
+        const itemsN = Array.isArray(appData.items) ? appData.items.length : 0;
+        if(itemsN > 18) return true;
+        try {
+            const raw = localStorage.getItem("tsa_v5_1_data");
+            if(raw && raw.length >= (app.HEAVY_STORAGE_BYTES || 2500000) * 0.45) return true;
+        } catch(eLs) {}
+        return false;
+    },
+    setAdminPassageDeferredPlaceholder: function() {
+        const el = document.getElementById("ai-input");
+        if(!el || el.getAttribute("contenteditable") !== "true") return;
+        if(!app._isC1PassageEditorsVisuallyEmpty()) return;
+        let kb = 0;
+        try {
+            const st = (appData && typeof appData.sourceText === "string") ? appData.sourceText : "";
+            kb = Math.max(1, Math.round(st.length / 1000));
+        } catch(eLen) {}
+        el.innerHTML = `<div class="architect-admin-passage-placeholder" style="padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:0.88rem;line-height:1.45;">
+            <div style="font-weight:700;margin-bottom:6px;">Passage not loaded in editor</div>
+            <div style="margin-bottom:10px;opacity:0.9;">Your saved lesson has about <strong>${kb}k</strong> characters of source text. Building the full exam layout here as soon as you open Data was crashing the browser.</div>
+            <button type="button" class="btn btn-primary btn-small" onclick="app.loadAdminPassageOnDemand()">Load passage in editor</button>
+            <span style="font-size:0.8rem;opacity:0.75;margin-left:8px;">Lab and Quote Select still use the saved passage.</span>
+        </div>`;
+        if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+    },
+    loadAdminPassageOnDemand: function() {
+        if(!appData || appData.component === 2) return;
+        app._deferAdminPassageUntilDemand = false;
+        app._adminPassageHydrateDone = false;
+        const el = document.getElementById("ai-input");
+        if(el) el.innerHTML = `<div style="padding:10px;opacity:0.75;">Loading passage…</div>`;
+        const run = function() {
+            try {
+                if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+                app._adminPassageHydrateDone = true;
+            } catch(eLoad) {
+                console.warn("loadAdminPassageOnDemand:", eLoad);
+                if(el) el.innerHTML = `<div style="padding:10px;color:var(--error);">Could not load passage. Try recovery mode or trim the lesson in JSON.</div>`;
+            }
+        };
+        if(typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+        else setTimeout(run, 0);
+    },
     /** Data button only: load #ai-input passage without rebuilding Lab + Quote Select (avoids triple sync crash). */
     hydratePassageForAdminEditor: function() {
+        if(app._deferAdminPassageUntilDemand) return;
         if(app._adminPassageHydrateDone || app._adminPassageHydrateInFlight) return;
         if(!appData || appData.component === 2) return;
         const run = function() {
@@ -15499,7 +15553,7 @@ const app = {
         opts = opts || {};
         if(!app._passageDisplaysDeferred) return;
         if(opts.adminEditorOnly) {
-            app.hydratePassageForAdminEditor();
+            if(!app._deferAdminPassageUntilDemand) app.hydratePassageForAdminEditor();
             return;
         }
         app._passageDisplaysDeferred = false;
@@ -17264,20 +17318,10 @@ const ui = {
         if(id !== "modal-admin") return;
         const runAdminModalSync = function() {
             try {
-                if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
-                if(typeof admin !== "undefined" && admin.syncSourceEditorMode) admin.syncSourceEditorMode();
                 if(typeof admin !== "undefined" && admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
                 if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
                 if(typeof app.syncWJECAnchorInputsFromMeta === "function") app.syncWJECAnchorInputsFromMeta();
-                if(appData && appData.component !== 2 && app.syncAdminAiInputFromLesson && !app._adminPassageHydrateInFlight) {
-                    app._adminPassageHydrateInFlight = true;
-                    try {
-                        app.syncAdminAiInputFromLesson({ force: false });
-                    } catch(eSync) {
-                    } finally {
-                        app._adminPassageHydrateInFlight = false;
-                    }
-                }
+                /* Do not sync #ai-input passage here — openAdmin + renderAll handle it; sync on open caused OOM/crash. */
             } catch(eModal) { console.warn("Admin modal sync deferred path failed:", eModal); }
         };
         if(typeof requestAnimationFrame === "function") requestAnimationFrame(runAdminModalSync);
@@ -17344,6 +17388,9 @@ const ui = {
     openAdmin: () => {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
+        app._adminLiteOpen = true;
+        app._deferAdminPassageUntilDemand = !!(app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration());
+        if(app._deferAdminPassageUntilDemand && app.setAdminPassageDeferredPlaceholder) app.setAdminPassageDeferredPlaceholder();
         try {
             if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
             if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
@@ -17358,8 +17405,8 @@ const ui = {
                 console.error("Settings render failed:", e);
                 try {
                     if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                    if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
-                    if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+                    if(typeof admin.scheduleDeferredAdminPanels === "function") admin.scheduleDeferredAdminPanels();
+                    else if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
                 } catch(e2) { console.error(e2); }
             }
         };
@@ -22940,7 +22987,7 @@ const admin = {
             if(k === "edit" && appData && appData.component === 2 && typeof admin.fillC2PooledEditorFromLayout === "function") {
                 admin.fillC2PooledEditorFromLayout();
             }
-            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab({ skipPassageSync: !!app._deferAdminPassageUntilDemand });
         } catch(eSync) {}
     },
     goAdminTab: function(key) {
@@ -22970,17 +23017,28 @@ const admin = {
         } catch(e) { saved = "edit"; }
         admin.activateAdminTab(saved);
     },
+    scheduleDeferredAdminPanels: function() {
+        const qb = document.getElementById("quotes-bank-list");
+        if(qb && !qb.querySelector(".architect-admin-panels-loading")) {
+            qb.innerHTML = "<div class=\"architect-admin-panels-loading\" style=\"opacity:0.7;padding:8px 0;\">Loading quote bank…</div>";
+        }
+        const run = function() {
+            app._adminLiteOpen = false;
+            try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) { console.warn("deferred renderQuotesBank:", eQb); }
+            try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
+            try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
+            if(!app._deferAdminPassageUntilDemand && appData && appData.component !== 2 && app.syncAdminAiInputFromLesson && app._isC1PassageEditorsVisuallyEmpty && app._isC1PassageEditorsVisuallyEmpty()) {
+                try { app.syncAdminAiInputFromLesson({ force: false }); } catch(ePass) {}
+            }
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3500 });
+        else setTimeout(run, 100);
+    },
     renderAll: function(opts) {
         opts = opts || {};
         const importLite = !!(opts.importPass || opts.openAdminPass || app._importInProgress);
         try { admin.initTabs(); } catch(eTabs) {}
         try { admin.syncUI(); } catch(eSync) {}
-        try { admin.bindAiAutoPrompt(); } catch(eAi) {}
-        try { admin.ensureAiStepVisible(); } catch(eStep) {}
-        try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
-        try { admin.renderQuotesBank(); } catch(eQb) {}
-        try { admin.renderSelectionEditor(); } catch(eSel) {}
-        try { admin.renderGlobalList(); } catch(eGl) {}
         try {
             const lvl = typeof currentConfigLevel === "number" ? currentConfigLevel : 1;
             admin.renderConfig(lvl);
@@ -22988,8 +23046,23 @@ const admin = {
         } catch(eLb) {}
         if(importLite) {
             try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
+            if(opts.openAdminPass && admin.scheduleDeferredAdminPanels) admin.scheduleDeferredAdminPanels();
+            else {
+                try { admin.bindAiAutoPrompt(); } catch(eAi) {}
+                try { admin.ensureAiStepVisible(); } catch(eStep) {}
+                try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
+                try { admin.renderQuotesBank(); } catch(eQb) {}
+                try { admin.renderSelectionEditor(); } catch(eSel) {}
+                try { admin.renderGlobalList(); } catch(eGl) {}
+            }
             return;
         }
+        try { admin.bindAiAutoPrompt(); } catch(eAi) {}
+        try { admin.ensureAiStepVisible(); } catch(eStep) {}
+        try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
+        try { admin.renderQuotesBank(); } catch(eQb) {}
+        try { admin.renderSelectionEditor(); } catch(eSel) {}
+        try { admin.renderGlobalList(); } catch(eGl) {}
         try { if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
         try { if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
         try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
@@ -23141,14 +23214,15 @@ const admin = {
             singleWrap.classList.remove("hidden");
             if(c2AiHint) c2AiHint.classList.add("hidden");
         }
-        if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-        if(!useC2Editors && app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: false });
+        if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab({ skipPassageSync: true });
+        if(!useC2Editors && app.syncAdminAiInputFromLesson && !app._deferAdminPassageUntilDemand && !app._adminLiteOpen) app.syncAdminAiInputFromLesson({ force: false });
     },
     /**
      * One #source-text-single-wrap / #ai-input: park it under Editing Suite for C1 (default tab) or under Load & AI when that tab is active,
      * so teachers are not sent away from the Editing Suite to find the passage. C2 lessons hide the C1 block entirely.
      */
-    placeC1SourceWrapForAdminTab: function() {
+    placeC1SourceWrapForAdminTab: function(opts) {
+        opts = opts || {};
         if(!appData) return;
         const singleWrap = document.getElementById("source-text-single-wrap");
         const mountAi = document.getElementById("c1-source-editor-mount-ai");
@@ -23165,7 +23239,7 @@ const admin = {
         const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
         const target = (tab === "ai" ? mountAi : (mountEdit || mountAi));
         if(target && singleWrap.parentNode !== target) target.appendChild(singleWrap);
-        if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: false });
+        if(!opts.skipPassageSync && app.syncAdminAiInputFromLesson && !app._deferAdminPassageUntilDemand && !app._adminLiteOpen) app.syncAdminAiInputFromLesson({ force: false });
     },
     /** One-click: lesson was loaded as C1 but teacher wants Editing Suite C2 passages — no full re-import required. */
     promoteLessonToComponent2: function() {
@@ -26728,7 +26802,12 @@ const admin = {
         admin._renderingQuotesBank = true;
         try {
         if(!appData) { wrap.innerHTML = "<div style='opacity:0.7;'>Load a lesson first.</div>"; return; }
-        admin.ensureSelectionData();
+        if(admin.ensureSelectionData && !app._adminLiteOpen) admin.ensureSelectionData();
+        else if(admin.ensureSelectionData && app._adminLiteOpen) {
+            if(!appData.selection || typeof appData.selection !== "object") appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items, lessonSourceText: appData.sourceText });
+            if(!Array.isArray(appData.items)) appData.items = [];
+            if(!Array.isArray(appData.selection.items) || appData.selection.items !== appData.items) appData.selection.items = appData.items;
+        }
         if(admin.quotesBankViewLevel == null) admin.quotesBankViewLevel = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
         if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
         if(admin.renderQuotesBankModeBar) admin.renderQuotesBankModeBar();
