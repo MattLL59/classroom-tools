@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T13:30:00">
-<meta name="architect-deploy" content="past-paper-safe">
+<meta name="architect-build" content="2026-05-24T13:45:00">
+<meta name="architect-deploy" content="extract-questions-visible">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15838,9 +15838,13 @@ const app = {
                 if(opts.includeQuestions && typeof admin !== "undefined") {
                     if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
                     if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+                    if(admin.afterExtractQuestionsUi) {
+                        admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
+                    } else if(admin.refreshQuestionsList) admin.refreshQuestionsList();
+                } else if(typeof admin !== "undefined" && admin.refreshQuestionsList) {
+                    admin.refreshQuestionsList();
                 }
                 if(typeof admin !== "undefined") {
-                    if(admin.refreshQuestionsList) admin.refreshQuestionsList();
                     if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
                     if(admin.renderAll) admin.renderAll({ importPass: true });
                 }
@@ -22928,19 +22932,32 @@ const admin = {
             const pdf = await app._pdfTryGetDocumentFromBuffer(ab);
             const pagesToUse = c2SectionBAllPages ? null : (pages && pages.length ? pages : null);
             const byPage = {};
-            for(let p = 1; p <= pdf.numPages; p++) {
+            const extractPageToCache = async (p) => {
+                if(byPage[p] !== undefined) return byPage[p];
+                if(p < 1 || p > pdf.numPages) { byPage[p] = ""; return ""; }
                 const page = await pdf.getPage(p);
                 const layoutText = await admin.extractPageTextWithLayout(page);
                 byPage[p] = String(layoutText || "").trim();
-            }
+                return byPage[p];
+            };
             const joinPages = (nums) => (nums && nums.length ? nums.map(p => byPage[p]).filter(Boolean) : []).join("\n\n").trim();
-            const fromSpec = pagesToUse ? joinPages(pagesToUse) : "";
-            const fromAll = [...Array(pdf.numPages)].map((_, i) => byPage[i + 1]).filter(Boolean).join("\n\n").trim();
+            const pagesToReadFirst = (pagesToUse && pagesToUse.length) ? pagesToUse.slice() : [...Array(pdf.numPages)].map((_, i) => i + 1);
+            for(let ri = 0; ri < pagesToReadFirst.length; ri++) {
+                await extractPageToCache(pagesToReadFirst[ri]);
+            }
+            const fromSpec = pagesToUse ? joinPages(pagesToUse) : joinPages(pagesToReadFirst);
+            let fromAll = (pagesToReadFirst.length >= pdf.numPages) ? fromSpec : "";
             /* Prefer selected page(s); if that yields nothing (wrong default), parse the whole Questions PDF. */
             let questionsSectionText = (fromSpec || fromAll).trim();
             if(!questionsSectionText) { alert("No text extracted from the selected page(s)."); return; }
             let parsed = admin.finalizeExtractedQuestionPrompts(admin.parseQuestionsFromText(questionsSectionText));
             const restrictRe = admin.isPastPaperQuestionsPageRangeRestricted();
+            if(parsed.length < 2 && fromSpec && !fromAll && !restrictRe) {
+                for(let p = 1; p <= pdf.numPages; p++) {
+                    if(byPage[p] === undefined) await extractPageToCache(p);
+                }
+                fromAll = [...Array(pdf.numPages)].map((_, i) => byPage[i + 1]).filter(Boolean).join("\n\n").trim();
+            }
             if(parsed.length < 2 && fromSpec && fromAll && fromSpec.trim() !== fromAll.trim() && !restrictRe) {
                 const alt = admin.finalizeExtractedQuestionPrompts(admin.parseQuestionsFromText(fromAll));
                 if(alt.length > parsed.length) {
@@ -22983,13 +23000,12 @@ const admin = {
             app.save();
             admin.syncLevelBankForPastPaperQuestions();
             admin.autoAssignLevelsByLineRangeIfApplicable();
-            admin.refreshQuestionsList();
-            ui.renderSelection && ui.renderSelection();
             if(parsed.length >= 1) {
-                alert(parsed.length + " question(s) extracted.");
+                alert(parsed.length + " question(s) extracted. Open Load & AI → Focus questions (Evidence Lab is hidden). Students see the focus question on Quote Select and Writing Desk.");
             } else {
-                alert("No Section A reading questions detected. The full Questions PDF was used as fallback — check Section A reading page range (include every page with [1]/[10] tasks, e.g. 1-2) or paste questions manually.");
+                alert("No Section A reading questions detected. The full Questions PDF was used as fallback — check Section A reading page range (include every page with [1]/[10] tasks, e.g. 1-2) or paste questions manually in Load & AI → Focus questions.");
             }
+            admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
             alert("Could not re-extract: " + (e.message || String(e)));
         }
@@ -26237,7 +26253,8 @@ const admin = {
         }
         return outer;
     },
-    refreshQuestionsList: () => {
+    refreshQuestionsList: (opts) => {
+        opts = opts || {};
         const mounts = Array.from(document.querySelectorAll(".questions-list-mount")).filter(Boolean);
         if(!mounts.length) return;
         if(!Array.isArray(appData.questions)) appData.questions = [{ id: "q1", prompt: appData.question || "" }];
@@ -26268,7 +26285,34 @@ const admin = {
                 m.appendChild(admin._createQuestionRowElement(q, i, questions));
             });
         });
-        if(document.getElementById("level-bank-editor")) admin._renderLevelBankDOM();
+        if(!opts.skipLevelBank && document.getElementById("level-bank-editor")) {
+            const renderLb = () => { try { admin._renderLevelBankDOM(); } catch(eLb) {} };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(renderLb, { timeout: 800 });
+            else setTimeout(renderLb, 0);
+        }
+    },
+    /** After Extract questions: refresh admin list + student Quote Select / Desk banners. */
+    afterExtractQuestionsUi: function(parsedCount) {
+        try {
+            if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
+            admin.refreshQuestionsList({ skipLevelBank: false });
+            if(typeof admin.renderLevelBank === "function") admin.renderLevelBank();
+            if(typeof ui !== "undefined") {
+                if(ui.renderQuestionBanner) ui.renderQuestionBanner();
+                if(ui.renderSelection) ui.renderSelection();
+                if(userState && userState.view === "desk") {
+                    if(ui.updateCommitAnswerPanel) ui.updateCommitAnswerPanel();
+                    if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
+                }
+            }
+            if(typeof admin.goAdminTab === "function") admin.goAdminTab("ai");
+            const ql = document.getElementById("questions-list");
+            if(ql) {
+                try { ql.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
+            }
+        } catch(eUi) {
+            console.warn("afterExtractQuestionsUi:", eUi);
+        }
     },
     /** Swap two questions in order (fixes PDF split order). Preserves each question’s id for level bank / quote links. */
     moveQuestionRow: (index, delta) => {
@@ -30659,14 +30703,13 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         if(!items.length || !sourceText.trim()) return;
         admin.autoAssignSelectionLevelsByLineRange(opts || {});
     },
-    /** After past paper extraction: map L1→q1, L2→q2 etc. and set active levels. Call when we have 2+ questions. */
+    /** After past paper extraction: map L1→q1, L2→q2 etc. and set active levels. */
     syncLevelBankForPastPaperQuestions: () => {
         if(appData && typeof app.normalizeLessonQuestionsAfterRepair === "function") app.normalizeLessonQuestionsAfterRepair(appData, null);
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
-        if(questions.length < 2) return;
+        if(questions.length < 1) return;
         if(!appData.settings) appData.settings = {};
         if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
-        const norm = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const sorted = questions.slice().sort((a, b) => {
             const ma = String(a.id || "").match(/q0?(\d+)/i);
             const mb = String(b.id || "").match(/q0?(\d+)/i);
@@ -30684,7 +30727,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         }
         if(typeof admin.syncLevelBankC2TextsFromFocusQuestions === "function") admin.syncLevelBankC2TextsFromFocusQuestions();
         appData.settings.activeLevels = sorted.map((_, i) => i + 1);
-        app.save();
+        if(typeof app.save === "function") app.save({ skipRender: true, silent: true });
     },
     capSelectionCountsToTargets: () => {
         admin.ensureSelectionData();
