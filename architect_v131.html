@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T13:45:00">
-<meta name="architect-deploy" content="extract-questions-visible">
+<meta name="architect-build" content="2026-05-24T14:00:00">
+<meta name="architect-deploy" content="fix-question-wipe-race">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15838,15 +15838,16 @@ const app = {
                 if(opts.includeQuestions && typeof admin !== "undefined") {
                     if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
                     if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
-                    if(admin.afterExtractQuestionsUi) {
-                        admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
-                    } else if(admin.refreshQuestionsList) admin.refreshQuestionsList();
                 } else if(typeof admin !== "undefined" && admin.refreshQuestionsList) {
                     admin.refreshQuestionsList();
                 }
                 if(typeof admin !== "undefined") {
                     if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
                     if(admin.renderAll) admin.renderAll({ importPass: true });
+                }
+                if(opts.includeQuestions && typeof admin !== "undefined" && admin.afterExtractQuestionsUi) {
+                    try { localStorage.setItem("tsa_admin_tab", "ai"); } catch(eTab) {}
+                    admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
                 }
                 if(!app._passageDisplaysDeferred && !opts.loadAsComponent2 && appData && appData.sourceText && String(appData.sourceText).trim()) {
                     if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
@@ -15910,10 +15911,13 @@ const app = {
     },
     /** Flush focus-question inputs into appData before writing localStorage (if the list is on screen). */
     persistLessonBeforeSave: function() {
+        if(app._suppressAdminInputFlushOnce) return;
         if(typeof admin === "undefined" || !admin.syncQuestionsFromListCore) return;
         const mounts = document.querySelectorAll(".questions-list-mount");
         if(!mounts.length) return;
-        try { admin.syncQuestionsFromListCore(); } catch(e) {}
+        const hasRows = Array.from(mounts).some(m => m && m.children && m.children.length > 0);
+        if(!hasRows) return;
+        try { admin.syncQuestionsFromListCore({ fromPersistHook: true }); } catch(e) {}
     },
     /** Restores questions and mark scheme from browser cache when the main lesson JSON lost them on reload. */
     mergeLessonExtractCacheOnLoad: function(safe) {
@@ -15979,7 +15983,7 @@ const app = {
     save: function(opts) {
         opts = opts || {};
         try {
-            if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
+            if(!opts.skipQuestionPersist && app.persistLessonBeforeSave) app.persistLessonBeforeSave();
             if(!appData.isStandalone) {
                 try {
                     localStorage.setItem('tsa_v5_1_data', JSON.stringify(appData));
@@ -22952,13 +22956,13 @@ const admin = {
             if(!questionsSectionText) { alert("No text extracted from the selected page(s)."); return; }
             let parsed = admin.finalizeExtractedQuestionPrompts(admin.parseQuestionsFromText(questionsSectionText));
             const restrictRe = admin.isPastPaperQuestionsPageRangeRestricted();
-            if(parsed.length < 2 && fromSpec && !fromAll && !restrictRe) {
+            if(parsed.length === 0 && fromSpec && !fromAll && !restrictRe) {
                 for(let p = 1; p <= pdf.numPages; p++) {
                     if(byPage[p] === undefined) await extractPageToCache(p);
                 }
                 fromAll = [...Array(pdf.numPages)].map((_, i) => byPage[i + 1]).filter(Boolean).join("\n\n").trim();
             }
-            if(parsed.length < 2 && fromSpec && fromAll && fromSpec.trim() !== fromAll.trim() && !restrictRe) {
+            if(parsed.length < 2 && parsed.length >= 1 && fromSpec && fromAll && fromSpec.trim() !== fromAll.trim() && !restrictRe) {
                 const alt = admin.finalizeExtractedQuestionPrompts(admin.parseQuestionsFromText(fromAll));
                 if(alt.length > parsed.length) {
                     parsed = alt;
@@ -22997,13 +23001,15 @@ const admin = {
                 const inp = document.getElementById("past-paper-question-pages-questions");
                 appData.component2Layout.questionPaperPagesForQuestions = (inp && inp.value && inp.value.trim()) ? inp.value.trim() : "2";
             }
-            app.save();
+            app.save({ skipQuestionPersist: true, skipRender: true });
             admin.syncLevelBankForPastPaperQuestions();
             admin.autoAssignLevelsByLineRangeIfApplicable();
+            admin.refreshQuestionsList();
+            app.save({ skipRender: true });
             if(parsed.length >= 1) {
-                alert(parsed.length + " question(s) extracted. Open Load & AI → Focus questions (Evidence Lab is hidden). Students see the focus question on Quote Select and Writing Desk.");
+                alert(parsed.length + " question(s) extracted into Load & AI → Focus questions. Students see them on Quote Select / Writing Desk (Focus Question banner).");
             } else {
-                alert("No Section A reading questions detected. The full Questions PDF was used as fallback — check Section A reading page range (include every page with [1]/[10] tasks, e.g. 1-2) or paste questions manually in Load & AI → Focus questions.");
+                alert("No Section A reading questions detected on page 2 — check the page range or paste questions manually in Load & AI → Focus questions.");
             }
             admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
@@ -26294,6 +26300,7 @@ const admin = {
     /** After Extract questions: refresh admin list + student Quote Select / Desk banners. */
     afterExtractQuestionsUi: function(parsedCount) {
         try {
+            if(typeof admin.goAdminTab === "function") admin.goAdminTab("ai");
             if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
             admin.refreshQuestionsList({ skipLevelBank: false });
             if(typeof admin.renderLevelBank === "function") admin.renderLevelBank();
@@ -26305,7 +26312,6 @@ const admin = {
                     if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
                 }
             }
-            if(typeof admin.goAdminTab === "function") admin.goAdminTab("ai");
             const ql = document.getElementById("questions-list");
             if(ql) {
                 try { ql.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
@@ -26371,8 +26377,10 @@ const admin = {
         else
             list = mountsAll.find(m => m.contains(document.activeElement)) || mountsAll[0];
         if(!list) return;
-        const sanitize = !!(opts && opts.sanitize);
         const rowEls = Array.from(list.children);
+        const memHasPrompts = Array.isArray(appData.questions) && appData.questions.some(q => q && String(q.prompt || "").trim());
+        if(!rowEls.length && memHasPrompts && (opts && opts.fromPersistHook)) return;
+        const sanitize = !!(opts && opts.sanitize);
         const rows = rowEls.map((row) => {
             const inp = row.querySelector("input.question-prompt-input") || row.querySelector("input[type='text']");
             const lineRefEl = row.querySelector("input.question-line-ref-input");
