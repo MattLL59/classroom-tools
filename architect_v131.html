@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T17:30:00">
-<meta name="architect-deploy" content="fix-extract-text-passage-display">
+<meta name="architect-build" content="2026-05-24T18:00:00">
+<meta name="architect-deploy" content="fix-desk-paraphrase-runbuilder">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524173000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524180000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -17553,13 +17553,16 @@ const ui = {
         } else if(v === "desk") {
             ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
             ui.updateCommitAnswerPanel();
-            if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
+            const deskQ = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
+            if(deskQ.length > 0) {
                 const lvl = userState.level || 1;
                 const useParaphrase = (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
-                if(useParaphrase) {
-                    const first = ui.ensureQuoteItem(userState.deskQueue[0]);
+                const sb = document.getElementById("sentence-builder");
+                const builderEmpty = !sb || !sb.querySelector("#paraphrase-input, .slot-row");
+                if(builderEmpty && (useParaphrase || redirectedToDesk)) {
+                    const first = ui.ensureQuoteItem(deskQ[0]);
                     if(first) ui.runBuilder(first);
-                } else {
+                } else if(redirectedToDesk && !useParaphrase) {
                     app.flushDeskQueueToEssayIfNeeded();
                 }
             }
@@ -18191,17 +18194,22 @@ const ui = {
                         ui.renderDeskQuoteTabs();
                         return;
                     }
-                    app.advanceSelectionQuestionIfComplete();
-                    userState.selectionChosen = [];
-                    const lvlRb = userState.level || 1;
-                    const evGoalRb = app.getSelectionEvidenceGoalForLevel(lvlRb);
-                    const ptsRb = app.countSelectionEvidencePoints(lvlRb);
-                    const goalMetRb = app.isLevelProgressionReady ? app.isLevelProgressionReady(lvlRb) : (ptsRb >= evGoalRb);
-                    userState.selectionCompleted = !!goalMetRb;
                     app.save();
                     ui.renderDeskQuoteTabs();
-                    if(goalMetRb) app.advanceStudentToNextActiveLevel({ showCelebration: false });
-                    ui.switchView("select");
+                    const lvlRb = userState.level || 1;
+                    const advanced = (app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlRb, { showCelebration: false }))
+                        || (app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete());
+                    if(!advanced) {
+                        const evGoalRb = app.getSelectionEvidenceGoalForLevel(lvlRb);
+                        const ptsRb = app.countSelectionEvidencePoints(lvlRb);
+                        const goalMetRb = app.isLevelProgressionReady ? app.isLevelProgressionReady(lvlRb) : (ptsRb >= evGoalRb);
+                        userState.selectionCompleted = !!goalMetRb;
+                        if(goalMetRb && app.advanceStudentToNextActiveLevel) app.advanceStudentToNextActiveLevel({ showCelebration: false });
+                    } else {
+                        userState.selectionChosen = [];
+                    }
+                    app.save();
+                    ui.switchView("select", true);
                     ui.renderSelection();
                     app.checkLevelCompletion();
                 };
@@ -20965,7 +20973,9 @@ const ui = {
             if(window.getSelection) window.getSelection().removeAllRanges();
             ui._textSelecting = false;
             ui.switchView("desk", true);
-            app.flushDeskQueueToEssayIfNeeded();
+            const firstDesk = (userState.deskQueue && userState.deskQueue.length)
+                ? ui.ensureQuoteItem(userState.deskQueue[0]) : null;
+            if(firstDesk && ui.runBuilder) ui.runBuilder(firstDesk);
             if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
             if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
             if(ui.updateMarksDisplay) ui.updateMarksDisplay();
