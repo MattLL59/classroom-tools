@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T15:15:00">
-<meta name="architect-deploy" content="level-bank-checkbox-lite">
+<meta name="architect-build" content="2026-05-24T16:00:00">
+<meta name="architect-deploy" content="restore-direct-load">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -14924,8 +14924,9 @@ const app = {
         } catch(eNorm) {}
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
-        if(!app._passageDisplaysDeferred) app._heavyLessonOnLoad = false;
-        try { app.enforceLessonSizeLimits(appData, { alert: !app._passageDisplaysDeferred, alertDelay: 1200 }); } catch(eLim) {}
+        app._heavyLessonOnLoad = false;
+        app._passageDisplaysDeferred = false;
+        try { app.enforceLessonSizeLimits(appData, { alert: true, alertDelay: 1200 }); } catch(eLim) {}
 
         if(!appData.isStandalone) {
             if(!window.__tsaEscBound) {
@@ -14939,7 +14940,7 @@ const app = {
                             const m = document.getElementById(mid);
                             if(!m || !m.classList.contains("open")) continue;
                             ev.preventDefault();
-                            if(mid === "modal-admin" && typeof ui.closeAdminLite === "function") ui.closeAdminLite();
+                            if(mid === "modal-admin" && typeof ui.closeModal === "function") ui.closeModal(mid);
                             else if(typeof ui.closeModal === "function") ui.closeModal(mid);
                             return;
                         }
@@ -14971,7 +14972,7 @@ const app = {
 
         if(ui._sendToBuilderGuard) ui._sendToBuilderGuard = false;
         try {
-            if(!app._passageDisplaysDeferred && typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
             if(typeof admin !== "undefined" && admin.derivePointsFromQuestions) admin.derivePointsFromQuestions();
             ui.init();
         } catch(e) {
@@ -15553,23 +15554,9 @@ const app = {
         if(st.length >= app.HEAVY_SOURCE_CHARS) return true;
         return false;
     },
-    /** Teacher Data / saves: skip full passage + quote bank rebuild when lesson is large. */
-    preferLiteAdmin: function() {
-        if(app._heavyLessonOnLoad || app._passageDisplaysDeferred) return true;
-        try {
-            const raw = localStorage.getItem("tsa_v5_1_data");
-            if(raw && raw.length >= app.DEFER_PASSAGE_STORAGE_BYTES) return true;
-        } catch(e) {}
-        return app.isHeavyLesson(appData);
-    },
-    applyPassageDeferFromLoad: function(rawBytes) {
-        if(window.__tsaSkipLessonLoad || !appData) return false;
-        const heavy = app.isHeavyLesson(appData, { rawBytes: rawBytes });
-        if(!heavy) return false;
-        app._heavyLessonOnLoad = true;
-        app._passageDisplaysDeferred = true;
-        return true;
-    },
+    /** Disabled — defer/lite admin broke passage editing and Tap quote select. */
+    preferLiteAdmin: function() { return false; },
+    applyPassageDeferFromLoad: function(rawBytes) { return false; },
     /** Caps run on repair/import so AI dumps and huge quote banks cannot freeze the tab. */
     enforceLessonSizeLimits: function(safe, opts) {
         opts = opts || {};
@@ -15615,20 +15602,7 @@ const app = {
     _deferAdminPassageUntilDemand: false,
     _adminLiteOpen: false,
     ADMIN_PASSAGE_DEFER_CHARS: 28000,
-    /** Skip building exam gutters in #ai-input on Data open (large passage / big quote bank). */
-    shouldDeferAdminPassageHydration: function() {
-        if(!appData || appData.component === 2) return false;
-        const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
-        if(st.length >= app.ADMIN_PASSAGE_DEFER_CHARS) return true;
-        if(st.length > 6000 && app.isStructuredPassageSource && app.isStructuredPassageSource(st)) return true;
-        const itemsN = Array.isArray(appData.items) ? appData.items.length : 0;
-        if(itemsN > 18) return true;
-        try {
-            const raw = localStorage.getItem("tsa_v5_1_data");
-            if(raw && raw.length >= (app.HEAVY_STORAGE_BYTES || 2500000) * 0.45) return true;
-        } catch(eLs) {}
-        return false;
-    },
+    shouldDeferAdminPassageHydration: function() { return false; },
     setAdminPassageDeferredPlaceholder: function() {
         const el = document.getElementById("ai-input");
         if(!el || el.getAttribute("contenteditable") !== "true") return;
@@ -15738,9 +15712,9 @@ const app = {
             app.dedupeLessonPassageInMemory(safe);
             app.enforceLessonSizeLimits(safe, { alert: false });
         }
-        const heavy = app.isHeavyLesson(safe || appData);
-        app._heavyLessonOnLoad = heavy;
-        app._passageDisplaysDeferred = heavy;
+        app._heavyLessonOnLoad = false;
+        app._passageDisplaysDeferred = false;
+        app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
     },
@@ -15758,8 +15732,7 @@ const app = {
         app._suppressAdminInputFlushOnce = true;
         try {
             if(opts.applyPassageScope && typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
-            if(app._passageDisplaysDeferred && typeof app.refreshLessonChromeLite === "function") app.refreshLessonChromeLite({ skipPassage: true });
-            else if(typeof ui !== "undefined" && ui.init) ui.init();
+            if(typeof ui !== "undefined" && ui.init) ui.init();
         } finally {
             app._suppressAdminInputFlushOnce = false;
         }
@@ -15781,7 +15754,7 @@ const app = {
             app._importInProgress = false;
             const stLen = appData && typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
             const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
-            if(!opts.skipPassageRelayout && !app._passageDisplaysDeferred) {
+            if(!opts.skipPassageRelayout) {
                 if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
                 else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
                     if(typeof app.setAiInputValue === "function") app.setAiInputValue(appData.sourceText);
@@ -15796,10 +15769,7 @@ const app = {
                 }, 60);
             }
         };
-        if(app._heavyLessonOnLoad) {
-            if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2500 });
-            else setTimeout(finish, 150);
-        } else finish();
+        finish();
     },
     /** Update titles, level bar, question banner — no full ui.init or passage HTML rebuild. */
     refreshLessonChromeLite: function(opts) {
@@ -15844,12 +15814,11 @@ const app = {
     afterPastPaperExtractUi: function(opts) {
         opts = opts || {};
         app.prepareImportedLesson(appData);
-        app._deferAdminPassageUntilDemand = !!(app._passageDisplaysDeferred || (app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration()));
-        if(app._deferAdminPassageUntilDemand && app.setAdminPassageDeferredPlaceholder) app.setAdminPassageDeferredPlaceholder();
+        app._deferAdminPassageUntilDemand = false;
         app._importInProgress = true;
         app._suppressAdminInputFlushOnce = true;
         try {
-            if(typeof app.refreshLessonChromeLite === "function") app.refreshLessonChromeLite({ skipPassage: app._passageDisplaysDeferred });
+            if(typeof ui !== "undefined" && ui.init) ui.init();
         } finally {
             app._suppressAdminInputFlushOnce = false;
         }
@@ -15863,19 +15832,17 @@ const app = {
                 }
                 if(typeof admin !== "undefined") {
                     if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
-                    if(!opts.includeQuestions && admin.renderAll) {
-                        admin.renderAll({ importPass: true });
-                    }
+                    if(!opts.includeQuestions && admin.renderAll) admin.renderAll();
                 }
                 if(opts.includeQuestions && typeof admin !== "undefined" && admin.afterExtractQuestionsUi) {
                     try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
                     admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
                 }
-                if(!app._passageDisplaysDeferred && !opts.loadAsComponent2 && appData && appData.sourceText && String(appData.sourceText).trim()) {
+                if(!opts.loadAsComponent2 && appData && appData.sourceText && String(appData.sourceText).trim()) {
                     if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
                 }
                 if(opts.loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function") {
-                    admin.loadC2PassagesIntoEditor({ goToEditTab: false, skipPassageRefresh: !!app._passageDisplaysDeferred });
+                    admin.loadC2PassagesIntoEditor({ goToEditTab: false });
                 }
             } catch(eF) {
                 console.warn("afterPastPaperExtractUi:", eF);
@@ -16063,9 +16030,7 @@ const app = {
                 setTimeout(() => { saveEl.style.opacity = 0; }, 800);
             }
         }
-        if(!opts.skipRender && typeof ui !== "undefined" && ui.renderLab) {
-            if(opts.forceRender || !app.preferLiteAdmin()) ui.renderLab();
-        }
+        if(!opts.skipRender && typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
     },
     /** After init: persist extract cache immediately; full lesson write only when needed and deferred. */
     flushInitPersistence: function() {
@@ -16088,7 +16053,7 @@ const app = {
         userState.essay = text;
         if(ui.updateMarksDisplay) ui.updateMarksDisplay();
         clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => { app.save({ skipRender: app.preferLiteAdmin && app.preferLiteAdmin() }); }, 1000);
+        saveTimeout = setTimeout(() => { app.save(); }, 1000);
     },
 
     resetSession: function() {
@@ -16718,7 +16683,7 @@ const ui = {
         const rawSource = (appData.sourceText && appData.sourceText.trim())
             ? appData.sourceText
             : (selectionText || fallbackText);
-        if(!app._heavyLessonOnLoad && (!appData.sourceText || !appData.sourceText.trim()) && rawSource.trim()) {
+        if((!appData.sourceText || !appData.sourceText.trim()) && rawSource.trim()) {
             const toSave = (() => {
                 if(!rawSource) return null;
                 if(app.isStructuredPassageSource && app.isStructuredPassageSource(rawSource)) return String(rawSource).trim();
@@ -16773,8 +16738,8 @@ const ui = {
         let dispBundleInit = null;
         const levInitDisp = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
         const scopeInitDisp = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
-        const deferPassageInit = !!(app._passageDisplaysDeferred && app.getPassageDeferPlaceholderHtml);
-        let dispPassageHtml = deferPassageInit ? app.getPassageDeferPlaceholderHtml() : app.formatSourceHtml(sourceForDisplay);
+        const deferPassageInit = false;
+        let dispPassageHtml = app.formatSourceHtml(sourceForDisplay);
         if(!deferPassageInit && typeof sourceForDisplay === "string" && typeof app.buildPassagePaneHtmlForLevel === "function") {
             const lineWinInit = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levInitDisp) : null;
             const paneOptsInit = { warnHtml: "", scope: scopeInitDisp };
@@ -16851,7 +16816,7 @@ const ui = {
             const sel = document.getElementById("level-selector");
             if(sel) { sel.value = lvl; sel.disabled = true; sel.title = "Practice mode locks the selected level"; }
         }
-        ui.renderLab(null, { skipPassage: true });
+        ui.renderLab();
 
         document.querySelectorAll(".modal").forEach(modal => {
             if(modal.dataset.backdropBound) return;
@@ -17722,23 +17687,42 @@ const ui = {
         if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings(ev);
     },
     closeModal: (id) => {
-        if(id === "modal-admin") {
-            if(typeof ui.closeAdminLite === "function") { ui.closeAdminLite(); return; }
+        if(id === "modal-admin" && !appData.isStandalone && admin.ensureActiveSourcePersisted) {
+            admin.ensureActiveSourcePersisted();
         }
         const el = document.getElementById(id);
         if(el) el.classList.remove("open");
         if(id === 'modal-source') { ui.stopReader(); }
+        if(id === 'modal-admin' && !appData.isStandalone) {
+            ui._pauseSelectionGate = false;
+            app._adminLiteOpen = false;
+            const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+            if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(stClose);
+            else {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(stClose);
+                if(ui.renderLab) ui.renderLab(stClose);
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(stClose);
+            }
+            if(typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(function() {
+                    const st2 = appData && typeof appData.sourceText === "string" ? appData.sourceText : stClose;
+                    if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(st2);
+                });
+            }
+            if(ui.activeQuoteId) {
+                const item = appData.items.find(i=>i.id===ui.activeQuoteId);
+                if(item) ui.runBuilder(item);
+            }
+            if(userState.view === "desk" && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+        }
+        if(id === "modal-admin" && typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
     },
     
     openAdmin: () => {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
-        if(typeof ui.showAdminModalShell === "function") ui.showAdminModalShell();
-        if(typeof app !== "undefined" && app) {
-            app._adminLiteOpen = true;
-            app._deferAdminPassageUntilDemand = !!(app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration());
-            if(app._deferAdminPassageUntilDemand && app.setAdminPassageDeferredPlaceholder) app.setAdminPassageDeferredPlaceholder();
-        }
+        app._adminLiteOpen = false;
+        app._deferAdminPassageUntilDemand = false;
         try {
             if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
             if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
@@ -17748,14 +17732,13 @@ const ui = {
         const run = () => {
             try {
                 if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAdminShellLite) admin.renderAdminShellLite();
-                else if(admin.renderAll) admin.renderAll({ openAdminPass: true });
+                if(admin.renderAll) admin.renderAll();
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
                     if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                    if(typeof admin.scheduleDeferredAdminPanels === "function") admin.scheduleDeferredAdminPanels();
-                    else if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
+                    if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
+                    if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
                 } catch(e2) { console.error(e2); }
             }
         };
@@ -23366,7 +23349,7 @@ const admin = {
             if(k === "edit" && appData && appData.component === 2 && typeof admin.fillC2PooledEditorFromLayout === "function") {
                 admin.fillC2PooledEditorFromLayout();
             }
-            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab({ skipPassageSync: !!app._deferAdminPassageUntilDemand });
+            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
         } catch(eSync) {}
     },
     goAdminTab: function(key) {
@@ -23397,41 +23380,15 @@ const admin = {
         admin.activateAdminTab(saved);
     },
     scheduleDeferredAdminPanels: function() {
-        const qb = document.getElementById("quotes-bank-list");
-        const itemN = appData && Array.isArray(appData.items) ? appData.items.length : 0;
-        if(qb && itemN > 40) {
-            qb.innerHTML = "<div style=\"opacity:0.85;padding:10px 0;line-height:1.45;\"><strong>Quote bank (" + itemN + " rows)</strong> — full list not drawn at once (memory limit). Use <strong>All levels</strong> filters, compact view, or edit via Load &amp; AI JSON. Questions and Level Bank above still work.</div>";
-            app._adminLiteOpen = false;
-            return;
-        }
-        if(qb && !qb.querySelector(".architect-admin-panels-loading")) {
-            qb.innerHTML = "<div class=\"architect-admin-panels-loading\" style=\"opacity:0.7;padding:8px 0;\">Loading quote bank…</div>";
-        }
-        const run = function() {
-            app._adminLiteOpen = false;
-            try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) { console.warn("deferred renderQuotesBank:", eQb); }
-            try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
-            try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
-        };
-        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 200 });
-        else setTimeout(run, 30);
+        try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) { console.warn("renderQuotesBank:", eQb); }
+        try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
+        try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
     },
-    /** Fast path for Data open — Level Bank + questions only; quote bank on idle. */
     renderAdminShellLite: function() {
-        app._adminLiteOpen = true;
-        try { if(!admin.tabsBound && admin.initTabs) admin.initTabs(); } catch(eTabs) {}
-        try { admin.syncUI({ lite: true }); } catch(eSync) {}
-        try {
-            const lvl = typeof currentConfigLevel === "number" ? currentConfigLevel : 1;
-            admin.renderLevelBank({ skipSyncFromList: true });
-            admin.renderConfig(lvl);
-        } catch(eLb) {}
-        try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
-        if(admin.scheduleDeferredAdminPanels) admin.scheduleDeferredAdminPanels();
+        if(admin.renderAll) admin.renderAll();
     },
     renderAll: function(opts) {
         opts = opts || {};
-        const importLite = !!(opts.importPass || opts.openAdminPass || app._importInProgress);
         try { admin.initTabs(); } catch(eTabs) {}
         try { admin.syncUI(); } catch(eSync) {}
         try {
@@ -23439,20 +23396,6 @@ const admin = {
             admin.renderConfig(lvl);
             admin.renderLevelBank();
         } catch(eLb) {}
-        if(importLite) {
-            try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
-            if(opts.openAdminPass) {
-                if(admin.scheduleDeferredAdminPanels) admin.scheduleDeferredAdminPanels();
-            } else {
-                try { admin.bindAiAutoPrompt(); } catch(eAi) {}
-                try { admin.ensureAiStepVisible(); } catch(eStep) {}
-                try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
-                try { admin.renderQuotesBank(); } catch(eQb) {}
-                try { admin.renderSelectionEditor(); } catch(eSel) {}
-                try { admin.renderGlobalList(); } catch(eGl) {}
-            }
-            return;
-        }
         try { admin.bindAiAutoPrompt(); } catch(eAi) {}
         try { admin.ensureAiStepVisible(); } catch(eStep) {}
         try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
@@ -23517,7 +23460,7 @@ const admin = {
     },
     syncUI: function(opts) {
         opts = opts || {};
-        const lite = !!(opts.lite || app.preferLiteAdmin());
+        const lite = !!opts.lite;
         const wmm = document.getElementById("worksheet-match-mode");
         if(wmm) wmm.value = appData.settings.worksheetMatchMode || "jumbled";
         const wsm = document.getElementById("worksheet-scaffold-mode");
@@ -23612,8 +23555,8 @@ const admin = {
             singleWrap.classList.remove("hidden");
             if(c2AiHint) c2AiHint.classList.add("hidden");
         }
-        if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab({ skipPassageSync: true });
-        if(!useC2Editors && app.syncAdminAiInputFromLesson && !app._deferAdminPassageUntilDemand && !app._adminLiteOpen) app.syncAdminAiInputFromLesson({ force: false });
+        if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+        if(!useC2Editors && app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: false });
     },
     /**
      * One #source-text-single-wrap / #ai-input: park it under Editing Suite for C1 (default tab) or under Load & AI when that tab is active,
@@ -23637,7 +23580,7 @@ const admin = {
         const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
         const target = (tab === "ai" ? mountAi : (mountEdit || mountAi));
         if(target && singleWrap.parentNode !== target) target.appendChild(singleWrap);
-        if(!opts.skipPassageSync && app.syncAdminAiInputFromLesson && !app._deferAdminPassageUntilDemand && !app._adminLiteOpen) app.syncAdminAiInputFromLesson({ force: false });
+        if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: false });
     },
     /** One-click: lesson was loaded as C1 but teacher wants Editing Suite C2 passages — no full re-import required. */
     promoteLessonToComponent2: function() {
@@ -26370,13 +26313,9 @@ const admin = {
             });
         });
         if(!opts.skipLevelBank && document.getElementById("level-bank-editor")) {
-            if(app.preferLiteAdmin()) {
-                try { admin._renderLevelBankDOM(); } catch(eLb) {}
-            } else {
             const renderLb = () => { try { admin._renderLevelBankDOM(); } catch(eLb) {} };
             if(typeof requestIdleCallback === "function") requestIdleCallback(renderLb, { timeout: 800 });
             else setTimeout(renderLb, 0);
-            }
         }
     },
     /** After Extract questions: refresh lists, Level Bank L1→Qn, student banners. */
@@ -26389,7 +26328,7 @@ const admin = {
             if(typeof ui !== "undefined") {
                 if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
                 if(ui.renderQuestionBanner) ui.renderQuestionBanner();
-                if(ui.renderSelection) ui.renderSelection(null, app.preferLiteAdmin() ? { skipPassage: true } : {});
+                if(ui.renderSelection) ui.renderSelection();
                 if(userState && userState.view === "desk") {
                     if(ui.updateCommitAnswerPanel) ui.updateCommitAnswerPanel();
                     if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
@@ -27238,12 +27177,7 @@ const admin = {
         admin._renderingQuotesBank = true;
         try {
         if(!appData) { wrap.innerHTML = "<div style='opacity:0.7;'>Load a lesson first.</div>"; return; }
-        if(admin.ensureSelectionData && !app._adminLiteOpen) admin.ensureSelectionData();
-        else if(admin.ensureSelectionData && app._adminLiteOpen) {
-            if(!appData.selection || typeof appData.selection !== "object") appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items, lessonSourceText: appData.sourceText });
-            if(!Array.isArray(appData.items)) appData.items = [];
-            if(!Array.isArray(appData.selection.items) || appData.selection.items !== appData.items) appData.selection.items = appData.items;
-        }
+        if(admin.ensureSelectionData) admin.ensureSelectionData();
         if(admin.quotesBankViewLevel == null) admin.quotesBankViewLevel = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
         if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
         if(admin.renderQuotesBankModeBar) admin.renderQuotesBankModeBar();
@@ -31305,15 +31239,12 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             try { app.save({ skipRender: true, silent: true }); } catch(e) {}
         }, 180);
     },
-    /** While Data is open, only save — refresh Quote Select after close. */
+    /** Refresh student Quote Select after Level Bank edits (when Data is closed). */
     _liteStudentRefresh: function() {
         const adm = document.getElementById("modal-admin");
         if(adm && adm.classList.contains("open")) return;
-        if(app.preferLiteAdmin && app.preferLiteAdmin()) {
-            if(ui.updateMarksDisplay) ui.updateMarksDisplay();
-            return;
-        }
-        if(ui.renderSelection) ui.renderSelection(null, { skipPassage: true });
+        if(ui.updateMarksDisplay) ui.updateMarksDisplay();
+        if(ui.renderSelection) ui.renderSelection();
     },
     /** Fill Level Bank → Preview block “Booklet lines” from the assigned Focus question (same field as Load & AI / Editing Suite). */
     _syncTeacherPreviewLineWindowInput: function() {
