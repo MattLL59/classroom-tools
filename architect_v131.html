@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T18:00:00">
-<meta name="architect-deploy" content="fix-desk-paraphrase-runbuilder">
+<meta name="architect-build" content="2026-05-24T18:30:00">
+<meta name="architect-deploy" content="fix-desk-stack-overflow-q1">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524180000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524183000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -3351,7 +3351,7 @@ const app = {
         if(!qStr) return "";
         const lvl = (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
         const ownWordsQ1 = app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl);
-        if(ownWordsQ1 && !(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl))) {
+        if(ownWordsQ1 && !(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl))) {
             return String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(qStr) : "") || "").trim();
         }
         return app.formatDeskQueueQuoteWithJustification(qStr);
@@ -3632,7 +3632,8 @@ const app = {
      * False for single-question mode (one 10-mark question) or when on Q2+ in a past paper. */
     isLevelUsingFirstQuestion: function(level) {
         const lvl = parseInt(level, 10) || 1;
-        if(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl)) return false;
+        /** Verbatim “Short ans” only — not C1 Q1 retrieval (own-words paraphrase desk). Avoid isShortAnswerLevel here (mutual recursion). */
+        if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) return false;
         const bank = app.getLevelBank();
         const entry = bank && bank[lvl] ? bank[lvl] : null;
         const ids = app.resolveQuestionIdsForLevel(lvl);
@@ -4136,7 +4137,7 @@ const app = {
     isC1OwnWordsShortAnswerLevel: function(level) {
         try {
             if(app.getArchitectComponent() === 2) return false;
-            if(!app.isShortAnswerLevel || !app.isShortAnswerLevel(level)) return false;
+            if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(level)) return false;
             return !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
         } catch(e) { return false; }
     },
@@ -17553,16 +17554,13 @@ const ui = {
         } else if(v === "desk") {
             ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
             ui.updateCommitAnswerPanel();
-            const deskQ = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
-            if(deskQ.length > 0) {
+            if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length && !ui._runBuilderInProgress) {
                 const lvl = userState.level || 1;
                 const useParaphrase = (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
-                const sb = document.getElementById("sentence-builder");
-                const builderEmpty = !sb || !sb.querySelector("#paraphrase-input, .slot-row");
-                if(builderEmpty && (useParaphrase || redirectedToDesk)) {
-                    const first = ui.ensureQuoteItem(deskQ[0]);
+                if(useParaphrase) {
+                    const first = ui.ensureQuoteItem(userState.deskQueue[0]);
                     if(first) ui.runBuilder(first);
-                } else if(redirectedToDesk && !useParaphrase) {
+                } else {
                     app.flushDeskQueueToEssayIfNeeded();
                 }
             }
@@ -18131,8 +18129,11 @@ const ui = {
     },
 
     runBuilder: function(item) {
+        if(ui._runBuilderInProgress) return;
+        ui._runBuilderInProgress = true;
+        try {
         ui.activeQuoteId = item.id;
-        ui.switchView("desk");
+        ui.switchView("desk", true);
         ui.renderDeskQuoteTabs();
         const cont = document.getElementById("sentence-builder");
         // Guided slots UI removed: keep desk flow working without builder.
@@ -18355,6 +18356,9 @@ const ui = {
 
         if(!userState.completed.includes(item.id)) {
             app.awardXp(10);
+        }
+        } finally {
+            ui._runBuilderInProgress = false;
         }
     },
 
@@ -20972,10 +20976,10 @@ const ui = {
             app.save();
             if(window.getSelection) window.getSelection().removeAllRanges();
             ui._textSelecting = false;
-            ui.switchView("desk", true);
             const firstDesk = (userState.deskQueue && userState.deskQueue.length)
                 ? ui.ensureQuoteItem(userState.deskQueue[0]) : null;
             if(firstDesk && ui.runBuilder) ui.runBuilder(firstDesk);
+            else ui.switchView("desk", true);
             if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
             if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
             if(ui.updateMarksDisplay) ui.updateMarksDisplay();
