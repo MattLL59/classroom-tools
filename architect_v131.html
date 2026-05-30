@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T16:00:00">
-<meta name="architect-deploy" content="restore-direct-load">
+<meta name="architect-build" content="2026-05-24T16:30:00">
+<meta name="architect-deploy" content="c2-export-and-device-speed">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -25596,6 +25596,35 @@ const admin = {
             appData.component2Layout.nineteenthHeadLine2 = i2;
         }
     },
+    /** Before Student App export: flush C2 editors and backfill layout fields from the full pooled sourceText blob. */
+    ensureC2LayoutFieldsFromSource: function() {
+        if(!appData || appData.component !== 2 || !appData.component2Layout) return;
+        try { if(typeof admin.flushC2PooledEditorToLayout === "function") admin.flushC2PooledEditorToLayout(); } catch(e) {}
+        const L = appData.component2Layout;
+        const blob = (appData.selection && appData.selection.text && appData.selection.text.source)
+            ? appData.selection.text.source
+            : (appData.sourceText || "");
+        const split = admin.splitC2PooledSourceBlob ? admin.splitC2PooledSourceBlob(blob) : null;
+        if(split) {
+            const s1 = String(split.twentyFirst || "").trim();
+            const s2 = String(split.nineteenth || "").trim();
+            const cur1 = String(L.resourcePaperText || "").trim();
+            const cur2 = String(L.questionPaperPage3Text || "").trim();
+            if(s1 && (!cur1 || s1.length > cur1.length + 30)) L.resourcePaperText = s1;
+            if(s2 && (!cur2 || s2.length > cur2.length + 30)) L.questionPaperPage3Text = s2;
+        } else {
+            const b = String(blob || "").trim();
+            if(b && !String(L.resourcePaperText || "").trim()) L.resourcePaperText = b;
+        }
+        const combined = app.getSourceTextCombined ? app.getSourceTextCombined() : "";
+        if(combined && String(combined).trim()) {
+            appData.sourceText = combined;
+            if(appData.selection) {
+                if(!appData.selection.text) appData.selection.text = {};
+                appData.selection.text.source = combined;
+            }
+        }
+    },
     flushC2PooledEditorToLayout: function() {
         const modal = document.getElementById("modal-admin");
         if(!modal || !modal.classList.contains("open") || !appData || !appData.component2Layout) return;
@@ -25909,7 +25938,9 @@ const admin = {
                 const split = admin.splitC2PooledSourceBlob(blob);
                 if(split) {
                     if(!r1) r1 = split.twentyFirst || "";
+                    else if(split.twentyFirst && String(split.twentyFirst).length > String(r1).length + 30) r1 = split.twentyFirst;
                     if(!r2) r2 = split.nineteenth || "";
+                    else if(split.nineteenth && String(split.nineteenth).length > String(r2).length + 30) r2 = split.nineteenth;
                 }
             }
         }
@@ -26087,10 +26118,8 @@ const admin = {
             appData.settings.aiIncludeStructure = !!enabled;
             appData.settings.exportIncludeStructure = !!enabled;
         }
-        app.save();
-        ui.renderSelection();
-        ui.renderLab();
-        admin.syncUI();
+        app.save({ skipRender: true, silent: true });
+        if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: true });
     },
     setFocusQuestion: (v) => {
         if(!appData) return;
@@ -26112,7 +26141,7 @@ const admin = {
         if(!appData.settings) appData.settings = {};
         if(device === "tone") appData.settings.aiIncludeTone = !!enabled;
         if(device === "structure") appData.settings.aiIncludeStructure = !!enabled;
-        app.save();
+        app.save({ skipRender: true, silent: true });
     },
     setExportDevice: (device, enabled) => {
         if(!appData.settings) appData.settings = {};
@@ -32104,6 +32133,9 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             }
         }
         /** Snapshot live C1 passage (gutters + &lt;b&gt;/&lt;i&gt; in v2) into `appData` before clone — otherwise export reused stale `sourceText` or `innerText` fallbacks that stripped markup. */
+        if(appData && appData.component === 2 && typeof admin.ensureC2LayoutFieldsFromSource === "function") {
+            try { admin.ensureC2LayoutFieldsFromSource(); } catch(eC2Ex) { console.warn("ensureC2LayoutFieldsFromSource:", eC2Ex); }
+        }
         if(typeof app.flushAiInputToLessonSourceIfEditable === "function" && appData && appData.component !== 2) {
             try {
                 app.flushAiInputToLessonSourceIfEditable();
