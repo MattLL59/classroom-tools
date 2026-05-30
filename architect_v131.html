@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T14:45:00">
-<meta name="architect-deploy" content="level-bank-points-lite">
+<meta name="architect-build" content="2026-05-24T15:00:00">
+<meta name="architect-deploy" content="lite-admin-performance">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15542,11 +15542,25 @@ const app = {
         const st = typeof d.sourceText === "string" ? d.sourceText : "";
         if(st.length >= app.DEFER_PASSAGE_SOURCE_CHARS) return true;
         if(st.length > 4000 && app.isStructuredPassageSource && app.isStructuredPassageSource(st)) return true;
+        const c2 = d.component2Layout;
+        if(c2 && typeof c2 === "object") {
+            const c2Text = [c2.resourcePaperText, c2.questionPaperPage3Text, c2.questionPaperPage2Text, c2.markSchemeText].filter(Boolean).join("");
+            if(c2Text.length >= app.DEFER_PASSAGE_SOURCE_CHARS) return true;
+        }
         const itemsN = Array.isArray(d.items) ? d.items.length : 0;
         if(itemsN >= app.DEFER_PASSAGE_ITEMS) return true;
         if(opts.rawBytes != null && opts.rawBytes >= app.HEAVY_STORAGE_BYTES) return true;
         if(st.length >= app.HEAVY_SOURCE_CHARS) return true;
         return false;
+    },
+    /** Teacher Data / saves: skip full passage + quote bank rebuild when lesson is large. */
+    preferLiteAdmin: function() {
+        if(app._heavyLessonOnLoad || app._passageDisplaysDeferred) return true;
+        try {
+            const raw = localStorage.getItem("tsa_v5_1_data");
+            if(raw && raw.length >= app.DEFER_PASSAGE_STORAGE_BYTES) return true;
+        } catch(e) {}
+        return app.isHeavyLesson(appData);
     },
     applyPassageDeferFromLoad: function(rawBytes) {
         if(window.__tsaSkipLessonLoad || !appData) return false;
@@ -15868,8 +15882,8 @@ const app = {
             }
             app._importInProgress = false;
         };
-        if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 2000 });
-        else setTimeout(finish, 80);
+        if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 400 });
+        else setTimeout(finish, 60);
     },
     clearLessonStorageOnly: function() {
         if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
@@ -16049,7 +16063,9 @@ const app = {
                 setTimeout(() => { saveEl.style.opacity = 0; }, 800);
             }
         }
-        if(!opts.skipRender && typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+        if(!opts.skipRender && typeof ui !== "undefined" && ui.renderLab) {
+            if(opts.forceRender || !app.preferLiteAdmin()) ui.renderLab();
+        }
     },
     /** After init: persist extract cache immediately; full lesson write only when needed and deferred. */
     flushInitPersistence: function() {
@@ -16064,15 +16080,15 @@ const app = {
         const run = function() {
             try { app.save({ skipRender: true, silent: true, skipExtractCache: true }); } catch(e) {}
         };
-        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 8000 });
-        else setTimeout(run, 250);
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 500 });
+        else setTimeout(run, 80);
     },
 
     updateEssay: function(text) {
         userState.essay = text;
         if(ui.updateMarksDisplay) ui.updateMarksDisplay();
         clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => { app.save(); }, 1000);
+        saveTimeout = setTimeout(() => { app.save({ skipRender: app.preferLiteAdmin && app.preferLiteAdmin() }); }, 1000);
     },
 
     resetSession: function() {
@@ -16835,7 +16851,7 @@ const ui = {
             const sel = document.getElementById("level-selector");
             if(sel) { sel.value = lvl; sel.disabled = true; sel.title = "Practice mode locks the selected level"; }
         }
-        ui.renderLab();
+        ui.renderLab(null, { skipPassage: true });
 
         document.querySelectorAll(".modal").forEach(modal => {
             if(modal.dataset.backdropBound) return;
@@ -17728,7 +17744,8 @@ const ui = {
         const run = () => {
             try {
                 if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAll) admin.renderAll({ openAdminPass: true });
+                if(admin.renderAdminShellLite) admin.renderAdminShellLite();
+                else if(admin.renderAll) admin.renderAll({ openAdminPass: true });
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
@@ -23392,8 +23409,21 @@ const admin = {
             try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
             try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
         };
-        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3500 });
-        else setTimeout(run, 100);
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 200 });
+        else setTimeout(run, 30);
+    },
+    /** Fast path for Data open — Level Bank + questions only; quote bank on idle. */
+    renderAdminShellLite: function() {
+        app._adminLiteOpen = true;
+        try { if(!admin.tabsBound && admin.initTabs) admin.initTabs(); } catch(eTabs) {}
+        try { admin.syncUI({ lite: true }); } catch(eSync) {}
+        try {
+            const lvl = typeof currentConfigLevel === "number" ? currentConfigLevel : 1;
+            admin.renderLevelBank({ skipSyncFromList: true });
+            admin.renderConfig(lvl);
+        } catch(eLb) {}
+        try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
+        if(admin.scheduleDeferredAdminPanels) admin.scheduleDeferredAdminPanels();
     },
     renderAll: function(opts) {
         opts = opts || {};
@@ -23407,8 +23437,9 @@ const admin = {
         } catch(eLb) {}
         if(importLite) {
             try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
-            if(opts.openAdminPass && admin.scheduleDeferredAdminPanels) admin.scheduleDeferredAdminPanels();
-            else {
+            if(opts.openAdminPass) {
+                if(admin.scheduleDeferredAdminPanels) admin.scheduleDeferredAdminPanels();
+            } else {
                 try { admin.bindAiAutoPrompt(); } catch(eAi) {}
                 try { admin.ensureAiStepVisible(); } catch(eStep) {}
                 try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
@@ -23480,7 +23511,9 @@ const admin = {
             });
         }
     },
-    syncUI: function() {
+    syncUI: function(opts) {
+        opts = opts || {};
+        const lite = !!(opts.lite || app.preferLiteAdmin());
         const wmm = document.getElementById("worksheet-match-mode");
         if(wmm) wmm.value = appData.settings.worksheetMatchMode || "jumbled";
         const wsm = document.getElementById("worksheet-scaffold-mode");
@@ -23536,12 +23569,12 @@ const admin = {
             const preset = document.getElementById("selection-stage-preset");
             if(preset) preset.value = "custom";
         }
-        admin.refreshQuestionsList({ skipSanitize: true });
+        admin.refreshQuestionsList({ skipSanitize: true, skipLevelBank: lite });
         const loadModeSel = document.getElementById("past-paper-load-mode");
         if(loadModeSel) loadModeSel.value = String(appData.component === 2 ? 2 : 1);
         admin.syncPastPaperLabels();
         admin.syncSourceEditorMode();
-        if(!appData.isStandalone) admin.restorePastPaperFilesFromIdb();
+        if(!lite && !appData.isStandalone) admin.restorePastPaperFilesFromIdb();
     },
     syncSourceEditorMode: function() {
         if(!appData) return;
@@ -26333,9 +26366,13 @@ const admin = {
             });
         });
         if(!opts.skipLevelBank && document.getElementById("level-bank-editor")) {
+            if(app.preferLiteAdmin()) {
+                try { admin._renderLevelBankDOM(); } catch(eLb) {}
+            } else {
             const renderLb = () => { try { admin._renderLevelBankDOM(); } catch(eLb) {} };
             if(typeof requestIdleCallback === "function") requestIdleCallback(renderLb, { timeout: 800 });
             else setTimeout(renderLb, 0);
+            }
         }
     },
     /** After Extract questions: refresh lists, Level Bank L1→Qn, student banners. */
@@ -26348,7 +26385,7 @@ const admin = {
             if(typeof ui !== "undefined") {
                 if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
                 if(ui.renderQuestionBanner) ui.renderQuestionBanner();
-                if(ui.renderSelection) ui.renderSelection();
+                if(ui.renderSelection) ui.renderSelection(null, app.preferLiteAdmin() ? { skipPassage: true } : {});
                 if(userState && userState.view === "desk") {
                     if(ui.updateCommitAnswerPanel) ui.updateCommitAnswerPanel();
                     if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
@@ -31446,6 +31483,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             app.save({ skipRender: true, silent: true });
             admin.renderLevelBank({ skipSyncFromList: true });
             if(ui.renderSelection) ui.renderSelection();
+            return;
         } else if(key === "levelsOfResponse") {
             appData.settings.levelBank[lvl].levelsOfResponse = el.checked;
             if(el.checked) appData.settings.levelBank[lvl].shortAnswersOnly = false;
@@ -31453,6 +31491,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             admin.renderLevelBank({ skipSyncFromList: true });
             if(ui.renderSelection) ui.renderSelection();
             if(ui.updateMarksDisplay) ui.updateMarksDisplay();
+            return;
         } else if(key === "passageExamExcerpt") {
             appData.settings.levelBank[lvl].passageExamExcerpt = el.checked;
             ui.renderSelection && ui.renderSelection();
@@ -31488,8 +31527,10 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         } else if(key === "c2Source") {
             const v = String(el.value || "").trim();
             if(v === "21st" || v === "19th" || v === "both") appData.settings.levelBank[lvl].c2Source = v;
-            ui.refreshSourceDisplay && ui.refreshSourceDisplay();
-            ui.renderSelection && ui.renderSelection();
+            app.save({ skipRender: true, silent: true });
+            if(ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+            if(ui.renderSelection) ui.renderSelection();
+            return;
         } else {
             const min = key === "distractorCount" ? 0 : (key === "quoteTarget" ? 1 : 3);
             const max = key === "quoteTarget" ? 12 : (key === "distractorCount" ? 8 : 30);
