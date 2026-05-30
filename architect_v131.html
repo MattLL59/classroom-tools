@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T16:30:00">
-<meta name="architect-deploy" content="c2-export-and-device-speed">
+<meta name="architect-build" content="2026-05-24T17:00:00">
+<meta name="architect-deploy" content="init-single-passage-build">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -14972,7 +14972,10 @@ const app = {
 
         if(ui._sendToBuilderGuard) ui._sendToBuilderGuard = false;
         try {
-            if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
+            if(typeof app.applyExamPassageInsertWidthCh === "function") {
+                const heavyInit = app.isHeavyLesson && app.isHeavyLesson(appData);
+                app.applyExamPassageInsertWidthCh(heavyInit ? { skipDomSync: true } : {});
+            }
             if(typeof admin !== "undefined" && admin.derivePointsFromQuestions) admin.derivePointsFromQuestions();
             ui.init();
         } catch(e) {
@@ -14987,7 +14990,11 @@ const app = {
         if(!document.getElementById("modal-admin")) return;
         try { if(admin.initTabs) admin.initTabs(); } catch(e1) {}
         try { if(admin.activateAdminTab) admin.activateAdminTab("edit"); } catch(e1b) {}
-        try { if(admin.syncUI) admin.syncUI(); } catch(e2) {}
+        const runSync = function() {
+            try { if(admin.syncUI) admin.syncUI({ skipLevelBank: true }); } catch(e2) {}
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(runSync, { timeout: 2500 });
+        else setTimeout(runSync, 80);
     },
     isImportingPdf: false,
 
@@ -16417,6 +16424,7 @@ const ui = {
     },
 
     _initInProgress: false,
+    _initPassageBuilt: false,
     /** After passage innerHTML update: line gutters need normal white-space on the host and reader band inset (inline pre-wrap and :has() are unreliable). */
     syncPassageLineLayoutShell: function(wrapEl, hostEl, html) {
         const has = !!(html && /source-with-line-numbers/i.test(html));
@@ -16773,8 +16781,8 @@ const ui = {
         const hasSplitInit = admin.splitC2PooledSourceBlob && admin.splitC2PooledSourceBlob(blobInit);
         if(hasC2Layout || (appData && appData.component === 2 && hasSplitInit)) {
             admin.syncArchitectC2SourceBar();
-            ui.refreshSourceDisplay();
         }
+        ui._initPassageBuilt = true;
         ui.renderQuestionBanner();
         ui.initReaderControls();
         if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
@@ -16816,7 +16824,7 @@ const ui = {
             const sel = document.getElementById("level-selector");
             if(sel) { sel.value = lvl; sel.disabled = true; sel.title = "Practice mode locks the selected level"; }
         }
-        ui.renderLab();
+        ui.renderLab(null, { skipPassage: true });
 
         document.querySelectorAll(".modal").forEach(modal => {
             if(modal.dataset.backdropBound) return;
@@ -16891,6 +16899,7 @@ const ui = {
             }
         } finally {
             ui._initInProgress = false;
+            ui._initPassageBuilt = false;
             if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
             else if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
             document.body.classList.add("tsa-init-done");
@@ -17533,7 +17542,8 @@ const ui = {
         userState.view = v;
         if(!appData.isStandalone && !ui._initInProgress) app.save();
         if(v === "select") {
-            ui.renderSelection();
+            const skipPass = !!(ui._initInProgress && ui._initPassageBuilt);
+            ui.renderSelection(null, skipPass ? { skipPassage: true } : {});
         } else if(v === "desk") {
             ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
             ui.updateCommitAnswerPanel();
@@ -26073,7 +26083,8 @@ const admin = {
             });
         });
         const lb = document.getElementById("level-bank-editor");
-        if(lb) admin.renderLevelBank();
+        const adm = document.getElementById("modal-admin");
+        if(lb && adm && adm.classList.contains("open") && admin.renderLevelBank) admin.renderLevelBank();
     },
     setRewardUrl: (v) => {
         if(!appData.settings) appData.settings = {};
