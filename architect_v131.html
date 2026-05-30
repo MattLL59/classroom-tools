@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T14:15:00">
-<meta name="architect-deploy" content="level-bank-sync-fix">
+<meta name="architect-build" content="2026-05-24T14:30:00">
+<meta name="architect-deploy" content="questions-persist-restore">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -14913,8 +14913,14 @@ const app = {
         try {
             if(app.mergeLessonExtractCacheOnLoad && app.mergeLessonExtractCacheOnLoad(appData)) app._extractCacheMergedOnLoad = true;
             app.normalizeLessonQuestionsAfterRepair(appData, null);
+            if(app.countFilledFocusQuestions && app.countFilledFocusQuestions(appData) === 0 && app.mergeLessonExtractCacheOnLoad && app.mergeLessonExtractCacheOnLoad(appData)) {
+                app._extractCacheMergedOnLoad = true;
+            }
             if(typeof admin !== "undefined" && admin.ensureMarkSchemeParsedFromLayout) admin.ensureMarkSchemeParsedFromLayout();
             if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
+            if(typeof admin !== "undefined" && app.countFilledFocusQuestions && app.countFilledFocusQuestions(appData) >= 1) {
+                if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
+            }
         } catch(eNorm) {}
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
@@ -15843,9 +15849,7 @@ const app = {
                 }
                 if(typeof admin !== "undefined") {
                     if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
-                    if(opts.includeQuestions) {
-                        if(admin.refreshQuestionsList) admin.refreshQuestionsList({ skipLevelBank: true });
-                    } else if(admin.renderAll) {
+                    if(!opts.includeQuestions && admin.renderAll) {
                         admin.renderAll({ importPass: true });
                     }
                 }
@@ -15888,6 +15892,21 @@ const app = {
         for(let i = 0; i < slice.length; i++) h = ((h << 5) - h + slice.charCodeAt(i)) | 0;
         return (title || "untitled") + "|" + st.length + "|" + h;
     },
+    countFilledFocusQuestions: function(data) {
+        const d = data || appData;
+        return (Array.isArray(d && d.questions) ? d.questions : []).filter(q => q && String(q.prompt || "").trim()).length;
+    },
+    /** Write extracted questions to memory + extract cache before any DOM sync can wipe them. */
+    commitExtractedQuestions: function(questions) {
+        if(!appData || !Array.isArray(questions)) return;
+        appData.questions = questions;
+        if(questions.length >= 1 && questions[0] && String(questions[0].prompt || "").trim()) {
+            appData.question = questions[0].prompt;
+            if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
+        }
+        if(typeof app.saveLessonExtractCache === "function") app.saveLessonExtractCache();
+        if(typeof app.save === "function") app.save({ skipQuestionPersist: true, skipRender: true, silent: true });
+    },
     /** Persists focus questions + mark scheme in localStorage (same browser) so reload keeps extract work like passage text. */
     saveLessonExtractCache: function() {
         if(!appData || appData.isStandalone) return;
@@ -15921,6 +15940,10 @@ const app = {
         if(!mounts.length) return;
         const hasRows = Array.from(mounts).some(m => m && m.children && m.children.length > 0);
         if(!hasRows) return;
+        if(app.countFilledFocusQuestions && app.countFilledFocusQuestions() > 0) {
+            const domFilled = Array.from(mounts).some(m => Array.from(m.querySelectorAll("input.question-prompt-input, input[type='text']")).some(inp => String(inp.value || "").trim()));
+            if(!domFilled) return;
+        }
         try { admin.syncQuestionsFromListCore({ fromPersistHook: true }); } catch(e) {}
     },
     /** Restores questions and mark scheme from browser cache when the main lesson JSON lost them on reload. */
@@ -15940,7 +15963,16 @@ const app = {
         let changed = false;
         const normId = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const sortQid = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
+        const countPrompts = (arr) => (Array.isArray(arr) ? arr : []).filter(q => q && String(q.prompt || "").trim()).length;
         if(Array.isArray(b.questions) && b.questions.length) {
+            const curN = countPrompts(safe.questions);
+            const bakN = countPrompts(b.questions);
+            if(bakN > curN) {
+                safe.questions = JSON.parse(JSON.stringify(b.questions));
+                if(safe.questions[0] && String(safe.questions[0].prompt || "").trim()) safe.question = safe.questions[0].prompt;
+                else if(String(b.question || "").trim()) safe.question = b.question;
+                changed = true;
+            } else {
             const byId = new Map();
             (safe.questions || []).forEach(q => {
                 if(q && q.id) byId.set(normId(q.id), Object.assign({}, q));
@@ -15965,6 +15997,7 @@ const app = {
                 safe.questions = Array.from(byId.values()).sort((a, b) => sortQid(a.id) - sortQid(b.id));
                 if(safe.questions[0] && String(safe.questions[0].prompt || "").trim()) safe.question = safe.questions[0].prompt;
                 else if(String(b.question || "").trim()) safe.question = b.question;
+            }
             }
         }
         const msText = String(b.markSchemeText || "").trim();
@@ -22074,6 +22107,8 @@ const admin = {
             kept.push(row);
         });
         if(kept.length !== safe.questions.length) {
+            const beforeN = safe.questions.filter(q => q && String(q.prompt || "").trim()).length;
+            if(kept.length === 0 && beforeN > 0) return false;
             safe.questions = kept.length ? kept : safe.questions;
             changed = true;
         }
@@ -22868,7 +22903,8 @@ const admin = {
             }
             appData.questions = admin.buildQuestionsFromFinalizedPrompts(parsed);
             if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
-            if(appData.questions.length >= 1) {
+            if(typeof app.commitExtractedQuestions === "function") app.commitExtractedQuestions(appData.questions);
+            else if(appData.questions.length >= 1) {
                 appData.question = appData.questions[0].prompt || appData.question;
                 if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
             } else if(appData.selection && appData.selection.question) {
@@ -22993,7 +23029,8 @@ const admin = {
             } catch(eDbg) {}
             appData.questions = admin.buildQuestionsFromFinalizedPrompts(parsed);
             if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
-            if(appData.questions.length >= 1) {
+            if(typeof app.commitExtractedQuestions === "function") app.commitExtractedQuestions(appData.questions);
+            else if(appData.questions.length >= 1) {
                 appData.question = appData.questions[0].prompt || appData.question;
                 if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
             } else {
@@ -23499,7 +23536,7 @@ const admin = {
             const preset = document.getElementById("selection-stage-preset");
             if(preset) preset.value = "custom";
         }
-        admin.refreshQuestionsList();
+        admin.refreshQuestionsList({ skipSanitize: true });
         const loadModeSel = document.getElementById("past-paper-load-mode");
         if(loadModeSel) loadModeSel.value = String(appData.component === 2 ? 2 : 1);
         admin.syncPastPaperLabels();
@@ -26269,7 +26306,7 @@ const admin = {
         if(!mounts.length) return;
         if(!Array.isArray(appData.questions)) appData.questions = [{ id: "q1", prompt: appData.question || "" }];
         let questionsRepaired = false;
-        if(typeof admin.sanitizeC2InstructionRowsFromQuestionBank === "function" && admin.sanitizeC2InstructionRowsFromQuestionBank(appData)) {
+        if(!opts.skipSanitize && typeof admin.sanitizeC2InstructionRowsFromQuestionBank === "function" && admin.sanitizeC2InstructionRowsFromQuestionBank(appData)) {
             questionsRepaired = true;
         }
         appData.questions.forEach((q) => {
@@ -26408,6 +26445,7 @@ const admin = {
                 _rowEl: row
             };
         });
+        if(rows.every(r => !r.prompt) && memHasPrompts) return;
         const filtered = rows.filter((r, i) => r.prompt || i === 0);
         if(filtered.length === 0) filtered.push({ prompt: "", qid: rows[0] ? rows[0].qid : "", hasWsCb: false, includeWS: false });
         const prev = Array.isArray(appData.questions) ? appData.questions : [];
