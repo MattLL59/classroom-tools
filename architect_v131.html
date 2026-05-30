@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T14:00:00">
-<meta name="architect-deploy" content="fix-question-wipe-race">
+<meta name="architect-build" content="2026-05-24T14:15:00">
+<meta name="architect-deploy" content="level-bank-sync-fix">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15843,10 +15843,14 @@ const app = {
                 }
                 if(typeof admin !== "undefined") {
                     if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
-                    if(admin.renderAll) admin.renderAll({ importPass: true });
+                    if(opts.includeQuestions) {
+                        if(admin.refreshQuestionsList) admin.refreshQuestionsList({ skipLevelBank: true });
+                    } else if(admin.renderAll) {
+                        admin.renderAll({ importPass: true });
+                    }
                 }
                 if(opts.includeQuestions && typeof admin !== "undefined" && admin.afterExtractQuestionsUi) {
-                    try { localStorage.setItem("tsa_admin_tab", "ai"); } catch(eTab) {}
+                    try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
                     admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
                 }
                 if(!app._passageDisplaysDeferred && !opts.loadAsComponent2 && appData && appData.sourceText && String(appData.sourceText).trim()) {
@@ -23002,14 +23006,14 @@ const admin = {
                 appData.component2Layout.questionPaperPagesForQuestions = (inp && inp.value && inp.value.trim()) ? inp.value.trim() : "2";
             }
             app.save({ skipQuestionPersist: true, skipRender: true });
+            admin.refreshQuestionsList({ skipLevelBank: true });
             admin.syncLevelBankForPastPaperQuestions();
             admin.autoAssignLevelsByLineRangeIfApplicable();
-            admin.refreshQuestionsList();
             app.save({ skipRender: true });
             if(parsed.length >= 1) {
-                alert(parsed.length + " question(s) extracted into Load & AI → Focus questions. Students see them on Quote Select / Writing Desk (Focus Question banner).");
+                alert(parsed.length + " question(s) extracted. Level Bank updated (L1→Q1, …). Check Editing Suite → Level Bank and Focus questions.");
             } else {
-                alert("No Section A reading questions detected on page 2 — check the page range or paste questions manually in Load & AI → Focus questions.");
+                alert("No Section A reading questions detected on page 2 — check the page range or paste questions manually in Editing Suite → Focus questions.");
             }
             admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
@@ -26297,14 +26301,15 @@ const admin = {
             else setTimeout(renderLb, 0);
         }
     },
-    /** After Extract questions: refresh admin list + student Quote Select / Desk banners. */
+    /** After Extract questions: refresh lists, Level Bank L1→Qn, student banners. */
     afterExtractQuestionsUi: function(parsedCount) {
         try {
-            if(typeof admin.goAdminTab === "function") admin.goAdminTab("ai");
-            if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
-            admin.refreshQuestionsList({ skipLevelBank: false });
-            if(typeof admin.renderLevelBank === "function") admin.renderLevelBank();
+            admin.refreshQuestionsList({ skipLevelBank: true });
+            if(typeof admin.syncLevelBankForPastPaperQuestions === "function") admin.syncLevelBankForPastPaperQuestions();
+            if(typeof admin.autoAssignLevelsByLineRangeIfApplicable === "function") admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+            if(typeof admin.renderLevelBank === "function") admin.renderLevelBank({ skipSyncFromList: true });
             if(typeof ui !== "undefined") {
+                if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
                 if(ui.renderQuestionBanner) ui.renderQuestionBanner();
                 if(ui.renderSelection) ui.renderSelection();
                 if(userState && userState.view === "desk") {
@@ -26312,9 +26317,10 @@ const admin = {
                     if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
                 }
             }
-            const ql = document.getElementById("questions-list");
-            if(ql) {
-                try { ql.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
+            if(typeof admin.goAdminTab === "function") admin.goAdminTab("edit");
+            const lb = document.getElementById("level-bank-editor");
+            if(lb) {
+                try { lb.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
             }
         } catch(eUi) {
             console.warn("afterExtractQuestionsUi:", eUi);
@@ -26379,7 +26385,7 @@ const admin = {
         if(!list) return;
         const rowEls = Array.from(list.children);
         const memHasPrompts = Array.isArray(appData.questions) && appData.questions.some(q => q && String(q.prompt || "").trim());
-        if(!rowEls.length && memHasPrompts && (opts && opts.fromPersistHook)) return;
+        if(!rowEls.length && memHasPrompts) return;
         const sanitize = !!(opts && opts.sanitize);
         const rows = rowEls.map((row) => {
             const inp = row.querySelector("input.question-prompt-input") || row.querySelector("input[type='text']");
@@ -30735,7 +30741,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         }
         if(typeof admin.syncLevelBankC2TextsFromFocusQuestions === "function") admin.syncLevelBankC2TextsFromFocusQuestions();
         appData.settings.activeLevels = sorted.map((_, i) => i + 1);
-        if(typeof app.save === "function") app.save({ skipRender: true, silent: true });
+        if(typeof app.save === "function") app.save({ skipRender: true, silent: true, skipQuestionPersist: true });
     },
     capSelectionCountsToTargets: () => {
         admin.ensureSelectionData();
@@ -31296,11 +31302,15 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         }
         admin._syncTeacherPreviewLineWindowInput();
     },
-    renderLevelBank: function() {
+    renderLevelBank: function(opts) {
+        opts = opts || {};
         const wrap = document.getElementById("level-bank-editor");
         if(!wrap) return;
         admin._pushLineRefsFromAppDataToFocusInputs();
-        admin.syncQuestionsFromListCore();
+        const mountsHaveRows = Array.from(document.querySelectorAll(".questions-list-mount")).some(m => m && m.children && m.children.length > 0);
+        if(!opts.skipSyncFromList && mountsHaveRows && !app._importInProgress) {
+            admin.syncQuestionsFromListCore();
+        }
         admin._renderLevelBankDOM();
     },
     updateLevelBankQuestionIds: function(selectEl) {
