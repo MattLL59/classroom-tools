@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T18:30:00">
-<meta name="architect-deploy" content="fix-desk-stack-overflow-q1">
+<meta name="architect-build" content="2026-05-24T19:00:00">
+<meta name="architect-deploy" content="fix-q2-paraphrase-retrieval">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524183000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524190000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -3350,7 +3350,7 @@ const app = {
         const qStr = strip(String(quoteText || "").trim());
         if(!qStr) return "";
         const lvl = (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
-        const ownWordsQ1 = app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl);
+        const ownWordsQ1 = app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl);
         if(ownWordsQ1 && !(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl))) {
             return String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(qStr) : "") || "").trim();
         }
@@ -3359,7 +3359,7 @@ const app = {
     /** Move desk queue quotes into the answer (long-response path); keeps Q1 paraphrase / short-answer flows on the queue. */
     flushDeskQueueToEssayIfNeeded: function() {
         const level = (app.getEffectiveLevel && app.getEffectiveLevel()) || userState.level || 1;
-        if(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) return;
+        if(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) return;
         try {
             if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) return;
         } catch(e) {}
@@ -3646,6 +3646,21 @@ const app = {
         /** One focus question in the bank (common C1) — still “question 1” of the paper if it matches the first stored prompt. */
         if(ids.length === 1) return norm(ids[0]) === norm(firstId) && norm(currentId) === norm(firstId);
         return norm(currentId) === norm(firstId);
+    },
+    /** C1 own-words retrieval (Q1, Q2, …): paraphrase in Writing Desk — not verbatim Short ans, not LoR essay levels. */
+    isOwnWordsRetrievalLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        try {
+            if(app.getArchitectComponent() === 2) return false;
+            if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) return false;
+            if(app.isLevelsOfResponseLevel && app.isLevelsOfResponseLevel(lvl)) return false;
+            if(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
+            const ids = app.resolveQuestionIdsForLevel(lvl);
+            if(!ids || ids.length !== 1) return false;
+            const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvl) : null;
+            if(marks != null && marks <= 2) return true;
+            return false;
+        } catch(e) { return false; }
     },
     /**
      * Question id(s) for this Level Bank row only. Empty questionIds → **one** id for this level (L1→q1), never the whole question bank.
@@ -4110,7 +4125,7 @@ const app = {
         try {
             const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
             if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) return true;
-            if(app.getArchitectComponent() !== 2 && app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
+            if(app.getArchitectComponent() !== 2 && app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl)) return true;
             return false;
         } catch(e) { return false; }
     },
@@ -4137,8 +4152,7 @@ const app = {
     isC1OwnWordsShortAnswerLevel: function(level) {
         try {
             if(app.getArchitectComponent() === 2) return false;
-            if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(level)) return false;
-            return !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+            return !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         } catch(e) { return false; }
     },
     /** C2 Short ans: quote only — no examine/justify step; send to answer and advance. */
@@ -16870,7 +16884,7 @@ const ui = {
         if(userState.view === "desk") {
             if(Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
                 const lvl = userState.level || 1;
-                const useParaphrase = (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
+                const useParaphrase = (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
                 if(useParaphrase) {
                     const first = ui.ensureQuoteItem(userState.deskQueue[0]);
                     if(first) ui.runBuilder(first);
@@ -17556,7 +17570,7 @@ const ui = {
             ui.updateCommitAnswerPanel();
             if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length && !ui._runBuilderInProgress) {
                 const lvl = userState.level || 1;
-                const useParaphrase = (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
+                const useParaphrase = (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
                 if(useParaphrase) {
                     const first = ui.ensureQuoteItem(userState.deskQueue[0]);
                     if(first) ui.runBuilder(first);
@@ -17749,7 +17763,7 @@ const ui = {
         const run = () => {
             try {
                 if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAll) admin.renderAll();
+                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true });
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
@@ -18143,7 +18157,7 @@ const ui = {
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
         const fromDeskQueue = Array.isArray(userState.deskQueue) && userState.deskQueue.length > 0 && userState.deskQueue.some(q => app.quoteKey(q) === app.quoteKey(item.original));
-        const noQuotesMode = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+        const noQuotesMode = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) {
             if(!Array.isArray(userState.deskQueue) || userState.deskQueue.length === 0) {
                 const raw = item.original && (typeof item.original === "object" && "quote" in item.original ? item.original.quote : item.original);
@@ -18417,7 +18431,7 @@ const ui = {
         }
         const strip = app.stripLineNumbersFromQuote || function(s) { return String(s || "").trim(); };
         const lvl = app.getEffectiveLevel && app.getEffectiveLevel();
-        const q1Own = !!(app.isLevelUsingFirstQuestion && lvl != null && app.isLevelUsingFirstQuestion(lvl));
+        const q1Own = !!(app.isOwnWordsRetrievalLevel && lvl != null && app.isOwnWordsRetrievalLevel(lvl));
         const parts = uniqueChosen.map(q => {
             const raw = typeof q === "object" && q && "quote" in q ? q.quote : q;
             const t = strip(String(raw || "").trim());
@@ -19049,7 +19063,7 @@ const ui = {
                 app.save();
             }
         }
-        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)));
         if((!sel.items.length || sel.items.length < 2) && !(tapSelectOnly && hasSourceEarly)) {
             if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
             const tPanel = document.getElementById("selection-top-panel");
@@ -19332,11 +19346,11 @@ const ui = {
             quoteOnlyShort ||
             app.isTeacherTapRecordPassageMode() ||
             levelEntry.shortAnswersOnly === true ||
-            (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level))
+            (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level))
         ) && hasSource;
         const questionTextGlobal = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : app.getQuestionForLevel(level);
         const topPanel = document.getElementById("selection-top-panel");
-        const noQuotesTopPanel = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+        const noQuotesTopPanel = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         const updateTopAndQuestion = () => {
             const idxFound = (ids && ids.length > 1 && currentQId) ? ids.findIndex(qid => normId(qid) === normId(currentQId)) : -1;
             const qNum = idxFound >= 0 ? idxFound + 1 : 0;
@@ -19392,7 +19406,7 @@ const ui = {
         const studentWantsQuoteList = !!(userState && userState.studentQuoteListHelp === true);
         /* Short-answer questions: always use simple tap flow (no language/justify stages). Teacher "record" mode uses the same tap UI to save meaning/analysis to the lesson. */
         const teacherRecordMode = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
-        const tapPathActive = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || teacherRecordMode || levelEntry.shortAnswersOnly === true || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)));
+        const tapPathActive = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || teacherRecordMode || levelEntry.shortAnswersOnly === true || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)));
         const questionText = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.cleanQuestionPromptForDisplay ? app.cleanQuestionPromptForDisplay(app.getQuestionForLevel(level)) : app.getQuestionForLevel(level));
         /* Passage highlight → examine step must run even when "Give me quote choices" is on (that option only hides the tap *hint* card, not tapping itself). */
         const pendingQuotePassage = String(ui._freeSelectPendingQuote || "").trim();
@@ -19417,7 +19431,7 @@ const ui = {
                     <div style="opacity:0.95;">Your highlight does not closely match the <strong>answer passage</strong> your teacher set for this question. You can still continue if you are sure — in the exam you must work from the lines the question gives you.</div>
                 </div>`
                 : "";
-            const q1TapParaphrase = c1OwnWordsShort || !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+            const q1TapParaphrase = c1OwnWordsShort || !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
             const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
             const showJustifyBox = tr || (!isShortAnswerMode) || c1OwnWordsShort;
             const whyHeading = tr
@@ -19462,10 +19476,6 @@ const ui = {
                 } else if(pendingQuote) {
                     const whyEl = document.getElementById("free-select-why");
                     const whyStu = whyEl ? String(whyEl.value || "").trim() : "";
-                    if(c1OwnWordsShort && !whyStu) {
-                        alert("Put the fact in your own words before continuing (do not copy the passage).");
-                        return;
-                    }
                     if(whyStu && app.setSelectionJustificationForQuoteText) app.setSelectionJustificationForQuoteText(pendingQuote, whyStu);
                 }
                 if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
@@ -19476,8 +19486,8 @@ const ui = {
                 ui._freeSelectPendingQuote = "";
                 if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
                 app.save();
-                if(c1OwnWordsShort) {
-                    ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                if(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) {
+                    ui.sendSelectionQuotesToBuilder();
                     return;
                 }
                 if(quoteOnlyShort) {
@@ -19503,7 +19513,7 @@ const ui = {
                 </div>`;
                 return;
             }
-            const noQuotesFlow = !!(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level));
+            const noQuotesFlow = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
             if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && uniqueChosenCount > 0 && !ui._initInProgress && !canPickFromText) {
                 if(quoteOnlyShort) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                 else ui.sendSelectionQuotesToBuilder();
@@ -20863,8 +20873,8 @@ const ui = {
             }
             if(!toAdd) {
                 const lvl = lvlEarly;
-                if(app.isLevelUsingFirstQuestion && lvl != null && app.isLevelUsingFirstQuestion(lvl)) {
-                    alert("For Question 1, write each point in your own words in Quote Select first, or type your answer in the box.");
+                if(app.isOwnWordsRetrievalLevel && lvl != null && app.isOwnWordsRetrievalLevel(lvl)) {
+                    alert("Write each point in your own words in the Writing Desk paraphrase box (or type in the answer box).");
                 }
                 return;
             }
@@ -23419,19 +23429,37 @@ const admin = {
     },
     renderAll: function(opts) {
         opts = opts || {};
+        const deferHeavy = !!(opts.lite || opts.skipLevelBank);
         try { admin.initTabs(); } catch(eTabs) {}
-        try { admin.syncUI(); } catch(eSync) {}
+        try { admin.syncUI({ lite: deferHeavy }); } catch(eSync) {}
         try {
             const lvl = typeof currentConfigLevel === "number" ? currentConfigLevel : 1;
-            admin.renderConfig(lvl);
-            admin.renderLevelBank();
+            if(!opts.skipLevelBank) {
+                admin.renderConfig(lvl);
+                admin.renderLevelBank();
+            }
         } catch(eLb) {}
         try { admin.bindAiAutoPrompt(); } catch(eAi) {}
         try { admin.ensureAiStepVisible(); } catch(eStep) {}
         try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
-        try { admin.renderQuotesBank(); } catch(eQb) {}
-        try { admin.renderSelectionEditor(); } catch(eSel) {}
-        try { admin.renderGlobalList(); } catch(eGl) {}
+        if(deferHeavy) {
+            const fillHeavy = function() {
+                try {
+                    const adm = document.getElementById("modal-admin");
+                    if(!adm || !adm.classList.contains("open")) return;
+                    if(opts.skipLevelBank && admin.renderLevelBank) admin.renderLevelBank();
+                    if(admin.renderQuotesBank) admin.renderQuotesBank();
+                    if(admin.renderSelectionEditor) admin.renderSelectionEditor();
+                    if(admin.renderGlobalList) admin.renderGlobalList();
+                } catch(eFill) {}
+            };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(fillHeavy, { timeout: 1200 });
+            else setTimeout(fillHeavy, 120);
+        } else {
+            try { admin.renderQuotesBank(); } catch(eQb) {}
+            try { admin.renderSelectionEditor(); } catch(eSel) {}
+            try { admin.renderGlobalList(); } catch(eGl) {}
+        }
         try { if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
         try { if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
         try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
