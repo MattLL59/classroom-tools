@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T17:00:00">
-<meta name="architect-deploy" content="init-single-passage-build">
+<meta name="architect-build" content="2026-05-24T17:30:00">
+<meta name="architect-deploy" content="fix-extract-text-passage-display">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15817,7 +15817,7 @@ const app = {
             if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
         }
     },
-    /** After Lobby Extract text / questions — avoid ui.init + setAiInputValue storm that OOMs. */
+    /** After Lobby Extract text / questions — refresh passage + admin editors immediately (no idle defer). */
     afterPastPaperExtractUi: function(opts) {
         opts = opts || {};
         app.prepareImportedLesson(appData);
@@ -15829,35 +15829,41 @@ const app = {
         } finally {
             app._suppressAdminInputFlushOnce = false;
         }
-        const finish = function() {
-            try {
-                if(opts.includeQuestions && typeof admin !== "undefined") {
-                    if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
-                    if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
-                } else if(typeof admin !== "undefined" && admin.refreshQuestionsList) {
-                    admin.refreshQuestionsList();
-                }
-                if(typeof admin !== "undefined") {
-                    if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
-                    if(!opts.includeQuestions && admin.renderAll) admin.renderAll();
-                }
-                if(opts.includeQuestions && typeof admin !== "undefined" && admin.afterExtractQuestionsUi) {
-                    try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
-                    admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
-                }
-                if(!opts.loadAsComponent2 && appData && appData.sourceText && String(appData.sourceText).trim()) {
-                    if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
-                }
-                if(opts.loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function") {
+        try {
+            if(opts.includeQuestions && typeof admin !== "undefined") {
+                if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
+                if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+            } else if(typeof admin !== "undefined" && admin.refreshQuestionsList) {
+                admin.refreshQuestionsList();
+            }
+            if(typeof admin !== "undefined") {
+                if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
+                if(!opts.includeQuestions && admin.renderAll) admin.renderAll();
+            }
+            if(opts.includeQuestions && typeof admin !== "undefined" && admin.afterExtractQuestionsUi) {
+                try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
+                admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
+            }
+            if(opts.loadAsComponent2) {
+                if(typeof admin.loadC2PassagesIntoEditor === "function") {
                     admin.loadC2PassagesIntoEditor({ goToEditTab: false });
                 }
-            } catch(eF) {
-                console.warn("afterPastPaperExtractUi:", eF);
+            } else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
+                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") {
+                    app.finishC1PassageLayoutAfterLessonLoad();
+                } else if(typeof app.syncAdminAiInputFromLesson === "function") {
+                    app.syncAdminAiInputFromLesson({ force: true });
+                }
             }
-            app._importInProgress = false;
-        };
-        if(typeof requestIdleCallback === "function") requestIdleCallback(finish, { timeout: 400 });
-        else setTimeout(finish, 60);
+            if(typeof ui !== "undefined") {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+                if(ui.renderLab) ui.renderLab();
+                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection();
+            }
+        } catch(eF) {
+            console.warn("afterPastPaperExtractUi:", eF);
+        }
+        app._importInProgress = false;
     },
     clearLessonStorageOnly: function() {
         if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
@@ -17368,7 +17374,7 @@ const ui = {
             const labWrapEl = document.getElementById("source-lab-wrap");
             if(labWrapEl) labWrapEl.classList.toggle("architect-passage-excerpt-shell", !!(bundleLab && bundleLab.useExcerptShell));
             ui.syncPassageLineLayoutShell(labWrapEl, inline, labH);
-        } else if(inline && opts.skipPassage && app.getPassageDeferPlaceholderHtml) {
+        } else if(inline && opts.skipPassage && app._passageDisplaysDeferred && app.getPassageDeferPlaceholderHtml) {
             const ph = app.getPassageDeferPlaceholderHtml();
             inline.innerHTML = ph;
             const labWrapEl = document.getElementById("source-lab-wrap");
@@ -19082,7 +19088,7 @@ const ui = {
         const inlineSelect = document.getElementById("source-inline-select");
         const selWrap = document.getElementById("source-inline-select-wrap");
         if(inlineSelect) {
-            if(opts.skipPassage && app.getPassageDeferPlaceholderHtml) {
+            if(opts.skipPassage && app._passageDisplaysDeferred && app.getPassageDeferPlaceholderHtml) {
                 const ph = app.getPassageDeferPlaceholderHtml();
                 inlineSelect.innerHTML = ph;
                 if(selWrap) ui.syncPassageLineLayoutShell(selWrap, inlineSelect, ph);
