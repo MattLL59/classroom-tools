@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T19:30:00">
-<meta name="architect-deploy" content="fix-desk-send-paraphrase">
+<meta name="architect-build" content="2026-05-24T20:00:00">
+<meta name="architect-deploy" content="fix-own-words-quote-select-to-desk">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524193000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524200000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -4172,6 +4172,10 @@ const app = {
             if(app.getArchitectComponent() === 2) return false;
             return !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         } catch(e) { return false; }
+    },
+    /** Paraphrase in Quote Select → answer area; no second paraphrase step on the desk (typical 1–2 mark retrieval). */
+    sendsOwnWordsParaphraseFromQuoteSelect: function(level) {
+        return !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
     },
     /** C2 Short ans: quote only — no examine/justify step; send to answer and advance. */
     acceptShortAnswerQuoteFromPassage: function(quoteText, level) {
@@ -16903,10 +16907,10 @@ const ui = {
         if(userState.view === "desk") {
             if(Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
                 const lvl = userState.level || 1;
-                const useParaphrase = (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
-                if(useParaphrase) {
-                    const first = ui.ensureQuoteItem(userState.deskQueue[0]);
-                    if(first) ui.runBuilder(first);
+                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
+                    ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
+                } else if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
+                    ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
                 } else {
                     app.flushDeskQueueToEssayIfNeeded();
                 }
@@ -17589,10 +17593,10 @@ const ui = {
             ui.updateCommitAnswerPanel();
             if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length && !ui._runBuilderInProgress) {
                 const lvl = userState.level || 1;
-                const useParaphrase = (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl));
-                if(useParaphrase) {
-                    const first = ui.ensureQuoteItem(userState.deskQueue[0]);
-                    if(first) ui.runBuilder(first);
+                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
+                    ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
+                } else if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
+                    ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
                 } else {
                     app.flushDeskQueueToEssayIfNeeded();
                 }
@@ -18189,79 +18193,15 @@ const ui = {
             ui.sendSelectionQuotesDirectToAnswer();
             return;
         }
-        const synPanel = document.getElementById("synonym-suggestion-panel");
-        if(noQuotesMode) {
-            const savedParaphrase = app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(quoteRaw || "") : "";
-            cont.innerHTML = `
-                <div class="card" style="margin-bottom:12px;">
-                    <div style="font-weight:700; margin-bottom:6px;">Selected text</div>
-                    <div style="font-style:italic; margin-bottom:10px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--border);">${app.quoteDisplayHtml(item.original || "")}</div>
-                    <div style="font-weight:700; margin-bottom:6px;">Put this in your own words</div>
-                    <textarea id="paraphrase-input" placeholder="Write a short factual answer in your own words..." style="width:100%; min-height:80px; padding:10px; border:1px solid var(--border); border-radius:6px; font-size:1rem; margin-bottom:10px;"></textarea>
-                    <button type="button" class="btn btn-primary" id="paraphrase-add-btn">Add to Answer</button>
-                </div>
-            `;
-            const addBtn = document.getElementById("paraphrase-add-btn");
-            const textarea = document.getElementById("paraphrase-input");
-            if(textarea && savedParaphrase) {
-                textarea.value = savedParaphrase;
+        if(noQuotesMode && app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+            if(!Array.isArray(userState.deskQueue) || userState.deskQueue.length === 0) {
+                const raw = quoteRaw;
+                if(raw) userState.deskQueue = [raw];
             }
-            if(addBtn && textarea) {
-                addBtn.onclick = () => {
-                    const paraphrase = textarea.value.trim();
-                    if(!paraphrase) { alert("Please write your paraphrase before adding."); return; }
-                    const existing = (userState.essay || "").trim();
-                    const toAdd = paraphrase.endsWith(".") ? paraphrase : paraphrase + ".";
-                    userState.essay = existing ? existing + (existing.endsWith(" ") ? "" : " ") + toAdd : toAdd;
-                    const essayEl = document.getElementById("essay-area");
-                    if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
-                    app.awardXp(10);
-                    if(app.bumpDeskCommitForLevel) app.bumpDeskCommitForLevel(app.getEffectiveLevel());
-                    ui.updateMarksDisplay();
-                    const idx = Array.isArray(userState.deskQueue) ? userState.deskQueue.findIndex(q => app.quoteTextsMatch(q, quoteRaw)) : -1;
-                    if(idx >= 0) {
-                        const removed = userState.deskQueue.splice(idx, 1)[0];
-                        if(removed && !Array.isArray(userState.selectionAnsweredForQuestion)) userState.selectionAnsweredForQuestion = [];
-                        if(removed) userState.selectionAnsweredForQuestion.push(typeof removed === "object" && removed && "quote" in removed ? removed.quote : removed);
-                    }
-                    if(userState.deskQueue.length > 0) {
-                        const next = ui.ensureQuoteItem(userState.deskQueue[0]);
-                        if(next) { app.save(); setTimeout(() => ui.runBuilder(next), 0); return; }
-                    }
-                    if(app.shouldShowCommitAnswerPanel()) {
-                        userState.pendingCommitForNextQuestion = true;
-                        app.save();
-                        ui.switchView("desk");
-                        ui.updateCommitAnswerPanel();
-                        ui.renderDeskQuoteTabs();
-                        return;
-                    }
-                    app.save();
-                    ui.renderDeskQuoteTabs();
-                    const lvlRb = userState.level || 1;
-                    const advanced = (app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlRb, { showCelebration: false }))
-                        || (app.advanceSelectionQuestionIfComplete && app.advanceSelectionQuestionIfComplete());
-                    if(!advanced) {
-                        const evGoalRb = app.getSelectionEvidenceGoalForLevel(lvlRb);
-                        const ptsRb = app.countSelectionEvidencePoints(lvlRb);
-                        const goalMetRb = app.isLevelProgressionReady ? app.isLevelProgressionReady(lvlRb) : (ptsRb >= evGoalRb);
-                        userState.selectionCompleted = !!goalMetRb;
-                        if(goalMetRb && app.advanceStudentToNextActiveLevel) app.advanceStudentToNextActiveLevel({ showCelebration: false });
-                    } else {
-                        userState.selectionChosen = [];
-                    }
-                    app.save();
-                    ui.switchView("select", true);
-                    ui.renderSelection();
-                    app.checkLevelCompletion();
-                };
-            }
-            if(synPanel && app.isStudentSynonymsHelp()) synPanel.classList.remove("hidden");
-            const synBtn = document.getElementById("btn-suggest-synonyms");
-            const synResults = document.getElementById("synonym-results");
-            if(synBtn && synResults) synBtn.onclick = () => ui.fetchSynonymsForText(item.original || "", synResults);
+            ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
             return;
         }
+        const synPanel = document.getElementById("synonym-suggestion-panel");
         if(synPanel) {
             if(app.isStudentSynonymsHelp()) {
                 synPanel.classList.remove("hidden");
@@ -19413,7 +19353,11 @@ const ui = {
                 const clearBtn = topPanel.querySelector("#selection-clear-chosen");
                 const sendBtn = topPanel.querySelector("#selection-send-chosen");
                 if(clearBtn) clearBtn.onclick = () => { userState.selectionChosen = []; userState.deskQueue = []; userState.selectionJustification = {}; app.save(); ui.renderSelection(); };
-                if(sendBtn) sendBtn.onclick = () => (quoteOnlyShort ? ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true }) : ui.sendSelectionQuotesToBuilder());
+                if(sendBtn) sendBtn.onclick = () => {
+                    if(quoteOnlyShort || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level))) {
+                        ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: quoteOnlyShort, showDesk: !quoteOnlyShort });
+                    } else ui.sendSelectionQuotesToBuilder();
+                };
             }
         };
         updateTopAndQuestion();
@@ -19421,6 +19365,7 @@ const ui = {
         if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && !canPickFromText && uniqueChosenCount > 0 && !ui._initInProgress) {
             setTimeout(() => {
                 if(quoteOnlyShort) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                else if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) ui.sendSelectionQuotesDirectToAnswer({ showDesk: true });
                 else ui.sendSelectionQuotesToBuilder();
             }, 0);
             return;
@@ -19467,7 +19412,7 @@ const ui = {
                 ? "Comment / analysis (saved to lesson)"
                 : (c1OwnWordsShort
                     ? "Put each fact in your own words below (retrieval — do not copy the passage)."
-                    : (q1TapParaphrase ? "Does this text answer the question? You will paraphrase it in the Writing Desk." : "Does this quote support your answer? Why?"));
+                    : (q1TapParaphrase ? "Does this text answer the question? Put it in your own words below — it will go straight into your answer on the Writing Desk." : "Does this quote support your answer? Why?"));
             const whyBlockHtml = showJustifyBox
                 ? `<div style="font-weight:700; margin-bottom:4px;">${whyHeading}</div>
                         <textarea id="free-select-why" placeholder="${whyPlaceholder}" style="width:100%; min-height:60px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>`
@@ -19521,8 +19466,8 @@ const ui = {
                 ui._freeSelectPendingQuote = "";
                 if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
                 app.save();
-                if(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) {
-                    ui.sendSelectionQuotesToBuilder();
+                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                    ui.sendSelectionQuotesDirectToAnswer({ showDesk: true });
                     return;
                 }
                 if(quoteOnlyShort) {
@@ -19552,15 +19497,18 @@ const ui = {
             if(!pendingHighlightQuote && autoDeskAdv && pointsMade >= evidenceGoalForUi && uniqueChosenCount > 0 && !ui._initInProgress && !canPickFromText) {
                 setTimeout(() => {
                     if(quoteOnlyShort) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                    else if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) ui.sendSelectionQuotesDirectToAnswer({ showDesk: true });
                     else ui.sendSelectionQuotesToBuilder();
                 }, 0);
                 return;
             }
             const targetMetLine = pointsMade >= evidenceGoalForUi
                 ? (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Writing Desk when ready, or add another.</p>`)
-                : (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will paraphrase each selection in the Writing Desk.</p>`);
+                : (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>` : (noQuotesFlow ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Paraphrase each selection in the box that appears — it goes into your Writing Desk answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will build each quote in the Sentence Builder.</p>`));
             const sendLabel = quoteOnlyShort ? "Send to Answer" : (noQuotesFlow ? "Send to Writing Desk" : "Send quotes to Sentence Builder");
-            const sendAction = quoteOnlyShort ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })" : "ui.sendSelectionQuotesToBuilder()";
+            const sendAction = quoteOnlyShort
+                ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })"
+                : (noQuotesFlow ? "ui.sendSelectionQuotesDirectToAnswer({ showDesk: true })" : "ui.sendSelectionQuotesToBuilder()");
             const tapProgressLine = tapHighlightEvidenceMode
                 ? `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span></div>`
                 : `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span><span style="opacity:0.85;"> · </span><span>Evidence points:</span> <span style="font-variant-numeric: tabular-nums;">${pointsMade}</span></div>`;
@@ -20878,6 +20826,7 @@ const ui = {
             const opts = (useDeskQueueOrOpts && typeof useDeskQueueOrOpts === "object") ? useDeskQueueOrOpts : {};
             const useDeskQueue = opts.useDeskQueue === true || useDeskQueueOrOpts === true;
             const stayOnQuoteSelect = opts.stayOnQuoteSelect === true;
+            const showDesk = opts.showDesk === true;
             let chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
             if (useDeskQueue || (!chosen.length && Array.isArray(userState.deskQueue) && userState.deskQueue.length > 0)) {
                 chosen = userState.deskQueue.map(q => (typeof q === "object" && q && "quote" in q ? q.quote : q));
@@ -20885,17 +20834,28 @@ const ui = {
             const seen = new Set();
             const uniqueChosen = chosen.filter(q => {
                 const raw = typeof q === "object" && q && "quote" in q ? q.quote : q;
-                const k = app.quoteKey(String(raw || "").trim());
+                const k = app.justificationKeyForQuoteText ? app.justificationKeyForQuoteText(String(raw || "").trim()) : app.quoteKey(String(raw || "").trim());
                 if(!k || seen.has(k)) return false;
                 seen.add(k);
                 return true;
             });
-            if(!uniqueChosen.length) return;
+            if(!uniqueChosen.length) {
+                alert("Select at least one quote in the passage first.");
+                return;
+            }
             const strip = app.stripLineNumbersFromQuote || (s => String(s || "").trim());
             const texts = uniqueChosen.map(q => strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim())).filter(Boolean);
             if(!texts.length) return;
-            const existing = (userState.essay || "").trim();
             const lvlEarly = app.getEffectiveLevel && app.getEffectiveLevel();
+            const ownWordsFromSelect = app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlEarly);
+            if(ownWordsFromSelect) {
+                const missing = texts.filter(t => !String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(t) : "") || "").trim());
+                if(missing.length) {
+                    alert("Paraphrase each highlight in Quote Select first: highlight the passage, write in your own words in the box, then tap Use this quote.");
+                    return;
+                }
+            }
+            const existing = (userState.essay || "").trim();
             let perLevelQuoteEssay = false;
             try {
                 perLevelQuoteEssay = !!(lvlEarly != null && app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlEarly));
@@ -20905,9 +20865,8 @@ const ui = {
                 toAdd = texts.map(t => app.formatDeskQueueQuoteWithJustification(t)).filter(Boolean).join("\n\n");
             }
             if(!toAdd) {
-                const lvl = lvlEarly;
-                if(app.isOwnWordsRetrievalLevel && lvl != null && app.isOwnWordsRetrievalLevel(lvl)) {
-                    alert("Write each point in your own words in the Writing Desk paraphrase box (or type in the answer box).");
+                if(ownWordsFromSelect) {
+                    alert("Paraphrase each highlight in Quote Select first (do not copy the passage).");
                 }
                 return;
             }
@@ -20924,14 +20883,23 @@ const ui = {
             userState.essay = newEssay;
             const essayEl = document.getElementById("essay-area");
             if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
-            if(app.shouldMergeQuoteSelectionIntoAnalysisBanks()) {
-                texts.forEach(t => { if(ui.ensureQuoteItem) ui.ensureQuoteItem(t); });
-                texts.forEach(raw => {
-                    const it = (appData.items || []).find(i => i && app.quoteKey(i.original || i.quote || "") === app.quoteKey(String(raw || "").trim()));
-                    if(it && admin.splitModelAnswerForItem) admin.splitModelAnswerForItem(it, false);
-                });
-                if(admin.populateAnalysisBanksFromLessonItems) admin.populateAnalysisBanksFromLessonItems({ silent: true });
-                if(admin.renderQuotesBank) admin.renderQuotesBank();
+            const mergeBanks = app.shouldMergeQuoteSelectionIntoAnalysisBanks();
+            const adminOpen = !!(document.getElementById("modal-admin") && document.getElementById("modal-admin").classList.contains("open"));
+            if(mergeBanks) {
+                const deferMerge = () => {
+                    try {
+                        texts.forEach(t => { if(ui.ensureQuoteItem) ui.ensureQuoteItem(t); });
+                        texts.forEach(raw => {
+                            const it = (appData.items || []).find(i => i && app.quoteTextsMatch(i.original || i.quote || "", raw));
+                            if(it && admin.splitModelAnswerForItem) admin.splitModelAnswerForItem(it, false);
+                        });
+                        if(admin.populateAnalysisBanksFromLessonItems) admin.populateAnalysisBanksFromLessonItems({ silent: true });
+                        app.save();
+                        if(adminOpen && admin.renderQuotesBank) admin.renderQuotesBank();
+                    } catch(eMerge) { console.warn("Deferred quote bank merge failed:", eMerge); }
+                };
+                if(typeof requestIdleCallback === "function") requestIdleCallback(deferMerge, { timeout: 2000 });
+                else setTimeout(deferMerge, 0);
             }
             userState.selectionChosen = [];
             userState.deskQueue = [];
@@ -20951,7 +20919,6 @@ const ui = {
             let c1OwnWordsSa = false;
             try { quoteOnlySa = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlNow)); } catch(eSn) {}
             try { c1OwnWordsSa = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvlNow)); } catch(eC1) {}
-            const shortAnsStayOnSelect = stayOnQuoteSelect || quoteOnlySa || c1OwnWordsSa;
             let advancedLevel = false;
             let advancedInLevel = false;
             if((quoteOnlySa || c1OwnWordsSa) && app.tryFinishShortAnswerLevelAndAdvance) {
@@ -20965,12 +20932,21 @@ const ui = {
                     && app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlNow, { showCelebration: false });
             }
             if(app.checkLevelCompletion) app.checkLevelCompletion();
-            if(advancedLevel || advancedInLevel || shortAnsStayOnSelect) {
+            if(advancedLevel || advancedInLevel) {
+                if(ui.switchView) ui.switchView("select", true);
+                if(ui.renderSelection) ui.renderSelection();
+            } else if(showDesk) {
+                if(ui.switchView) ui.switchView("desk", true);
+                if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
+            } else if(stayOnQuoteSelect || quoteOnlySa) {
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(ui.switchView) ui.switchView("desk", true);
             if(ui.updateMarksDisplay) ui.updateMarksDisplay();
-        } catch(e) {}
+        } catch(e) {
+            console.warn("sendSelectionQuotesDirectToAnswer failed:", e);
+            alert("Could not add your answer. Try again or refresh the page.");
+        }
     },
     sendSelectionQuotesToBuilder: function() {
         if(ui._sendToBuilderGuard) {
@@ -20981,6 +20957,10 @@ const ui = {
             const lvl = app.getEffectiveLevel && app.getEffectiveLevel();
             if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) {
                 ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                return;
+            }
+            if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
+                ui.sendSelectionQuotesDirectToAnswer({ showDesk: true });
                 return;
             }
         } catch(e) { /* fall through to normal flow */ }
