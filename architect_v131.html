@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T20:00:00">
-<meta name="architect-deploy" content="fix-own-words-quote-select-to-desk">
+<meta name="architect-build" content="2026-05-24T20:30:00">
+<meta name="architect-deploy" content="fix-own-words-no-sentence-builder">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524200000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524203000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -3665,18 +3665,22 @@ const app = {
         if(ids.length === 1) return norm(ids[0]) === norm(firstId) && norm(currentId) === norm(firstId);
         return norm(currentId) === norm(firstId);
     },
-    /** C1 own-words retrieval (Q1, Q2, …): paraphrase in Writing Desk — not verbatim Short ans, not LoR essay levels. */
+    /** C1 own-words retrieval (Q1, Q2, …): paraphrase in Quote Select — not verbatim Short ans, not LoR essay levels. */
     isOwnWordsRetrievalLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
         try {
             if(app.getArchitectComponent() === 2) return false;
-            if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) return false;
             if(app.isLevelsOfResponseLevel && app.isLevelsOfResponseLevel(lvl)) return false;
+            const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvl) : null;
+            const lowMarkRetrieval = marks != null && marks <= 2;
+            if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) {
+                /* Level Bank “Short ans” on C1 1–2 mark rows is own-words retrieval, not verbatim quote paste. */
+                return lowMarkRetrieval;
+            }
             if(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
             const ids = app.resolveQuestionIdsForLevel(lvl);
             if(!ids || ids.length !== 1) return false;
-            const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvl) : null;
-            if(marks != null && marks <= 2) return true;
+            if(lowMarkRetrieval) return true;
             return false;
         } catch(e) { return false; }
     },
@@ -4159,6 +4163,10 @@ const app = {
         try {
             const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
             if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) return false;
+            if(app.getArchitectComponent() !== 2 && app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) {
+                const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvl) : null;
+                if(marks != null && marks <= 2) return false;
+            }
             return !!(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl));
         } catch(e) { return false; }
     },
@@ -4173,9 +4181,16 @@ const app = {
             return !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         } catch(e) { return false; }
     },
-    /** Paraphrase in Quote Select → answer area; no second paraphrase step on the desk (typical 1–2 mark retrieval). */
+    /** Paraphrase in Quote Select → answer area; no Sentence Builder (typical 1–2 mark C1 retrieval). */
     sendsOwnWordsParaphraseFromQuoteSelect: function(level) {
-        return !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
+        try {
+            if(app.getArchitectComponent() === 2) return false;
+            if(app.isLevelsOfResponseLevel && app.isLevelsOfResponseLevel(level)) return false;
+            if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level)) return false;
+            const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(level) : null;
+            if(marks != null && marks <= 2) return true;
+            return !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
+        } catch(e) { return false; }
     },
     /** C2 Short ans: quote only — no examine/justify step; send to answer and advance. */
     acceptShortAnswerQuoteFromPassage: function(quoteText, level) {
@@ -17591,18 +17606,21 @@ const ui = {
         } else if(v === "desk") {
             ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
             ui.updateCommitAnswerPanel();
-            if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length && !ui._runBuilderInProgress) {
-                const lvl = userState.level || 1;
-                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
+            const lvlDesk = userState.level || 1;
+            const ownWordsDesk = app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlDesk);
+            if(redirectedToDesk && Array.isArray(userState.deskQueue) && userState.deskQueue.length && !ui._runBuilderInProgress && !ui._directOwnWordsSendInProgress) {
+                if(ownWordsDesk) {
                     ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
-                } else if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
+                } else if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvlDesk)) {
                     ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
                 } else {
                     app.flushDeskQueueToEssayIfNeeded();
                 }
             }
-            if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
-            if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
+            if(ownWordsDesk && ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
+            if(!ownWordsDesk && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+            if(!ownWordsDesk && ui.setupDeskDragDrop) ui.setupDeskDragDrop();
+            else if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
             ui.updateMarksDisplay();
             if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
         }
@@ -17672,9 +17690,10 @@ const ui = {
             try {
                 if(ui.activeQuoteId) {
                     const item = appData.items.find(i => i.id === ui.activeQuoteId);
-                    if(item) ui.runBuilder(item);
+                    const lvlAdm = userState.level || 1;
+                    if(item && !(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlAdm))) ui.runBuilder(item);
                 }
-                if(userState.view === "desk" && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+                if(userState.view === "desk" && ui.renderDeskSentenceBank && !(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(userState.level || 1))) ui.renderDeskSentenceBank();
             } catch(eUi) { console.warn("closeAdminLite ui:", eUi); }
             if(typeof admin._liteStudentRefresh === "function") admin._liteStudentRefresh();
         } catch(eClose) {
@@ -18170,6 +18189,16 @@ const ui = {
             if(Date.now() - (ui._runBuilderInProgressAt || 0) > 8000) ui._runBuilderInProgress = false;
             else return;
         }
+        const level = userState.level || 1;
+        const quoteRaw = item && item.original && (typeof item.original === "object" && "quote" in item.original ? item.original.quote : item.original);
+        if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+            if(quoteRaw) {
+                if(!Array.isArray(userState.deskQueue) || !userState.deskQueue.length) userState.deskQueue = [quoteRaw];
+                else if(!userState.deskQueue.some(q => app.quoteTextsMatch(q, quoteRaw))) userState.deskQueue.push(quoteRaw);
+            }
+            ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true, onlyQuotes: quoteRaw ? [quoteRaw] : null });
+            return;
+        }
         ui._runBuilderInProgress = true;
         ui._runBuilderInProgressAt = Date.now();
         try {
@@ -18180,10 +18209,8 @@ const ui = {
         // Guided slots UI removed: keep desk flow working without builder.
         if(!cont) return;
         cont.innerHTML = "";
-        const level = userState.level || 1;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
-        const quoteRaw = item.original && (typeof item.original === "object" && "quote" in item.original ? item.original.quote : item.original);
         const noQuotesMode = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) {
             if(!Array.isArray(userState.deskQueue) || userState.deskQueue.length === 0) {
@@ -18191,14 +18218,6 @@ const ui = {
                 if(raw) userState.deskQueue = [raw];
             }
             ui.sendSelectionQuotesDirectToAnswer();
-            return;
-        }
-        if(noQuotesMode && app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
-            if(!Array.isArray(userState.deskQueue) || userState.deskQueue.length === 0) {
-                const raw = quoteRaw;
-                if(raw) userState.deskQueue = [raw];
-            }
-            ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, showDesk: true });
             return;
         }
         const synPanel = document.getElementById("synonym-suggestion-panel");
@@ -19467,7 +19486,7 @@ const ui = {
                 if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
                 app.save();
                 if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
-                    ui.sendSelectionQuotesDirectToAnswer({ showDesk: true });
+                    ui.sendSelectionQuotesDirectToAnswer({ showDesk: true, onlyQuotes: pendingQuote ? [pendingQuote] : null });
                     return;
                 }
                 if(quoteOnlyShort) {
@@ -20820,15 +20839,26 @@ const ui = {
         }
     },
     _sendToBuilderGuard: false,
+    clearDeskSentenceBuilder: function() {
+        const cont = document.getElementById("sentence-builder");
+        if(cont) cont.innerHTML = "";
+        const toolkit = document.getElementById("desk-construction-bank");
+        if(toolkit) toolkit.open = false;
+        const preview = document.getElementById("desk-sentence-preview");
+        if(preview) { preview.textContent = ""; preview.style.display = "none"; }
+    },
     /** Component 2 Q11/Q13: add chosen highlights directly to the answer as short answers. No Writing Desk or paraphrasing. */
     sendSelectionQuotesDirectToAnswer: function(useDeskQueueOrOpts) {
+        if(ui._directOwnWordsSendInProgress) return;
         try {
             const opts = (useDeskQueueOrOpts && typeof useDeskQueueOrOpts === "object") ? useDeskQueueOrOpts : {};
             const useDeskQueue = opts.useDeskQueue === true || useDeskQueueOrOpts === true;
             const stayOnQuoteSelect = opts.stayOnQuoteSelect === true;
             const showDesk = opts.showDesk === true;
-            let chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
-            if (useDeskQueue || (!chosen.length && Array.isArray(userState.deskQueue) && userState.deskQueue.length > 0)) {
+            let chosen = Array.isArray(opts.onlyQuotes) && opts.onlyQuotes.length
+                ? opts.onlyQuotes.slice()
+                : (Array.isArray(userState.selectionChosen) ? userState.selectionChosen : []);
+            if(!opts.onlyQuotes && (useDeskQueue || (!chosen.length && Array.isArray(userState.deskQueue) && userState.deskQueue.length > 0))) {
                 chosen = userState.deskQueue.map(q => (typeof q === "object" && q && "quote" in q ? q.quote : q));
             }
             const seen = new Set();
@@ -20843,6 +20873,7 @@ const ui = {
                 alert("Select at least one quote in the passage first.");
                 return;
             }
+            ui._directOwnWordsSendInProgress = true;
             const strip = app.stripLineNumbersFromQuote || (s => String(s || "").trim());
             const texts = uniqueChosen.map(q => strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim())).filter(Boolean);
             if(!texts.length) return;
@@ -20878,7 +20909,9 @@ const ui = {
                 const essayKey = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvlEarly) : String(lvlEarly) + "_0";
                 userState.questionEssays[essayKey] = withPrefix;
             } else {
-                newEssay = existing ? existing + "\n\n" + toAdd : toAdd;
+                const marksOne = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvlEarly) : null;
+                if(ownWordsFromSelect && marksOne === 1 && texts.length === 1) newEssay = toAdd;
+                else newEssay = existing ? existing + "\n\n" + toAdd : toAdd;
             }
             userState.essay = newEssay;
             const essayEl = document.getElementById("essay-area");
@@ -20936,8 +20969,10 @@ const ui = {
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(showDesk) {
+                if(ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
                 if(ui.switchView) ui.switchView("desk", true);
-                if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
+                const essayElDesk = document.getElementById("essay-area");
+                if(essayElDesk) { essayElDesk.value = userState.essay; essayElDesk.scrollTop = essayElDesk.scrollHeight; }
             } else if(stayOnQuoteSelect || quoteOnlySa) {
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
@@ -20946,6 +20981,8 @@ const ui = {
         } catch(e) {
             console.warn("sendSelectionQuotesDirectToAnswer failed:", e);
             alert("Could not add your answer. Try again or refresh the page.");
+        } finally {
+            ui._directOwnWordsSendInProgress = false;
         }
     },
     sendSelectionQuotesToBuilder: function() {
