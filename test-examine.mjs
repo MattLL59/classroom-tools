@@ -36,15 +36,16 @@ const result = await page.evaluate(async () => {
   ui.renderSelection(null, { skipPassage: true });
   document.getElementById("free-select-why").value = "My paraphrase text here";
   document.getElementById("free-select-use").click();
-  await new Promise((r) => setTimeout(r, 300));
+  await new Promise((r) => setTimeout(r, 400));
   const levelAfterSave = app.getEffectiveLevel();
-  ui.switchView("desk", true);
+  const onDesk = userState.view === "desk";
   const essay = document.getElementById("essay-area")?.value || "";
   const teacherAdvanceBlocked = !app.advanceStudentToNextActiveLevel({ showCelebration: false });
   return {
     beforeGoalMet: before,
     levelAfterCheck,
     levelAfterSave,
+    onDesk,
     essayLen: essay.length,
     hasParaphrase: essay.toLowerCase().includes("paraphrase"),
     teacherAdvanceBlocked
@@ -57,6 +58,7 @@ server.close();
 const ok = !result.beforeGoalMet
   && result.levelAfterCheck === 1
   && result.levelAfterSave === 1
+  && result.onDesk
   && result.hasParaphrase
   && result.essayLen > 10
   && result.teacherAdvanceBlocked;

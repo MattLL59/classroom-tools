@@ -56,7 +56,7 @@ const result = await page.evaluate(async () => {
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  ui.switchView("desk", true);
+  const onDesk = userState.view === "desk";
   const essay = document.getElementById("essay-area")?.value || "";
 
   return {
@@ -65,6 +65,7 @@ const result = await page.evaluate(async () => {
     examineTitle,
     hasWhyBox,
     chosenLenAfterHighlight: chosenLen,
+    onDesk,
     essayLen: essay.length,
     hasParaphrase: essay.toLowerCase().includes("paraphrase"),
     routesToDesk: app.quoteSelectParaphraseRoutesToDesk(1),
@@ -75,5 +76,5 @@ const result = await page.evaluate(async () => {
 console.log(JSON.stringify(result, null, 2));
 await browser.close();
 server.close();
-const ok = result.pendingAfterHighlight.length > 5 && result.hasWhyBox && result.hasParaphrase;
+const ok = result.pendingAfterHighlight.length > 5 && result.hasWhyBox && result.onDesk && result.hasParaphrase;
 process.exit(ok ? 0 : 1);
