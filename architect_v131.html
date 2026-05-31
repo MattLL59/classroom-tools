@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-31T23:00:00">
-<meta name="architect-deploy" content="fix-use-desk-teacher-no-auto-advance">
+<meta name="architect-build" content="2026-05-31T23:30:00">
+<meta name="architect-deploy" content="fix-quote-pickup-examine-desk">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -4288,7 +4288,26 @@ const app = {
             return false;
         } catch(e) { return false; }
     },
-    /** Persist Writing Desk draft for the current level/question only (never bleed from userState.essay). */
+    /** True when this highlight still needs a Quote Select paraphrase before Writing Desk. */
+    quoteNeedsParaphraseBeforeDesk: function(quoteText, level) {
+        try {
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+            if(!app.quoteSelectParaphraseRoutesToDesk || !app.quoteSelectParaphraseRoutesToDesk(lvl)) return false;
+            const q = String(quoteText || "").trim();
+            if(!q) return false;
+            const j = String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(q) : "") || "").trim();
+            return j.length < 3;
+        } catch(e) { return false; }
+    },
+    /** Quotes from a list that still need paraphrase in Quote Select. */
+    quotesMissingParaphraseForLevel: function(quotes, level) {
+        const strip = app.stripLineNumbersFromQuote || function(s) { return String(s || "").trim(); };
+        return (Array.isArray(quotes) ? quotes : []).map(function(q) {
+            return strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim());
+        }).filter(function(t) {
+            return t && app.quoteNeedsParaphraseBeforeDesk(t, level);
+        });
+    },
     storeEssayDraftForLevel: function(level, text) {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
@@ -17207,6 +17226,7 @@ const ui = {
                 if(!okMatch && sourceEl && sourceEl.id === "source-inline-select" && ancEl && sourceEl.contains(ancEl) && text.length >= 3) okMatch = true;
                 if(!okMatch) return;
                 ui._freeSelectProcessLock = true;
+                try {
                 const deferClearPassageSelection = () => {
                     const run = () => { if(window.getSelection) window.getSelection().removeAllRanges(); };
                     if(typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(run));
@@ -17268,7 +17288,9 @@ const ui = {
                 }
                 ui.renderSelection(null, { skipPassage: true });
                 deferClearPassageSelection();
-                finishProcess();
+                } finally {
+                    finishProcess();
+                }
             };
             if(!document.body.dataset.freeSelectMouseBound) {
                 document.body.dataset.freeSelectMouseBound = "true";
@@ -17310,7 +17332,7 @@ const ui = {
                     const adminModal = document.getElementById("modal-admin");
                     const adminOpen = !!(adminModal && adminModal.classList.contains("open"));
                     const allowTeacherPassageCapture = !!(teacherTapOn && adminOpen);
-                    const allowShortAnsOrQ1PassageTap = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) || (app.getEffectiveTapText && app.getEffectiveTapText(level));
+                    const allowShortAnsOrQ1PassageTap = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) || (app.quoteSelectParaphraseRoutesToDesk && app.quoteSelectParaphraseRoutesToDesk(level)) || (app.getEffectiveTapText && app.getEffectiveTapText(level));
                     if(!app.getEffectiveTapText(level) && !teacherRecordOn && !allowTeacherPassageCapture && !allowShortAnsOrQ1PassageTap) return;
                     const sourceText = (app.getSourceTextForDisplay && app.getSourceTextForDisplay()) || app.getSourceText();
                     if(!sourceText || !String(sourceText).trim()) return;
@@ -18666,7 +18688,14 @@ const ui = {
             return t ? app.formatDeskQueueEntryForEssay(t) : "";
         }).filter(Boolean);
         if(!parts.length) {
-            if(q1Own) alert("For Question 1, each highlight needs your own words saved from Quote Select — type them in the box under the quote when you tap the passage, tap Use this quote, then return here. Or type straight into your answer.");
+            if(q1Own) {
+                const missingDesk = app.quotesMissingParaphraseForLevel && app.quotesMissingParaphraseForLevel(uniqueChosen, lvl);
+                if(missingDesk && missingDesk.length && ui.promptQuoteSelectParaphraseExamine) {
+                    ui.promptQuoteSelectParaphraseExamine(missingDesk[0]);
+                    return;
+                }
+                alert("For Question 1, each highlight needs your own words saved from Quote Select — type them in the box under the quote when you tap the passage, tap Use this quote, then return here. Or type straight into your answer.");
+            }
             return;
         }
         const block = parts.join("\n\n");
@@ -19235,6 +19264,14 @@ const ui = {
     },
 
     /** Passage highlight → Examine your quote (priority over affirm / MC / “not enough evidence”). */
+    promptQuoteSelectParaphraseExamine: function(quoteText) {
+        const q = String(quoteText || ui._freeSelectPendingQuote || "").trim();
+        if(!q) return false;
+        ui._freeSelectPendingQuote = q;
+        if(ui.switchView) ui.switchView("select", true);
+        if(ui.renderSelection) ui.renderSelection(null, { skipPassage: true });
+        return true;
+    },
     tryRenderPendingPassageExamine: function(ctx) {
         const cont = ctx && ctx.cont;
         const level = parseInt(ctx && ctx.level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
@@ -19321,11 +19358,6 @@ const ui = {
                 }
                 if(whyStu && app.setSelectionJustificationForQuoteText) app.setSelectionJustificationForQuoteText(pendingQuote, whyStu);
             }
-            if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
-            const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && ("quote" in q || "original" in q) ? (q.quote || q.original) : q)));
-            if(pendingQuote && !chosenKeys.has(app.quoteKey(pendingQuote))) {
-                userState.selectionChosen.push(pendingQuote);
-            }
             ui._freeSelectPendingQuote = "";
             if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
             app.save();
@@ -19336,6 +19368,11 @@ const ui = {
             if(routeParaphraseToDesk) {
                 ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true, onlyQuotes: pendingQuote ? [pendingQuote] : null });
                 return;
+            }
+            if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+            const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && ("quote" in q || "original" in q) ? (q.quote || q.original) : q)));
+            if(pendingQuote && !chosenKeys.has(app.quoteKey(pendingQuote))) {
+                userState.selectionChosen.push(pendingQuote);
             }
             ui.renderSelection();
         };
@@ -19751,6 +19788,11 @@ const ui = {
                 const sendBtn = topPanel.querySelector("#selection-send-chosen");
                 if(clearBtn) clearBtn.onclick = () => { userState.selectionChosen = []; userState.deskQueue = []; userState.selectionJustification = {}; app.save(); ui.renderSelection(); };
                 if(sendBtn) sendBtn.onclick = () => {
+                    const missingSend = app.quotesMissingParaphraseForLevel && app.quotesMissingParaphraseForLevel(userState.selectionChosen || [], level);
+                    if(missingSend && missingSend.length && ui.promptQuoteSelectParaphraseExamine) {
+                        ui.promptQuoteSelectParaphraseExamine(missingSend[0]);
+                        return;
+                    }
                     if(quoteOnlyShort || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level))) {
                         ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                     } else ui.sendSelectionQuotesToBuilder();
@@ -19812,9 +19854,9 @@ const ui = {
                 ? (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>`)
                 : (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>`                 : (noQuotesFlow ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Paraphrase each selection in the box that appears — it goes into your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will build each quote in the Sentence Builder.</p>`));
             const sendLabel = quoteOnlyShort ? "Send to Answer" : (noQuotesFlow ? "Send to Answer" : "Send quotes to Sentence Builder");
-            const sendAction = quoteOnlyShort
-                ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })"
-                : (noQuotesFlow ? "ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true })" : "ui.sendSelectionQuotesToBuilder()");
+            const sendAction = quoteOnlyShort || noQuotesFlow
+                ? "ui.sendChosenQuotesFromTapPanel()"
+                : "ui.sendSelectionQuotesToBuilder()";
             const tapProgressLine = tapHighlightEvidenceMode
                 ? `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span></div>`
                 : `<div style="font-weight:700; margin-bottom:6px;"><span>Quotes selected:</span> <span style="font-variant-numeric: tabular-nums;">${quoteTallyDistinct}</span><span style="opacity:0.85;"> · </span><span>Evidence points:</span> <span style="font-variant-numeric: tabular-nums;">${pointsMade}</span></div>`;
@@ -21217,6 +21259,7 @@ const ui = {
             if(ownWordsFromSelect) {
                 const missing = texts.filter(t => !String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(t) : "") || "").trim());
                 if(missing.length) {
+                    if(ui.promptQuoteSelectParaphraseExamine && ui.promptQuoteSelectParaphraseExamine(missing[0])) return;
                     alert("Paraphrase each highlight in Quote Select first: highlight the passage, write in your own words in the box, then tap Use this quote.");
                     return;
                 }
@@ -21232,7 +21275,8 @@ const ui = {
             }
             if(!toAdd) {
                 if(ownWordsFromSelect) {
-                    alert("Paraphrase each highlight in Quote Select first (do not copy the passage).");
+                    const reopen = texts.length && ui.promptQuoteSelectParaphraseExamine ? ui.promptQuoteSelectParaphraseExamine(texts[0]) : false;
+                    if(!reopen) alert("Paraphrase each highlight in Quote Select first (do not copy the passage).");
                 }
                 return;
             }
@@ -21331,7 +21375,7 @@ const ui = {
             } else if(stayOnQuoteSelect || quoteOnlySa || ownWordsFromSelect) {
                 if(ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
                 if(ownWordsFromSelect && ui.showSelectionMessage) {
-                    ui.showSelectionMessage("Saved", "Your paraphrase is in your answer. Highlight another quote or open Writing Desk when you want to review.");
+                    ui.showSelectionMessage("Saved", "Your paraphrase is in Writing Desk. Open Writing Desk (bottom nav) to review, or highlight another quote.");
                 }
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
@@ -21349,6 +21393,31 @@ const ui = {
             ui._directOwnWordsSendInProgress = false;
         }
     },
+    /** Tap panel / Send to Answer — open Examine when paraphrase still needed. */
+    sendChosenQuotesFromTapPanel: function() {
+        const lvl = app.getEffectiveLevel && app.getEffectiveLevel();
+        const pending = String(ui._freeSelectPendingQuote || "").trim();
+        if(pending && ui.promptQuoteSelectParaphraseExamine) {
+            const chosen = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
+            const missing = app.quotesMissingParaphraseForLevel && app.quotesMissingParaphraseForLevel(chosen, lvl);
+            if((!chosen.length || (missing && missing.length)) && app.quoteNeedsParaphraseBeforeDesk && app.quoteNeedsParaphraseBeforeDesk(pending, lvl)) {
+                ui.promptQuoteSelectParaphraseExamine(pending);
+                return;
+            }
+        }
+        let quoteOnlyShort = false;
+        try { quoteOnlyShort = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)); } catch(e) {}
+        const missing = app.quotesMissingParaphraseForLevel && app.quotesMissingParaphraseForLevel(userState.selectionChosen || [], lvl);
+        if(missing && missing.length && ui.promptQuoteSelectParaphraseExamine) {
+            ui.promptQuoteSelectParaphraseExamine(missing[0]);
+            return;
+        }
+        if(quoteOnlyShort || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl))) {
+            ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+        } else {
+            ui.sendSelectionQuotesToBuilder();
+        }
+    },
     sendSelectionQuotesToBuilder: function() {
         if(ui._sendToBuilderGuard) {
             if(Date.now() - (ui._sendToBuilderGuardAt || 0) > 5000) ui._sendToBuilderGuard = false;
@@ -21361,6 +21430,12 @@ const ui = {
                 return;
             }
             if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
+                const chosenEarly = Array.isArray(userState.selectionChosen) ? userState.selectionChosen : [];
+                const missingEarly = app.quotesMissingParaphraseForLevel && app.quotesMissingParaphraseForLevel(chosenEarly, lvl);
+                if(missingEarly && missingEarly.length && ui.promptQuoteSelectParaphraseExamine) {
+                    ui.promptQuoteSelectParaphraseExamine(missingEarly[0]);
+                    return;
+                }
                 ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                 return;
             }
