@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-31T13:00:00">
+<meta name="architect-build" content="2026-05-31T14:30:00">
 <meta name="architect-deploy" content="fix-paraphrase-step-and-per-level-essay">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -3253,6 +3253,32 @@ const app = {
         if(app.isLevelsOfResponseLevel(lvl)) return app.getExamMarkCapForLevel(lvl);
         return null;
     },
+    /** Exam marks for routing (own-words vs Sentence Builder): question .marks, [n] in prompt, mark scheme — not Level Bank Points (evidence goal). */
+    getExamMarksFromQuestionForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const bank = app.getLevelBank();
+        const entry = bank && bank[lvl] ? bank[lvl] : null;
+        let ids = entry && Array.isArray(entry.questionIds) && entry.questionIds.length ? entry.questionIds : null;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        if(!ids || ids.length === 0) ids = questions.filter(function(q) { return q && q.id; }).map(function(q) { return q.id; });
+        let currentQId = app.getCurrentQuestionIdForLevel(lvl) || (ids && ids[0]) || "q1";
+        const normQid = function(id) { return String(id || "").replace(/^q0?/i, "q").toLowerCase(); };
+        const findQ = function(id) {
+            return questions.find(function(qq) { return qq && (qq.id === id || normQid(qq.id) === normQid(id)); });
+        };
+        const q = findQ(currentQId);
+        if(q && typeof q.marks === "number" && q.marks >= 1) return Math.min(100, q.marks);
+        const prompt = (q && q.prompt) || app.getQuestionForLevel(lvl) || "";
+        const fromPrompt = app.parseRequiredCountFromQuestion(prompt);
+        if(fromPrompt != null && fromPrompt >= 1) return Math.min(100, fromPrompt);
+        const ent = app.getMarkSchemeEntryForQuestionId(currentQId);
+        if(ent && ent.maxMarks != null) {
+            const m = parseInt(ent.maxMarks, 10);
+            if(m >= 1) return Math.min(100, m);
+        }
+        if(app.isLevelsOfResponseLevel(lvl)) return app.getExamMarkCapForLevel(lvl);
+        return null;
+    },
     getPaperQuestionDisplayIndex: function(level) {
         const lvl = parseInt(level, 10) || 1;
         const currentQId = app.getCurrentQuestionIdForLevel(lvl);
@@ -3680,10 +3706,10 @@ const app = {
         try {
             if(app.getArchitectComponent() === 2) return false;
             if(app.isLevelsOfResponseLevel && app.isLevelsOfResponseLevel(lvl)) return false;
-            const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvl) : null;
-            const lowMarkRetrieval = marks == null || marks <= 2;
+            const examMarks = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(lvl) : null;
+            const lowMarkRetrieval = examMarks == null || examMarks <= 2;
             if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) {
-                /* C1 Short ans: own-words retrieval unless marks clearly > 2 (longer short tasks). */
+                /* C1 Short ans: own-words retrieval unless exam marks clearly > 2 (Level Bank Points are evidence goals, not marks). */
                 return lowMarkRetrieval;
             }
             if(app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(lvl)) return true;
@@ -4170,9 +4196,9 @@ const app = {
             const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
             if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) return false;
             if(app.getArchitectComponent() !== 2 && app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) {
-                const marks = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvl) : null;
-                /* C1 Short ans defaults to own-words when marks unknown or ≤2 — not verbatim paste. */
-                if(marks == null || marks <= 2) return false;
+                const examMarks = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(lvl) : null;
+                /* C1 Short ans defaults to own-words when exam marks unknown or ≤2 — not verbatim paste. */
+                if(examMarks == null || examMarks <= 2) return false;
             }
             return !!(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl));
         } catch(e) { return false; }
@@ -16940,6 +16966,7 @@ const ui = {
         }
         ui.switchView(userState.view, true);
         ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
+        if(ui.syncDeskOwnWordsLayout) ui.syncDeskOwnWordsLayout(userState.level || 1);
         if(userState.view === "desk") {
             if(Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
                 const lvl = userState.level || 1;
@@ -19104,6 +19131,7 @@ const ui = {
         const levelBank = app.getLevelBank();
         const level = app.getEffectiveLevel();
         const levelEntry = levelBank[level] || {};
+        if(ui.syncDeskOwnWordsLayout) ui.syncDeskOwnWordsLayout(level);
         const autoDeskAdv = app.shouldAutoAdvanceQuotePipelineToDesk(level);
         let quoteOnlyShort = false;
         try { quoteOnlyShort = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level)); } catch(e) {}
@@ -21033,7 +21061,7 @@ const ui = {
                 ? String(userState.questionEssays[essayKey]).trim()
                 : "";
             if(perLevelQuoteEssay || ownWordsFromSelect) {
-                const marksOne = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvlEarly) : null;
+                const marksOne = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(lvlEarly) : null;
                 const block = (ownWordsFromSelect && marksOne === 1 && texts.length === 1)
                     ? toAdd
                     : (priorForLevel ? priorForLevel + "\n\n" + toAdd : toAdd);
@@ -21041,7 +21069,7 @@ const ui = {
                 if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
                 userState.questionEssays[essayKey] = newEssay;
             } else {
-                const marksOne = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvlEarly) : null;
+                const marksOne = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(lvlEarly) : null;
                 if(ownWordsFromSelect && marksOne === 1 && texts.length === 1) newEssay = toAdd;
                 else newEssay = existing ? existing + "\n\n" + toAdd : toAdd;
             }
