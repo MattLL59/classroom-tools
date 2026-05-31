@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T21:00:00">
-<meta name="architect-deploy" content="fix-level-bank-short-ans-freeze">
+<meta name="architect-build" content="2026-05-24T21:30:00">
+<meta name="architect-deploy" content="fix-admin-close-after-level-bank">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524210000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524213000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -15001,7 +15001,7 @@ const app = {
                         console.warn("Escape handler:", eEsc);
                         try {
                             const adm = document.getElementById("modal-admin");
-                            if(adm) adm.classList.remove("open");
+                            if(adm) ui.hideModalShell(adm);
                         } catch(e2) {}
                         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
                     }
@@ -17674,34 +17674,62 @@ const ui = {
         if(app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration()) return true;
         return false;
     },
+    hideModalShell: function(el) {
+        if(!el) return;
+        el.classList.remove("open");
+        el.style.removeProperty("display");
+        el.style.removeProperty("visibility");
+        el.style.removeProperty("opacity");
+        el.style.removeProperty("pointer-events");
+        el.style.removeProperty("z-index");
+        el.setAttribute("aria-hidden", "true");
+    },
+    _flushPendingLevelBankSave: function() {
+        if(typeof admin === "undefined" || !admin._levelBankSaveTimer) return;
+        clearTimeout(admin._levelBankSaveTimer);
+        admin._levelBankSaveTimer = null;
+        try {
+            app.save({ skipRender: true, silent: true, skipQuestionPersist: true, skipExtractCache: true });
+        } catch(e) {}
+    },
+    _deferAfterAdminClose: function() {
+        const skipHeavy = ui._adminCloseSkipsPassageWork && ui._adminCloseSkipsPassageWork();
+        if(!skipHeavy && appData && !appData.isStandalone && admin && admin.ensureActiveSourcePersisted) {
+            try { admin.ensureActiveSourcePersisted(); } catch(ePers) { console.warn("ensureActiveSourcePersisted:", ePers); }
+        }
+        if(skipHeavy || !appData || appData.isStandalone) {
+            if(typeof admin._liteStudentRefresh === "function") admin._liteStudentRefresh();
+            return;
+        }
+        const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+        try {
+            if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(stClose);
+            else {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(stClose);
+                if(ui.renderLab) ui.renderLab(stClose);
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(stClose);
+            }
+        } catch(eRef) { console.warn("post-admin refresh:", eRef); }
+        if(typeof admin._liteStudentRefresh === "function") admin._liteStudentRefresh();
+    },
     closeAdminLite: function() {
         try {
             const el = document.getElementById("modal-admin");
-            if(el) el.classList.remove("open");
+            ui._flushPendingLevelBankSave();
+            if(typeof admin !== "undefined" && admin._levelBankFullRenderTimer) {
+                clearTimeout(admin._levelBankFullRenderTimer);
+                admin._levelBankFullRenderTimer = null;
+            }
+            ui.hideModalShell(el);
             ui._pauseSelectionGate = false;
             app._adminLiteOpen = false;
-            const skipHeavy = ui._adminCloseSkipsPassageWork && ui._adminCloseSkipsPassageWork();
-            if(!skipHeavy && appData && !appData.isStandalone && admin && admin.ensureActiveSourcePersisted) {
-                try { admin.ensureActiveSourcePersisted(); } catch(ePers) { console.warn("ensureActiveSourcePersisted:", ePers); }
-            }
-            if(skipHeavy || !appData || appData.isStandalone) {
-                if(!skipHeavy && typeof admin._liteStudentRefresh === "function") admin._liteStudentRefresh();
-                return;
-            }
-            const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
-            try {
-                if(ui.activeQuoteId) {
-                    const item = appData.items.find(i => i.id === ui.activeQuoteId);
-                    const lvlAdm = userState.level || 1;
-                    if(item && !(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlAdm))) ui.runBuilder(item);
-                }
-                if(userState.view === "desk" && ui.renderDeskSentenceBank && !(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(userState.level || 1))) ui.renderDeskSentenceBank();
-            } catch(eUi) { console.warn("closeAdminLite ui:", eUi); }
-            if(typeof admin._liteStudentRefresh === "function") admin._liteStudentRefresh();
+            const defer = () => { try { ui._deferAfterAdminClose(); } catch(e) { console.warn("closeAdminLite defer:", e); } };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(defer, { timeout: 1200 });
+            else setTimeout(defer, 0);
         } catch(eClose) {
             console.warn("closeAdminLite:", eClose);
             const el = document.getElementById("modal-admin");
-            if(el) el.classList.remove("open");
+            ui.hideModalShell(el);
             ui._pauseSelectionGate = false;
             app._adminLiteOpen = false;
         }
@@ -17739,7 +17767,7 @@ const ui = {
         if(ev && ev.stopPropagation) ev.stopPropagation();
         const adm = document.getElementById("modal-admin");
         if(adm && adm.classList.contains("open") && !(ui.isAdminModalVisible && ui.isAdminModalVisible())) {
-            adm.classList.remove("open");
+            ui.hideModalShell(adm);
         }
         if(ui.isAdminModalVisible && ui.isAdminModalVisible()) return;
         try {
@@ -17762,35 +17790,29 @@ const ui = {
         if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings(ev);
     },
     closeModal: (id) => {
-        if(id === "modal-admin" && !appData.isStandalone && admin.ensureActiveSourcePersisted) {
-            admin.ensureActiveSourcePersisted();
-        }
         const el = document.getElementById(id);
-        if(el) el.classList.remove("open");
-        if(id === 'modal-source') { ui.stopReader(); }
-        if(id === 'modal-admin' && !appData.isStandalone) {
+        if(id === "modal-admin" && !appData.isStandalone) {
+            ui._flushPendingLevelBankSave();
+            if(typeof admin !== "undefined" && admin._levelBankFullRenderTimer) {
+                clearTimeout(admin._levelBankFullRenderTimer);
+                admin._levelBankFullRenderTimer = null;
+            }
+            ui.hideModalShell(el);
             ui._pauseSelectionGate = false;
             app._adminLiteOpen = false;
-            const stClose = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
-            if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(stClose);
-            else {
-                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(stClose);
-                if(ui.renderLab) ui.renderLab(stClose);
-                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(stClose);
-            }
-            if(typeof requestAnimationFrame === "function") {
-                requestAnimationFrame(function() {
-                    const st2 = appData && typeof appData.sourceText === "string" ? appData.sourceText : stClose;
-                    if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays(st2);
-                });
-            }
-            if(ui.activeQuoteId) {
-                const item = appData.items.find(i=>i.id===ui.activeQuoteId);
-                if(item) ui.runBuilder(item);
-            }
-            if(userState.view === "desk" && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+            if(id === 'modal-source') { ui.stopReader(); }
+            const defer = () => {
+                try {
+                    ui._deferAfterAdminClose();
+                    if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+                } catch(e) { console.warn("closeModal admin defer:", e); }
+            };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(defer, { timeout: 1200 });
+            else setTimeout(defer, 0);
+            return;
         }
-        if(id === "modal-admin" && typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+        ui.hideModalShell(el);
+        if(id === 'modal-source') { ui.stopReader(); }
     },
     
     openAdmin: () => {
