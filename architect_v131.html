@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T20:30:00">
-<meta name="architect-deploy" content="fix-own-words-no-sentence-builder">
+<meta name="architect-build" content="2026-05-24T21:00:00">
+<meta name="architect-deploy" content="fix-level-bank-short-ans-freeze">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1132,7 +1132,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524203000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524210000";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -16930,7 +16930,9 @@ const ui = {
                     app.flushDeskQueueToEssayIfNeeded();
                 }
             }
-            if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+            const ownWordsInit = app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(userState.level || 1);
+            if(ownWordsInit && ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
+            if(!ownWordsInit && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
             if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
             ui.updateMarksDisplay();
             if(ui.renderDeskQuoteTabs) ui.renderDeskQuoteTabs();
@@ -26203,7 +26205,16 @@ const admin = {
         });
         const lb = document.getElementById("level-bank-editor");
         const adm = document.getElementById("modal-admin");
-        if(lb && adm && adm.classList.contains("open") && admin.renderLevelBank) admin.renderLevelBank();
+        if(lb && adm && adm.classList.contains("open") && admin.renderLevelBank) {
+            if(admin._levelBankFullRenderTimer) clearTimeout(admin._levelBankFullRenderTimer);
+            admin._levelBankFullRenderTimer = setTimeout(function() {
+                admin._levelBankFullRenderTimer = null;
+                try {
+                    const a = document.getElementById("modal-admin");
+                    if(a && a.classList.contains("open") && admin.renderLevelBank) admin.renderLevelBank({ skipSyncFromList: true });
+                } catch(eLb) {}
+            }, 500);
+        }
     },
     setRewardUrl: (v) => {
         if(!appData.settings) appData.settings = {};
@@ -26648,7 +26659,8 @@ const admin = {
         appData.question = appData.questions[0].prompt || "";
         if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
         admin._mirrorQuestionRowsToSiblingMounts(list);
-        app.save();
+        if(opts && opts.fromPersistHook) return;
+        app.save({ skipRender: true, silent: true, skipQuestionPersist: true });
     },
     syncQuestionsFromList: (sanitizeOnCommit, eventTarget) => {
         const preferredMount = eventTarget && eventTarget.closest && eventTarget.closest(".questions-list-mount");
@@ -31212,7 +31224,9 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const levelsToShow = Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => i + 1);
         const rows = [];
-        if(app.repairAllLevelBankShortAnsLorConflicts && app.repairAllLevelBankShortAnsLorConflicts()) app.save({ skipRender: true, silent: true });
+        if(app.repairAllLevelBankShortAnsLorConflicts && app.repairAllLevelBankShortAnsLorConflicts()) {
+            app.save({ skipRender: true, silent: true, skipQuestionPersist: true, skipExtractCache: true });
+        }
         for(const lvl of levelsToShow) {
             const entry = appData.settings.levelBank[lvl] || defaultData.settings.levelBank[lvl];
             const shortAnsOn = !!(entry.shortAnswersOnly === true || entry.shortAnswersOnly === "true" || entry.shortAnswersOnly === 1);
@@ -31395,8 +31409,10 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         if(admin._levelBankSaveTimer) clearTimeout(admin._levelBankSaveTimer);
         admin._levelBankSaveTimer = setTimeout(function() {
             admin._levelBankSaveTimer = null;
-            try { app.save({ skipRender: true, silent: true }); } catch(e) {}
-        }, 180);
+            try {
+                app.save({ skipRender: true, silent: true, skipQuestionPersist: true, skipExtractCache: true });
+            } catch(e) {}
+        }, 350);
     },
     /** Refresh student Quote Select after Level Bank edits (when Data is closed). */
     _liteStudentRefresh: function() {
@@ -31598,19 +31614,29 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         if(key === "freeSelectFromText") {
             appData.settings.levelBank[lvl].freeSelectFromText = el.checked;
         } else if(key === "shortAnswersOnly") {
-            appData.settings.levelBank[lvl].shortAnswersOnly = el.checked;
-            if(el.checked) appData.settings.levelBank[lvl].levelsOfResponse = false;
-            admin.refreshLevelBankRowMutex(lvl);
-            admin._scheduleLevelBankSave();
-            admin._liteStudentRefresh();
+            if(admin._levelBankCheckboxBusy) return;
+            admin._levelBankCheckboxBusy = true;
+            try {
+                appData.settings.levelBank[lvl].shortAnswersOnly = el.checked;
+                if(el.checked) appData.settings.levelBank[lvl].levelsOfResponse = false;
+                admin.refreshLevelBankRowMutex(lvl);
+                admin._scheduleLevelBankSave();
+            } finally {
+                admin._levelBankCheckboxBusy = false;
+            }
             return;
         } else if(key === "levelsOfResponse") {
-            appData.settings.levelBank[lvl].levelsOfResponse = el.checked;
-            if(el.checked) appData.settings.levelBank[lvl].shortAnswersOnly = false;
-            admin.refreshLevelBankRowMutex(lvl);
-            admin._scheduleLevelBankSave();
-            if(ui.updateMarksDisplay) ui.updateMarksDisplay();
-            admin._liteStudentRefresh();
+            if(admin._levelBankCheckboxBusy) return;
+            admin._levelBankCheckboxBusy = true;
+            try {
+                appData.settings.levelBank[lvl].levelsOfResponse = el.checked;
+                if(el.checked) appData.settings.levelBank[lvl].shortAnswersOnly = false;
+                admin.refreshLevelBankRowMutex(lvl);
+                admin._scheduleLevelBankSave();
+                if(ui.updateMarksDisplay) ui.updateMarksDisplay();
+            } finally {
+                admin._levelBankCheckboxBusy = false;
+            }
             return;
         } else if(key === "passageExamExcerpt") {
             appData.settings.levelBank[lvl].passageExamExcerpt = el.checked;
