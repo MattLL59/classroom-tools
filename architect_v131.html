@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-31T21:00:00">
+<meta name="architect-build" content="2026-05-31T21:30:00">
 <meta name="architect-deploy" content="fix-paraphrase-step-and-per-level-essay">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -3163,6 +3163,25 @@ const app = {
         const n = m[lvl];
         return typeof n === "number" && n >= 0 ? n : 0;
     },
+    /** C1 / own-words Short ans: distinct highlights with a saved paraphrase (not raw quote count). */
+    countOwnWordsParaphrasesForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const answered = Array.isArray(userState.selectionAnsweredForQuestion) ? userState.selectionAnsweredForQuestion : [];
+        const seen = new Set();
+        let n = 0;
+        answered.forEach(function(ch) {
+            const raw = typeof ch === "object" && ch && ("quote" in ch || "original" in ch) ? (ch.quote || ch.original) : ch;
+            const q = String(raw || "").trim();
+            if(!q) return;
+            const k = app.quoteKey(q);
+            if(!k || seen.has(k)) return;
+            const j = String((app.getSelectionJustificationForQuoteText && app.getSelectionJustificationForQuoteText(q)) || "").trim();
+            if(j.length < 3) return;
+            seen.add(k);
+            n++;
+        });
+        return n;
+    },
     bumpDeskCommitForLevel: function(level) {
         const lvl = String(parseInt(level, 10) || 1);
         if(!userState.deskCommitByLevel || typeof userState.deskCommitByLevel !== "object") userState.deskCommitByLevel = {};
@@ -4953,6 +4972,11 @@ const app = {
         const lvl = parseInt(level, 10) || 1;
         const goal = app.getSelectionEvidenceGoalForLevel(lvl);
         if(goal < 1) return false;
+        if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) {
+            const goal = app.getSelectionEvidenceGoalForLevel(lvl);
+            if(app.countDeskCommitsForLevel(lvl) >= goal && app.hasShortAnswerContentForLevel(lvl)) return true;
+            return false;
+        }
         if(app.countSelectionEvidencePoints(lvl) >= goal) return true;
         if(app.countDeskCommitsForLevel(lvl) >= goal) return true;
         return false;
@@ -4986,6 +5010,11 @@ const app = {
         const ownWords = app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl);
         if(!quoteOnly && !ownWords) return false;
         if(app.isLevelsOfResponseLevel(lvl)) return false;
+        if(ownWords) {
+            const goal = app.getSelectionEvidenceGoalForLevel(lvl);
+            if(app.countDeskCommitsForLevel(lvl) < goal) return false;
+            if(!app.hasShortAnswerContentForLevel(lvl)) return false;
+        }
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
         if(!app.isLevelProgressionReady(lvl)) return false;
         let next = app.resolveNextActiveLevelAfter(lvl);
@@ -17108,6 +17137,7 @@ const ui = {
         if(!document.body.dataset.freeSelectSelectBound) {
             document.body.dataset.freeSelectSelectBound = "true";
             const tryProcessSelection = (sourceEl, sourceText, closeReaderThenSwitch, preCaptured) => {
+                if(ui._freeSelectProcessLock) return;
                 let text, anchor, focus;
                 if(preCaptured && preCaptured.text) {
                     text = preCaptured.text;
@@ -17146,24 +17176,35 @@ const ui = {
                 }
                 if(!okMatch && sourceEl && sourceEl.id === "source-inline-select" && ancEl && sourceEl.contains(ancEl) && text.length >= 3) okMatch = true;
                 if(!okMatch) return;
+                ui._freeSelectProcessLock = true;
+                const deferClearPassageSelection = () => {
+                    const run = () => { if(window.getSelection) window.getSelection().removeAllRanges(); };
+                    if(typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(run));
+                    else setTimeout(run, 0);
+                };
+                const finishProcess = () => {
+                    setTimeout(() => { ui._freeSelectProcessLock = false; }, 250);
+                };
                 const lvlTap = (app.getEffectiveLevel && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1;
                 if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlTap)) {
                     ui._freeSelectPendingQuote = text;
-                    if(window.getSelection) window.getSelection().removeAllRanges();
                     if(closeReaderThenSwitch) {
                         ui.closeModal("modal-source");
                         ui.switchView("select");
                     }
                     ui.renderSelection(null, { skipPassage: true });
+                    deferClearPassageSelection();
+                    finishProcess();
                     return;
                 }
                 if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlTap)) {
                     if(app.acceptShortAnswerQuoteFromPassage && app.acceptShortAnswerQuoteFromPassage(text, lvlTap)) {
-                        if(window.getSelection) window.getSelection().removeAllRanges();
+                        deferClearPassageSelection();
                         if(closeReaderThenSwitch) {
                             ui.closeModal("modal-source");
                             ui.switchView("select");
                         }
+                        finishProcess();
                         return;
                     }
                     if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
@@ -17173,28 +17214,31 @@ const ui = {
                     })) userState.selectionChosen.push(text);
                     ui._freeSelectPendingQuote = "";
                     if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
-                    if(window.getSelection) window.getSelection().removeAllRanges();
+                    deferClearPassageSelection();
                     if(closeReaderThenSwitch) {
                         ui.closeModal("modal-source");
                         ui.switchView("select");
                     }
+                    finishProcess();
                     return;
                 }
                 if(app.acceptShortAnswerQuoteFromPassage && app.acceptShortAnswerQuoteFromPassage(text, lvlTap)) {
-                    if(window.getSelection) window.getSelection().removeAllRanges();
+                    deferClearPassageSelection();
                     if(closeReaderThenSwitch) {
                         ui.closeModal("modal-source");
                         ui.switchView("select");
                     }
+                    finishProcess();
                     return;
                 }
                 ui._freeSelectPendingQuote = text;
-                if(window.getSelection) window.getSelection().removeAllRanges();
                 if(closeReaderThenSwitch) {
                     ui.closeModal("modal-source");
                     ui.switchView("select");
                 }
                 ui.renderSelection(null, { skipPassage: true });
+                deferClearPassageSelection();
+                finishProcess();
             };
             if(!document.body.dataset.freeSelectMouseBound) {
                 document.body.dataset.freeSelectMouseBound = "true";
@@ -17220,18 +17264,8 @@ const ui = {
                     }
                 };
                 document.addEventListener("selectionchange", captureSelection, true);
-                let freeSelectProcessTimer = null;
-                const scheduleFreeSelectProcess = () => {
-                    if(freeSelectProcessTimer) clearTimeout(freeSelectProcessTimer);
-                    freeSelectProcessTimer = setTimeout(() => {
-                        freeSelectProcessTimer = null;
-                        const selectView = document.getElementById("view-select");
-                        if(!selectView || !selectView.classList.contains("active")) return;
-                        if(ui._lastCapturedSelection && ui._lastCapturedSelection.text) docSelectHandler({ type: "selectionchange" });
-                    }, 120);
-                };
-                document.addEventListener("selectionchange", scheduleFreeSelectProcess, true);
                 const docSelectHandler = (e) => {
+                    if(ui._freeSelectProcessLock) return;
                     const sel = appData.selection;
                     const levelBank = app.getLevelBank();
                     const level = app.getEffectiveLevel();
@@ -19221,7 +19255,8 @@ const ui = {
                     ${passageMismatchWarn}
                     <div class="card" style="margin-bottom:10px;">
                         <div style="font-weight:700; margin-bottom:6px;">Selected quote</div>
-                        <div style="font-style:italic; margin-bottom:10px; padding:8px; background:var(--bg); border-radius:6px;">${app.quoteDisplayHtml(pendingQuote || "")}</div>
+                        <div style="font-size:0.82rem; opacity:0.85; margin-bottom:6px;">Your highlight is captured below — the passage selection may clear while you paraphrase.</div>
+                        <div style="font-style:italic; margin-bottom:10px; padding:8px; background:var(--bg); border-radius:6px; border-left:3px solid var(--primary);">${app.quoteDisplayHtml(pendingQuote || "")}</div>
                         <div style="font-weight:700; margin-bottom:4px;">Question</div>
                         <div style="margin-bottom:10px; opacity:0.9;">${app.escapeHtml(questionText) || "—"}</div>
                         ${trMeaningBlock}
@@ -21194,6 +21229,11 @@ const ui = {
             userState.essay = newEssay;
             const essayEl = document.getElementById("essay-area");
             if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
+            const essayBodySaved = String(newEssay || "").replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim().length >= 3;
+            if(!essayBodySaved && ownWordsFromSelect) {
+                alert("Could not save your paraphrase to the answer. Try again.");
+                return;
+            }
             const mergeBanks = app.shouldMergeQuoteSelectionIntoAnalysisBanks();
             const adminOpen = !!(document.getElementById("modal-admin") && document.getElementById("modal-admin").classList.contains("open"));
             if(mergeBanks) {
