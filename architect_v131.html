@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-31T18:30:00">
+<meta name="architect-build" content="2026-05-31T20:00:00">
 <meta name="architect-deploy" content="fix-paraphrase-step-and-per-level-essay">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -17150,7 +17150,7 @@ const ui = {
                         ui.closeModal("modal-source");
                         ui.switchView("select");
                     }
-                    ui.renderSelection();
+                    ui.renderSelection(null, { skipPassage: true });
                     return;
                 }
                 if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvlTap)) {
@@ -17190,7 +17190,7 @@ const ui = {
                     ui.closeModal("modal-source");
                     ui.switchView("select");
                 }
-                ui.renderSelection();
+                ui.renderSelection(null, { skipPassage: true });
             };
             if(!document.body.dataset.freeSelectMouseBound) {
                 document.body.dataset.freeSelectMouseBound = "true";
@@ -17222,6 +17222,8 @@ const ui = {
                     const modules = app.getModulesActive();
                     const selectionModuleOn = modules.selection !== false;
                     if(!sel || !selectionModuleOn || !sel.enabled) return;
+                    const selectView = document.getElementById("view-select");
+                    if(!selectView || !selectView.classList.contains("active")) return;
                     const teacherTapOn = !appData.isStandalone && appData.settings && appData.settings.teacherTapToAddQuotes;
                     const teacherRecordOn = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
                     const adminModal = document.getElementById("modal-admin");
@@ -17256,7 +17258,7 @@ const ui = {
                     }
                     const runProcess = () => {
                         if(allowTeacherPassageCapture && admin.tryTeacherPassageCaptureFromPre && admin.tryTeacherPassageCaptureFromPre(preCaptured, { inlineSelectEl, sourceInline, sourceText })) return;
-                        const inInlineSelect = inlineSelectEl && inlineSelectEl.offsetParent !== null && inlineSelectEl.innerHTML.trim().length > 0;
+                        const inInlineSelect = selectView && selectView.classList.contains("active") && inlineSelectEl && inlineSelectEl.innerHTML.trim().length > 0;
                         const inLab = sourceInline && sourceInline.offsetParent !== null && sourceInline.innerHTML.trim().length > 0;
                         const inQuoteSelect = quoteSelectEl && quoteSelectEl.offsetParent !== null;
                         const usePreForInline = preCaptured && inlineSelectEl && (inlineSelectEl.contains(preCaptured.anchorNode) || inlineSelectEl.contains(preCaptured.focusNode) || (preCaptured.anchorNode && preCaptured.anchorNode.parentNode && inlineSelectEl.contains(preCaptured.anchorNode.parentNode)));
@@ -19149,6 +19151,125 @@ const ui = {
         });
     },
 
+    /** Passage highlight → Examine your quote (priority over affirm / MC / “not enough evidence”). */
+    tryRenderPendingPassageExamine: function(ctx) {
+        const cont = ctx && ctx.cont;
+        const level = parseInt(ctx && ctx.level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+        if(!cont) return false;
+        const pendingQuote = String(ui._freeSelectPendingQuote || "").trim();
+        if(!pendingQuote) return false;
+        const hasSource = !!(ctx && ctx.hasSource);
+        const sourceText = (ctx && ctx.sourceText) || "";
+        const quoteOnlyShort = !!(ctx && ctx.quoteOnlyShort);
+        const isShortAnswerMode = !!(ctx && ctx.isShortAnswerMode);
+        const teacherRecordMode = !!(ctx && ctx.teacherRecordMode);
+        const tapPathActive = !!(ctx && ctx.tapPathActive);
+        if(!tapPathActive || !hasSource) return false;
+        const c1OwnWordsShort = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
+        if(quoteOnlyShort && !teacherRecordMode) {
+            if(app.acceptShortAnswerQuoteFromPassage && app.acceptShortAnswerQuoteFromPassage(pendingQuote, level)) return true;
+            if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+            const kFo = app.quoteKey(pendingQuote);
+            if(!userState.selectionChosen.some(function(ch) {
+                return app.quoteKey(typeof ch === "object" && ch && ("quote" in ch || "original" in ch) ? (ch.quote || ch.original) : ch) === kFo;
+            })) userState.selectionChosen.push(pendingQuote);
+            ui._freeSelectPendingQuote = "";
+            if(ui.sendSelectionQuotesDirectToAnswer) ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true, onlyQuotes: [pendingQuote] });
+            return true;
+        }
+        const questionText = (ctx && ctx.questionText) || (app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : app.getQuestionForLevel(level));
+        const tr = teacherRecordMode;
+        const officialAnswerPassage = (!tr && app.getAnswerPassageExcerptForLevel) ? app.getAnswerPassageExcerptForLevel(level) : "";
+        const passageMismatchWarn = (!tr && officialAnswerPassage && app.shouldWarnAnswerPassageMismatch(pendingQuote, officialAnswerPassage, sourceText))
+            ? `<div class="card" style="margin-bottom:10px;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.09);font-size:0.86rem;line-height:1.45;">
+                    <div style="font-weight:700;margin-bottom:4px;">Check you are on the right part of the passage</div>
+                    <div style="opacity:0.95;">Your highlight does not closely match the <strong>answer passage</strong> your teacher set for this question. You can still continue if you are sure — in the exam you must work from the lines the question gives you.</div>
+                </div>`
+            : "";
+        const q1TapParaphrase = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || c1OwnWordsShort || !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
+        const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
+        const showJustifyBox = tr || q1TapParaphrase || (!isShortAnswerMode && !quoteOnlyShort);
+        const whyHeading = tr
+            ? "Comment / analysis (saved to lesson)"
+            : (c1OwnWordsShort
+                ? "Put each fact in your own words below (retrieval — do not copy the passage)."
+                : (q1TapParaphrase ? "Does this text answer the question? Put it in your own words below — it will go into your answer." : "Does this quote support your answer? Why?"));
+        const whyBlockHtml = showJustifyBox
+            ? `<div style="font-weight:700; margin-bottom:4px;">${whyHeading}</div>
+                        <textarea id="free-select-why" placeholder="${whyPlaceholder}" style="width:100%; min-height:60px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>`
+            : "";
+        const trMeaningBlock = tr && !isShortAnswerMode ? `<div style="font-weight:700; margin-bottom:4px;">Meaning (gloss)</div>
+                        <textarea id="teacher-record-translation" placeholder="Short paraphrase / meaning for worksheet match" style="width:100%; min-height:52px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>` : "";
+        cont.innerHTML = `
+                    <div class="section-header">${tr ? "Teacher: record this quote" : "Examine your quote"}</div>
+                    ${passageMismatchWarn}
+                    <div class="card" style="margin-bottom:10px;">
+                        <div style="font-weight:700; margin-bottom:6px;">Selected quote</div>
+                        <div style="font-style:italic; margin-bottom:10px; padding:8px; background:var(--bg); border-radius:6px;">${app.quoteDisplayHtml(pendingQuote || "")}</div>
+                        <div style="font-weight:700; margin-bottom:4px;">Question</div>
+                        <div style="margin-bottom:10px; opacity:0.9;">${app.escapeHtml(questionText) || "—"}</div>
+                        ${trMeaningBlock}
+                        ${whyBlockHtml}
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-primary btn-small" id="free-select-use">${tr ? "Save to lesson & continue" : (c1OwnWordsShort ? "Save and continue" : "Use this quote")}</button>
+                            <button class="btn btn-outline btn-small" id="free-select-cancel">Cancel</button>
+                        </div>
+                    </div>
+                `;
+        const useBtn = document.getElementById("free-select-use");
+        const cancelBtn = document.getElementById("free-select-cancel");
+        if(useBtn) useBtn.onclick = () => {
+            if(tr) {
+                const trEl = document.getElementById("teacher-record-translation");
+                const whyEl = document.getElementById("free-select-why");
+                const translation = trEl ? String(trEl.value || "").trim() : "";
+                const why = whyEl ? String(whyEl.value || "").trim() : "";
+                const pending = ui._freeSelectPendingQuote || "";
+                if(admin.applyTeacherCaptureFromQuoteFlow) {
+                    admin.applyTeacherCaptureFromQuoteFlow(pending, { why, translation, shortAnswer: isShortAnswerMode });
+                }
+            } else if(pendingQuote) {
+                const whyEl = document.getElementById("free-select-why");
+                const whyStu = whyEl ? String(whyEl.value || "").trim() : "";
+                const ownWordsTap = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
+                if(ownWordsTap && !whyStu) {
+                    alert("Put the fact in your own words before continuing (do not copy the passage).");
+                    if(whyEl) whyEl.focus();
+                    return;
+                }
+                if(whyStu && app.setSelectionJustificationForQuoteText) app.setSelectionJustificationForQuoteText(pendingQuote, whyStu);
+            }
+            if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
+            const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && ("quote" in q || "original" in q) ? (q.quote || q.original) : q)));
+            if(pendingQuote && !chosenKeys.has(app.quoteKey(pendingQuote))) {
+                userState.selectionChosen.push(pendingQuote);
+            }
+            ui._freeSelectPendingQuote = "";
+            if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
+            app.save();
+            if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true, onlyQuotes: pendingQuote ? [pendingQuote] : null });
+                return;
+            }
+            if(quoteOnlyShort) {
+                ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                return;
+            }
+            ui.renderSelection();
+        };
+        if(cancelBtn) cancelBtn.onclick = () => {
+            ui._freeSelectPendingQuote = "";
+            if(window.getSelection) window.getSelection().removeAllRanges();
+            ui.renderSelection();
+        };
+        if(typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(function() {
+                if(cont && cont.scrollIntoView) cont.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            });
+        }
+        return true;
+    },
+
     renderSelection: function(overrideCanon, opts) {
         opts = opts || {};
         if(opts.skipPassage == null && app._passageDisplaysDeferred) opts.skipPassage = true;
@@ -19309,6 +19430,12 @@ const ui = {
                 passageHintEl.innerHTML = "";
             }
         }
+        const teacherRecordModeEarly = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
+        const tapPathEarly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || teacherRecordModeEarly || levelEntry.shortAnswersOnly === true || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)));
+        if(String(ui._freeSelectPendingQuote || "").trim() && ui.tryRenderPendingPassageExamine({
+            cont, level, hasSource, sourceText, levelEntry, quoteOnlyShort, isShortAnswerMode,
+            teacherRecordMode: teacherRecordModeEarly, tapPathActive: tapPathEarly, questionText: questionTextEarly
+        })) return;
         const affirmTeacherPreview = !!(userState && userState.teacherPreviewAffirmStep);
         if((appData.isStandalone || affirmTeacherPreview) && displayLineRange && hasSource && (levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true")) {
             if(!userState.passageExamAckMap || typeof userState.passageExamAckMap !== "object") userState.passageExamAckMap = {};
@@ -19566,102 +19693,11 @@ const ui = {
         if(tapPathActive && hasSource && pendingQuotePassage && quoteOnlyShort && !teacherRecordMode) {
             if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
         }
-        if(tapPathActive && hasSource && pendingQuotePassage) {
-            if(quoteOnlyShort && !teacherRecordMode) {
-                if(app.acceptShortAnswerQuoteFromPassage(pendingQuotePassage, level)) return;
-                ui._freeSelectPendingQuote = "";
-                app.save();
-                ui.renderSelection();
-                return;
-            }
-            const pendingQuote = pendingQuotePassage;
-            const tr = teacherRecordMode;
-            const officialAnswerPassage = (!tr && app.getAnswerPassageExcerptForLevel) ? app.getAnswerPassageExcerptForLevel(level) : "";
-            const passageMismatchWarn = (!tr && officialAnswerPassage && app.shouldWarnAnswerPassageMismatch(pendingQuote, officialAnswerPassage, sourceText))
-                ? `<div class="card" style="margin-bottom:10px;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.09);font-size:0.86rem;line-height:1.45;">
-                    <div style="font-weight:700;margin-bottom:4px;">Check you are on the right part of the passage</div>
-                    <div style="opacity:0.95;">Your highlight does not closely match the <strong>answer passage</strong> your teacher set for this question. You can still continue if you are sure — in the exam you must work from the lines the question gives you.</div>
-                </div>`
-                : "";
-            const q1TapParaphrase = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || c1OwnWordsShort || !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
-            const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
-            const showJustifyBox = tr || q1TapParaphrase || (!isShortAnswerMode && !quoteOnlyShort);
-            const whyHeading = tr
-                ? "Comment / analysis (saved to lesson)"
-                : (c1OwnWordsShort
-                    ? "Put each fact in your own words below (retrieval — do not copy the passage)."
-                    : (q1TapParaphrase ? "Does this text answer the question? Put it in your own words below — it will go into your answer." : "Does this quote support your answer? Why?"));
-            const whyBlockHtml = showJustifyBox
-                ? `<div style="font-weight:700; margin-bottom:4px;">${whyHeading}</div>
-                        <textarea id="free-select-why" placeholder="${whyPlaceholder}" style="width:100%; min-height:60px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>`
-                : "";
-            const trMeaningBlock = tr && !isShortAnswerMode ? `<div style="font-weight:700; margin-bottom:4px;">Meaning (gloss)</div>
-                        <textarea id="teacher-record-translation" placeholder="Short paraphrase / meaning for worksheet match" style="width:100%; min-height:52px; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; font-size:0.9rem;"></textarea>` : "";
-            cont.innerHTML = `
-                    <div class="section-header">${tr ? "Teacher: record this quote" : "Examine your quote"}</div>
-                    ${passageMismatchWarn}
-                    <div class="card" style="margin-bottom:10px;">
-                        <div style="font-weight:700; margin-bottom:6px;">Selected quote</div>
-                        <div style="font-style:italic; margin-bottom:10px; padding:8px; background:var(--bg); border-radius:6px;">${app.quoteDisplayHtml(pendingQuote || "")}</div>
-                        <div style="font-weight:700; margin-bottom:4px;">Question</div>
-                        <div style="margin-bottom:10px; opacity:0.9;">${app.escapeHtml(questionText) || "—"}</div>
-                        ${trMeaningBlock}
-                        ${whyBlockHtml}
-                        <div style="display:flex; gap:8px;">
-                            <button class="btn btn-primary btn-small" id="free-select-use">${tr ? "Save to lesson & continue" : (c1OwnWordsShort ? "Save and continue" : "Use this quote")}</button>
-                            <button class="btn btn-outline btn-small" id="free-select-cancel">Cancel</button>
-                        </div>
-                    </div>
-                `;
-            const useBtn = document.getElementById("free-select-use");
-            const cancelBtn = document.getElementById("free-select-cancel");
-            if(useBtn) useBtn.onclick = () => {
-                if(tr) {
-                    const trEl = document.getElementById("teacher-record-translation");
-                    const whyEl = document.getElementById("free-select-why");
-                    const translation = trEl ? String(trEl.value || "").trim() : "";
-                    const why = whyEl ? String(whyEl.value || "").trim() : "";
-                    const pending = ui._freeSelectPendingQuote || "";
-                    if(admin.applyTeacherCaptureFromQuoteFlow) {
-                        admin.applyTeacherCaptureFromQuoteFlow(pending, { why, translation, shortAnswer: isShortAnswerMode });
-                    }
-                } else if(pendingQuote) {
-                    const whyEl = document.getElementById("free-select-why");
-                    const whyStu = whyEl ? String(whyEl.value || "").trim() : "";
-                    const ownWordsTap = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
-                    if(ownWordsTap && !whyStu) {
-                        alert("Put the fact in your own words before continuing (do not copy the passage).");
-                        if(whyEl) whyEl.focus();
-                        return;
-                    }
-                    if(whyStu && app.setSelectionJustificationForQuoteText) app.setSelectionJustificationForQuoteText(pendingQuote, whyStu);
-                }
-                if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
-                const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && ("quote" in q || "original" in q) ? (q.quote || q.original) : q)));
-                if(pendingQuote && !chosenKeys.has(app.quoteKey(pendingQuote))) {
-                    userState.selectionChosen.push(pendingQuote);
-                }
-                ui._freeSelectPendingQuote = "";
-                if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
-                app.save();
-                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
-                    ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true, onlyQuotes: pendingQuote ? [pendingQuote] : null });
-                    return;
-                }
-                if(quoteOnlyShort) {
-                    ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
-                    return;
-                }
-                ui.renderSelection();
-            };
-            if(cancelBtn) cancelBtn.onclick = () => {
-                ui._freeSelectPendingQuote = "";
-                if(window.getSelection) window.getSelection().removeAllRanges();
-                ui.renderSelection();
-            };
-            return;
-        }
-        /* Tap-first card: short-answer levels always allow passage tap (no justify). Quote-list mode still uses MC for other levels. */
+        if(ui.tryRenderPendingPassageExamine({
+            cont, level, hasSource, sourceText, levelEntry, quoteOnlyShort, isShortAnswerMode,
+            teacherRecordMode, tapPathActive, questionText
+        })) return;
+        /* Tap-first card: short-answer levels always allow passage tap (no language/justify stages). Teacher "record" mode uses the same tap UI to save meaning/analysis to the lesson. */
         if(tapPathActive && (!studentWantsQuoteList || isShortAnswerMode)) {
             if(!hasSource) {
                 cont.innerHTML = `<div class="card" style="cursor:default;">
@@ -21161,6 +21197,7 @@ const ui = {
             }
             if(app.bumpDeskCommitForLevel) app.bumpDeskCommitForLevel(lvlEarly);
             if(app.persistCurrentQuestionEssay) app.persistCurrentQuestionEssay();
+            if(app.applyQuestionEssayForCurrentQuestion) app.applyQuestionEssayForCurrentQuestion(lvlEarly);
             if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
             app.save();
             const lvlNow = app.getEffectiveLevel();
