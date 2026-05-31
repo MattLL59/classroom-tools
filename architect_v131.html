@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-31T22:00:00">
-<meta name="architect-deploy" content="fix-paraphrase-step-and-per-level-essay">
+<meta name="architect-build" content="2026-05-31T23:00:00">
+<meta name="architect-deploy" content="fix-use-desk-teacher-no-auto-advance">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2502,6 +2502,10 @@ const app = {
     isTeacherTapRecordPassageMode: function() {
         return !!(typeof appData !== "undefined" && appData && !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow === true);
     },
+    /** Teacher app / lesson editor preview — not a student export. Auto level advance is disabled here. */
+    isTeacherPreviewApp: function() {
+        return !!(typeof appData !== "undefined" && appData && !appData.isStandalone);
+    },
     /** Writing Desk draggable chips from Analysis Banks: on for teacher builds; standalone students only when they tick I'm stuck → sentence bank. */
     isDeskSentenceBankChipsEnabled: function() {
         if(typeof appData === "undefined" || !appData) return true;
@@ -4208,6 +4212,11 @@ const app = {
             if(strippedLive.length >= 3) return true;
         }
         if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) {
+            if(app.countOwnWordsParaphrasesForLevel && app.countOwnWordsParaphrasesForLevel(lvl) >= 1) return true;
+            const essayEl = document.getElementById("essay-area");
+            const live = essayEl ? String(essayEl.value || "").trim() : String((userState && userState.essay) || "").trim();
+            const strippedLive = live.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
+            if(strippedLive.length >= 3) return true;
             return false;
         }
         if(app.countDeskCommitsForLevel(lvl) >= 1) return true;
@@ -4267,6 +4276,16 @@ const app = {
             if(app.isLevelsOfResponseLevel && app.isLevelsOfResponseLevel(level)) return false;
             if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level)) return false;
             return !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
+        } catch(e) { return false; }
+    },
+    /** True when Examine-your-quote paraphrase should land in Writing Desk (broader than sendsOwnWords for Use-button routing). */
+    quoteSelectParaphraseRoutesToDesk: function(level) {
+        try {
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+            if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) return true;
+            if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) return true;
+            if(app.getArchitectComponent() !== 2 && app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl)) return true;
+            return false;
         } catch(e) { return false; }
     },
     /** Persist Writing Desk draft for the current level/question only (never bleed from userState.essay). */
@@ -4975,6 +4994,11 @@ const app = {
         const needsDeskSave = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl))
             || !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl));
         if(needsDeskSave) {
+            if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) {
+                const paraphrases = app.countOwnWordsParaphrasesForLevel ? app.countOwnWordsParaphrasesForLevel(lvl) : 0;
+                if(paraphrases >= goal && app.hasShortAnswerContentForLevel(lvl)) return true;
+                return false;
+            }
             if(app.countDeskCommitsForLevel(lvl) >= goal && app.hasShortAnswerContentForLevel(lvl)) return true;
             return false;
         }
@@ -5006,6 +5030,7 @@ const app = {
     /** After a Short ans quote is saved, move Ln→Ln+1 (not in-level multi-question steps). */
     tryFinishShortAnswerLevelAndAdvance: function(level, opts) {
         opts = opts || {};
+        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp()) return false;
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
         const quoteOnly = app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl);
         const ownWords = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl));
@@ -5063,6 +5088,7 @@ const app = {
      */
     advanceStudentToNextActiveLevel: function(opts) {
         opts = opts || {};
+        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp() && opts.allowTeacherAutoAdvance !== true) return false;
         const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
         if(app.isLevelsOfResponseLevel(cur)) return false;
         if(!app.isLevelProgressionReady(cur)) return false;
@@ -16451,6 +16477,7 @@ const app = {
                 if(!app.hasShortAnswerContentForLevel(lvlDone)) return;
                 if(!app.isLevelSelectionGoalMet(lvlDone)) return;
             }
+            if(app.isTeacherPreviewApp && app.isTeacherPreviewApp()) return;
             if(!userState.completedLevels.includes(userState.level)) {
                 userState.completedLevels.push(userState.level);
             }
@@ -17189,7 +17216,7 @@ const ui = {
                     setTimeout(() => { ui._freeSelectProcessLock = false; }, 250);
                 };
                 const lvlTap = (app.getEffectiveLevel && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1;
-                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlTap)) {
+                if((app.quoteSelectParaphraseRoutesToDesk && app.quoteSelectParaphraseRoutesToDesk(lvlTap)) || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlTap))) {
                     ui._freeSelectPendingQuote = text;
                     if(closeReaderThenSwitch) {
                         ui.closeModal("modal-source");
@@ -19286,8 +19313,8 @@ const ui = {
             } else if(pendingQuote) {
                 const whyEl = document.getElementById("free-select-why");
                 const whyStu = whyEl ? String(whyEl.value || "").trim() : "";
-                const ownWordsTap = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
-                if(ownWordsTap && !whyStu) {
+                const mustParaphrase = q1TapParaphrase || c1OwnWordsShort;
+                if(mustParaphrase && !whyStu) {
                     alert("Put the fact in your own words before continuing (do not copy the passage).");
                     if(whyEl) whyEl.focus();
                     return;
@@ -19302,12 +19329,12 @@ const ui = {
             ui._freeSelectPendingQuote = "";
             if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
             app.save();
-            if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+            const routeParaphraseToDesk = !!(app.quoteSelectParaphraseRoutesToDesk && app.quoteSelectParaphraseRoutesToDesk(level))
+                || quoteOnlyShort
+                || q1TapParaphrase
+                || c1OwnWordsShort;
+            if(routeParaphraseToDesk) {
                 ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true, onlyQuotes: pendingQuote ? [pendingQuote] : null });
-                return;
-            }
-            if(quoteOnlyShort) {
-                ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                 return;
             }
             ui.renderSelection();
@@ -21182,7 +21209,11 @@ const ui = {
             const texts = uniqueChosen.map(q => strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim())).filter(Boolean);
             if(!texts.length) return;
             const lvlEarly = app.getEffectiveLevel && app.getEffectiveLevel();
-            const ownWordsFromSelect = app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlEarly);
+            const ownWordsFromSelect = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlEarly))
+                || !!(app.quoteSelectParaphraseRoutesToDesk && app.quoteSelectParaphraseRoutesToDesk(lvlEarly))
+                || texts.some(function(t) {
+                    return String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(t) : "") || "").trim().length >= 3;
+                });
             if(ownWordsFromSelect) {
                 const missing = texts.filter(t => !String((app.getSelectionJustificationForQuoteText ? app.getSelectionJustificationForQuoteText(t) : "") || "").trim());
                 if(missing.length) {
@@ -21412,6 +21443,7 @@ const ui = {
     },
 
     showCelebration: function(autoAdvance, isFinal) {
+        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp()) autoAdvance = false;
         const overlay = document.getElementById('celebration-overlay');
         const inner = document.getElementById('celebration-inner');
         const title = document.getElementById('celebration-title');
