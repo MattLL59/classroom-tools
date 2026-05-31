@@ -1140,7 +1140,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524220000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524221500";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -3793,9 +3793,6 @@ const app = {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         const lvl = parseInt(level, 10) || app.getEffectiveLevel() || 1;
         const key = app.getQuestionEssayStorageKey(lvl);
-        if(!(userState.questionEssays[key] != null && String(userState.questionEssays[key]).length) && (userState.essay || "").trim()) {
-            userState.questionEssays[key] = userState.essay;
-        }
         let text = (userState.questionEssays[key] != null) ? String(userState.questionEssays[key]) : "";
         if(app.ensureQuestionEssayPrefix) text = app.ensureQuestionEssayPrefix(text, lvl);
         userState.essay = text;
@@ -4198,6 +4195,19 @@ const app = {
             if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level)) return false;
             return !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
         } catch(e) { return false; }
+    },
+    /** Persist Writing Desk draft for the current level/question only (never bleed from userState.essay). */
+    storeEssayDraftForLevel: function(level, text) {
+        if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+        const key = app.getQuestionEssayStorageKey(lvl);
+        let t = String(text != null ? text : "");
+        if(app.ensureQuestionEssayPrefix) t = app.ensureQuestionEssayPrefix(t, lvl);
+        userState.questionEssays[key] = t;
+        userState.essay = t;
+        const essayEl = document.getElementById("essay-area");
+        if(essayEl) essayEl.value = t;
+        return t;
     },
     /** C2 Short ans: quote only — no examine/justify step; send to answer and advance. */
     acceptShortAnswerQuoteFromPassage: function(quoteText, level) {
@@ -16153,6 +16163,8 @@ const app = {
             userState.selectionProgress = {};
             userState.selectionJustification = {};
             userState.selectionChosen = [];
+            userState.deskQueue = [];
+            userState.selectionAnsweredForQuestion = [];
             userState.selectionKey = app.getSelectionKey();
             ui._selectionCorrectItem = null;
             ui._selectionQuote = null;
@@ -19538,7 +19550,7 @@ const ui = {
                 } else if(pendingQuote) {
                     const whyEl = document.getElementById("free-select-why");
                     const whyStu = whyEl ? String(whyEl.value || "").trim() : "";
-                    const ownWordsTap = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
+                    const ownWordsTap = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
                     if(ownWordsTap && !whyStu) {
                         alert("Put the fact in your own words before continuing (do not copy the passage).");
                         if(whyEl) whyEl.focus();
@@ -19974,6 +19986,12 @@ const ui = {
                         card.classList.remove("quote-dim", "card-choice-incorrect");
                         card.classList.add("card-choice-correct");
                         if(isShortAnswerMode && o.correct && o.quote) {
+                            if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                                ui._selectionCorrectItem = o.item;
+                                ui._selectionQuote = o.quote;
+                                ui.promptParaphraseForQuoteInSelect(o.quote);
+                                return;
+                            }
                             if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
                             const sk = storeKey(o.quote);
                             if(!userState.selectionChosen.some(ch => app.quoteKey(typeof ch === "object" && ch && "quote" in ch ? ch.quote : ch) === sk)) {
@@ -19982,7 +20000,7 @@ const ui = {
                             ui._selectionCorrectItem = o.item;
                             ui._selectionQuote = o.quote;
                             app.save();
-                            ui.sendSelectionQuotesDirectToAnswer(quoteOnlyShort ? { stayOnQuoteSelect: true } : undefined);
+                            ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                             return;
                         }
                     } else {
@@ -20031,8 +20049,12 @@ const ui = {
                         }
                     }
                     if(isShortAnswerMode && picked && picked.quote) {
+                        if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                            ui.promptParaphraseForQuoteInSelect(picked.quote);
+                            return;
+                        }
                         app.save();
-                        ui.sendSelectionQuotesDirectToAnswer(quoteOnlyShort ? { stayOnQuoteSelect: true } : undefined);
+                        ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                         return;
                     }
                     userState.selectionStage = stageIndex + 1;
@@ -20327,6 +20349,11 @@ const ui = {
                             }
                             const ptsNow = app.countSelectionEvidencePoints(level);
                             const shortReady = quoteOnlyShort && quoteToAdd;
+                            const ownWordsReady = !!(quoteToAdd && app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
+                            if(ownWordsReady) {
+                                ui.promptParaphraseForQuoteInSelect(quoteToAdd);
+                                return;
+                            }
                             if(shortReady && autoDeskAdv) {
                                 userState.selectionCompleted = true;
                                 app.save();
@@ -20372,6 +20399,10 @@ const ui = {
         }
         if(isShortAnswerMode && (stageKey === "justify" || stageKey === "align")) {
             const qAuto = (chosenCorrect && (chosenCorrect.quote || chosenCorrect.original)) || ui._selectionQuote || "";
+            if(qAuto && app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                ui.promptParaphraseForQuoteInSelect(qAuto);
+                return;
+            }
             if(qAuto && !Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
             if(qAuto) {
                 const kA = app.quoteKey(qAuto);
@@ -20381,7 +20412,7 @@ const ui = {
             }
             userState.selectionStage = 1;
             app.save();
-            ui.sendSelectionQuotesDirectToAnswer(quoteOnlyShort ? { stayOnQuoteSelect: true } : undefined);
+            ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
             return;
         }
         if(stageKey === "justify") {
@@ -20908,6 +20939,16 @@ const ui = {
         }
     },
     _sendToBuilderGuard: false,
+    /** Own-words retrieval: open Examine-your-quote step instead of sending straight to the desk/builder. */
+    promptParaphraseForQuoteInSelect: function(quoteText) {
+        const q = String(quoteText || "").trim();
+        if(!q) return false;
+        ui._freeSelectPendingQuote = q;
+        if(typeof app.save === "function") app.save();
+        if(ui.switchView) ui.switchView("select", true);
+        if(ui.renderSelection) ui.renderSelection();
+        return true;
+    },
     clearDeskSentenceBuilder: function() {
         const cont = document.getElementById("sentence-builder");
         if(cont) cont.innerHTML = "";
@@ -20986,12 +21027,18 @@ const ui = {
                 return;
             }
             let newEssay;
-            if(perLevelQuoteEssay) {
-                const withPrefix = app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(toAdd, lvlEarly) : toAdd;
-                newEssay = withPrefix;
+            const essayKey = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvlEarly) : String(lvlEarly) + "_0";
+            const priorForLevel = (userState.questionEssays && userState.questionEssays[essayKey] != null)
+                ? String(userState.questionEssays[essayKey]).trim()
+                : "";
+            if(perLevelQuoteEssay || ownWordsFromSelect) {
+                const marksOne = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvlEarly) : null;
+                const block = (ownWordsFromSelect && marksOne === 1 && texts.length === 1)
+                    ? toAdd
+                    : (priorForLevel ? priorForLevel + "\n\n" + toAdd : toAdd);
+                newEssay = app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(block, lvlEarly) : block;
                 if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
-                const essayKey = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvlEarly) : String(lvlEarly) + "_0";
-                userState.questionEssays[essayKey] = withPrefix;
+                userState.questionEssays[essayKey] = newEssay;
             } else {
                 const marksOne = app.getMarksAvailableForLevelQuestion ? app.getMarksAvailableForLevelQuestion(lvlEarly) : null;
                 if(ownWordsFromSelect && marksOne === 1 && texts.length === 1) newEssay = toAdd;
@@ -21054,6 +21101,9 @@ const ui = {
                 if(ui.renderSelection) ui.renderSelection();
             } else if(stayOnQuoteSelect || quoteOnlySa || ownWordsFromSelect) {
                 if(ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
+                if(ownWordsFromSelect && ui.showSelectionMessage) {
+                    ui.showSelectionMessage("Saved", "Your paraphrase is in your answer. Highlight another quote or open Writing Desk when you want to review.");
+                }
                 if(ui.switchView) ui.switchView("select", true);
                 if(ui.renderSelection) ui.renderSelection();
             } else if(showDesk) {
