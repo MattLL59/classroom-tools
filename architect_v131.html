@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-31T20:00:00">
+<meta name="architect-build" content="2026-05-31T21:00:00">
 <meta name="architect-deploy" content="fix-paraphrase-step-and-per-level-essay">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -15818,7 +15818,10 @@ const app = {
         try {
             if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
             if(typeof ui.renderLab === "function") ui.renderLab();
-            if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection();
+            if(userState && userState.view === "select" && typeof ui.renderSelection === "function") {
+                const keepPending = String(ui._freeSelectPendingQuote || "").trim();
+                ui.renderSelection(null, keepPending ? { skipPassage: true } : {});
+            }
         } catch(eHydr) {
             console.warn("Deferred passage hydrate failed:", eHydr);
         }
@@ -17141,6 +17144,7 @@ const ui = {
                         if((q1OrShort || tr || quoteOnlyTap || (tapFromPassage && sourceEl && sourceEl.contains(ancEl))) && text.length >= 3) okMatch = true;
                     } catch(eOk) { /* keep okMatch false */ }
                 }
+                if(!okMatch && sourceEl && sourceEl.id === "source-inline-select" && ancEl && sourceEl.contains(ancEl) && text.length >= 3) okMatch = true;
                 if(!okMatch) return;
                 const lvlTap = (app.getEffectiveLevel && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1;
                 if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvlTap)) {
@@ -17204,16 +17208,29 @@ const ui = {
                     const ancEl = anc && anc.nodeType === 3 ? anc.parentNode : anc;
                     const focEl = foc && foc.nodeType === 3 ? foc.parentNode : foc;
                     const inlineEl = document.getElementById("source-inline-select");
+                    const inlineScroll = document.getElementById("source-inline-select-scroll");
                     const labEl = document.getElementById("source-inline");
-                    if(inlineEl && ancEl && focEl && (inlineEl.contains(ancEl) || inlineEl.contains(focEl))) {
+                    const inPassageHost = (host) => host && ancEl && focEl && (host.contains(ancEl) || host.contains(focEl));
+                    if(inPassageHost(inlineEl) || inPassageHost(inlineScroll)) {
                         ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
-                    } else if(labEl && ancEl && focEl && (labEl.contains(ancEl) || labEl.contains(focEl))) {
+                    } else if(inPassageHost(labEl)) {
                         ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
                     } else {
                         ui._lastCapturedSelection = null;
                     }
                 };
                 document.addEventListener("selectionchange", captureSelection, true);
+                let freeSelectProcessTimer = null;
+                const scheduleFreeSelectProcess = () => {
+                    if(freeSelectProcessTimer) clearTimeout(freeSelectProcessTimer);
+                    freeSelectProcessTimer = setTimeout(() => {
+                        freeSelectProcessTimer = null;
+                        const selectView = document.getElementById("view-select");
+                        if(!selectView || !selectView.classList.contains("active")) return;
+                        if(ui._lastCapturedSelection && ui._lastCapturedSelection.text) docSelectHandler({ type: "selectionchange" });
+                    }, 120);
+                };
+                document.addEventListener("selectionchange", scheduleFreeSelectProcess, true);
                 const docSelectHandler = (e) => {
                     const sel = appData.selection;
                     const levelBank = app.getLevelBank();
@@ -17229,11 +17246,12 @@ const ui = {
                     const adminModal = document.getElementById("modal-admin");
                     const adminOpen = !!(adminModal && adminModal.classList.contains("open"));
                     const allowTeacherPassageCapture = !!(teacherTapOn && adminOpen);
-                    const allowShortAnsOrQ1PassageTap = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
+                    const allowShortAnsOrQ1PassageTap = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) || (app.getEffectiveTapText && app.getEffectiveTapText(level));
                     if(!app.getEffectiveTapText(level) && !teacherRecordOn && !allowTeacherPassageCapture && !allowShortAnsOrQ1PassageTap) return;
-                    const sourceText = app.getSourceText();
+                    const sourceText = (app.getSourceTextForDisplay && app.getSourceTextForDisplay()) || app.getSourceText();
                     if(!sourceText || !String(sourceText).trim()) return;
                     const inlineSelectEl = document.getElementById("source-inline-select");
+                    const inlineSelectScroll = document.getElementById("source-inline-select-scroll");
                     const sourceInline = document.getElementById("source-inline");
                     const quoteSelectEl = document.getElementById("selection-free-select-source");
                     let preCaptured = ui._lastCapturedSelection;
@@ -17246,7 +17264,7 @@ const ui = {
                                 const foc = selObj.focusNode;
                                 const ancEl = anc && anc.nodeType === 3 ? anc.parentNode : anc;
                                 const focEl = foc && foc.nodeType === 3 ? foc.parentNode : foc;
-                                if(inlineSelectEl && ancEl && focEl && (inlineSelectEl.contains(ancEl) || inlineSelectEl.contains(focEl))) {
+                                if(inlineSelectEl && ancEl && focEl && (inlineSelectEl.contains(ancEl) || inlineSelectEl.contains(focEl) || (inlineSelectScroll && (inlineSelectScroll.contains(ancEl) || inlineSelectScroll.contains(focEl))))) {
                                     preCaptured = { text: txt, anchorNode: anc, focusNode: foc };
                                 } else if(sourceInline && ancEl && focEl && (sourceInline.contains(ancEl) || sourceInline.contains(focEl))) {
                                     preCaptured = { text: txt, anchorNode: anc, focusNode: foc };
@@ -17258,7 +17276,7 @@ const ui = {
                     }
                     const runProcess = () => {
                         if(allowTeacherPassageCapture && admin.tryTeacherPassageCaptureFromPre && admin.tryTeacherPassageCaptureFromPre(preCaptured, { inlineSelectEl, sourceInline, sourceText })) return;
-                        const inInlineSelect = selectView && selectView.classList.contains("active") && inlineSelectEl && inlineSelectEl.innerHTML.trim().length > 0;
+                        const inInlineSelect = selectView && selectView.classList.contains("active") && inlineSelectEl && inlineSelectEl.innerHTML.trim().length > 0 && (inlineSelectEl.offsetParent !== null || (inlineSelectScroll && inlineSelectScroll.offsetParent !== null));
                         const inLab = sourceInline && sourceInline.offsetParent !== null && sourceInline.innerHTML.trim().length > 0;
                         const inQuoteSelect = quoteSelectEl && quoteSelectEl.offsetParent !== null;
                         const usePreForInline = preCaptured && inlineSelectEl && (inlineSelectEl.contains(preCaptured.anchorNode) || inlineSelectEl.contains(preCaptured.focusNode) || (preCaptured.anchorNode && preCaptured.anchorNode.parentNode && inlineSelectEl.contains(preCaptured.anchorNode.parentNode)));
@@ -19163,8 +19181,6 @@ const ui = {
         const quoteOnlyShort = !!(ctx && ctx.quoteOnlyShort);
         const isShortAnswerMode = !!(ctx && ctx.isShortAnswerMode);
         const teacherRecordMode = !!(ctx && ctx.teacherRecordMode);
-        const tapPathActive = !!(ctx && ctx.tapPathActive);
-        if(!tapPathActive || !hasSource) return false;
         const c1OwnWordsShort = !!(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
         if(quoteOnlyShort && !teacherRecordMode) {
             if(app.acceptShortAnswerQuoteFromPassage && app.acceptShortAnswerQuoteFromPassage(pendingQuote, level)) return true;
@@ -19329,7 +19345,14 @@ const ui = {
             }
         }
         const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)));
-        if((!sel.items.length || sel.items.length < 2) && !(tapSelectOnly && hasSourceEarly)) {
+        const pendingQuoteEarly = String(ui._freeSelectPendingQuote || "").trim();
+        const teacherRecordModeEarlyTop = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
+        const tapPathEarlyTop = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || teacherRecordModeEarlyTop || levelEntry.shortAnswersOnly === true || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) || pendingQuoteEarly);
+        if(pendingQuoteEarly && ui.tryRenderPendingPassageExamine({
+            cont, level, hasSource: hasSourceEarly, sourceText: sourceTextEarly, levelEntry, quoteOnlyShort, isShortAnswerMode,
+            teacherRecordMode: teacherRecordModeEarlyTop, tapPathActive: tapPathEarlyTop, questionText: questionTextEarly
+        })) return;
+        if((!sel.items.length || sel.items.length < 2) && !(tapSelectOnly && hasSourceEarly) && !pendingQuoteEarly) {
             if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
             const tPanel = document.getElementById("selection-top-panel");
             if(tPanel) tPanel.innerHTML = "";
@@ -19379,7 +19402,10 @@ const ui = {
         const inlineSelect = document.getElementById("source-inline-select");
         const selWrap = document.getElementById("source-inline-select-wrap");
         if(inlineSelect) {
-            if(opts.skipPassage && app._passageDisplaysDeferred && app.getPassageDeferPlaceholderHtml) {
+            const keepPassageDom = !!(opts.skipPassage && String(ui._freeSelectPendingQuote || "").trim());
+            if(keepPassageDom) {
+                /* Keep highlighted passage visible while Examine your quote is open. */
+            } else if(opts.skipPassage && app._passageDisplaysDeferred && app.getPassageDeferPlaceholderHtml) {
                 const ph = app.getPassageDeferPlaceholderHtml();
                 inlineSelect.innerHTML = ph;
                 if(selWrap) ui.syncPassageLineLayoutShell(selWrap, inlineSelect, ph);
