@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-05-24T21:30:00">
+<meta name="architect-build" content="2026-05-24T21:45:00">
 <meta name="architect-deploy" content="fix-admin-close-after-level-bank">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -544,6 +544,13 @@
         pointer-events: auto !important;
         z-index: 10200 !important;
     }
+    .modal.modal-hidden,
+    #modal-admin.modal.modal-hidden {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
     .modal-content { background: var(--bg); width: 95%; max-width: 900px; max-height: 95vh; border-radius: 10px; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.3); overflow: hidden; color: var(--text); opacity: 1; }
     .modal-header { flex-shrink: 0; padding: 15px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1rem; }
     /* flex:1 + min-height:0 so tall content scrolls inside max-height modal (not clipped) */
@@ -1068,6 +1075,7 @@
         function showModalShell(id) {
             var m = document.getElementById(id);
             if(!m) return false;
+            m.classList.remove("modal-hidden");
             m.classList.add("open");
             m.style.display = "flex";
             m.style.visibility = "visible";
@@ -1132,7 +1140,7 @@
             var raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
             var commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
             var revRaw = rev && rev.getAttribute("content") ? String(rev.getAttribute("content")).trim() : "";
-            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524213000";
+            var pagesUrl = "https://mattll59.github.io/classroom-tools/architect_v131.html?b=20260524214500";
             if(el) {
                 if(raw) el.textContent = "v131 · " + raw + (commit ? " · " + commit : "");
                 else el.textContent = "v131";
@@ -1425,7 +1433,7 @@
 
     <div id="modal-admin" class="modal">
         <div class="modal-content">
-            <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="ui.openModal('modal-manual')" title="Instruction manual">?</button> <button class="icon-btn" onclick="ui.closeModal('modal-admin')">✕</button></div>
+            <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="ui.openModal('modal-manual')" title="Instruction manual">?</button> <button type="button" class="icon-btn" id="btn-admin-modal-close" data-admin-close="1" onclick="ui.closeTeacherSettings(event)" title="Close Teacher Settings">✕</button></div>
             <div class="modal-body">
                 <div class="tab-bar" id="admin-tabs">
                     <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward" onclick="admin.goAdminTab('reward')">Reward</button>
@@ -14992,7 +15000,8 @@ const app = {
                             const m = document.getElementById(mid);
                             if(!m || !m.classList.contains("open")) continue;
                             ev.preventDefault();
-                            if(mid === "modal-admin" && typeof ui.closeModal === "function") ui.closeModal(mid);
+                            if(mid === "modal-admin" && typeof ui.closeTeacherSettings === "function") ui.closeTeacherSettings(ev);
+                            else if(mid === "modal-admin" && typeof ui.closeModal === "function") ui.closeModal(mid);
                             else if(typeof ui.closeModal === "function") ui.closeModal(mid);
                             return;
                         }
@@ -17629,8 +17638,10 @@ const ui = {
     },
 
     openModal: (id) => {
+        if(id === "modal-admin" && ui._adminCloseGuardUntil && Date.now() < ui._adminCloseGuardUntil) return;
         const modal = document.getElementById(id);
         if(modal) {
+            modal.classList.remove("modal-hidden");
             modal.classList.add("open");
             modal.style.display = "flex";
             modal.style.visibility = "visible";
@@ -17677,12 +17688,45 @@ const ui = {
     hideModalShell: function(el) {
         if(!el) return;
         el.classList.remove("open");
-        el.style.removeProperty("display");
-        el.style.removeProperty("visibility");
-        el.style.removeProperty("opacity");
-        el.style.removeProperty("pointer-events");
+        el.classList.add("modal-hidden");
+        el.style.display = "none";
+        el.style.visibility = "hidden";
+        el.style.opacity = "0";
+        el.style.pointerEvents = "none";
         el.style.removeProperty("z-index");
         el.setAttribute("aria-hidden", "true");
+        if(el.id === "modal-admin") {
+            const content = el.querySelector(".modal-content");
+            if(content) content.style.transform = "";
+        }
+    },
+    _beginAdminCloseGuard: function(ms) {
+        ui._adminCloseGuardUntil = Date.now() + (ms || 450);
+    },
+    _adminCloseGuardActive: function() {
+        return !!(ui._adminCloseGuardUntil && Date.now() < ui._adminCloseGuardUntil);
+    },
+    _finishAdminModalClose: function() {
+        const el = document.getElementById("modal-admin");
+        ui._flushPendingLevelBankSave();
+        if(typeof admin !== "undefined" && admin._levelBankFullRenderTimer) {
+            clearTimeout(admin._levelBankFullRenderTimer);
+            admin._levelBankFullRenderTimer = null;
+        }
+        ui.hideModalShell(el);
+        ui._pauseSelectionGate = false;
+        app._adminLiteOpen = false;
+        ui._beginAdminCloseGuard(450);
+        const defer = () => {
+            const adm = document.getElementById("modal-admin");
+            if(adm && adm.classList.contains("open") && !adm.classList.contains("modal-hidden")) return;
+            try {
+                ui._deferAfterAdminClose();
+                if(typeof admin !== "undefined" && typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
+            } catch(e) { console.warn("admin close defer:", e); }
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(defer, { timeout: 1200 });
+        else setTimeout(defer, 0);
     },
     _flushPendingLevelBankSave: function() {
         if(typeof admin === "undefined" || !admin._levelBankSaveTimer) return;
@@ -17714,29 +17758,20 @@ const ui = {
     },
     closeAdminLite: function() {
         try {
-            const el = document.getElementById("modal-admin");
-            ui._flushPendingLevelBankSave();
-            if(typeof admin !== "undefined" && admin._levelBankFullRenderTimer) {
-                clearTimeout(admin._levelBankFullRenderTimer);
-                admin._levelBankFullRenderTimer = null;
-            }
-            ui.hideModalShell(el);
-            ui._pauseSelectionGate = false;
-            app._adminLiteOpen = false;
-            const defer = () => { try { ui._deferAfterAdminClose(); } catch(e) { console.warn("closeAdminLite defer:", e); } };
-            if(typeof requestIdleCallback === "function") requestIdleCallback(defer, { timeout: 1200 });
-            else setTimeout(defer, 0);
+            ui._finishAdminModalClose();
         } catch(eClose) {
             console.warn("closeAdminLite:", eClose);
             const el = document.getElementById("modal-admin");
             ui.hideModalShell(el);
             ui._pauseSelectionGate = false;
             app._adminLiteOpen = false;
+            ui._beginAdminCloseGuard(450);
         }
     },
     isAdminModalVisible: function() {
         const adm = document.getElementById("modal-admin");
-        if(!adm || !adm.classList.contains("open")) return false;
+        if(!adm || adm.classList.contains("modal-hidden")) return false;
+        if(!adm.classList.contains("open")) return false;
         try {
             const st = window.getComputedStyle(adm);
             return st.display !== "none" && st.visibility !== "hidden" && st.opacity !== "0";
@@ -17745,8 +17780,10 @@ const ui = {
         }
     },
     showAdminModalShell: function() {
+        if(ui._adminCloseGuardActive()) return false;
         const adm = document.getElementById("modal-admin");
         if(!adm) return false;
+        adm.classList.remove("modal-hidden");
         adm.classList.add("open");
         adm.style.display = "flex";
         adm.style.visibility = "visible";
@@ -17765,6 +17802,7 @@ const ui = {
     showTeacherSettings: function(ev) {
         if(ev && ev.preventDefault) ev.preventDefault();
         if(ev && ev.stopPropagation) ev.stopPropagation();
+        if(ui._adminCloseGuardActive()) return;
         const adm = document.getElementById("modal-admin");
         if(adm && adm.classList.contains("open") && !(ui.isAdminModalVisible && ui.isAdminModalVisible())) {
             ui.hideModalShell(adm);
@@ -17789,26 +17827,33 @@ const ui = {
     openAdminSafe: function(ev) {
         if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings(ev);
     },
-    closeModal: (id) => {
-        const el = document.getElementById(id);
-        if(id === "modal-admin" && !appData.isStandalone) {
-            ui._flushPendingLevelBankSave();
-            if(typeof admin !== "undefined" && admin._levelBankFullRenderTimer) {
-                clearTimeout(admin._levelBankFullRenderTimer);
-                admin._levelBankFullRenderTimer = null;
-            }
-            ui.hideModalShell(el);
+    closeTeacherSettings: function(ev) {
+        if(ev) {
+            if(ev.preventDefault) ev.preventDefault();
+            if(ev.stopPropagation) ev.stopPropagation();
+            if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+        }
+        ui._beginAdminCloseGuard(450);
+        try {
+            if(appData && !appData.isStandalone) ui._finishAdminModalClose();
+            else ui.closeModal("modal-admin");
+        } catch(eClose) {
+            console.warn("closeTeacherSettings:", eClose);
+            ui.hideModalShell(document.getElementById("modal-admin"));
             ui._pauseSelectionGate = false;
             app._adminLiteOpen = false;
+        }
+    },
+    closeModal: (id) => {
+        const el = document.getElementById(id);
+        if(id === "modal-admin") {
+            if(appData && !appData.isStandalone) {
+                ui._finishAdminModalClose();
+                return;
+            }
+            ui.hideModalShell(el);
+            ui._beginAdminCloseGuard(450);
             if(id === 'modal-source') { ui.stopReader(); }
-            const defer = () => {
-                try {
-                    ui._deferAfterAdminClose();
-                    if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
-                } catch(e) { console.warn("closeModal admin defer:", e); }
-            };
-            if(typeof requestIdleCallback === "function") requestIdleCallback(defer, { timeout: 1200 });
-            else setTimeout(defer, 0);
             return;
         }
         ui.hideModalShell(el);
@@ -28127,7 +28172,7 @@ const admin = {
         let drag = null;
         header.addEventListener("pointerdown", function(e) {
             if(e.button !== 0 && e.pointerType !== "touch") return;
-            if(e.target.closest && e.target.closest("button, a, input, select, textarea, summary")) return;
+            if(e.target.closest && e.target.closest("button, a, input, select, textarea, summary, [data-admin-close]")) return;
             drag = { sx: e.clientX - dx, sy: e.clientY - dy };
             try {
                 header.setPointerCapture(e.pointerId);
@@ -28152,8 +28197,16 @@ const admin = {
         }
         header.addEventListener("pointerup", endDrag);
         header.addEventListener("pointercancel", endDrag);
+        const closeBtn = modal.querySelector("[data-admin-close]");
+        if(closeBtn && !closeBtn.dataset.adminCloseBound) {
+            closeBtn.dataset.adminCloseBound = "1";
+            closeBtn.addEventListener("click", function(e) {
+                if(typeof ui.closeTeacherSettings === "function") ui.closeTeacherSettings(e);
+                else if(typeof ui.closeModal === "function") ui.closeModal("modal-admin");
+            }, true);
+        }
         header.addEventListener("dblclick", function(e) {
-            if(e.target.closest && e.target.closest("button")) return;
+            if(e.target.closest && e.target.closest("button, [data-admin-close]")) return;
             dx = 0;
             dy = 0;
             content.style.transform = "";
