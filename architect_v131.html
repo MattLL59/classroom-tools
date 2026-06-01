@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T04:45:00">
+<meta name="architect-build" content="2026-06-01T05:30:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -3836,7 +3836,73 @@ const app = {
         if(meta && typeof meta.idx === "number") return meta.idx + 1;
         const idx = app.getPaperQuestionDisplayIndex(lvl);
         if(idx >= 0) return idx + 1;
-        return 1;
+        if(app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout()) {
+            const active = app.getActiveLevels ? app.getActiveLevels() : [];
+            const ai = active.indexOf(lvl);
+            if(ai >= 0) return ai + 1;
+        }
+        return lvl;
+    },
+    /** Strip any leading question label and apply the correct one for this level. */
+    rewriteQuestionEssayPrefixForLevel: function(text, level, questionNumOverride) {
+        const body = String(text || "").replace(/^\uFEFF/, "").replace(/^Question\s+\d+\s*\n+/i, "").trim();
+        const n = (typeof questionNumOverride === "number" && questionNumOverride >= 1)
+            ? questionNumOverride
+            : app.getQuestionNumberForEssay(level);
+        if(!body) return "Question " + n + "\n\n";
+        return "Question " + n + "\n\n" + body;
+    },
+    /** Remove duplicate quote blocks within one level’s saved answer. */
+    dedupeLevelEssayBody: function(text) {
+        const raw = String(text || "").replace(/^\uFEFF/, "").trim();
+        if(!raw) return "";
+        const headerMatch = raw.match(/^Question\s+\d+\s*\n/i);
+        const header = headerMatch ? headerMatch[0].trim() + "\n\n" : "";
+        const body = raw.replace(/^Question\s+\d+\s*\n+/i, "").trim();
+        if(!body) return header ? header.trim() : "";
+        const parts = body.split(/\n\n+/).map(function(p) { return p.trim(); }).filter(Boolean);
+        const seen = new Set();
+        const unique = [];
+        parts.forEach(function(p) {
+            const k = p.toLowerCase().replace(/\s+/g, " ");
+            if(!k || seen.has(k)) return;
+            seen.add(k);
+            unique.push(p);
+        });
+        return header + unique.join("\n\n");
+    },
+    /** True when this quote is already stored for the level (avoid desk-queue re-send loops). */
+    quoteAlreadySavedForLevel: function(quoteText, level) {
+        try {
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+            const q = String(quoteText || "").trim();
+            if(!q) return false;
+            const key = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvl) : (String(lvl) + "_0");
+            const stored = String((userState.questionEssays && userState.questionEssays[key]) || "").trim();
+            if(!stored) return false;
+            const strip = app.stripLineNumbersFromQuote || function(s) { return String(s || "").trim(); };
+            const qNorm = strip(q).toLowerCase();
+            const qDisp = (app.quoteDisplayPlain ? app.quoteDisplayPlain(q) : ("\"" + q + "\"")).toLowerCase();
+            const body = stored.replace(/^Question\s+\d+\s*\n+/i, "").toLowerCase();
+            return body.indexOf(qNorm) >= 0 || body.indexOf(qDisp) >= 0;
+        } catch(e) { return false; }
+    },
+    /** Merge new quote/paraphrase into a level block without duplicating on reload. */
+    mergeQuoteIntoLevelEssay: function(priorText, toAdd, level) {
+        const prior = String(priorText || "").trim();
+        const add = String(toAdd || "").trim();
+        if(!add) return prior;
+        if(!prior) return add;
+        const priorBody = prior.replace(/^Question\s+\d+\s*\n+/i, "").trim();
+        const addNorm = add.toLowerCase().replace(/\s+/g, " ");
+        if(priorBody.toLowerCase().indexOf(addNorm) >= 0) return prior;
+        const marksOne = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(level) : null;
+        const quoteOnly = app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level);
+        const shortAns = !!(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(level));
+        if(marksOne === 1 || quoteOnly || (shortAns && app.usesOneQuestionPerLevelLayout && app.usesOneQuestionPerLevelLayout())) {
+            return add;
+        }
+        return priorBody ? prior + "\n\n" + add : add;
     },
     /** If the draft has no leading question label, prepend "Question n" (so each answer names its question). */
     ensureQuestionEssayPrefix: function(text, level, questionNumOverride) {
@@ -3926,7 +3992,9 @@ const app = {
         if(!meta || !meta.ids || meta.ids.length <= 1) {
             const key = app.getQuestionEssayStorageKey(lvl);
             const raw = userState.questionEssays[key] != null ? String(userState.questionEssays[key]) : "";
-            return raw.trim() ? (app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(raw, lvl) : raw) : "";
+            if(!raw.trim()) return "";
+            const cleaned = app.dedupeLevelEssayBody ? app.dedupeLevelEssayBody(raw) : raw;
+            return app.rewriteQuestionEssayPrefixForLevel ? app.rewriteQuestionEssayPrefixForLevel(cleaned, lvl) : cleaned;
         }
         const parts = [];
         for(let i = 0; i < meta.ids.length; i++) {
@@ -21397,13 +21465,30 @@ const ui = {
                 seen.add(k);
                 return true;
             });
+            const lvlFilter = app.getEffectiveLevel && app.getEffectiveLevel();
+            const pendingSave = uniqueChosen.filter(function(q) {
+                const raw = typeof q === "object" && q && "quote" in q ? q.quote : q;
+                return !app.quoteAlreadySavedForLevel || !app.quoteAlreadySavedForLevel(raw, lvlFilter);
+            });
+            if(!pendingSave.length && uniqueChosen.length) {
+                userState.deskQueue = [];
+                userState.selectionChosen = [];
+                if(app.buildWritingDeskDisplayEssay) {
+                    userState.essay = app.buildWritingDeskDisplayEssay(lvlFilter);
+                    const eaSkip = document.getElementById("essay-area");
+                    if(eaSkip) eaSkip.value = userState.essay;
+                }
+                app.save();
+                return;
+            }
             if(!uniqueChosen.length) {
                 alert("Select at least one quote in the passage first.");
                 return;
             }
             ui._directOwnWordsSendInProgress = true;
             const strip = app.stripLineNumbersFromQuote || (s => String(s || "").trim());
-            const texts = uniqueChosen.map(q => strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim())).filter(Boolean);
+            const chosenForSave = pendingSave.length ? pendingSave : uniqueChosen;
+            const texts = chosenForSave.map(q => strip(String((typeof q === "object" && q && "quote" in q ? q.quote : q) || "").trim())).filter(Boolean);
             if(!texts.length) return;
             const lvlEarly = app.getEffectiveLevel && app.getEffectiveLevel();
             let quoteOnlySa = false;
@@ -21461,17 +21546,18 @@ const ui = {
             }
             if(perLevelQuoteEssay || ownWordsFromSelect || quoteOnlySa || perQuestionDesk || shortAnsDeskSave) {
                 const marksOne = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(lvlEarly) : null;
-                let blockBody = toAdd;
-                if(ownWordsFromSelect && priorForLevel) {
+                let blockBody = app.mergeQuoteIntoLevelEssay ? app.mergeQuoteIntoLevelEssay(priorForLevel, toAdd, lvlEarly) : toAdd;
+                if(ownWordsFromSelect && priorForLevel && blockBody === toAdd) {
                     const priorBody = priorForLevel.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
-                    blockBody = priorBody ? priorForLevel + "\n\n" + toAdd : toAdd;
-                } else if(priorForLevel && !ownWordsFromSelect && !perQuestionDesk) {
-                    blockBody = priorForLevel + "\n\n" + toAdd;
+                    if(priorBody && priorBody.toLowerCase().indexOf(String(toAdd).trim().toLowerCase()) < 0) {
+                        blockBody = priorForLevel + "\n\n" + toAdd;
+                    }
                 }
                 const block = (ownWordsFromSelect && marksOne === 1 && texts.length === 1 && !priorForLevel.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim())
                     ? toAdd
                     : blockBody;
-                newEssay = app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(block, lvlEarly) : block;
+                blockBody = app.dedupeLevelEssayBody ? app.dedupeLevelEssayBody(block) : block;
+                newEssay = app.rewriteQuestionEssayPrefixForLevel ? app.rewriteQuestionEssayPrefixForLevel(blockBody, lvlEarly) : block;
                 if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
                 userState.questionEssays[essayKey] = newEssay;
             } else {

@@ -51,6 +51,7 @@ const result = await page.evaluate(() => {
     key1: userState.questionEssays["1_0"] || ""
   };
 
+  userState.level = 2;
   ui.sendSelectionQuotesDirectToAnswer({ openDeskAfterSave: false, onlyQuotes: ["Quote for level two"] });
   const afterL2 = {
     level: userState.level,
