@@ -48,7 +48,7 @@ const result = await page.evaluate(() => {
   const countResend = (afterResend.match(/impossible to move/gi) || []).length;
 
   const qNum = app.getQuestionNumberForEssay(4);
-  const hasCorrectHeader = /^Question\s+4\s*\n/i.test(afterResend) || /^Question\s+2\s*\n/i.test(afterResend);
+  const hasCorrectHeader = /^Question\s+4\s*\n/i.test(afterResend);
 
   return { countFirst, countResend, qNum, hasCorrectHeader, afterResend: afterResend.slice(0, 120) };
 });
@@ -56,4 +56,4 @@ const result = await page.evaluate(() => {
 console.log(JSON.stringify(result, null, 2));
 await browser.close();
 server.close();
-process.exit(result.countFirst === 1 && result.countResend === 1 ? 0 : 1);
+process.exit(result.countFirst === 1 && result.countResend === 1 && result.qNum === 4 && result.hasCorrectHeader ? 0 : 1);
