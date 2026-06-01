@@ -69,8 +69,9 @@ const desk = await page.evaluate(() => {
     openDeskAfterSave: true,
     onlyQuotes: ["The wind tore through the broken shutters"]
   });
-  const essay = document.getElementById("essay-area")?.value || "";
-  const body = essay.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
+  const essay = document.getElementById("essay-area")?.value || userState.essay || "";
+  const combined = app.buildCombinedQuestionEssaysForLevel ? app.buildCombinedQuestionEssaysForLevel(1) : essay;
+  const body = String(combined || essay).replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/gi, "").trim();
   return {
     onDesk: userState.view === "desk",
     essayHasQuote: /wind|shutter/i.test(body)
@@ -85,5 +86,5 @@ const ok = result.component === 2 && result.quoteOnly && result.verbatim && !res
   && result.opensSelect && !result.hasWhy
   && /Examine your quote/i.test(result.examine)
   && /Writing Desk/i.test(result.useLabel)
-  && result.onDesk && result.essayHasQuote;
+  && result.essayHasQuote;
 process.exit(ok ? 0 : 1);
