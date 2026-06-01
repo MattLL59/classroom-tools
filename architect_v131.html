@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T02:15:00">
+<meta name="architect-build" content="2026-06-01T03:30:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -3850,6 +3850,74 @@ const app = {
         if(!trimmed) return header;
         return header + s;
     },
+    /** Writing Desk shows every saved answer for this level (not only the focus question). */
+    shouldShowCombinedDeskEssay: function(level) {
+        try {
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+            if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) return true;
+            if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) return true;
+            const meta = app.getMultiQuestionNavMeta(lvl);
+            return !!(meta && meta.ids && meta.ids.length > 1);
+        } catch(e) { return false; }
+    },
+    /** Merge per-question drafts into one desk document (Question 1, Question 2, …). */
+    buildCombinedQuestionEssaysForLevel: function(level) {
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+        if(!userState.questionEssays || typeof userState.questionEssays !== "object") return "";
+        const meta = app.getMultiQuestionNavMeta(lvl);
+        if(!meta || !meta.ids || meta.ids.length <= 1) {
+            const key = app.getQuestionEssayStorageKey(lvl);
+            const raw = userState.questionEssays[key] != null ? String(userState.questionEssays[key]) : "";
+            return raw.trim() ? (app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(raw, lvl) : raw) : "";
+        }
+        const parts = [];
+        for(let i = 0; i < meta.ids.length; i++) {
+            const key = String(lvl) + "_" + i;
+            const raw = userState.questionEssays[key] != null ? String(userState.questionEssays[key]) : "";
+            if(!raw.trim()) continue;
+            parts.push(app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(raw, lvl, i + 1) : raw);
+        }
+        return parts.join("\n\n");
+    },
+    /** Split a combined desk essay back into per-question storage keys. */
+    parseQuestionEssaySections: function(fullText) {
+        const out = {};
+        const s = String(fullText || "").replace(/^\uFEFF/, "");
+        if(!s.trim()) return out;
+        const chunks = s.split(/(?=^Question\s+\d+\s*\n)/im);
+        chunks.forEach(function(chunk) {
+            const piece = String(chunk || "").trim();
+            if(!piece) return;
+            const m = piece.match(/^Question\s+(\d+)\s*\n/i);
+            if(m) {
+                const n = parseInt(m[1], 10);
+                if(n >= 1) out[n] = piece;
+            } else if(!Object.keys(out).length) {
+                out[1] = app.ensureQuestionEssayPrefix ? app.ensureQuestionEssayPrefix(piece, 1, 1) : piece;
+            }
+        });
+        return out;
+    },
+    persistCombinedQuestionEssaysFromDesk: function(level) {
+        if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+        const essayEl = document.getElementById("essay-area");
+        const full = essayEl ? String(essayEl.value || "") : String(userState.essay || "");
+        const meta = app.getMultiQuestionNavMeta(lvl);
+        if(!meta || !meta.ids || meta.ids.length <= 1) {
+            const key = app.getQuestionEssayStorageKey(lvl);
+            userState.questionEssays[key] = full;
+            userState.essay = full;
+            return;
+        }
+        const sections = app.parseQuestionEssaySections(full);
+        for(let i = 0; i < meta.ids.length; i++) {
+            const key = String(lvl) + "_" + i;
+            const sec = sections[i + 1];
+            if(sec != null && String(sec).trim()) userState.questionEssays[key] = sec;
+        }
+        userState.essay = app.buildCombinedQuestionEssaysForLevel(lvl) || full;
+    },
     /** Word export: one bold numbered heading per block; body text escaped. */
     formatAnswerExportSectionsHtml: function(sections) {
         const esc = (t) => app.escapeHtml(String(t || ""));
@@ -3864,6 +3932,10 @@ const app = {
     persistCurrentQuestionEssay: function() {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         const level = app.getEffectiveLevel();
+        if(app.shouldShowCombinedDeskEssay && app.shouldShowCombinedDeskEssay(level)) {
+            app.persistCombinedQuestionEssaysFromDesk(level);
+            return;
+        }
         const key = app.getQuestionEssayStorageKey(level);
         const essayEl = document.getElementById("essay-area");
         const t = essayEl ? String(essayEl.value || "") : String(userState.essay || "");
@@ -3873,11 +3945,16 @@ const app = {
     applyQuestionEssayForCurrentQuestion: function(level) {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         const lvl = parseInt(level, 10) || app.getEffectiveLevel() || 1;
-        const key = app.getQuestionEssayStorageKey(lvl);
-        let text = (userState.questionEssays[key] != null) ? String(userState.questionEssays[key]) : "";
-        if(app.ensureQuestionEssayPrefix) text = app.ensureQuestionEssayPrefix(text, lvl);
+        let text;
+        if(app.shouldShowCombinedDeskEssay && app.shouldShowCombinedDeskEssay(lvl)) {
+            text = app.buildCombinedQuestionEssaysForLevel(lvl);
+        } else {
+            const key = app.getQuestionEssayStorageKey(lvl);
+            text = (userState.questionEssays[key] != null) ? String(userState.questionEssays[key]) : "";
+            if(app.ensureQuestionEssayPrefix) text = app.ensureQuestionEssayPrefix(text, lvl);
+            userState.questionEssays[key] = text;
+        }
         userState.essay = text;
-        userState.questionEssays[key] = text;
         const essayEl = document.getElementById("essay-area");
         if(essayEl) essayEl.value = text;
     },
@@ -4208,6 +4285,11 @@ const app = {
             const body = String(userState.questionEssays[key] || "").trim();
             const stripped = body.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
             if(stripped.length >= 3) return true;
+            if(app.shouldShowCombinedDeskEssay && app.shouldShowCombinedDeskEssay(lvl)) {
+                const combined = app.buildCombinedQuestionEssaysForLevel(lvl);
+                const strippedCombined = String(combined || "").replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/gi, "").trim();
+                if(strippedCombined.length >= 3) return true;
+            }
         }
         if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) {
             const essayEl = document.getElementById("essay-area");
@@ -4995,7 +5077,10 @@ const app = {
         if(app.isLevelsOfResponseLevel(level)) return false;
         const evidenceGoal = app.getSelectionEvidenceGoalForLevel(level);
         const pointsMade = app.countSelectionEvidencePoints(level);
-        const skipPointsGate = manual && app.isFreeQuestionNavigation();
+        const skipPointsGate = (manual && app.isFreeQuestionNavigation())
+            || !!(opts && opts.afterShortAnswerQuote)
+            || !!(shortAns && app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level))
+            || !!(shortAns && app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(level));
         if(!skipPointsGate && pointsMade < evidenceGoal) return false;
         const idx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[level] === "number") ? userState.currentQuestionIndexByLevel[level] : 0;
         if(idx >= ids.length - 1) return false;
@@ -5060,12 +5145,21 @@ const app = {
     /** After a Short ans quote is saved, move Ln→Ln+1 (not in-level multi-question steps). */
     tryFinishShortAnswerLevelAndAdvance: function(level, opts) {
         opts = opts || {};
-        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp()) return false;
+        if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode()) return false;
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
         const quoteOnly = app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl);
         const ownWords = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl));
         if(!quoteOnly && !ownWords) return false;
         if(app.isLevelsOfResponseLevel(lvl)) return false;
+        const idsOnLevel = app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(lvl) : [];
+        if(idsOnLevel.length > 1) {
+            const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number")
+                ? userState.currentQuestionIndexByLevel[lvl] : 0;
+            if(qIdx < idsOnLevel.length - 1) {
+                if(!app.hasShortAnswerContentForLevel(lvl)) return false;
+                return app.advanceSelectionQuestionIfComplete(Object.assign({}, opts, { afterShortAnswerQuote: true }));
+            }
+        }
         if(ownWords) {
             const goal = app.getSelectionEvidenceGoalForLevel(lvl);
             if(app.countDeskCommitsForLevel(lvl) < goal) return false;
@@ -5118,7 +5212,7 @@ const app = {
      */
     advanceStudentToNextActiveLevel: function(opts) {
         opts = opts || {};
-        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp() && opts.allowTeacherAutoAdvance !== true) return false;
+        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp() && opts.allowTeacherAutoAdvance !== true && opts.shortAnswerAdvance !== true) return false;
         const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
         if(app.isLevelsOfResponseLevel(cur)) return false;
         if(!app.isLevelProgressionReady(cur)) return false;
@@ -21281,13 +21375,15 @@ const ui = {
             const priorForLevel = (userState.questionEssays && userState.questionEssays[essayKey] != null)
                 ? String(userState.questionEssays[essayKey]).trim()
                 : "";
-            if(perLevelQuoteEssay || ownWordsFromSelect || quoteOnlySa) {
+            const multiQMeta = app.getMultiQuestionNavMeta ? app.getMultiQuestionNavMeta(lvlEarly) : null;
+            const perQuestionDesk = !!(multiQMeta && multiQMeta.ids && multiQMeta.ids.length > 1);
+            if(perLevelQuoteEssay || ownWordsFromSelect || quoteOnlySa || perQuestionDesk) {
                 const marksOne = app.getExamMarksFromQuestionForLevel ? app.getExamMarksFromQuestionForLevel(lvlEarly) : null;
                 let blockBody = toAdd;
                 if(ownWordsFromSelect && priorForLevel) {
                     const priorBody = priorForLevel.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
                     blockBody = priorBody ? priorForLevel + "\n\n" + toAdd : toAdd;
-                } else if(priorForLevel && !ownWordsFromSelect) {
+                } else if(priorForLevel && !ownWordsFromSelect && !perQuestionDesk) {
                     blockBody = priorForLevel + "\n\n" + toAdd;
                 }
                 const block = (ownWordsFromSelect && marksOne === 1 && texts.length === 1 && !priorForLevel.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim())
@@ -21301,16 +21397,15 @@ const ui = {
                 if(ownWordsFromSelect && marksOne === 1 && texts.length === 1) newEssay = toAdd;
                 else newEssay = existing ? existing + "\n\n" + toAdd : toAdd;
             }
-            userState.essay = newEssay;
+            const useCombinedDesk = !!(app.shouldShowCombinedDeskEssay && app.shouldShowCombinedDeskEssay(lvlEarly));
+            userState.essay = useCombinedDesk ? app.buildCombinedQuestionEssaysForLevel(lvlEarly) : newEssay;
             const essayEl = document.getElementById("essay-area");
             if(essayEl) { essayEl.value = userState.essay; essayEl.scrollTop = essayEl.scrollHeight; }
-            const essayBodySaved = String(newEssay || "").replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim().length >= 3;
+            const essayBodySaved = String(userState.essay || "").replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/gi, "").trim().length >= 3;
             if(!essayBodySaved && ownWordsFromSelect && !quoteOnlySa) {
                 alert("Could not save your paraphrase to the answer. Try again.");
                 return;
             }
-            if(app.persistCurrentQuestionEssay) app.persistCurrentQuestionEssay();
-            if(app.applyQuestionEssayForCurrentQuestion) app.applyQuestionEssayForCurrentQuestion(lvlEarly);
             const mergeBanks = app.shouldMergeQuoteSelectionIntoAnalysisBanks();
             const adminOpen = !!(document.getElementById("modal-admin") && document.getElementById("modal-admin").classList.contains("open"));
             if(mergeBanks) {
@@ -21369,7 +21464,11 @@ const ui = {
                 if(ui.renderSelection) ui.renderSelection();
             } else if(openDeskAfterSave && (ownWordsFromSelect || quoteOnlySa)) {
                 if(ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
-                if(app.applyQuestionEssayForCurrentQuestion) app.applyQuestionEssayForCurrentQuestion(lvlNow);
+                if(app.shouldShowCombinedDeskEssay && app.shouldShowCombinedDeskEssay(lvlNow)) {
+                    userState.essay = app.buildCombinedQuestionEssaysForLevel(lvlNow);
+                } else if(app.applyQuestionEssayForCurrentQuestion) {
+                    app.applyQuestionEssayForCurrentQuestion(lvlNow);
+                }
                 if(ui.switchView) ui.switchView("desk", true);
                 const essayElDesk = document.getElementById("essay-area");
                 if(essayElDesk) { essayElDesk.value = userState.essay; essayElDesk.scrollTop = essayElDesk.scrollHeight; }
