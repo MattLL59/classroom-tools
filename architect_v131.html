@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T06:15:00">
+<meta name="architect-build" content="2026-06-01T07:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -3917,11 +3917,11 @@ const app = {
             return app.quoteAlreadySavedForLevel(q, app.getEffectiveLevel && app.getEffectiveLevel());
         } catch(e) { return false; }
     },
-    /** Fix duplicated / mis-labelled blocks in saved desk storage (e.g. after reload). */
+    /** Fix duplicated / mis-labelled blocks in saved desk storage. Never delete another level’s answer. */
     repairWritingDeskStorage: function() {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         const active = app.getActiveLevels ? app.getActiveLevels() : [];
-        const seenBodies = new Set();
+        const lvlNow = (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
         let changed = false;
         active.forEach(function(lvl) {
             const meta = app.getMultiQuestionNavMeta(lvl);
@@ -3941,16 +3941,8 @@ const app = {
             const before = String(userState.questionEssays[k]);
             let fixed = app.dedupeLevelEssayBody(before);
             fixed = app.rewriteQuestionEssayPrefixForLevel(fixed, lvl);
-            const norm = app.normalizeEssayBodyForCompare(fixed);
-            if(norm && seenBodies.has(norm)) {
-                delete userState.questionEssays[k];
-                changed = true;
-                return;
-            }
-            if(norm) seenBodies.add(norm);
             if(fixed !== before) { userState.questionEssays[k] = fixed; changed = true; }
         });
-        const lvlNow = (app.getEffectiveLevel && app.getEffectiveLevel()) || (userState && userState.level) || 1;
         const rebuilt = app.buildWritingDeskDisplayEssay ? app.buildWritingDeskDisplayEssay(lvlNow) : "";
         if(rebuilt !== String(userState.essay || "")) {
             userState.essay = rebuilt;
@@ -4022,15 +4014,10 @@ const app = {
     buildAccumulatedWritingDeskEssay: function() {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") return "";
         const parts = [];
-        const seenBodies = new Set();
         const levels = app.getActiveLevels ? app.getActiveLevels() : [];
         levels.forEach(function(lvl) {
             const block = app.buildCombinedQuestionEssaysForLevel(lvl);
-            if(!block || !String(block).trim()) return;
-            const norm = app.normalizeEssayBodyForCompare(block);
-            if(norm && seenBodies.has(norm)) return;
-            if(norm) seenBodies.add(norm);
-            parts.push(block);
+            if(block && String(block).trim()) parts.push(block);
         });
         return parts.join("\n\n");
     },
@@ -4053,30 +4040,35 @@ const app = {
         if(!userState.questionEssays || typeof userState.questionEssays !== "object") userState.questionEssays = {};
         const essayEl = document.getElementById("essay-area");
         const full = essayEl ? String(essayEl.value || "") : String(userState.essay || "");
+        const ordered = app.parseOrderedQuestionEssaySections ? app.parseOrderedQuestionEssaySections(full) : [];
         const sections = app.parseQuestionEssaySections(full);
-        const sectionList = Object.keys(sections).sort(function(a, b) { return parseInt(a, 10) - parseInt(b, 10); }).map(function(k) { return sections[k]; });
         const active = app.getActiveLevels ? app.getActiveLevels() : [];
+        const pastPaper = app.shouldAccumulateDeskAcrossLevels && app.shouldAccumulateDeskAcrossLevels();
         active.forEach(function(lvl, ai) {
             const meta = app.getMultiQuestionNavMeta(lvl);
             if(meta && meta.ids && meta.ids.length > 1) {
                 for(let i = 0; i < meta.ids.length; i++) {
                     const key = String(lvl) + "_" + i;
-                    const sec = sections[i + 1] || sectionList[i];
+                    const sec = sections[i + 1] || ordered[i];
                     if(sec != null && String(sec).trim()) {
                         userState.questionEssays[key] = app.rewriteQuestionEssayPrefixForLevel(sec, lvl, i + 1);
                     }
                 }
+            } else if(pastPaper) {
+                const sec = ordered[ai];
+                if(sec != null && String(sec).trim()) {
+                    userState.questionEssays[String(lvl) + "_0"] = app.rewriteQuestionEssayPrefixForLevel(sec, lvl);
+                }
             } else {
                 const idx = app.getPaperQuestionDisplayIndex(lvl);
                 const num = idx >= 0 ? idx + 1 : (ai + 1);
-                const sec = sections[num] || sectionList[ai];
+                const sec = sections[num] || ordered[ai];
                 if(sec != null && String(sec).trim()) {
                     userState.questionEssays[String(lvl) + "_0"] = app.rewriteQuestionEssayPrefixForLevel(sec, lvl);
                 }
             }
         });
-        if(app.repairWritingDeskStorage) app.repairWritingDeskStorage();
-        else userState.essay = app.buildAccumulatedWritingDeskEssay();
+        userState.essay = app.buildAccumulatedWritingDeskEssay ? app.buildAccumulatedWritingDeskEssay() : full;
     },
     /** Merge per-question drafts into one desk document (Question 1, Question 2, …). */
     buildCombinedQuestionEssaysForLevel: function(level) {
@@ -4099,7 +4091,14 @@ const app = {
         }
         return parts.join("\n\n");
     },
-    /** Split a combined desk essay back into per-question storage keys. */
+    /** Ordered blocks from the desk textarea (position = level order in past-paper layout). */
+    parseOrderedQuestionEssaySections: function(fullText) {
+        const s = String(fullText || "").replace(/^\uFEFF/, "").trim();
+        if(!s) return [];
+        const chunks = s.split(/(?=^Question\s+\d+\s*\n)/im).map(function(c) { return String(c || "").trim(); }).filter(Boolean);
+        return chunks.length ? chunks : [s];
+    },
+    /** Split a combined desk essay back into per-question storage keys (by question number in header). */
     parseQuestionEssaySections: function(fullText) {
         const out = {};
         const s = String(fullText || "").replace(/^\uFEFF/, "");
