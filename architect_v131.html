@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T08:00:00">
+<meta name="architect-build" content="2026-06-01T09:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -4440,6 +4440,22 @@ const app = {
         if(qids.length && expectedQ) return qids.some(id => norm(id) === norm(expectedQ));
         if(expectedQ && qids.length === 0) return levels.length === 1 && levels[0] === lvl;
         return levels.length === 1 && levels[0] === lvl;
+    },
+    /** Good quotes in the bank that can power &quot;Give me quote choices&quot; for this level. */
+    countQuoteChoicesForSelectionLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const items = Array.isArray(appData && appData.selection && appData.selection.items)
+            ? appData.selection.items
+            : (Array.isArray(appData && appData.items) ? appData.items : []);
+        const exam = !!(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions());
+        return items.filter(function(i) {
+            if(!i || i.correct === false) return false;
+            const q = String((i.quote || i.original) || "").trim();
+            if(!q) return false;
+            if(exam) return app.quoteItemVisibleForSelectionLevel(i, lvl);
+            const levels = Array.isArray(i.levels) ? i.levels : [];
+            return levels.length === 0 || levels.includes(lvl);
+        }).length;
     },
     /** Student Quote Select: show quote only when level + question align (exam lessons). */
     quoteItemVisibleForSelectionLevel: function(item, level) {
@@ -19768,8 +19784,8 @@ const ui = {
         if(helpWrap) {
             helpWrap.classList.add("hidden");
             helpWrap.innerHTML = "";
-            const manualQuoteCountEarly = (sel.items || []).length;
-            if(manualQuoteCountEarly < 2 && userState.studentQuoteListHelp) {
+            const quoteChoicesEarly = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
+            if(quoteChoicesEarly < 2 && userState.studentQuoteListHelp) {
                 userState.studentQuoteListHelp = false;
                 app.save();
             }
@@ -19958,8 +19974,8 @@ const ui = {
                 return qids.some(qid => normId(qid) === normId(currentQId));
             }) : levelCorrectKeysBase)).filter(i => !lineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, lineRange));
         if(helpWrap) {
-            const manualQuoteCount = (sel.items || []).length;
-            const canOfferQuoteList = manualQuoteCount >= 2;
+            const quoteChoicesForLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
+            const canOfferQuoteList = quoteChoicesForLevel >= 2;
             const showMean = userState.studentHelpAiMeanings === true;
             const showDev = userState.studentHelpAiDeviceFocus === true;
             const showRub = userState.studentHelpAiRubricHints === true;
@@ -20161,8 +20177,8 @@ const ui = {
             cont, level, hasSource, sourceText, levelEntry, quoteOnlyShort, isShortAnswerMode,
             teacherRecordMode, tapPathActive, questionText
         })) return;
-        /* Tap-first card: short-answer levels always allow passage tap (no language/justify stages). Teacher "record" mode uses the same tap UI to save meaning/analysis to the lesson. */
-        if(tapPathActive && (!studentWantsQuoteList || isShortAnswerMode)) {
+        /* Tap-first card when the student has not asked for quote choices (C2 short-answer can still use the MC grid when the help box is ticked). */
+        if(tapPathActive && !studentWantsQuoteList) {
             if(!hasSource) {
                 cont.innerHTML = `<div class="card" style="cursor:default;">
                     <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Source text needed</div>
