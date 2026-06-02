@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T09:00:00">
+<meta name="architect-build" content="2026-06-01T10:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -4455,6 +4455,20 @@ const app = {
             if(exam) return app.quoteItemVisibleForSelectionLevel(i, lvl);
             const levels = Array.isArray(i.levels) ? i.levels : [];
             return levels.length === 0 || levels.includes(lvl);
+        }).length;
+    },
+    /** Good quotes in the bank assigned to a different Level Bank row (for stuck-help messaging). */
+    countGoodQuotesOnOtherLevels: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const items = Array.isArray(appData && appData.selection && appData.selection.items)
+            ? appData.selection.items
+            : (Array.isArray(appData && appData.items) ? appData.items : []);
+        return items.filter(function(i) {
+            if(!i || i.correct === false) return false;
+            const q = String((i.quote || i.original) || "").trim();
+            if(!q) return false;
+            const levels = Array.isArray(i.levels) ? i.levels : [];
+            return levels.length > 0 && !levels.includes(lvl);
         }).length;
     },
     /** Student Quote Select: show quote only when level + question align (exam lessons). */
@@ -19974,7 +19988,10 @@ const ui = {
                 return qids.some(qid => normId(qid) === normId(currentQId));
             }) : levelCorrectKeysBase)).filter(i => !lineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, lineRange));
         if(helpWrap) {
+            const prevHelpDetails = helpWrap.querySelector("details");
+            if(prevHelpDetails && prevHelpDetails.open) userState.studentHelpPanelOpen = true;
             const quoteChoicesForLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
+            const quotesOnOtherLevels = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
             const canOfferQuoteList = quoteChoicesForLevel >= 2;
             const showMean = userState.studentHelpAiMeanings === true;
             const showDev = userState.studentHelpAiDeviceFocus === true;
@@ -20024,26 +20041,57 @@ const ui = {
                     aiRefsHtml += `</details>`;
                 }
                 aiRefsHtml += `</div>`;
+            } else if(showMean || showDev || showRub) {
+                const otherHint = quotesOnOtherLevels > 0
+                    ? ` ${quotesOnOtherLevels} quote(s) in the bank are linked to other levels — open Settings → Quote bank and tick <strong>L${level}</strong> on the quotes for this question.`
+                    : "";
+                aiRefsHtml = `<div style="width:100%; flex-basis:100%; margin-top:8px; padding:8px 10px; border-top:1px dashed var(--border); font-size:0.82rem; line-height:1.45; background:rgba(255,152,0,0.08); border-radius:6px;">
+                    <strong>No quotes linked to Level ${level}.</strong> Meanings and hints only show for quotes assigned to the level you are on.${otherHint}
+                    ${!appData.isStandalone ? ` <button type="button" class="btn btn-outline btn-small" id="student-help-open-quotes" style="margin-top:6px;">Open Quote bank</button>` : ""}
+                </div>`;
             }
             helpWrap.classList.remove("hidden");
             const deskSentenceBankHelpLabel = appData.isStandalone
                 ? `<label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-desk-sentence-bank" ${userState.studentHelpDeskSentenceBank ? "checked" : ""}> Show sentence-bank chips on Writing Desk (markers, starters, analysis…)</label>`
                 : "";
-            helpWrap.innerHTML = `<details style="margin:0;"><summary style="cursor:pointer;">I'm stuck — get help</summary><div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:12px;">
-                <label style="display:flex; align-items:center; gap:6px; cursor:${canOfferQuoteList ? "pointer" : "default"}; ${!canOfferQuoteList ? "opacity:0.8;" : ""}"><input type="checkbox" id="student-help-quote-list" ${userState.studentQuoteListHelp ? "checked" : ""} ${!canOfferQuoteList ? "disabled" : ""}> Give me quote choices to pick from${!canOfferQuoteList ? " (need ≥2 quotes in bank)" : ""} <span style="opacity:0.75; font-weight:400;">(you can still highlight in the passage)</span></label>
-                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-synonyms" ${userState.studentSynonymsHelp ? "checked" : ""}> Show synonym suggestions in Writing Desk</label>
+            const helpDetailsOpen = userState.studentHelpPanelOpen === true ? " open" : "";
+            const quoteListNeedLabel = !canOfferQuoteList
+                ? ` (need ≥2 quotes on Level ${level}${quotesOnOtherLevels > 0 ? "; " + quotesOnOtherLevels + " on other levels" : ""})`
+                : "";
+            helpWrap.innerHTML = `<details id="selection-student-help-details" style="margin:0;"${helpDetailsOpen}><summary style="cursor:pointer;">I'm stuck — get help</summary><div id="selection-student-help-options" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:12px;">
+                <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:${canOfferQuoteList ? "pointer" : "default"}; ${!canOfferQuoteList ? "opacity:0.8;" : ""}"><input type="checkbox" id="student-help-quote-list" ${userState.studentQuoteListHelp ? "checked" : ""} ${!canOfferQuoteList ? "disabled" : ""}> Give me quote choices to pick from${quoteListNeedLabel} <span style="opacity:0.75; font-weight:400;">(you can still highlight in the passage)</span></label>
+                <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-synonyms" ${userState.studentSynonymsHelp ? "checked" : ""}> Show synonym suggestions in Writing Desk</label>
                 ${deskSentenceBankHelpLabel}
-                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ai-meanings" ${userState.studentHelpAiMeanings ? "checked" : ""}> Show meanings for lesson quotes</label>
-                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ai-device" ${userState.studentHelpAiDeviceFocus ? "checked" : ""}> Show language / tone / structure labels</label>
-                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ai-rubric" ${userState.studentHelpAiRubricHints ? "checked" : ""}> Show short sentence hints (not a full answer)</label>
-            </div>${aiRefsHtml}</details>`;
+                <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ai-meanings" ${userState.studentHelpAiMeanings ? "checked" : ""}> Show meanings for lesson quotes</label>
+                <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ai-device" ${userState.studentHelpAiDeviceFocus ? "checked" : ""}> Show language / tone / structure labels</label>
+                <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ai-rubric" ${userState.studentHelpAiRubricHints ? "checked" : ""}> Show short sentence hints (not a full answer)</label>
+            </div><div id="selection-student-help-refs">${aiRefsHtml}</div></details>`;
+            const helpDetailsEl = document.getElementById("selection-student-help-details");
+            if(helpDetailsEl) {
+                helpDetailsEl.addEventListener("toggle", function() {
+                    userState.studentHelpPanelOpen = helpDetailsEl.open;
+                    app.save({ skipRender: true, silent: true });
+                });
+            }
+            helpWrap.querySelectorAll(".student-help-check-label").forEach(function(lbl) {
+                lbl.addEventListener("click", function(e) { e.stopPropagation(); });
+            });
+            const openQuotesBtn = document.getElementById("student-help-open-quotes");
+            if(openQuotesBtn) openQuotesBtn.onclick = function(e) {
+                e.preventDefault();
+                userState.studentHelpPanelOpen = true;
+                if(ui.openAdminToQuoteOrSelection) ui.openAdminToQuoteOrSelection(null, null);
+                else if(ui.openAdmin) ui.openAdmin();
+            };
             const quoteListCb = document.getElementById("student-help-quote-list");
             const synCb = document.getElementById("student-help-synonyms");
             const deskBankCb = document.getElementById("student-help-desk-sentence-bank");
             const meanCb = document.getElementById("student-help-ai-meanings");
             const devCb = document.getElementById("student-help-ai-device");
             const rubCb = document.getElementById("student-help-ai-rubric");
+            const keepHelpOpen = function() { userState.studentHelpPanelOpen = true; };
             if(quoteListCb) quoteListCb.onchange = () => {
+                keepHelpOpen();
                 userState.studentQuoteListHelp = quoteListCb.checked;
                 if(!quoteListCb.checked) {
                     ui._freeSelectPendingQuote = "";
@@ -20052,16 +20100,17 @@ const ui = {
                 app.save();
                 ui.renderSelection();
             };
-            if(synCb) synCb.onchange = () => { userState.studentSynonymsHelp = synCb.checked; app.save(); ui.renderSelection(); };
+            if(synCb) synCb.onchange = () => { keepHelpOpen(); userState.studentSynonymsHelp = synCb.checked; app.save(); ui.renderSelection(null, { skipPassage: true }); };
             if(deskBankCb) deskBankCb.onchange = () => {
+                keepHelpOpen();
                 userState.studentHelpDeskSentenceBank = deskBankCb.checked;
                 app.save();
                 if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
-                ui.renderSelection();
+                ui.renderSelection(null, { skipPassage: true });
             };
-            if(meanCb) meanCb.onchange = () => { userState.studentHelpAiMeanings = meanCb.checked; app.save(); ui.renderSelection(); };
-            if(devCb) devCb.onchange = () => { userState.studentHelpAiDeviceFocus = devCb.checked; app.save(); ui.renderSelection(); };
-            if(rubCb) rubCb.onchange = () => { userState.studentHelpAiRubricHints = rubCb.checked; app.save(); ui.renderSelection(); };
+            if(meanCb) meanCb.onchange = () => { keepHelpOpen(); userState.studentHelpAiMeanings = meanCb.checked; app.save(); ui.renderSelection(null, { skipPassage: true }); };
+            if(devCb) devCb.onchange = () => { keepHelpOpen(); userState.studentHelpAiDeviceFocus = devCb.checked; app.save(); ui.renderSelection(null, { skipPassage: true }); };
+            if(rubCb) rubCb.onchange = () => { keepHelpOpen(); userState.studentHelpAiRubricHints = rubCb.checked; app.save(); ui.renderSelection(null, { skipPassage: true }); };
         }
         const levelCorrectKeys = new Set(levelCorrectKeysFiltered.map(i => app.quoteKey(getQuote(i))));
         let pointsMade = app.countSelectionEvidencePoints(level);
@@ -20471,9 +20520,15 @@ const ui = {
             }
         }
         if(options.length < 2) {
+            const qOnLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : 0;
+            const qOther = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
+            const levelHint = qOnLevel < 2 && qOther > 0
+                ? `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">The quote bank has <strong>${qOther}</strong> quote(s) on other levels but <strong>${qOnLevel}</strong> on <strong>Level ${level}</strong>. In Settings → Quote bank, tick <strong>L${level}</strong> on the quotes for this question (you need at least 2).</p>`
+                : (qOnLevel < 2 ? `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">Add at least <strong>2</strong> good quotes linked to <strong>Level ${level}</strong> in Settings → Quote bank.</p>` : "");
             body.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.05rem; margin-bottom:6px;">Not enough choices</div>
                 <div style="opacity:0.8;">Tap the passage to select quotes, or continue to the next step.</div>
+                ${levelHint}
             </div>`;
             return;
         }
