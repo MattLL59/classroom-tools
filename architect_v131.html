@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T10:00:00">
+<meta name="architect-build" content="2026-06-01T11:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -20135,8 +20135,15 @@ const ui = {
             answeredList.forEach(add);
             return n;
         })();
+        const studentWantsQuoteListEarly = !!(userState && userState.studentQuoteListHelp === true);
+        /* Bank rows for quote-list help: level-linked list (not only {@link quoteInSource} matches — taps may still show choices). */
+        const bankCorrectItems = levelCorrectKeysFiltered.filter((i, idx, arr) => arr.findIndex(x => app.quoteKey(getQuote(x)) === app.quoteKey(getQuote(i))) === idx);
         correctItems = correctItems.filter(i => !chosenSet.has(app.quoteKey(getQuote(i))));
         correctItems = correctItems.filter((i, idx, arr) => arr.findIndex(x => app.quoteKey(getQuote(x)) === app.quoteKey(getQuote(i))) === idx);
+        /* "Give me quote choices" — still show bank rows after passage taps (otherwise chosen quotes empty the grid). */
+        if(studentWantsQuoteListEarly && correctItems.length < 2 && bankCorrectItems.length >= 2) {
+            correctItems = bankCorrectItems.slice();
+        }
         /** Treat Q1 / short-answer retrieval like tap-from-passage so “goal met” panels do not block highlight → examine before {@link ui._freeSelectPendingQuote} runs. */
         const canPickFromText = (
             app.getEffectiveTapText(level) ||
@@ -20441,11 +20448,14 @@ const ui = {
                 if(q) reasonMap.set(app.quoteKey(q), `Not from the ${span} you were asked to use — mark as Not strong.`);
             });
         }
-        const correctItemsInRangeMain = (!lineRange || !hasSource)
+        let correctItemsInRangeMain = (!lineRange || !hasSource)
             ? correctItems.slice()
             : (strictlyInRangeCorrect.length > 0
                 ? strictlyInRangeCorrect
                 : (usedFallbackCorrect ? correctItems.slice() : strictlyInRangeCorrect));
+        if(studentWantsQuoteList && correctItemsInRangeMain.length < 2 && bankCorrectItems.length >= 2) {
+            correctItemsInRangeMain = bankCorrectItems.slice();
+        }
         const incorrectPoolInRange = [...primaryDistractorPool, ...fallbackIncorrect, ...otherDistractorPool, ...lessonPool]
             .filter(o => o && o.quote && o.quote !== primaryQuoteText)
             .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx)
@@ -20457,7 +20467,10 @@ const ui = {
             .filter(o => o && o.quote && o.quote !== primaryQuoteText)
             .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx);
         /* Strong options respect the exam line window whenever we could align the bank to it; only when nothing matches inside do we fall back (usedFallbackCorrect) so the MC is not empty. */
-        const correctToShow = Math.min(pointsGoal, correctItemsInRangeMain.length);
+        const includeChosenInQuoteListPool = studentWantsQuoteList;
+        const correctToShow = includeChosenInQuoteListPool
+            ? Math.min(Math.max(2, pointsGoal), correctItemsInRangeMain.length)
+            : Math.min(pointsGoal, correctItemsInRangeMain.length);
         const incorrectToShow = Math.min(distractorTarget || Math.max(1, optionCount - correctToShow), incorrectPool.length);
         const correctOpts = correctItemsInRangeMain.slice(0, correctToShow).map(i => ({ quote: getQuote(i), correct: true, item: i }));
         const incorrectOpts = app.shuffle(incorrectPool).slice(0, incorrectToShow);
@@ -20469,9 +20482,11 @@ const ui = {
             if(!o || !o.quote) return;
             const key = app.quoteKey(o.quote);
             if(seenOptionKeys.has(key)) return;
-            if(chosenSet.has(key)) return;
-            const allSoFar = options.map(x => x.quote).concat(chosenQuotes);
-            if(allSoFar.some(existing => isPartialDuplicate(o.quote, existing))) return;
+            if(!includeChosenInQuoteListPool && chosenSet.has(key)) return;
+            const allSoFar = includeChosenInQuoteListPool
+                ? options.map(x => x.quote)
+                : options.map(x => x.quote).concat(chosenQuotes);
+            if(!includeChosenInQuoteListPool && allSoFar.some(existing => isPartialDuplicate(o.quote, existing))) return;
             seenOptionKeys.add(key);
             options.push(o);
         });
@@ -20522,9 +20537,14 @@ const ui = {
         if(options.length < 2) {
             const qOnLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : 0;
             const qOther = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
-            const levelHint = qOnLevel < 2 && qOther > 0
-                ? `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">The quote bank has <strong>${qOther}</strong> quote(s) on other levels but <strong>${qOnLevel}</strong> on <strong>Level ${level}</strong>. In Settings → Quote bank, tick <strong>L${level}</strong> on the quotes for this question (you need at least 2).</p>`
-                : (qOnLevel < 2 ? `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">Add at least <strong>2</strong> good quotes linked to <strong>Level ${level}</strong> in Settings → Quote bank.</p>` : "");
+            let levelHint = "";
+            if(studentWantsQuoteList && bankCorrectItems.length >= 2 && uniqueChosenCount >= 2) {
+                levelHint = `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">You already selected <strong>${uniqueChosenCount}</strong> quote(s) from the passage. Click <strong>Clear</strong> above to reset and see bank quote cards here, or <strong>Send to Answer</strong> when ready.</p>`;
+            } else if(qOnLevel < 2 && qOther > 0) {
+                levelHint = `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">The quote bank has <strong>${qOther}</strong> quote(s) on other levels but <strong>${qOnLevel}</strong> on <strong>Level ${level}</strong>. In Settings → Quote bank, tick <strong>L${level}</strong> (need at least 2).</p>`;
+            } else if(qOnLevel < 2) {
+                levelHint = `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">Add at least <strong>2</strong> good quotes linked to <strong>Level ${level}</strong> in Settings → Quote bank.</p>`;
+            }
             body.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.05rem; margin-bottom:6px;">Not enough choices</div>
                 <div style="opacity:0.8;">Tap the passage to select quotes, or continue to the next step.</div>
@@ -20554,7 +20574,9 @@ const ui = {
                 .filter(o => o && o.quote)
                 .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx)
                 .filter(o => !correctKeysForLevel.has(app.quoteKey(o.quote)));
-            const correctToShow = Math.min(pointsGoal, correctItemsInRangeMain.length);
+            const correctToShow = includeChosenInQuoteListPool
+                ? Math.min(Math.max(2, pointsGoal), correctItemsInRangeMain.length)
+                : Math.min(pointsGoal, correctItemsInRangeMain.length);
             const incorrectToShow = Math.min(distractorTarget || optionCount - correctToShow, incorrectPool.length);
             const correctOpts = app.shuffle(correctItemsInRangeMain.map(i => ({ quote: getQuote(i), correct: true, item: i })).filter(o => o.quote)).slice(0, correctToShow);
             const incorrectOpts = app.shuffle(incorrectPool).slice(0, incorrectToShow);
@@ -20567,9 +20589,11 @@ const ui = {
                 if(!o || !o.quote || alreadyRejected[app.quoteKey(o.quote)] === "noise") return;
                 const key = app.quoteKey(o.quote);
                 if(seenPoolKeys.has(key)) return;
-                if(chosenSet.has(key)) return;
-                const allSoFarDisc = poolDeduped.map(x => x.quote).concat(chosenQuotesDisc);
-                if(allSoFarDisc.some(existing => isPartialDupDisc(o.quote, existing))) return;
+                if(!includeChosenInQuoteListPool && chosenSet.has(key)) return;
+                const allSoFarDisc = includeChosenInQuoteListPool
+                    ? poolDeduped.map(x => x.quote)
+                    : poolDeduped.map(x => x.quote).concat(chosenQuotesDisc);
+                if(!includeChosenInQuoteListPool && allSoFarDisc.some(existing => isPartialDupDisc(o.quote, existing))) return;
                 seenPoolKeys.add(key);
                 poolDeduped.push(o);
             });
@@ -20602,11 +20626,13 @@ const ui = {
             const continueBtn = body.querySelector("#selection-continue");
             pool.forEach(o => {
                 const card = document.createElement("div");
-                card.className = "card card-select-quote";
+                const pickedKey = app.quoteKey(o.quote);
+                card.className = "card card-select-quote" + (chosenSet.has(pickedKey) ? " quote-picked" : "");
                 card.style.position = "relative";
                 const qEsc = String(o.quote || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/</g, "\\u003c");
                 const editBtnHtml = !appData.isStandalone ? `<button type="button" class="card-edit-btn" onclick="event.stopPropagation(); ui.openAdminToQuoteOrSelection('${qEsc}', null)" title="Edit quote">✏️</button>` : "";
-                card.innerHTML = `${editBtnHtml}<div class="quote-text">${app.quoteDisplayHtml(o.quote || "")}</div>
+                const pickedNote = chosenSet.has(pickedKey) ? `<div style="font-size:0.75rem;opacity:0.8;margin-bottom:4px;">Already selected from the passage</div>` : "";
+                card.innerHTML = `${editBtnHtml}${pickedNote}<div class="quote-text">${app.quoteDisplayHtml(o.quote || "")}</div>
                     <div style="display:flex; gap:6px; margin-top:8px;">
                         <button class="btn btn-outline btn-small">Strong</button>
                         <button class="btn btn-outline btn-small">Not strong</button>
