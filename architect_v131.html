@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T10:00:00">
+<meta name="architect-build" content="2026-06-01T10:30:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -4441,8 +4441,10 @@ const app = {
         if(expectedQ && qids.length === 0) return levels.length === 1 && levels[0] === lvl;
         return levels.length === 1 && levels[0] === lvl;
     },
-    /** Good quotes in the bank that can power &quot;Give me quote choices&quot; for this level. */
+    /** Good quote rows assigned to this level (level + question link only — not line window / passage). */
     countQuoteChoicesForSelectionLevel: function(level) {
+        const stats = app.getQuoteChoiceEligibilityForLevel ? app.getQuoteChoiceEligibilityForLevel(level) : null;
+        if(stats && typeof stats.assigned === "number") return stats.assigned;
         const lvl = parseInt(level, 10) || 1;
         const items = Array.isArray(appData && appData.selection && appData.selection.items)
             ? appData.selection.items
@@ -4456,6 +4458,50 @@ const app = {
             const levels = Array.isArray(i.levels) ? i.levels : [];
             return levels.length === 0 || levels.includes(lvl);
         }).length;
+    },
+    /**
+     * How many bank quotes can actually appear in Quote Select help / multiple-choice (same filters as {@link ui.renderSelection}).
+     * Level Bank line window, C2 passage, and question id all affect {@link usable}.
+     */
+    getQuoteChoiceEligibilityForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const items = Array.isArray(appData && appData.selection && appData.selection.items)
+            ? appData.selection.items
+            : (Array.isArray(appData && appData.items) ? appData.items : []);
+        const getQuote = function(i) { return String((i && (i.quote || i.original)) || "").trim(); };
+        const exam = !!(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions());
+        const assignedList = items.filter(function(i) {
+            if(!i || i.correct === false) return false;
+            if(!getQuote(i)) return false;
+            if(exam) return app.quoteItemVisibleForSelectionLevel(i, lvl);
+            const levels = Array.isArray(i.levels) ? i.levels : [];
+            return levels.length === 0 || levels.includes(lvl);
+        });
+        const sourceText = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : (app.getSourceText ? app.getSourceText() : "");
+        const hasSource = !!(sourceText && String(sourceText).trim());
+        const win = app.resolveQuoteSelectLineWindow ? app.resolveQuoteSelectLineWindow(lvl) : {};
+        const lineRange = win && win.lineRange ? win.lineRange : null;
+        const inSourceList = assignedList.filter(function(i) {
+            return !hasSource || app.quoteInSource(getQuote(i), sourceText);
+        });
+        const inRangeList = inSourceList.filter(function(i) {
+            return !lineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, lineRange);
+        });
+        return {
+            level: lvl,
+            assigned: assignedList.length,
+            inSource: inSourceList.length,
+            inLineRange: inRangeList.length,
+            usable: inRangeList.length,
+            lineRange: lineRange,
+            currentQId: win && win.currentQId ? win.currentQId : null,
+            windowSource: win && win.windowSource ? win.windowSource : ""
+        };
+    },
+    /** Usable quote count for help / MC (passage + line window). */
+    countUsableQuoteChoicesForSelectionLevel: function(level) {
+        const stats = app.getQuoteChoiceEligibilityForLevel ? app.getQuoteChoiceEligibilityForLevel(level) : null;
+        return stats && typeof stats.usable === "number" ? stats.usable : app.countQuoteChoicesForSelectionLevel(level);
     },
     /** Good quotes in the bank assigned to a different Level Bank row (for stuck-help messaging). */
     countGoodQuotesOnOtherLevels: function(level) {
@@ -19798,7 +19844,9 @@ const ui = {
         if(helpWrap) {
             helpWrap.classList.add("hidden");
             helpWrap.innerHTML = "";
-            const quoteChoicesEarly = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
+            const quoteChoicesEarly = app.countUsableQuoteChoicesForSelectionLevel
+                ? app.countUsableQuoteChoicesForSelectionLevel(level)
+                : (app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length);
             if(quoteChoicesEarly < 2 && userState.studentQuoteListHelp) {
                 userState.studentQuoteListHelp = false;
                 app.save();
@@ -19990,9 +20038,26 @@ const ui = {
         if(helpWrap) {
             const prevHelpDetails = helpWrap.querySelector("details");
             if(prevHelpDetails && prevHelpDetails.open) userState.studentHelpPanelOpen = true;
-            const quoteChoicesForLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
+            const quoteStats = app.getQuoteChoiceEligibilityForLevel ? app.getQuoteChoiceEligibilityForLevel(level) : null;
+            const quoteAssigned = quoteStats ? quoteStats.assigned : (app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length);
+            const quoteChoicesForLevel = quoteStats ? quoteStats.usable : quoteAssigned;
             const quotesOnOtherLevels = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
             const canOfferQuoteList = quoteChoicesForLevel >= 2;
+            let filterHintHtml = "";
+            if(quoteAssigned >= 1 && quoteChoicesForLevel < quoteAssigned) {
+                const lr = quoteStats && quoteStats.lineRange;
+                const span = lr ? (lr.from === lr.to ? `line ${lr.from}` : `lines ${lr.from}–${lr.to}`) : "";
+                const parts = [];
+                if(quoteStats && quoteStats.inSource < quoteAssigned) {
+                    parts.push(`${quoteAssigned - quoteStats.inSource} not found in the passage for this level (check <strong>Level Bank → C2 texts</strong> and quote spelling)`);
+                }
+                if(quoteStats && quoteStats.inLineRange < quoteStats.inSource && span) {
+                    parts.push(`${quoteStats.inSource - quoteStats.inLineRange} outside the <strong>${span}</strong> window (Focus question <strong>Lines</strong> box or “Read lines …” in the prompt)`);
+                }
+                if(parts.length) {
+                    filterHintHtml = `<p style="width:100%; flex-basis:100%; margin:6px 0 0 0; font-size:0.78rem; line-height:1.45; opacity:0.9;">${quoteAssigned} quote(s) on Level ${level}, but only <strong>${quoteChoicesForLevel}</strong> can be offered here: ${parts.join("; ")}.</p>`;
+                }
+            }
             const showMean = userState.studentHelpAiMeanings === true;
             const showDev = userState.studentHelpAiDeviceFocus === true;
             const showRub = userState.studentHelpAiRubricHints === true;
@@ -20056,9 +20121,10 @@ const ui = {
                 : "";
             const helpDetailsOpen = userState.studentHelpPanelOpen === true ? " open" : "";
             const quoteListNeedLabel = !canOfferQuoteList
-                ? ` (need ≥2 quotes on Level ${level}${quotesOnOtherLevels > 0 ? "; " + quotesOnOtherLevels + " on other levels" : ""})`
+                ? ` (need ≥2 usable quotes on Level ${level}; ${quoteAssigned} assigned${quotesOnOtherLevels > 0 ? "; " + quotesOnOtherLevels + " on other levels" : ""})`
                 : "";
             helpWrap.innerHTML = `<details id="selection-student-help-details" style="margin:0;"${helpDetailsOpen}><summary style="cursor:pointer;">I'm stuck — get help</summary><div id="selection-student-help-options" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:12px;">
+                ${filterHintHtml}
                 <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:${canOfferQuoteList ? "pointer" : "default"}; ${!canOfferQuoteList ? "opacity:0.8;" : ""}"><input type="checkbox" id="student-help-quote-list" ${userState.studentQuoteListHelp ? "checked" : ""} ${!canOfferQuoteList ? "disabled" : ""}> Give me quote choices to pick from${quoteListNeedLabel} <span style="opacity:0.75; font-weight:400;">(you can still highlight in the passage)</span></label>
                 <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-synonyms" ${userState.studentSynonymsHelp ? "checked" : ""}> Show synonym suggestions in Writing Desk</label>
                 ${deskSentenceBankHelpLabel}
@@ -20520,11 +20586,20 @@ const ui = {
             }
         }
         if(options.length < 2) {
-            const qOnLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : 0;
+            const qStats = app.getQuoteChoiceEligibilityForLevel ? app.getQuoteChoiceEligibilityForLevel(level) : null;
+            const qAssigned = qStats ? qStats.assigned : (app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : 0);
+            const qUsable = qStats ? qStats.usable : qAssigned;
             const qOther = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
-            const levelHint = qOnLevel < 2 && qOther > 0
-                ? `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">The quote bank has <strong>${qOther}</strong> quote(s) on other levels but <strong>${qOnLevel}</strong> on <strong>Level ${level}</strong>. In Settings → Quote bank, tick <strong>L${level}</strong> on the quotes for this question (you need at least 2).</p>`
-                : (qOnLevel < 2 ? `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">Add at least <strong>2</strong> good quotes linked to <strong>Level ${level}</strong> in Settings → Quote bank.</p>` : "");
+            let levelHint = "";
+            if(qAssigned >= 2 && qUsable < 2) {
+                const lr = qStats && qStats.lineRange;
+                const span = lr ? (lr.from === lr.to ? `line ${lr.from}` : `lines ${lr.from}–${lr.to}`) : "the line window";
+                levelHint = `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;"><strong>${qAssigned}</strong> quotes are on Level ${level}, but only <strong>${qUsable}</strong> match the passage and <strong>${span}</strong>. Check quote spelling, <strong>Level Bank → C2 texts</strong>, and the Focus question <strong>Lines</strong> box.</p>`;
+            } else if(qAssigned < 2 && qOther > 0) {
+                levelHint = `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">The quote bank has <strong>${qOther}</strong> quote(s) on other levels but <strong>${qAssigned}</strong> on <strong>Level ${level}</strong>. In Settings → Quote bank, tick <strong>L${level}</strong> (you need at least 2 usable quotes).</p>`;
+            } else if(qUsable < 2) {
+                levelHint = `<p style="opacity:0.88; margin:8px 0 0 0; line-height:1.45;">Add at least <strong>2</strong> good quotes linked to <strong>Level ${level}</strong> that appear in the passage for this level.</p>`;
+            }
             body.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.05rem; margin-bottom:6px;">Not enough choices</div>
                 <div style="opacity:0.8;">Tap the passage to select quotes, or continue to the next step.</div>
