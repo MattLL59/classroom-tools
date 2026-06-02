@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T11:00:00">
+<meta name="architect-build" content="2026-06-01T12:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -4590,6 +4590,18 @@ const app = {
         try {
             if(app.getArchitectComponent() !== 2) return false;
             return app.isShortAnswerLevel(level);
+        } catch(e) { return false; }
+    },
+    /** Teacher enabled justify + require reason (Settings → Selection stages must include justify). */
+    selectionUsesJustifyStage: function(level) {
+        try {
+            const sel = appData && appData.selection;
+            if(!sel || !sel.modes) return false;
+            if(!sel.modes.requireReason) return false;
+            const stages = (appData.settings && Array.isArray(appData.settings.selectionStages) && appData.settings.selectionStages.length)
+                ? appData.settings.selectionStages
+                : (Array.isArray(sel.modes.stages) ? sel.modes.stages : []);
+            return stages.includes("justify");
         } catch(e) { return false; }
     },
     /** C2 Short ans + 1 exam mark: verbatim quote to answer. C1 never — single-mark questions must be paraphrased. */
@@ -19781,12 +19793,7 @@ const ui = {
         let quoteOnlyShort = false;
         try { quoteOnlyShort = !!(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(level)); } catch(e) {}
         const isShortAnswerMode = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level));
-        if(isShortAnswerMode && sel && sel.modes) {
-            sel.modes.requireReason = false;
-            if(Array.isArray(sel.modes.stages)) {
-                sel.modes.stages = sel.modes.stages.filter(function(s) { return s !== "justify" && s !== "align"; });
-            }
-        }
+        const useJustifyStage = !!(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(level));
         const questionTextEarly = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.getQuestionForLevel(level) || (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "");
         ui.renderQuestionBanner();
         if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
@@ -19824,10 +19831,14 @@ const ui = {
             return;
         }
         const quickPick = sel.modes && sel.modes.quickPick;
-        const baseStages = sel.modes && sel.modes.stages ? sel.modes.stages : ["discriminate","align","justify"];
+        const baseStages = (appData.settings && Array.isArray(appData.settings.selectionStages) && appData.settings.selectionStages.length)
+            ? appData.settings.selectionStages.slice()
+            : (sel.modes && sel.modes.stages ? sel.modes.stages.slice() : ["discriminate","align","justify"]);
         let stages = quickPick ? ["guided"] : baseStages;
-        if(isShortAnswerMode) {
+        if(isShortAnswerMode && !useJustifyStage) {
             stages = stages.filter(s => s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize");
+        } else if(isShortAnswerMode) {
+            stages = stages.filter(s => s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize" || s === "justify" || s === "align");
         }
         const stageIndex = Math.max(1, Math.min(stages.length, userState.selectionStage || 1));
         const stageKey = stages[stageIndex - 1];
@@ -20661,6 +20672,10 @@ const ui = {
                         card.classList.remove("quote-dim", "card-choice-incorrect");
                         card.classList.add("card-choice-correct");
                         if(isShortAnswerMode && o.correct && o.quote) {
+                            if(useJustifyStage && ui.goToJustifyForSelectedQuote) {
+                                ui.goToJustifyForSelectedQuote(level, o.item, o.quote);
+                                return;
+                            }
                             if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
                                 ui._selectionCorrectItem = o.item;
                                 ui._selectionQuote = o.quote;
@@ -20724,6 +20739,10 @@ const ui = {
                         }
                     }
                     if(isShortAnswerMode && picked && picked.quote) {
+                        if(useJustifyStage && ui.goToJustifyForSelectedQuote) {
+                            ui.goToJustifyForSelectedQuote(level, picked.item, picked.quote);
+                            return;
+                        }
                         if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
                             ui.promptParaphraseForQuoteInSelect(picked.quote);
                             return;
@@ -21072,7 +21091,7 @@ const ui = {
             });
             return;
         }
-        if(isShortAnswerMode && (stageKey === "justify" || stageKey === "align")) {
+        if(isShortAnswerMode && !useJustifyStage && (stageKey === "justify" || stageKey === "align")) {
             const qAuto = (chosenCorrect && (chosenCorrect.quote || chosenCorrect.original)) || ui._selectionQuote || "";
             if(qAuto && app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
                 ui.promptParaphraseForQuoteInSelect(qAuto);
@@ -21136,6 +21155,10 @@ const ui = {
                     btn.onclick = () => {
                         const quoteToAdd = chosenCorrect ? (chosenCorrect.quote || chosenCorrect.original || "") : "";
                         const justificationText = box ? box.value.trim() : "";
+                        if(sel.modes.requireReason && !justificationText) {
+                            alert("Write a short reason before continuing.");
+                            return;
+                        }
                         if(quoteToAdd && justificationText && app.setSelectionJustificationForQuoteText) {
                             app.setSelectionJustificationForQuoteText(quoteToAdd, justificationText);
                         }
@@ -21143,6 +21166,12 @@ const ui = {
                         const chosenKeys = new Set((userState.selectionChosen || []).map(q => app.quoteKey(typeof q === "object" && q && ("quote" in q || "original" in q) ? (q.quote || q.original) : q)));
                         if(quoteToAdd && !chosenKeys.has(app.quoteKey(quoteToAdd))) {
                             userState.selectionChosen.push(quoteToAdd);
+                        }
+                        if(isShortAnswerMode && useJustifyStage) {
+                            userState.selectionStage = stages.indexOf("discriminate") >= 0 ? stages.indexOf("discriminate") + 1 : 1;
+                            app.save();
+                            ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
+                            return;
                         }
                         const ptsNow = app.countSelectionEvidencePoints(level);
                         if(ptsNow >= evidenceGoalForUi && autoDeskAdv) {
@@ -21621,6 +21650,33 @@ const ui = {
         ui._freeSelectPendingQuote = q;
         if(typeof app.save === "function") app.save();
         if(ui.switchView) ui.switchView("select", true);
+        if(ui.renderSelection) ui.renderSelection();
+        return true;
+    },
+    /** After a new Strong quote in Quote Select, open the justify step (teacher: Require justification + justify stage). */
+    goToJustifyForSelectedQuote: function(level, item, quote) {
+        const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+        const q = String(quote || "").trim();
+        if(!q || !(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(lvl))) return false;
+        const newKey = app.quoteKey(q);
+        if(userState._lastJustifyQuoteKey && userState._lastJustifyQuoteKey !== newKey) {
+            const storedKey = lvl + ":justify";
+            if(userState.selectionProgress && userState.selectionProgress.freeText) {
+                delete userState.selectionProgress.freeText[storedKey];
+            }
+            if(userState.selectionJustification && typeof userState.selectionJustification === "object") {
+                delete userState.selectionJustification[newKey];
+            }
+        }
+        userState._lastJustifyQuoteKey = newKey;
+        ui._selectionCorrectItem = item || null;
+        ui._selectionQuote = q;
+        const stages = (appData.settings && Array.isArray(appData.settings.selectionStages) && appData.settings.selectionStages.length)
+            ? appData.settings.selectionStages
+            : (appData.selection && appData.selection.modes && appData.selection.modes.stages) || ["discriminate","align","justify"];
+        const jx = stages.indexOf("justify");
+        userState.selectionStage = jx >= 0 ? jx + 1 : (userState.selectionStage || 1);
+        app.save();
         if(ui.renderSelection) ui.renderSelection();
         return true;
     },
@@ -31135,6 +31191,7 @@ No "TBD" or placeholders. Valid JSON array only.`;
                         <input type="checkbox" ${sel.modes.requireReason ? "checked" : ""} onchange="admin.updateSelectionMeta('requireReason', this.checked)">
                         <span>Require reason before saving quotes (when the justify stage is in use)</span>
                     </label>
+                    <p style="font-size:0.78rem; opacity:0.82; margin:6px 0 0 0; line-height:1.45;">Needs <strong>Justify</strong> in Selection stages (Settings). On Short ans levels, each new <strong>Strong</strong> bank quote opens justify before saving; changing quote clears the previous reason. Passage tap on 1-mark C2 still skips justify unless you use the bank cards.</p>
                 </div>
             </div>
 
