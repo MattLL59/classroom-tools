@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T15:00:00">
+<meta name="architect-build" content="2026-06-01T16:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -4608,6 +4608,42 @@ const app = {
                 ? appData.settings.selectionStages
                 : (Array.isArray(sel.modes.stages) ? sel.modes.stages : []);
             return stages.includes("justify");
+        } catch(e) { return false; }
+    },
+    /** Stages actually shown in Quote Select (must match {@link ui.renderSelection} filtering). */
+    getEffectiveSelectionStagesForLevel: function(level, opts) {
+        opts = opts || {};
+        try {
+            const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
+            const sel = appData && appData.selection;
+            const baseStages = (appData.settings && Array.isArray(appData.settings.selectionStages) && appData.settings.selectionStages.length)
+                ? appData.settings.selectionStages.slice()
+                : (sel && sel.modes && Array.isArray(sel.modes.stages) && sel.modes.stages.length
+                    ? sel.modes.stages.slice()
+                    : ["discriminate", "align", "justify"]);
+            if(opts.quickPick || (sel && sel.modes && sel.modes.quickPick)) return ["guided"];
+            let stages = baseStages.slice();
+            const useJustify = !!(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(lvl));
+            const shortAns = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(lvl));
+            if(shortAns && !useJustify) {
+                stages = stages.filter(function(s) {
+                    return s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize";
+                });
+            } else if(shortAns) {
+                stages = stages.filter(function(s) {
+                    return s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize"
+                        || s === "justify" || s === "align";
+                });
+            }
+            return stages.length ? stages : ["discriminate"];
+        } catch(e) { return ["discriminate"]; }
+    },
+    /** Student must explain how the quote answers before Writing Desk (justify stage and/or require reason). */
+    selectionRequiresJustifyPrompt: function(level) {
+        try {
+            if(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(level)) return true;
+            const sel = appData && appData.selection;
+            return !!(sel && sel.modes && sel.modes.requireReason);
         } catch(e) { return false; }
     },
     /** C2 Short ans + 1 exam mark: verbatim quote to answer. C1 never — single-mark questions must be paraphrased. */
@@ -19865,15 +19901,9 @@ const ui = {
             return;
         }
         const quickPick = sel.modes && sel.modes.quickPick;
-        const baseStages = (appData.settings && Array.isArray(appData.settings.selectionStages) && appData.settings.selectionStages.length)
-            ? appData.settings.selectionStages.slice()
-            : (sel.modes && sel.modes.stages ? sel.modes.stages.slice() : ["discriminate","align","justify"]);
-        let stages = quickPick ? ["guided"] : baseStages;
-        if(isShortAnswerMode && !useJustifyStage) {
-            stages = stages.filter(s => s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize");
-        } else if(isShortAnswerMode) {
-            stages = stages.filter(s => s === "discriminate" || s === "guided" || s === "boundary" || s === "recognize" || s === "justify" || s === "align");
-        }
+        const stages = app.getEffectiveSelectionStagesForLevel
+            ? app.getEffectiveSelectionStagesForLevel(level, { quickPick: quickPick })
+            : ["discriminate", "align", "justify"];
         const stageIndex = Math.max(1, Math.min(stages.length, userState.selectionStage || 1));
         const stageKey = stages[stageIndex - 1];
         const canJumpStages = !appData.isStandalone;
@@ -20367,9 +20397,28 @@ const ui = {
         }
         const primaryCorrect = correctItems[0] || sel.items[0];
         const primaryQuoteText = getQuote(primaryCorrect);
-        const validChosen = ui._selectionCorrectItem && correctItems.some(c => app.quoteKey(getQuote(c)) === app.quoteKey(getQuote(ui._selectionCorrectItem)));
-        const chosenCorrect = validChosen ? ui._selectionCorrectItem : primaryCorrect;
-        if(!validChosen) { ui._selectionCorrectItem = null; ui._selectionQuote = null; }
+        const pendingPickQuote = String(ui._selectionQuote || "").trim();
+        const resolveChosenItem = function() {
+            if(pendingPickQuote) {
+                const hit = correctItemsAll.find(function(c) {
+                    return app.quoteKey(getQuote(c)) === app.quoteKey(pendingPickQuote);
+                });
+                if(hit) return hit;
+                if(ui._selectionCorrectItem) return ui._selectionCorrectItem;
+                return { quote: pendingPickQuote, original: pendingPickQuote };
+            }
+            if(ui._selectionCorrectItem && correctItems.some(function(c) {
+                return app.quoteKey(getQuote(c)) === app.quoteKey(getQuote(ui._selectionCorrectItem));
+            })) return ui._selectionCorrectItem;
+            return primaryCorrect;
+        };
+        const chosenCorrect = resolveChosenItem();
+        if(!pendingPickQuote && !(ui._selectionCorrectItem && correctItems.some(function(c) {
+            return app.quoteKey(getQuote(c)) === app.quoteKey(getQuote(ui._selectionCorrectItem));
+        }))) {
+            ui._selectionCorrectItem = null;
+            ui._selectionQuote = null;
+        }
         /* Aggregate distractors from all correct items for this level/question so we have enough options (e.g. 5 quotes + 2 distractors). */
         const seenDistractorKeys = new Set();
         const baseDistractors = [];
@@ -20707,27 +20756,15 @@ const ui = {
                         card.classList.remove("quote-dim", "card-choice-incorrect");
                         card.classList.add("card-choice-correct");
                         if(o.correct && o.quote) {
-                            ui._selectionCorrectItem = o.item;
-                            ui._selectionQuote = o.quote;
-                            if(useJustifyStage && ui.goToJustifyForSelectedQuote) {
-                                ui.goToJustifyForSelectedQuote(level, o.item, o.quote);
+                            if(app.selectionRequiresJustifyPrompt && app.selectionRequiresJustifyPrompt(level)) {
+                                if(ui.goToJustifyForSelectedQuote && ui.goToJustifyForSelectedQuote(level, o.item, o.quote)) return;
+                            } else if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                                ui.promptParaphraseForQuoteInSelect(o.quote);
                                 return;
                             }
-                            const needsExamineBeforeDesk = !!(isShortAnswerMode
-                                || (userState.studentQuoteListHelp && requireReasonForChoice)
-                                || app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
-                            if(needsExamineBeforeDesk) {
-                                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
-                                    ui.promptParaphraseForQuoteInSelect(o.quote);
-                                    return;
-                                }
-                                if(ui.promptQuoteSelectParaphraseExamine) {
-                                    app.save();
-                                    ui.promptQuoteSelectParaphraseExamine(o.quote);
-                                    return;
-                                }
-                            }
                             if(isShortAnswerMode) {
+                                ui._selectionCorrectItem = o.item;
+                                ui._selectionQuote = o.quote;
                                 if(!Array.isArray(userState.selectionChosen)) userState.selectionChosen = [];
                                 const sk = storeKey(o.quote);
                                 if(!userState.selectionChosen.some(ch => app.quoteKey(typeof ch === "object" && ch && "quote" in ch ? ch.quote : ch) === sk)) {
@@ -20784,27 +20821,15 @@ const ui = {
                         }
                     }
                     if(picked && picked.quote) {
-                        ui._selectionCorrectItem = picked.item;
-                        ui._selectionQuote = picked.quote;
-                        if(useJustifyStage && ui.goToJustifyForSelectedQuote) {
-                            ui.goToJustifyForSelectedQuote(level, picked.item, picked.quote);
+                        if(app.selectionRequiresJustifyPrompt && app.selectionRequiresJustifyPrompt(level)) {
+                            if(ui.goToJustifyForSelectedQuote && ui.goToJustifyForSelectedQuote(level, picked.item, picked.quote)) return;
+                        } else if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
+                            ui.promptParaphraseForQuoteInSelect(picked.quote);
                             return;
                         }
-                        const needsExamineContinue = !!(isShortAnswerMode
-                            || (userState.studentQuoteListHelp && requireReasonForChoice)
-                            || app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level));
-                        if(needsExamineContinue) {
-                            if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) {
-                                ui.promptParaphraseForQuoteInSelect(picked.quote);
-                                return;
-                            }
-                            if(ui.promptQuoteSelectParaphraseExamine) {
-                                app.save();
-                                ui.promptQuoteSelectParaphraseExamine(picked.quote);
-                                return;
-                            }
-                        }
                         if(isShortAnswerMode) {
+                            ui._selectionCorrectItem = picked.item;
+                            ui._selectionQuote = picked.quote;
                             app.save();
                             ui.sendSelectionQuotesDirectToAnswer({ stayOnQuoteSelect: true });
                             return;
@@ -21227,7 +21252,6 @@ const ui = {
                             userState.selectionChosen.push(quoteToAdd);
                         }
                         if(useJustifyStage) {
-                            userState.selectionStage = stages.indexOf("discriminate") >= 0 ? stages.indexOf("discriminate") + 1 : 1;
                             app.save();
                             ui.sendSelectionQuotesDirectToAnswer({
                                 openDeskAfterSave: true,
@@ -21727,7 +21751,17 @@ const ui = {
     goToJustifyForSelectedQuote: function(level, item, quote) {
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel && app.getEffectiveLevel()) || 1;
         const q = String(quote || "").trim();
-        if(!q || !(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(lvl))) return false;
+        if(!q) return false;
+        ui._selectionCorrectItem = item || null;
+        ui._selectionQuote = q;
+        const useJustify = !!(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(lvl));
+        if(!useJustify) {
+            if(app.selectionRequiresJustifyPrompt && app.selectionRequiresJustifyPrompt(lvl) && ui.promptQuoteSelectParaphraseExamine) {
+                app.save();
+                return ui.promptQuoteSelectParaphraseExamine(q);
+            }
+            return false;
+        }
         const newKey = app.quoteKey(q);
         if(userState._lastJustifyQuoteKey && userState._lastJustifyQuoteKey !== newKey) {
             const storedKey = lvl + ":justify";
@@ -21739,13 +21773,18 @@ const ui = {
             }
         }
         userState._lastJustifyQuoteKey = newKey;
-        ui._selectionCorrectItem = item || null;
-        ui._selectionQuote = q;
-        const stages = (appData.settings && Array.isArray(appData.settings.selectionStages) && appData.settings.selectionStages.length)
-            ? appData.settings.selectionStages
-            : (appData.selection && appData.selection.modes && appData.selection.modes.stages) || ["discriminate","align","justify"];
+        const stages = app.getEffectiveSelectionStagesForLevel
+            ? app.getEffectiveSelectionStagesForLevel(lvl)
+            : ["discriminate", "justify"];
         const jx = stages.indexOf("justify");
-        userState.selectionStage = jx >= 0 ? jx + 1 : (userState.selectionStage || 1);
+        if(jx < 0) {
+            if(ui.promptQuoteSelectParaphraseExamine) {
+                app.save();
+                return ui.promptQuoteSelectParaphraseExamine(q);
+            }
+            return false;
+        }
+        userState.selectionStage = jx + 1;
         app.save();
         if(ui.renderSelection) ui.renderSelection();
         return true;
