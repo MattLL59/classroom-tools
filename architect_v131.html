@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T13:00:00">
+<meta name="architect-build" content="2026-06-01T14:00:00">
 <meta name="architect-deploy" content="fix-c2-quote-examine-no-paraphrase">
 <meta name="architect-rev" content="c2-q15-q16-after-both-texts-f806">
 <title>Answer Architect (v131)</title>
@@ -2502,7 +2502,7 @@ const app = {
     isTeacherTapRecordPassageMode: function() {
         return !!(typeof appData !== "undefined" && appData && !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow === true);
     },
-    /** Teacher app / lesson editor preview — not a student export. Auto level advance is disabled here. */
+    /** Teacher app / lesson editor preview — not a student export. Celebration auto-chains are toned down; silent progression still runs. */
     isTeacherPreviewApp: function() {
         return !!(typeof appData !== "undefined" && appData && !appData.isStandalone);
     },
@@ -4554,6 +4554,12 @@ const app = {
             const strippedLive = live.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
             if(strippedLive.length >= 3) return true;
         }
+        if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) {
+            const essayElSa = document.getElementById("essay-area");
+            const liveSa = essayElSa ? String(essayElSa.value || "").trim() : String((userState && userState.essay) || "").trim();
+            const strippedSa = liveSa.replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/gi, "").trim();
+            if(strippedSa.length >= 3) return true;
+        }
         if(app.isC1OwnWordsShortAnswerLevel && app.isC1OwnWordsShortAnswerLevel(lvl)) {
             if(app.countOwnWordsParaphrasesForLevel && app.countOwnWordsParaphrasesForLevel(lvl) >= 1) return true;
             const essayEl = document.getElementById("essay-area");
@@ -5400,9 +5406,7 @@ const app = {
             return app.isLevelSelectionGoalMet(lvl);
         }
         if(app.levelBankShortAnswerEnabled && app.levelBankShortAnswerEnabled(lvl)) {
-            if(app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl)) {
-                return !!(app.hasShortAnswerContentForLevel && app.hasShortAnswerContentForLevel(lvl));
-            }
+            if(app.hasShortAnswerContentForLevel && app.hasShortAnswerContentForLevel(lvl)) return true;
             return app.isLevelSelectionGoalMet(lvl);
         }
         if(app.isLevelSelectionGoalMet(lvl)) return true;
@@ -5414,7 +5418,7 @@ const app = {
     /** After a Short ans quote is saved, move Ln→Ln+1 (not in-level multi-question steps). */
     tryFinishShortAnswerLevelAndAdvance: function(level, opts) {
         opts = opts || {};
-        if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode()) return false;
+        if(app.isTeacherTapRecordPassageMode && app.isTeacherTapRecordPassageMode() && opts.silentProgression !== true) return false;
         const lvl = parseInt(level, 10) || (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level) || 1;
         const quoteOnly = app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl);
         const ownWords = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl));
@@ -5453,7 +5457,9 @@ const app = {
         return app.advanceStudentToNextActiveLevel({
             level: lvl,
             showCelebration: opts.showCelebration !== false,
-            shortAnswerAdvance: true
+            shortAnswerAdvance: true,
+            allowTeacherAutoAdvance: true,
+            silentProgression: opts.silentProgression === true
         });
     },
     tryAdvanceLevelAfterDeskActivity: function(level, opts) {
@@ -5474,7 +5480,12 @@ const app = {
         }
         if(!app.isLevelProgressionReady(lvl)) return false;
         if(app.ensureActiveLevelsFromQuestions) app.ensureActiveLevelsFromQuestions();
-        return app.advanceStudentToNextActiveLevel({ level: lvl, showCelebration: opts.showCelebration !== false });
+        return app.advanceStudentToNextActiveLevel({
+            level: lvl,
+            showCelebration: opts.showCelebration !== false,
+            allowTeacherAutoAdvance: true,
+            silentProgression: opts.silentProgression === true
+        });
     },
     /**
      * Move the student to the next Level Bank level after finishing the current one.
@@ -5482,7 +5493,10 @@ const app = {
      */
     advanceStudentToNextActiveLevel: function(opts) {
         opts = opts || {};
-        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp() && opts.allowTeacherAutoAdvance !== true && opts.shortAnswerAdvance !== true) return false;
+        if(app.isTeacherPreviewApp && app.isTeacherPreviewApp()
+            && opts.showCelebration !== false
+            && opts.allowTeacherAutoAdvance !== true
+            && opts.shortAnswerAdvance !== true) return false;
         const cur = parseInt(opts.level != null ? opts.level : (app.getEffectiveLevel ? app.getEffectiveLevel() : userState.level), 10) || 1;
         if(app.isLevelsOfResponseLevel(cur)) return false;
         if(!app.isLevelProgressionReady(cur)) return false;
@@ -18181,7 +18195,15 @@ const ui = {
         if(v === "select") {
             if(!ui._initInProgress) {
                 const lvlReturn = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
-                if(app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlReturn, { showCelebration: false })) {
+                try {
+                    if(app.persistAccumulatedWritingDeskFromDesk && app.shouldAccumulateDeskAcrossLevels && app.shouldAccumulateDeskAcrossLevels()) {
+                        const essayElPersist = document.getElementById("essay-area");
+                        if(essayElPersist && String(essayElPersist.value || "").trim().length >= 3) {
+                            app.persistAccumulatedWritingDeskFromDesk();
+                        }
+                    }
+                } catch(ePersist) { console.warn("persist desk before level advance:", ePersist); }
+                if(app.tryAdvanceLevelAfterDeskActivity && app.tryAdvanceLevelAfterDeskActivity(lvlReturn, { showCelebration: false, silentProgression: true })) {
                     if(ui.renderQuestionBanner) ui.renderQuestionBanner();
                 }
             }
