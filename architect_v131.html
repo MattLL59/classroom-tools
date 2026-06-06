@@ -7,9 +7,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T20:00:00">
-<meta name="architect-deploy" content="level-bank-compact-question-pick">
-<meta name="architect-rev" content="level-bank-q-pick-f806">
+<meta name="architect-build" content="2026-06-01T20:15:00">
+<meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
+<meta name="architect-rev" content="level-bank-q1-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -32345,16 +32345,35 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     levelBankQuestionPrompt: function(q, globalPrompt, index) {
         if(!q) return "";
         let prompt = (q.prompt || "").trim();
+        const segLvl = index != null ? (index + 1) : 1;
         if(!prompt && globalPrompt && typeof app.extractQuestionSegmentByLevel === "function")
-            prompt = app.extractQuestionSegmentByLevel(globalPrompt, (index != null ? index : 0) + 1) || "";
+            prompt = app.extractQuestionSegmentByLevel(globalPrompt, segLvl) || "";
+        if(!prompt && q.id && app.getQuestionLabelShort) {
+            const lab = app.getQuestionLabelShort(q.id);
+            const colon = lab.indexOf(": ");
+            if(colon >= 0) prompt = lab.slice(colon + 2).trim();
+        }
         return prompt;
     },
     levelBankQuestionMenuLabel: function(q, globalPrompt, index) {
         const shortId = admin.formatLevelBankQuestionShortId(q && q.id);
         const prompt = admin.levelBankQuestionPrompt(q, globalPrompt, index);
-        if(!prompt) return shortId;
+        if(!prompt) return shortId + " (add prompt in Focus questions)";
         const clip = prompt.length > 140 ? prompt.slice(0, 140) + "…" : prompt;
         return shortId + ": " + clip;
+    },
+    expandLevelBankQuestionSelectLabels: function(sel) {
+        if(!sel || !sel.options) return;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const globalPrompt = (appData.question || (questions[0] && questions[0].prompt) || "").trim();
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const findQ = (id) => questions.find((qq) => qq && (qq.id === id || normQid(qq.id) === normQid(id)));
+        Array.from(sel.options).forEach((opt, oi) => {
+            if(!opt.value) return;
+            const q = findQ(opt.value);
+            const qi = q ? questions.indexOf(q) : oi - 1;
+            opt.textContent = admin.levelBankQuestionMenuLabel(q || { id: opt.value }, globalPrompt, qi);
+        });
     },
     refreshLevelBankQuestionSelectLabels: function(sel) {
         if(!sel || !sel.options) return;
@@ -32418,13 +32437,11 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             const allQuestionsForDropdown = questions.slice();
             const opts = allQuestionsForDropdown.map((q, i) => {
                 const isSel = normQid(q.id) === normQid(currentQid);
-                const shortId = admin.formatLevelBankQuestionShortId(q.id);
                 const menuLabel = admin.levelBankQuestionMenuLabel(q, globalPrompt, i);
-                const label = isSel ? shortId : menuLabel;
                 const sel = isSel ? " selected" : "";
                 const disabled = assignedElsewhere.has(normQid(q.id)) ? " disabled" : "";
                 const titleText = admin.levelBankQuestionPrompt(q, globalPrompt, i);
-                return `<option value="${app.escapeHtml(q.id)}"${sel}${disabled} title="${app.escapeHtml(titleText.slice(0, 400))}">${app.escapeHtml(label)}</option>`;
+                return `<option value="${app.escapeHtml(q.id)}"${sel}${disabled} title="${app.escapeHtml(titleText.slice(0, 400))}">${app.escapeHtml(menuLabel)}</option>`;
             }).join("");
             const curQ = currentQid ? allQuestionsForDropdown.find(q => normQid(q.id) === normQid(currentQid)) : null;
             const curPrompt = curQ ? admin.levelBankQuestionPrompt(curQ, globalPrompt, allQuestionsForDropdown.indexOf(curQ)) : "";
@@ -32517,6 +32534,18 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         `;
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         if(pvLvl) pvLvl.value = String(Math.min(ARCHITECT_MAX_LEVEL, Math.max(1, parseInt(userState.level, 10) || 1)));
+        wrap.querySelectorAll(".level-bank-question-select").forEach((sel) => admin.refreshLevelBankQuestionSelectLabels(sel));
+        if(!wrap.dataset.levelBankQSelectFocusBound) {
+            wrap.dataset.levelBankQSelectFocusBound = "1";
+            wrap.addEventListener("focusin", function(ev) {
+                const sel = ev.target && ev.target.closest && ev.target.closest(".level-bank-question-select");
+                if(sel) admin.expandLevelBankQuestionSelectLabels(sel);
+            });
+            wrap.addEventListener("focusout", function(ev) {
+                const sel = ev.target && ev.target.closest && ev.target.closest(".level-bank-question-select");
+                if(sel) admin.refreshLevelBankQuestionSelectLabels(sel);
+            });
+        }
         if(!wrap.dataset.levelBankDelegated) {
             wrap.dataset.levelBankDelegated = "1";
             wrap.addEventListener("change", function(ev) {
