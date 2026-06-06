@@ -7,9 +7,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T20:00:00">
-<meta name="architect-deploy" content="level-bank-compact-question-pick">
-<meta name="architect-rev" content="level-bank-q-pick-f806">
+<meta name="architect-build" content="2026-06-01T20:30:00">
+<meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
+<meta name="architect-rev" content="level-bank-q1-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -571,6 +571,8 @@
     #level-bank-editor .level-bank-row,
     #level-bank-editor .level-bank-header { display: grid; gap: 10px; align-items: center; }
     #level-bank-editor .level-bank-header > div { font-size: 0.76rem; line-height: 1.25; padding: 0 1px; white-space: nowrap; }
+    #level-bank-editor .level-bank-header > div.level-bank-col-help { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+    #level-bank-editor .level-bank-col-legend { font-size: 0.74rem; opacity: 0.78; margin: 0 0 8px 0; line-height: 1.4; }
     #level-bank-editor .level-bank-questions-wrap { min-width: 0; display: flex; justify-content: center; }
     #level-bank-editor select.level-bank-question-select {
         width: 3.4em; max-width: 4.2em; min-width: 0; margin: 0 auto;
@@ -1536,7 +1538,7 @@
                     <p class="admin-console-intro">One console for <strong>level assignments</strong>, <strong>focus questions (WS)</strong>, <strong>quote targets</strong>, and the <strong>quote bank</strong>. Expand only the pane you need. The <strong>Load &amp; AI</strong> tab keeps the same focus-question list for import — edits sync both ways.</p>
                     <details class="admin-console-pane" open>
                         <summary>🎚️ Level Bank (1–10)</summary>
-                        <div style="font-size:0.85rem; opacity:0.8; margin-bottom:4px;">Controls language tier, complexity (meanings/analysis), and which question applies to each level. Students use <strong>tap text</strong> (select from passage) by default.</div>
+                        <div style="font-size:0.85rem; opacity:0.8; margin-bottom:4px;">Assign a <strong>focus question</strong> per level and set quote targets. <strong>Student wording</strong> and <strong>AI depth</strong> control different things — hover those column titles (dotted underline) to see which lesson parts they affect.</div>
                         <div style="font-size:0.8rem; opacity:0.7; margin-bottom:8px;"><strong>Question</strong>: one per level — use dropdown to assign or change; choose — None — to clear.</div>
                         <div style="font-size:0.8rem; opacity:0.75; margin-bottom:8px;">You can list <strong>each paper part</strong> as its own row in <strong>Focus questions</strong> (e.g. Q1a, Q1b). The <strong>Level Bank</strong> decides what students see: assign <strong>one question per level</strong>; Quote Select shows that row only. With one id per level, when the points goal is met the app moves to the <strong>next active level</strong> (next bank assignment). Use multiple ids on one level only if you need several questions on the same level before advancing.</div>
                         <div style="font-size:0.8rem; opacity:0.75; margin-bottom:8px;"><strong>Component 2:</strong> the <strong>C2 texts</strong> column (after <strong>Tap</strong>) sets whether each level shows the 21st-century passage, the 19th-century passage, or both. <strong>exam px</strong> (excerpt / every # / affirm) is hidden — C2 passages are continuous prose with no booklet line numbers.</div>
@@ -32336,6 +32338,19 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             cont.appendChild(linkWrap);
         }
     },
+    levelBankColumnHelp: {
+        wording: "Student wording — how simple the scaffold text is that students read (not the exam passage). Applies to: I'm stuck quote meanings, justify hints, meaning & analysis multiple-choice options, and this level's Writing Desk link chips. Low = everyday words · Medium = GCSE-style · Advanced = richer exam vocabulary.",
+        aiDepth: "AI depth — how sophisticated meanings and analysis should be when AI builds or refreshes quote-bank content. Applies to: Load & AI generate prompts, quote translations, modelAnswer lines, device reasons, and worksheet rubric chips in imported JSON. Does not change live student wording — use Student wording for that.",
+        pts: "Exam marks target for this level (overrides [n] in the question when set). Leave empty to use Quotes for the session goal.",
+        quo: "Good quotes students should find this level (Quote bank + Quote Select when Points is empty).",
+        bad: "Wrong-option quotes for multiple-choice quote grids.",
+        short: "Highlight → straight to answer; skips Writing Desk / Sentence Builder.",
+        tap: "On: highlight passage to pick quotes. Off: staged quote bank (devices + justify).",
+        lor: "Long-mark levels-of-response: desk shows scheme overlap; quote tally is not the exam mark.",
+        q: "Focus question for this level — open list for full wording.",
+        c2: "Which passage(s) students see: 21st C resource, 19th C question paper, or both.",
+        exam: "Component 1 only: excerpt line window, every margin #, affirm-before-quote drill."
+    },
     formatLevelBankQuestionShortId: function(id) {
         const s = String(id || "").trim();
         if(!s) return "—";
@@ -32345,16 +32360,35 @@ OUTPUT: ${nWant} lines only (quotations only).`;
     levelBankQuestionPrompt: function(q, globalPrompt, index) {
         if(!q) return "";
         let prompt = (q.prompt || "").trim();
+        const segLvl = index != null ? (index + 1) : 1;
         if(!prompt && globalPrompt && typeof app.extractQuestionSegmentByLevel === "function")
-            prompt = app.extractQuestionSegmentByLevel(globalPrompt, (index != null ? index : 0) + 1) || "";
+            prompt = app.extractQuestionSegmentByLevel(globalPrompt, segLvl) || "";
+        if(!prompt && q.id && app.getQuestionLabelShort) {
+            const lab = app.getQuestionLabelShort(q.id);
+            const colon = lab.indexOf(": ");
+            if(colon >= 0) prompt = lab.slice(colon + 2).trim();
+        }
         return prompt;
     },
     levelBankQuestionMenuLabel: function(q, globalPrompt, index) {
         const shortId = admin.formatLevelBankQuestionShortId(q && q.id);
         const prompt = admin.levelBankQuestionPrompt(q, globalPrompt, index);
-        if(!prompt) return shortId;
+        if(!prompt) return shortId + " (add prompt in Focus questions)";
         const clip = prompt.length > 140 ? prompt.slice(0, 140) + "…" : prompt;
         return shortId + ": " + clip;
+    },
+    expandLevelBankQuestionSelectLabels: function(sel) {
+        if(!sel || !sel.options) return;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const globalPrompt = (appData.question || (questions[0] && questions[0].prompt) || "").trim();
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const findQ = (id) => questions.find((qq) => qq && (qq.id === id || normQid(qq.id) === normQid(id)));
+        Array.from(sel.options).forEach((opt, oi) => {
+            if(!opt.value) return;
+            const q = findQ(opt.value);
+            const qi = q ? questions.indexOf(q) : oi - 1;
+            opt.textContent = admin.levelBankQuestionMenuLabel(q || { id: opt.value }, globalPrompt, qi);
+        });
     },
     refreshLevelBankQuestionSelectLabels: function(sel) {
         if(!sel || !sel.options) return;
@@ -32418,13 +32452,11 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             const allQuestionsForDropdown = questions.slice();
             const opts = allQuestionsForDropdown.map((q, i) => {
                 const isSel = normQid(q.id) === normQid(currentQid);
-                const shortId = admin.formatLevelBankQuestionShortId(q.id);
                 const menuLabel = admin.levelBankQuestionMenuLabel(q, globalPrompt, i);
-                const label = isSel ? shortId : menuLabel;
                 const sel = isSel ? " selected" : "";
                 const disabled = assignedElsewhere.has(normQid(q.id)) ? " disabled" : "";
                 const titleText = admin.levelBankQuestionPrompt(q, globalPrompt, i);
-                return `<option value="${app.escapeHtml(q.id)}"${sel}${disabled} title="${app.escapeHtml(titleText.slice(0, 400))}">${app.escapeHtml(label)}</option>`;
+                return `<option value="${app.escapeHtml(q.id)}"${sel}${disabled} title="${app.escapeHtml(titleText.slice(0, 400))}">${app.escapeHtml(menuLabel)}</option>`;
             }).join("");
             const curQ = currentQid ? allQuestionsForDropdown.find(q => normQid(q.id) === normQid(currentQid)) : null;
             const curPrompt = curQ ? admin.levelBankQuestionPrompt(curQ, globalPrompt, allQuestionsForDropdown.indexOf(curQ)) : "";
@@ -32446,12 +32478,12 @@ OUTPUT: ${nWant} lines only (quotations only).`;
             rows.push(`
                 <div class="level-bank-row" style="margin-bottom:6px;">
                     <div style="font-weight:700;">L${lvl}</div>
-                    <select data-lvl="${lvl}" data-key="languageTier" class="level-bank-input">
+                    <select data-lvl="${lvl}" data-key="languageTier" class="level-bank-input" title="${app.escapeHtml(admin.levelBankColumnHelp.wording)}">
                         <option value="low" ${entry.languageTier==="low"?"selected":""}>Low</option>
                         <option value="medium" ${entry.languageTier==="medium"?"selected":""}>Medium</option>
                         <option value="advanced" ${entry.languageTier==="advanced"?"selected":""}>Advanced</option>
                     </select>
-                    <select data-lvl="${lvl}" data-key="complexity" class="level-bank-input" title="Meanings/analysis complexity for AI generation">
+                    <select data-lvl="${lvl}" data-key="complexity" class="level-bank-input" title="${app.escapeHtml(admin.levelBankColumnHelp.aiDepth)}">
                         <option value="very simple" ${entry.complexity==="very simple"?"selected":""}>Very simple</option>
                         <option value="simple" ${entry.complexity==="simple"?"selected":""}>Simple</option>
                         <option value="medium" ${entry.complexity==="medium"?"selected":""}>Medium</option>
@@ -32483,22 +32515,24 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         const c2LiveHint = showC2Col && !dual
             ? `<p style="font-size:0.8rem; opacity:0.8; margin:0 0 10px 0; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--card);">C2 texts controls are ready. <strong>Load both passages</strong> (21st + 19th) in the Component 2 layout or pooled source, then these dropdowns unlock and apply in the student view.</p>`
             : "";
+        const colHelp = admin.levelBankColumnHelp || {};
         wrap.innerHTML = `
             <div class="level-bank-rows-wrap">
                 ${c2LiveHint}
-                <div class="level-bank-header" style="opacity:0.82; margin-bottom:6px;">
+                <p class="level-bank-col-legend">Hover dotted column titles for what each control affects.</p>
+                <div class="level-bank-header" style="opacity:0.88; margin-bottom:6px;">
                     <div title="Lesson level (L1–L10)">Lvl</div>
-                    <div title="Language tier for this level">Lang</div>
-                    <div title="Meanings/analysis complexity for AI generation">Complex</div>
-                    <div title="Total marks for this level's question. Leave empty to use Quotes for the student goal.">Pts</div>
-                    <div title="Good quotes per session (Quote bank + student flow)">Quo</div>
-                    <div title="Wrong-option quotes for quote MC">Bad</div>
-                    <div title="Short answers: highlight straight to answer, no Writing Desk">Short</div>
-                    <div title="Tap: highlight in source. Off: staged quote bank (devices + justify)">Tap</div>
-                    ${showLineWindowPreview ? '<div title="excerpt = line window; every # = all margin line numbers on full passage; affirm = confirm drill.">Exam</div>' : ""}
-                    ${showC2Col ? '<div title="21st / 19th / both per level (Component 2)">C2</div>' : ""}
-                    <div title="Long-mark (levels of response)">LoR</div>
-                    <div title="Focus question id — open list for full wording">Q</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.wording || "")}">Stud. wording</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.aiDepth || "")}">AI depth</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.pts || "")}">Pts</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.quo || "")}">Quo</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.bad || "")}">Bad</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.short || "")}">Short</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.tap || "")}">Tap</div>
+                    ${showLineWindowPreview ? `<div class="level-bank-col-help" title="${app.escapeHtml(colHelp.exam || "")}">Exam</div>` : ""}
+                    ${showC2Col ? `<div class="level-bank-col-help" title="${app.escapeHtml(colHelp.c2 || "")}">C2</div>` : ""}
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.lor || "")}">LoR</div>
+                    <div class="level-bank-col-help" title="${app.escapeHtml(colHelp.q || "")}">Q</div>
                 </div>
                 ${rows.join("")}
             </div>
@@ -32517,6 +32551,18 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         `;
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         if(pvLvl) pvLvl.value = String(Math.min(ARCHITECT_MAX_LEVEL, Math.max(1, parseInt(userState.level, 10) || 1)));
+        wrap.querySelectorAll(".level-bank-question-select").forEach((sel) => admin.refreshLevelBankQuestionSelectLabels(sel));
+        if(!wrap.dataset.levelBankQSelectFocusBound) {
+            wrap.dataset.levelBankQSelectFocusBound = "1";
+            wrap.addEventListener("focusin", function(ev) {
+                const sel = ev.target && ev.target.closest && ev.target.closest(".level-bank-question-select");
+                if(sel) admin.expandLevelBankQuestionSelectLabels(sel);
+            });
+            wrap.addEventListener("focusout", function(ev) {
+                const sel = ev.target && ev.target.closest && ev.target.closest(".level-bank-question-select");
+                if(sel) admin.refreshLevelBankQuestionSelectLabels(sel);
+            });
+        }
         if(!wrap.dataset.levelBankDelegated) {
             wrap.dataset.levelBankDelegated = "1";
             wrap.addEventListener("change", function(ev) {
