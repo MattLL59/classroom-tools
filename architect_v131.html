@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T21:15:00">
+<meta name="architect-build" content="2026-06-01T21:45:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
 <meta name="architect-rev" content="level-bank-q1-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -1594,7 +1594,7 @@
                     </details>
                     <details class="admin-console-pane">
                         <summary>💬 Quote bank</summary>
-                        <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Add or edit <strong>good quotes</strong> here. Each row has <strong>Distractors</strong> — plausible <em>wrong quotations</em> from the passage for quote multiple choice (students distinguish the strong quote from near-misses). Set how many per good quote in <strong>Level Bank → Dist</strong> (default 2). Use <strong>Copy AI prompt for distractors</strong> on each row to draft lines. For wrong <em>explanations</em> about the <em>same</em> quote (worksheet / justify), use <strong>Distractor points</strong>.</div>
+                        <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Add or edit <strong>good quotes</strong> here. <strong>Wrong quotations</strong> must be <em>verbatim lines from the passage</em> (for the quote-choice grid). <strong>Wrong explanations</strong> are analysis phrases about the same quote (e.g. &quot;Shows he is too old…&quot;) — not passage text. Set how many wrong quotations per good quote in <strong>Level Bank → Dist</strong> (default 2).</div>
                         <div style="font-size:0.78rem; opacity:0.88; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(33,150,243,0.06); line-height:1.45;"><strong>Hybrid workflow (shorter AI):</strong> (1) Import past paper and run <strong>Extract text</strong> (includes <strong>mark scheme</strong> PDF) so indicative bullets are in the lesson. (2) <strong>Suggest quotes from mark scheme</strong> — local match of bullets to the passage (no AI). Use <strong>Fill empty answer passages from mark scheme</strong> (or each row’s <strong>Fill from mark scheme</strong>) to paste those matches into focus questions for the student “right part” check. (3) AI tab → <strong>Compact enrich prompt</strong> — small prompt with questions + bullets + your quotes only; merge JSON to fill meanings, <code>modelAnswer</code>, and wrong-quote fields (<code>distractors</code> in JSON). Full unified prompt is optional if you need the model to invent every quote.</div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
                             <button type="button" class="btn btn-primary btn-small" onclick="admin.suggestQuotesFromMarkScheme()" title="Match mark scheme indicative points to sentences in the source text (local — no AI)">Suggest quotes from mark scheme</button>
@@ -2564,18 +2564,67 @@ const app = {
             let host = good.find(g => sharesLevel(g, lvl));
             if(!host) host = good[0];
             if(!host) return;
-            if(!Array.isArray(host.distractors)) host.distractors = [];
-            const key = app.quoteKey(quote);
-            if(host.distractors.some(d => d && app.quoteKey(d.quote) === key)) return;
+            const src = (app.getSourceText && app.getSourceText()) || appData.sourceText || "";
             const reason = (typeof b.dismissPhrase === "string" && b.dismissPhrase.trim())
                 ? b.dismissPhrase.trim()
                 : "Weaker or irrelevant evidence for this question.";
-            host.distractors.push({ quote: quote, reason: reason });
+            if(quote && app.quoteInSource && app.quoteInSource(quote, src)) {
+                if(!Array.isArray(host.distractors)) host.distractors = [];
+                const key = app.quoteKey(quote);
+                if(!host.distractors.some(d => d && app.quoteKey(d.quote) === key)) {
+                    host.distractors.push({ quote: quote, reason: reason });
+                }
+            } else {
+                if(!Array.isArray(host.distractorPoints)) host.distractorPoints = [];
+                if(quote && !host.distractorPoints.includes(quote)) host.distractorPoints.push(quote);
+            }
         });
         for(let i = items.length - 1; i >= 0; i--) {
             if(items[i] && items[i].correct === false) items.splice(i, 1);
         }
         return true;
+    },
+    /** Keep only verbatim passage lines in item.distractors; move analysis phrases to distractorPoints. */
+    sanitizeQuotationDistractors: function(item, sourceText) {
+        if(!item) return false;
+        let src = sourceText;
+        if(src == null || !String(src).trim()) {
+            try { src = (app.getSourceText && app.getSourceText()) || ""; } catch(e) { src = ""; }
+        }
+        if(!String(src).trim()) src = (appData && appData.sourceText) || "";
+        if(!Array.isArray(item.distractors)) item.distractors = [];
+        if(!Array.isArray(item.distractorPoints)) item.distractorPoints = [];
+        const inSource = (line) => line && app.quoteInSource && app.quoteInSource(line, src);
+        const looksLikeExplanation = (line) => /^(shows|implies|suggests|indicates|demonstrates|reveals|highlights|emphasises|emphasizes|conveys|creates|presents)\b/i.test(String(line || "").trim());
+        const pointSet = new Set(item.distractorPoints.map(s => String(s || "").trim()).filter(Boolean));
+        const kept = [];
+        let changed = false;
+        item.distractors.forEach(d => {
+            const line = String((d && d.quote) || d || "").trim();
+            if(!line) return;
+            if(inSource(line) && !looksLikeExplanation(line)) {
+                kept.push(typeof d === "object" && d && d.quote ? d : { quote: line, reason: (d && d.reason) || "" });
+            } else {
+                if(!pointSet.has(line)) {
+                    item.distractorPoints.push(line);
+                    pointSet.add(line);
+                }
+                changed = true;
+            }
+        });
+        if(changed || kept.length !== item.distractors.length) {
+            item.distractors = kept;
+            return true;
+        }
+        return false;
+    },
+    sanitizeAllQuotationDistractors: function(items, sourceText) {
+        if(!Array.isArray(items)) return false;
+        let any = false;
+        items.forEach(it => {
+            if(it && app.sanitizeQuotationDistractors(it, sourceText)) any = true;
+        });
+        return any;
     },
     countQuoteBankGoodForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
@@ -16068,9 +16117,8 @@ const app = {
             const reasons = Array.isArray(item.reasons) ? item.reasons.filter(v => typeof v === 'string' && v.trim()) : (effect ? [String(effect).trim()] : []);
             const rawDist = Array.isArray(item.distractors) ? item.distractors : [];
             let distractors = rawDist.map(d => typeof d === 'string' ? { quote: d, reason: '' } : { quote: (d && d.quote) || '', reason: '' }).filter(d => d.quote);
-            if(!distractors.length && Array.isArray(item.effectDistractors)) distractors = item.effectDistractors.filter(v => typeof v === 'string' && v.trim()).map(v => ({ quote: v, reason: '' }));
             const modelAnswer = typeof item.modelAnswer === "string" ? item.modelAnswer : "";
-            return {
+            const out = {
                 id: typeof item.id === 'string' ? item.id : `q${idx + 1}`,
                 original: origStr,
                 quote: origStr,
@@ -16091,6 +16139,8 @@ const app = {
                 deviceReason: typeof item.deviceReason === 'string' ? item.deviceReason.trim() : (effect || ''),
                 modelAnswer: modelAnswer
             };
+            app.sanitizeQuotationDistractors(out, safe.sourceText);
+            return out;
         });
         const isPlaceholderQuoteText = (s) => {
             const raw = String(s || "").trim();
@@ -16166,6 +16216,9 @@ const app = {
             });
         }
         if(app.migrateBadQuotesToDistractors(safe.items)) {
+            safe.selection.items = safe.items;
+        }
+        if(app.sanitizeAllQuotationDistractors(safe.items, safe.sourceText)) {
             safe.selection.items = safe.items;
         }
         safe.selection = app.repairSelection(safe.selection, { activeLevels: safe.settings.activeLevels, lessonItems: safe.items, lessonSourceText: safe.sourceText });
@@ -28473,6 +28526,10 @@ const admin = {
             app.save({ skipRender: true, silent: true });
         }
         const sourceText = app.getSourceText ? app.getSourceText() : ((appData.selection && appData.selection.text && appData.selection.text.source) ? appData.selection.text.source : (appData.sourceText || ""));
+        if(app.sanitizeAllQuotationDistractors(items, sourceText)) {
+            appData.selection.items = appData.items;
+            app.save({ skipRender: true, silent: true });
+        }
         const examLink = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
         const bankLvl = app.getQuotesBankViewLevel ? app.getQuotesBankViewLevel() : 1;
         let indexed = items.map((item, idx) => ({ item, idx })).filter(x => x.item && x.item.correct !== false);
@@ -28533,12 +28590,12 @@ const admin = {
                     <div class="input-group"><label>Point</label><textarea onchange="admin.updateQuoteItem(${idx}, 'reasons', this.value)" style="height:42px;" placeholder="One line">${app.escapeHtml(reasons)}</textarea></div>
                     ${levelRow}
                     ${!examLink ? `<div class="input-group"><label>Focus question (optional)</label><select onchange="admin.setQuoteItemQuestionId(${idx}, this.value)">${questionOptionsForQuote(item)}</select></div>` : ""}
-                    <details style="margin-top:6px;"><summary style="font-size:0.82rem; cursor:pointer;">More options (device, worksheet, distractors, evidence)</summary>
+                    <details style="margin-top:6px;"><summary style="font-size:0.82rem; cursor:pointer;">More options (device, worksheet, wrong quotations, evidence)</summary>
                         <div class="input-group"><label>Device</label><select onchange="admin.updateQuoteItem(${idx}, 'device', this.value)"><option value="language" ${(item.device || item.type) === "language" ? "selected" : ""}>Language</option><option value="tone" ${(item.device || item.type) === "tone" ? "selected" : ""}>Tone</option><option value="structure" ${(item.device || item.type) === "structure" ? "selected" : ""}>Structure</option></select></div>
                         <div class="input-group"><label>Worksheet</label><label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;"><input type="checkbox" ${item.includeInWorksheet === true ? "checked" : ""} onchange="admin.updateQuoteItem(${idx}, 'includeInWorksheet', this.checked)"> Include on export</label></div>
-                        <div class="input-group"><label>Distractor points</label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractorPoints', this.value)" style="height:40px;">${app.escapeHtml((Array.isArray(item.distractorPoints) ? item.distractorPoints.join("\n") : ""))}</textarea></div>
-                        <div class="input-group"><label>Distractors</label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:50px;" placeholder="Plausible wrong quotations (one per line)">${app.escapeHtml(distractors)}</textarea>
-                        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForWrongQuotes(${idx})">Copy AI prompt for distractors</button></div></div>
+                        <div class="input-group"><label>Wrong explanations</label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractorPoints', this.value)" style="height:40px;">${app.escapeHtml((Array.isArray(item.distractorPoints) ? item.distractorPoints.join("\n") : ""))}</textarea></div>
+                        <div class="input-group"><label>Wrong quotations</label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:50px;" placeholder="Verbatim lines from the passage (one per line)">${app.escapeHtml(distractors)}</textarea>
+                        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForWrongQuotes(${idx})">Copy AI prompt for wrong quotations</button></div></div>
                         <div class="input-group"><label>Translation</label><input value="${app.escapeHtml(item.translation || "")}" onchange="admin.updateQuoteItem(${idx}, 'translation', this.value)"></div>
                         <div class="input-group"><label>Effect</label><input value="${app.escapeHtml(item.effect || "")}" onchange="admin.updateQuoteItem(${idx}, 'effect', this.value)"></div>
                     </details>
@@ -28551,10 +28608,10 @@ const admin = {
                     <div class="input-group"><label>Quote</label><input value="${app.escapeHtml(app.stripLineNumbersFromQuote(quote))}" onchange="admin.updateQuoteItem(${idx}, 'quote', this.value)"></div>
                     ${inSource ? "" : `<div style="font-size:0.8rem; color:var(--error); margin-bottom:6px;">Not found in passage — check spelling or formatting.</div>`}
                     <div class="input-group"><label>Good reasons</label><textarea onchange="admin.updateQuoteItem(${idx}, 'reasons', this.value)" style="height:50px;" placeholder="One per line">${app.escapeHtml(reasons)}</textarea></div>
-                    <div class="input-group"><label>Distractors <span style="font-weight:400; opacity:0.75;">(plausible <em>wrong quotations</em> for quote MC — students pick the strong quote vs these)</span></label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:70px;" placeholder="One per line: verbatim quotation from the passage. Set count in Level Bank → Dist (e.g. 2 per good quote).">${app.escapeHtml(distractors)}</textarea>
-                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForWrongQuotes(${idx})" title="Copies a prompt with the full passage so the AI suggests plausible wrong quotations">Copy AI prompt for distractors</button></div></div>
-                    <div class="input-group"><label>Distractor points <span style="font-weight:400; opacity:0.75;">(wrong-but-plausible <em>explanations</em> for this same quote — justify / worksheet, not quote MC)</span></label><textarea id="quote-distractor-points-${idx}" onchange="admin.updateQuoteItem(${idx}, 'distractorPoints', this.value)" style="height:50px;" placeholder="One per line: flawed analysis a student might offer.">${app.escapeHtml((Array.isArray(item.distractorPoints) ? item.distractorPoints.join("\n") : ""))}</textarea>
-                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForDistractorReasons(${idx})" title="Copies a prompt for wrong explanations about this quotation (paste into ChatGPT / Copilot)">Copy AI prompt for distractor points</button></div></div>
+                    <div class="input-group"><label>Wrong quotations <span style="font-weight:400; opacity:0.75;">(verbatim lines from the passage only — for the quote-choice grid)</span></label><textarea onchange="admin.updateQuoteItem(${idx}, 'distractors', this.value)" style="height:70px;" placeholder="One per line: copy exact words from the passage. Not explanations like &quot;Shows he is…&quot; — those go in Wrong explanations below.">${app.escapeHtml(distractors)}</textarea>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForWrongQuotes(${idx})" title="Copies a prompt with the full passage so the AI suggests plausible wrong quotations">Copy AI prompt for wrong quotations</button></div></div>
+                    <div class="input-group"><label>Wrong explanations <span style="font-weight:400; opacity:0.75;">(about this same quote — justify step / worksheet; e.g. &quot;Shows he is too old to work&quot;)</span></label><textarea id="quote-distractor-points-${idx}" onchange="admin.updateQuoteItem(${idx}, 'distractorPoints', this.value)" style="height:50px;" placeholder="One per line: flawed analysis a student might offer.">${app.escapeHtml((Array.isArray(item.distractorPoints) ? item.distractorPoints.join("\n") : ""))}</textarea>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyAiPromptForDistractorReasons(${idx})" title="Copies a prompt for wrong explanations about this quotation (paste into ChatGPT / Copilot)">Copy AI prompt for wrong explanations</button></div></div>
                     ${levelRow}
                     ${!examLink ? `<div class="input-group"><label>Focus question (optional)</label><select onchange="admin.setQuoteItemQuestionId(${idx}, this.value)">${questionOptionsForQuote(item)}</select></div>` : ""}
                     <div class="input-group"><label>Device</label><select onchange="admin.updateQuoteItem(${idx}, 'device', this.value)">
@@ -28578,7 +28635,7 @@ const admin = {
             : `Quotes (${quoteList.length})`;
         const quoteSection = quoteList.length
             ? `<div><div class="admin-h" style="margin-bottom:8px;">${listHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${quoteRender.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>`
-            : (examEmptyHint || "<div style='opacity:0.7;'>No quotes yet. Use + Add quote — attach plausible wrong quotations under <strong>Distractors</strong> on each row.</div>");
+            : (examEmptyHint || "<div style='opacity:0.7;'>No quotes yet. Use + Add quote — attach plausible wrong quotations under <strong>Wrong quotations</strong> on each row.</div>");
         wrap.innerHTML = capNote + quoteSection;
         } catch(eQb) {
             console.error("Quote bank render failed:", eQb);
@@ -28794,7 +28851,7 @@ const admin = {
         if(prepared > 0) {
             admin.autoFillDistractors();
             admin.autoAssignSelectionLevels(false);
-            alert(`Prepared ${prepared} item(s) for Quote Selection. Distractors and levels were auto-filled.`);
+            alert(`Prepared ${prepared} item(s) for Quote Selection. Wrong quotations and levels were auto-filled.`);
         } else alert("All items already have reasons and correct set. Nothing to prepare.");
     },
     saveStateBeforeQuoteBankPrepare: function() {
@@ -28925,6 +28982,7 @@ const admin = {
                 const quote = (pipe >= 0 ? line.slice(0, pipe) : line).trim();
                 return { id: "sd" + (idx+1) + "_" + (i+1), quote, reason: "" };
             }).filter(d => d.quote);
+            if(app.sanitizeQuotationDistractors(item)) admin.renderQuotesBank();
         } else if(key === "distractorPoints") {
             item.distractorPoints = String(value || "").split(/\n+/).map(v => v.trim()).filter(Boolean);
         } else if(key === "dismissPhrase") { item.dismissPhrase = String(value || "").trim(); admin.renderQuotesBank(); }
@@ -30900,7 +30958,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                 missing.push("At least 1 correct quote is required.");
             }
             if(distractorCount < 2) {
-                missing.push("Provide at least 2 distractor quotations on good-quote rows (Distractors field).");
+                missing.push("Provide at least 2 wrong quotations on good-quote rows (Wrong quotations field).");
             }
             if(missing.length) {
                 return alert("Selection JSON has missing fields:\n" + missing.slice(0, 10).join("\n"));
@@ -31562,9 +31620,9 @@ No "TBD" or placeholders. Valid JSON array only.`;
         admin.renderSelectionEditor();
         ui.renderSelection();
         if(filled > 0) {
-            alert(`Added ${filled} distractor quotation(s) to good-quote rows. Use Copy AI prompt for distractors on each row for more. For wrong *explanations* about the same quote, use Distractor points.`);
+            alert(`Added ${filled} wrong quotation(s) to good-quote rows. Use Copy AI prompt for wrong quotations on each row for more. For wrong *explanations* about the same quote, use Wrong explanations.`);
         } else {
-            alert("No distractors added. Add good quotes on other questions for the same level, lower Dist in Level Bank, or use Copy AI prompt for distractors on each row.");
+            alert("No wrong quotations added. Add good quotes on other questions for the same level, lower Dist in Level Bank, or use Copy AI prompt for wrong quotations on each row.");
         }
     },
     /** Copies a prompt for ChatGPT/Copilot etc. to generate lines for Distractor points (wrong explanations for THIS quotation — not alternate quotations). */
@@ -31614,9 +31672,9 @@ TASK: Write exactly ${nWant} lines. Each line = ONE short flawed explanation (ma
 
 REMINDER BEFORE YOU WRITE: Each line must contradict the gold tone or miss the easing-in idea — no extra correct analysis.
 
-OUTPUT: ${nWant} lines only, ONE PER LINE, plain text, no bullets, no quote marks around whole lines. I paste into "Distractor points".`;
+OUTPUT: ${nWant} lines only, ONE PER LINE, plain text, no bullets, no quote marks around whole lines. I paste into "Wrong explanations".`;
         const finish = (ok) => {
-            if(ok) admin.flashBrief("Prompt copied — paste into your AI, then paste lines into Distractor points.");
+            if(ok) admin.flashBrief("Prompt copied — paste into your AI, then paste lines into Wrong explanations.");
             else alert("Could not copy automatically. The prompt was logged to the browser console (F12).");
         };
         if(navigator.clipboard && navigator.clipboard.writeText) {
@@ -31716,14 +31774,15 @@ TASK:
 Output exactly ${nWant} lines. Each line must be ONE verbatim weak quotation copied from the passage (same words and punctuation as in the passage; trim only outer spaces). No reasons, no "||", no commentary — students only choose between quotation texts in multiple choice.
 
 RULES:
-1. Each verbatim quote must appear exactly once as a contiguous substring in the passage block above.
+1. Each line must appear exactly once as a contiguous substring in the passage block above (same words and punctuation).
 2. Do NOT output the strong quote. Do NOT repeat any quote listed under "Already listed".
-3. Prefer near-misses: tempting to a weak student, but clearly worse for THIS question than the strong quote.
-4. Plain text only: one quotation per line, no numbering or bullet characters at the start of lines.
+3. FORBIDDEN: analysis or commentary (e.g. "Shows he is too old", "Implies he relies on others") — those are explanations, not quotations. Every line must be copy-pasteable from the passage.
+4. Prefer near-misses: tempting to a weak student, but clearly weaker evidence for THIS question than the strong quote.
+5. Plain text only: one quotation per line, no numbering or bullet characters at the start of lines.
 
-OUTPUT: ${nWant} lines only (quotations only).`;
+OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const finish = (ok) => {
-            if(ok) admin.flashBrief("Distractor prompt copied — paste into your AI, then paste lines into Distractors on this row.");
+            if(ok) admin.flashBrief("Wrong-quotations prompt copied — paste into your AI, then paste lines into Wrong quotations on this row.");
             else alert("Could not copy automatically. The prompt was logged to the browser console (F12).");
         };
         if(navigator.clipboard && navigator.clipboard.writeText) {
@@ -32301,7 +32360,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
         aiDepth: "AI depth — how sophisticated meanings and analysis should be when AI builds or refreshes quote-bank content. Applies to: Load & AI generate prompts, quote translations, modelAnswer lines, device reasons, and worksheet rubric chips in imported JSON. Does not change live student wording — use Student wording for that.",
         pts: "Exam marks target for this level (overrides [n] in the question when set). Leave empty to use Quotes for the session goal.",
         quo: "Good quotes students should find this level (Quote bank + Quote Select when Points is empty).",
-        dist: "Distractors per good quote — plausible wrong quotations for quote MC (e.g. 2 = one strong quote + two near-miss options).",
+        dist: "Wrong quotations per good quote for quote MC (e.g. 2 = one strong quote + two near-miss options).",
         short: "Highlight → straight to answer; skips Writing Desk / Sentence Builder.",
         tap: "On: highlight passage to pick quotes. Off: staged quote bank (devices + justify).",
         lor: "Long-mark levels-of-response: desk shows scheme overlap; quote tally is not the exam mark.",
@@ -32450,7 +32509,7 @@ OUTPUT: ${nWant} lines only (quotations only).`;
                     </select>
                     <input type="number" min="1" max="30" value="${entry.pointsRequired || entry.answersRequired || ""}" data-lvl="${lvl}" data-key="pointsRequired" class="level-bank-input level-bank-num-input" placeholder="—" title="Total marks for this level's question (e.g. whole Q1 including a/b/c if they share one lesson question). Overrides counts parsed from the prompt. Leave empty to use Level Bank Quotes for the student session goal.">
                     <input type="number" min="1" max="12" value="${entry.quoteTarget != null ? entry.quoteTarget : 4}" data-lvl="${lvl}" data-key="quoteTarget" class="level-bank-input level-bank-num-input" title="Good quotes per session for this level (Quote bank + Quote Select when Points is empty).">
-                    <input type="number" min="0" max="8" value="${entry.distractorCount != null ? entry.distractorCount : 2}" data-lvl="${lvl}" data-key="distractorCount" class="level-bank-input level-bank-num-input" title="Distractors per good quote for quote multiple choice on this level (e.g. 2).">
+                    <input type="number" min="0" max="8" value="${entry.distractorCount != null ? entry.distractorCount : 2}" data-lvl="${lvl}" data-key="distractorCount" class="level-bank-input level-bank-num-input" title="Wrong quotations per good quote for quote multiple choice on this level (e.g. 2).">
                     <div class="level-bank-cb-cell${shortAnsMutexOff ? " level-bank-cb-mutex-off" : ""}" title="${app.escapeHtml(shortAnsMutexTitle)}">
                         <label><input type="checkbox" data-lvl="${lvl}" data-key="shortAnswersOnly" ${entry.shortAnswersOnly ? "checked" : ""}${shortAnsMutexOff ? " disabled" : ""}> Short ans</label>
                     </div>
