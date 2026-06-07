@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T22:45:00">
+<meta name="architect-build" content="2026-06-01T23:00:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
 <meta name="architect-rev" content="level-bank-q1-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -1593,10 +1593,11 @@
                     <details class="admin-console-pane">
                         <summary>💬 Quote bank</summary>
                         <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Add or edit <strong>good quotes</strong> here. Tick <strong>Include on worksheet</strong> to add a row to the Word sheet and the student <strong>Worksheet practice</strong> game. <strong>Wrong quotations</strong> = verbatim passage lines (quote-choice round). <strong>Wrong explanations</strong> = flawed analysis about the same quote (justify round). Set wrong-quotation count in <strong>Level Bank → Dist</strong> (default 2).</div>
-                        <div style="font-size:0.78rem; opacity:0.88; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(33,150,243,0.06); line-height:1.45;"><strong>Hybrid workflow (shorter AI):</strong> (1) Import past paper and run <strong>Extract text</strong> (includes <strong>mark scheme</strong> PDF) so indicative bullets are in the lesson. (2) <strong>Suggest quotes from mark scheme</strong> — local match of bullets to the passage (no AI). Use <strong>Fill empty answer passages from mark scheme</strong> (or each row’s <strong>Fill from mark scheme</strong>) to paste those matches into focus questions for the student “right part” check. (3) AI tab → <strong>Compact enrich prompt</strong> — small prompt with questions + bullets + your quotes only; merge JSON to fill meanings, <code>modelAnswer</code>, and wrong-quote fields (<code>distractors</code> in JSON). Full unified prompt is optional if you need the model to invent every quote.</div>
+                        <div style="font-size:0.78rem; opacity:0.88; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(33,150,243,0.06); line-height:1.45;"><strong>Hybrid workflow (shorter AI):</strong> (1) Import past paper and run <strong>Extract text</strong> (mark scheme PDF). (2) <strong>Fill from mark scheme</strong> — <strong>1-mark</strong> parts → short answers on focus rows + linked quote rows; <strong>4+ mark</strong> parts → suggest passage quotes into the bank (local match, no AI). (3) AI tab → <strong>Compact enrich prompt</strong> for meanings, <code>modelAnswer</code>, wrong quotations.</div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
-                            <button type="button" class="btn btn-primary btn-small" onclick="admin.suggestQuotesFromMarkScheme()" title="Match mark scheme indicative points to sentences in the source text (local — no AI)">Suggest quotes from mark scheme</button>
-                            <span style="font-size:0.78rem; opacity:0.8;">Needs extracted mark scheme + source text. Skips quotes already in the bank.</span>
+                            <button type="button" class="btn btn-primary btn-small" onclick="admin.fillFromMarkSchemeByQuestionType()" title="1-mark questions: fill short answers from indicative bullets. 4+ mark questions: suggest verbatim quotes from the passage.">Fill from mark scheme</button>
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.suggestQuotesFromMarkScheme()" title="Suggest quotes only (skips 1–2 mark retrieval parts)">Suggest quotes only</button>
+                            <span style="font-size:0.78rem; opacity:0.8;">Needs extracted mark scheme + source text. Uses [n] marks / mark scheme per question.</span>
                         </div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.suggestAnswerPassagesFromMarkScheme({ onlyEmpty: true })" title="For each focus question, paste passage sentences that match that part’s mark scheme bullets into the Answer passage field (only rows that are still empty)">Fill empty answer passages from mark scheme</button>
@@ -3426,6 +3427,45 @@ const app = {
         const numM = rawQ.match(/(\d+)/);
         const n = numM ? parseInt(numM[1], 10) : 1;
         return ms[rawQ] || ms["q" + n] || ms["q" + String(n).padStart(2, "0")] || ms["0" + n] || (numM ? ms["q" + numM[1]] : null) || null;
+    },
+    getExamMarksForQuestionId: function(questionId) {
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const normQid = function(id) { return String(id || "").replace(/^q0?/i, "q").toLowerCase(); };
+        const q = questions.find(function(qq) { return qq && normQid(qq.id) === normQid(questionId); });
+        if(q && typeof q.marks === "number" && q.marks >= 1) return Math.min(100, q.marks);
+        const prompt = (q && q.prompt) || "";
+        const fromPrompt = app.parseExamMarksFromQuestion ? app.parseExamMarksFromQuestion(prompt) : null;
+        if(fromPrompt != null && fromPrompt >= 1) return Math.min(100, fromPrompt);
+        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
+        if(ent && ent.maxMarks != null) {
+            const m = parseInt(ent.maxMarks, 10);
+            if(m >= 1) return Math.min(100, m);
+        }
+        return null;
+    },
+    questionUsesRetrievalAnswersFromMarkScheme: function(questionId) {
+        const m = app.getExamMarksForQuestionId(questionId);
+        if(m != null) return m <= 2;
+        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
+        if(ent && ent.maxMarks != null) return parseInt(ent.maxMarks, 10) <= 2;
+        return false;
+    },
+    questionUsesQuoteSuggestFromMarkScheme: function(questionId) {
+        const m = app.getExamMarksForQuestionId(questionId);
+        if(m != null) return m >= 4;
+        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
+        if(ent && ent.maxMarks != null) return parseInt(ent.maxMarks, 10) >= 4;
+        return false;
+    },
+    pickOwnWordsBulletsFromMarkScheme: function(questionId) {
+        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
+        if(!ent || !Array.isArray(ent.indicativeContent)) return [];
+        return ent.indicativeContent
+            .map(b => String(b == null ? "" : b).replace(/\s+/g, " ").trim())
+            .filter(b => b.length >= 4 && b.length <= 220)
+            .filter(b => !(app.isMarkSchemeNoiseLine && app.isMarkSchemeNoiseLine(b)))
+            .filter((s, i, a) => a.indexOf(s) === i)
+            .slice(0, 12);
     },
     /** Marks available for the current question: Level Bank Points first, then JSON .marks, [n] in prompt (last bracket wins), mark scheme, LoR. When known, header shows marks instead of XP. */
     getMarksAvailableForLevelQuestion: function(level) {
@@ -28848,6 +28888,104 @@ const admin = {
         admin.refreshQuestionsList();
         alert(n ? `Updated answer passage on ${n} focus question(s). Review and trim each box in Editing Suite as needed.` : (onlyEmpty ? "Nothing to add — either every row already has an answer passage, or no mark-scheme bullets matched the source." : "No mark-scheme matches found for any question."));
     },
+    fillFromMarkSchemeByQuestionType: function() {
+        admin.ensureSelectionData();
+        const ms = admin.ensureMarkSchemeParsedFromLayout();
+        if(!ms || !Object.keys(ms).length) return alert("Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text.");
+        const sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
+        if(!String(sourceText).trim()) return alert("Add source text (resource passage) first.");
+        const levelBank = app.getLevelBank();
+        const activeLevels = app.getActiveLevels();
+        const existingKeys = new Set((appData.items || []).map(i => app.quoteKey(i.original || i.quote || "")));
+        const normQ = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const levelForQuestionId = (qid) => {
+            for(let li = 0; li < activeLevels.length; li++) {
+                const lvl = activeLevels[li];
+                const ent = levelBank[lvl];
+                const ids = ent && Array.isArray(ent.questionIds) ? ent.questionIds : [];
+                if(ids.some(id => normQ(id) === normQ(qid))) return lvl;
+            }
+            const idx = questions.findIndex(q => q && normQ(q.id) === normQ(qid));
+            if(idx >= 0 && activeLevels[idx] != null) return activeLevels[idx];
+            return activeLevels[0] || 1;
+        };
+        let answersFilled = 0;
+        let quotesAdded = 0;
+        let skippedNoBullets = 0;
+        questions.forEach((q) => {
+            if(!q || !q.id) return;
+            const qId = q.id;
+            const qLab = app.worksheetQuestionHeadingLabel ? app.worksheetQuestionHeadingLabel(qId) : String(qId);
+            if(app.questionUsesRetrievalAnswersFromMarkScheme(qId)) {
+                const bullets = app.pickOwnWordsBulletsFromMarkScheme(qId);
+                if(!bullets.length) { skippedNoBullets++; return; }
+                const model = bullets[0].slice(0, 220);
+                q.worksheetInferenceModel = model;
+                const dists = bullets.slice(1, 5).filter(b => b !== model).map(b => b.slice(0, 160));
+                if(dists.length) q.worksheetInferenceDistractors = dists;
+                answersFilled++;
+                const lvl = levelForQuestionId(qId);
+                (appData.items || []).forEach(item => {
+                    if(!item || item.correct === false) return;
+                    const iqs = Array.isArray(item.questionIds) ? item.questionIds : [];
+                    const linked = iqs.length ? iqs.some(id => normQ(id) === normQ(qId)) : false;
+                    const ilv = Array.isArray(item.levels) ? item.levels : [];
+                    if(!linked && !ilv.includes(lvl)) return;
+                    if(!Array.isArray(item.reasons) || !item.reasons.length) {
+                        item.reasons = bullets.slice(0, Math.min(3, bullets.length)).map(s => s.slice(0, 200));
+                    }
+                    if(!String(item.effect || "").trim() && bullets[0]) item.effect = bullets[0].slice(0, 200);
+                });
+            } else if(app.questionUsesQuoteSuggestFromMarkScheme(qId)) {
+                const lvl = levelForQuestionId(qId);
+                const prompt = typeof q.prompt === "string" ? q.prompt : "";
+                const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
+                const lineRange = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(prompt)) || null);
+                const candidates = app.findQuoteCandidatesFromMarkScheme(qId, sourceText, ms, lineRange, lvl);
+                for(const c of candidates) {
+                    const key = app.quoteKey(c.quote);
+                    if(existingKeys.has(key)) continue;
+                    existingKeys.add(key);
+                    appData.items.push({
+                        id: "q" + Date.now() + "_" + quotesAdded,
+                        original: c.quote,
+                        quote: c.quote,
+                        translation: "",
+                        translationDistractors: [],
+                        type: "language",
+                        effect: c.reason,
+                        effectDistractors: [],
+                        levels: [lvl],
+                        includeInWorksheet: false,
+                        correct: true,
+                        reasons: [c.reason],
+                        distractors: [],
+                        questionIds: [normQ(qId)],
+                        device: "language",
+                        deviceReason: c.reason
+                    });
+                    quotesAdded++;
+                }
+            }
+        });
+        appData.selection.items = appData.items;
+        app.save();
+        if(quotesAdded > 0 && admin.populateAnalysisBanksFromLessonItems) admin.populateAnalysisBanksFromLessonItems({ silent: true });
+        admin.refreshQuestionsList();
+        admin.renderQuotesBank();
+        admin.renderSelectionEditor();
+        if(ui.renderSelection) ui.renderSelection();
+        const parts = [];
+        if(answersFilled) parts.push(`${answersFilled} retrieval part(s) — short answers filled (${answersFilled === 1 ? "see Load & AI → Focus questions" : "see focus rows + linked quote rows"})`);
+        if(quotesAdded) parts.push(`${quotesAdded} quote(s) suggested for 4+ mark parts`);
+        if(!parts.length) {
+            return alert(skippedNoBullets
+                ? "No mark-scheme bullets found for 1-mark parts, and no new passage quotes matched for longer parts. Re-extract the mark scheme or check question ids / [n] marks."
+                : "Nothing new to add — answers may already be filled and quotes may already be in the bank.");
+        }
+        alert(parts.join(". ") + ". Review and edit before export.");
+    },
     suggestQuotesFromMarkScheme: () => {
         admin.ensureSelectionData();
         const ms = admin.ensureMarkSchemeParsedFromLayout();
@@ -28858,6 +28996,7 @@ const admin = {
         const activeLevels = app.getActiveLevels();
         const existingKeys = new Set((appData.items || []).map(i => app.quoteKey(i.original || i.quote || "")));
         let added = 0;
+        let skippedRetrieval = 0;
         const normQ = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const findQ = (id) => questions.find(qq => qq && normQ(qq.id) === normQ(id));
@@ -28865,6 +29004,10 @@ const admin = {
             const entry = levelBank[lvl];
             const qIds = (entry && Array.isArray(entry.questionIds) && entry.questionIds.length) ? entry.questionIds : ["q" + (idx + 1)];
             const qId = qIds[0] || "q" + (idx + 1);
+            if(app.questionUsesRetrievalAnswersFromMarkScheme && app.questionUsesRetrievalAnswersFromMarkScheme(qId)) {
+                skippedRetrieval++;
+                return;
+            }
             const q = findQ(qId);
             const prompt = q && typeof q.prompt === "string" ? q.prompt : "";
             const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
@@ -28895,14 +29038,17 @@ const admin = {
                 added += 1;
             }
         });
-        if(added === 0) return alert("No new quotes suggested. The mark scheme indicative content may not match the source text closely enough, or all matches are already in the quote bank.");
+        if(added === 0) {
+            const hint = skippedRetrieval ? " Skipped " + skippedRetrieval + " retrieval (1–2 mark) part(s) — use Fill from mark scheme for those." : "";
+            return alert("No new quotes suggested. The mark scheme indicative content may not match the source text closely enough, or all matches are already in the quote bank." + hint);
+        }
         appData.selection.items = appData.items;
         app.save();
         if(admin.populateAnalysisBanksFromLessonItems) admin.populateAnalysisBanksFromLessonItems({ silent: true });
         admin.renderQuotesBank();
         admin.renderSelectionEditor();
         ui.renderSelection();
-        alert(`Added ${added} suggested quote(s) from the mark scheme. Analysis banks were refreshed from effect lines — use AI tab → Compact enrich for meanings/modelAnswer, or edit quotes. Then run "Auto-assign levels (match targets)" if needed.`);
+        alert(`Added ${added} suggested quote(s) from the mark scheme.${skippedRetrieval ? " (" + skippedRetrieval + " retrieval part(s) skipped — use Fill from mark scheme for short answers.)" : ""}`);
     },
     /** Safety net: make lesson-only items usable for Quote Selection (set correct, reasons from effect). Use after loading lesson-only JSON. */
     prepareLessonItemsForQuoteSelection: () => {
