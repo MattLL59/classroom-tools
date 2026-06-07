@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-01T22:15:00">
+<meta name="architect-build" content="2026-06-01T22:45:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
 <meta name="architect-rev" content="level-bank-q1-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -2671,8 +2671,28 @@ const app = {
         };
     },
     normWorksheetQuestionId: function(id) {
-        const m = String(id || "").trim().toLowerCase().match(/^q(\d+)/);
-        return m ? "q" + parseInt(m[1], 10) : String(id || "").trim().toLowerCase();
+        return app.normalizeQuestionId(id);
+    },
+    /** Sort worksheet question rows to match exam paper order (appData.questions list order). */
+    orderWorksheetFocusQuestions: function(list) {
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const norm = app.normalizeQuestionId;
+        const paperIndex = (id) => {
+            const idx = questions.findIndex(q => q && norm(q.id) === norm(id));
+            if(idx >= 0) return idx;
+            const m = String(id || "").match(/q0?(\d+)([a-z]?)/i);
+            if(m) return parseInt(m[1], 10) * 100 + (m[2] ? m[2].toLowerCase().charCodeAt(0) : 0);
+            return 9999;
+        };
+        return (Array.isArray(list) ? list : []).slice().sort((a, b) => paperIndex(a.id) - paperIndex(b.id));
+    },
+    worksheetQuestionHeadingLabel: function(qOrId) {
+        const id = (qOrId && typeof qOrId === "object") ? qOrId.id : qOrId;
+        if(typeof admin !== "undefined" && admin.formatLevelBankQuestionShortId) {
+            return admin.formatLevelBankQuestionShortId(id);
+        }
+        const m = String(id || "").match(/q0?(\d+[a-z]?)/i);
+        return m ? ("Q" + m[1]) : (String(id || "").trim() || "Question");
     },
     quoteItemOnWorksheetForLevel: function(item, level) {
         if(!item || item.correct === false || item.includeInWorksheet !== true) return false;
@@ -2701,12 +2721,21 @@ const app = {
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const focusQuestions = [];
         const wsQSet = new Set();
+        questions.forEach(q => {
+            if(!q || !q.id) return;
+            const nid = normWsQid(q.id);
+            if(!qidSet.has(nid)) return;
+            wsQSet.add(nid);
+            const prompt = String(q.prompt || "").trim();
+            focusQuestions.push({
+                id: q.id,
+                prompt: prompt || String(appData.question || "").trim() || "(Set question text in Load & AI → Focus questions)"
+            });
+        });
         Array.from(qidSet).forEach((nid, i) => {
-            const full = questions.find(q => q && normWsQid(q.id) === nid);
-            const id = (full && full.id) ? full.id : (nid || ("q" + (i + 1)));
-            const prompt = full && String(full.prompt || "").trim() ? full.prompt : "";
-            wsQSet.add(normWsQid(id));
-            focusQuestions.push({ id, prompt: prompt || String(appData.question || "").trim() || "(Set question text in Load & AI → Focus questions)" });
+            if(wsQSet.has(nid)) return;
+            wsQSet.add(nid);
+            focusQuestions.push({ id: nid || ("q" + (i + 1)), prompt: "(Question text missing — edit in Load & AI → Focus questions)" });
         });
         if(!focusQuestions.length) {
             const qLeg = String(appData.question || "").trim();
@@ -28692,7 +28721,7 @@ const admin = {
                         <option value="tone" ${(item.device || item.type) === "tone" ? "selected" : ""}>Tone</option>
                         <option value="structure" ${(item.device || item.type) === "structure" ? "selected" : ""}>Structure</option>
                     </select></div>
-                    <div class="input-group"><label>Include on worksheet (Word export)</label><label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;"><input type="checkbox" ${item.includeInWorksheet === true ? "checked" : ""} onchange="admin.updateQuoteItem(${idx}, 'includeInWorksheet', this.checked)"> Tick after you have the meaning &amp; point you want on the sheet</label></div>
+                    <div class="input-group"><label>Include on worksheet</label><label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;"><input type="checkbox" ${item.includeInWorksheet === true ? "checked" : ""} onchange="admin.updateQuoteItem(${idx}, 'includeInWorksheet', this.checked)"> Word export + student practice game (quote choice → justify)</label></div>
                     <details style="margin-top:8px;"><summary style="font-size:0.85rem; cursor:pointer;">Evidence (Sentence Builder)</summary>
                         <div class="input-group"><label>Translation</label><input value="${app.escapeHtml(item.translation || "")}" onchange="admin.updateQuoteItem(${idx}, 'translation', this.value)"></div>
                         <div class="input-group"><label>Effect / Analysis</label><input value="${app.escapeHtml(item.effect || "")}" onchange="admin.updateQuoteItem(${idx}, 'effect', this.value)"></div>
@@ -33030,10 +33059,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         .ws-rubric-model{font-size:9.5pt; font-weight:600; background:#e8f4fd; border:1px solid #1565c0; padding:6px 8px; margin:0 0 4px 0; line-height:1.35;}
         </style>
         </head><body>`;
-        const normWsQid = (id) => {
-            const m = String(id || "").trim().toLowerCase().match(/^q(\d+)/);
-            return m ? "q" + parseInt(m[1], 10) : String(id || "").trim().toLowerCase();
-        };
+        const normWsQid = (id) => app.normalizeQuestionId(id);
         const readWorksheetFocusFromQuestionsUI = () => {
             const mounts = Array.from(document.querySelectorAll(".questions-list-mount")).filter(m => m && m.children.length);
             const list = mounts.find(m => document.activeElement && m.contains(document.activeElement)) || mounts[0];
@@ -33132,6 +33158,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             alert("No quotes selected for the worksheet. In Quote bank, tick Include on worksheet on each row you want (or use All good → worksheet).");
             return;
         }
+        worksheetFocusQs = app.orderWorksheetFocusQuestions(worksheetFocusQs);
         const selDevWs = appData.settings && appData.settings.selectionDevices && typeof appData.settings.selectionDevices === "object"
             ? appData.settings.selectionDevices
             : { language: true, tone: false, structure: false };
@@ -33253,14 +33280,15 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content += `<p class="tag" style="margin:0 0 4px 0;">Use your <strong>exam source booklet</strong> for the passage. Write your answers for the question(s) below.</p>`;
         const wsQclean = (p) => (app.cleanQuestionPromptForWorksheet ? app.cleanQuestionPromptForWorksheet(p) : String(p || "").trim()) || String(p || "").trim();
         if(worksheetFocusQs && worksheetFocusQs.length) {
-            worksheetFocusQs.forEach((q, qi) => {
+            worksheetFocusQs.forEach((q) => {
                 const p = String(q.prompt || "").trim();
                 if(!p) return;
-                const label = worksheetFocusQs.length > 1 ? ("Focus question " + (qi + 1)) : "Focus question";
+                const label = app.worksheetQuestionHeadingLabel(q);
                 content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.escapeHtml(label)}:</strong> ${app.escapeHtml(wsQclean(p))}</p>`;
             });
         } else if(appData.question && String(appData.question).trim()) {
-            content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>Focus question:</strong> ${app.escapeHtml(wsQclean(String(appData.question).trim()))}</p>`;
+            const label = app.worksheetQuestionHeadingLabel("q1");
+            content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.escapeHtml(label)}:</strong> ${app.escapeHtml(wsQclean(String(appData.question).trim()))}</p>`;
         }
         let worksheetInferenceKeyHtml = "";
         const keyElInf = document.getElementById("worksheet-include-answer-key");
@@ -33275,8 +33303,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 ? fq0.worksheetInferenceDistractors.map(s => String(s == null ? "" : s).trim()).filter(Boolean).slice(0, 8)
                 : [];
             const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-            content += `<h3>Short answer practice (focus Q1 — own words, not a direct quotation)</h3>`;
-            content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.92;">These lines are <strong>not</strong> copied from the passage: they model brief factual <em>points</em> that answer the first focus question. In class and in the exam you still infer from the text and write in <strong>your own words</strong> — do not lift wording from the source.</p>`;
+            const q1Lab = app.worksheetQuestionHeadingLabel(fq0.id || "q1");
+            content += `<h3>Short answer practice (${app.escapeHtml(q1Lab)} — own words, not a direct quotation)</h3>`;
+            content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.92;">These lines are <strong>not</strong> copied from the passage: they model brief factual <em>points</em> that answer <strong>${app.escapeHtml(q1Lab)}</strong>. In class and in the exam you still infer from the text and write in <strong>your own words</strong> — do not lift wording from the source.</p>`;
             if(infDists.length) {
                 const opts = shuffle([{ text: infModel, ok: true }, ...infDists.map(text => ({ text, ok: false }))]);
                 opts.forEach((opt, oi) => {
@@ -33297,7 +33326,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content += `<div class="questions-section">`;
         if(!worksheetHasQuotes) {
             content += `<h3>1. Your response <span style="font-size:8.5pt; font-weight:400; opacity:0.85;">(no suggested quotes — booklet only)</span></h3>`;
-            content += `<p style="margin:0 0 8px 0; font-size:8.5pt; opacity:0.9;">This export has <strong>no</strong> pre-chosen quotations or match tasks — use your <strong>exam source booklet</strong> and the focus question(s) above. Add quotes to the bank and tick <strong>Include on worksheet</strong> when you want the full match / rubric version.</p>`;
+            content += `<p style="margin:0 0 8px 0; font-size:8.5pt; opacity:0.9;">This export has <strong>no</strong> pre-chosen quotations or match tasks — use your <strong>exam source booklet</strong> and the question(s) above. Add quotes to the bank and tick <strong>Include on worksheet</strong> when you want the full match / rubric version.</p>`;
             content += `<div class="dotted" style="min-height:200px; line-height:1.35;">&nbsp;</div>`;
         } else {
         const matchSelect = document.getElementById("worksheet-match-mode");
@@ -33324,7 +33353,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             return perm;
         };
         content += `<h3>1. Match each quote to its meaning</h3>`;
-        content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Only quotes for your worksheet focus question(s) are listed. <strong>Meanings are jumbled</strong> — the text beside each line is <em>not</em> in row order; draw lines to match.</p>`;
+        content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Only quotes for the question(s) above are listed. <strong>Meanings are jumbled</strong> — the text beside each line is <em>not</em> in row order; draw lines to match.</p>`;
         if(matchMode === "list") {
             const shuffled = shuffle(meanings.map(m => app.escapeHtml(m)));
             content += `<p style="margin:0 0 2px 0; font-size:9pt;"><em>Possible meanings (jumbled):</em> ${shuffled.join(" · ")}</p>`;
