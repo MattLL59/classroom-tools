@@ -7,9 +7,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T00:15:00">
+<meta name="architect-build" content="2026-06-02T01:30:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
-<meta name="architect-rev" content="quote-reason-sanitize-f806">
+<meta name="architect-rev" content="c1-lines-from-selection-f806">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -15628,6 +15628,90 @@ const app = {
         }
         return null;
     },
+    /** Map a highlighted passage phrase to booklet line numbers using layout rows (same as excerpt slicing). */
+    resolveBookletLineSpanFromPassageText: function(selectedText, sourceText, level) {
+        const sel = String(selectedText || "").replace(/\s+/g, " ").trim();
+        if(!sel || sel.length < 3) return null;
+        const rows = (app.getDomRowsForExamLineSlicing && app.getDomRowsForExamLineSlicing(sourceText, level)) || app.parseWJECStyleBookletRows(sourceText);
+        if(!rows || !rows.length) {
+            const fb = app.getQuoteBookletLineSpan(sel, sourceText);
+            return fb ? { start: fb.start, end: fb.end } : null;
+        }
+        const normalize = (str) => String(str || "").toLowerCase().replace(/[""''…\u2026]/g, "").replace(/\s+/g, " ").trim();
+        const nSel = normalize(sel);
+        const rowBodies = rows.map(r => String(r.body || "").replace(/\s+/g, " ").trim());
+        const rowStarts = [];
+        let nFull = "";
+        for(let i = 0; i < rowBodies.length; i++) {
+            if(i > 0) nFull += " ";
+            rowStarts[i] = nFull.length;
+            nFull += normalize(rowBodies[i]);
+        }
+        let startIdx = nFull.indexOf(nSel);
+        let endIdx = startIdx >= 0 ? startIdx + nSel.length : -1;
+        if(startIdx < 0) {
+            const words = nSel.split(/\s+/).filter(w => w.length >= 3);
+            if(words.length >= 2) {
+                const head = words.slice(0, Math.min(4, words.length)).join(" ");
+                const tail = words.slice(-Math.min(4, words.length)).join(" ");
+                startIdx = nFull.indexOf(head);
+                const tailIdx = nFull.lastIndexOf(tail);
+                if(startIdx >= 0 && tailIdx >= startIdx) endIdx = tailIdx + tail.length;
+            }
+        }
+        if(startIdx < 0) {
+            const fb = app.getQuoteBookletLineSpan(sel, sourceText);
+            return fb ? { start: fb.start, end: fb.end } : null;
+        }
+        const charToRowNum = (charIdx) => {
+            const idx = Math.max(0, charIdx);
+            for(let i = rowStarts.length - 1; i >= 0; i--) {
+                if(idx >= rowStarts[i]) return rows[i].num;
+            }
+            return rows[0].num;
+        };
+        const startNum = charToRowNum(startIdx);
+        const endNum = charToRowNum(Math.max(startIdx, endIdx - 1));
+        return { start: Math.min(startNum, endNum), end: Math.max(startNum, endNum) };
+    },
+    /** Highlighted passage text → `{ range, lineRef, span }` for the Lines box. */
+    resolveLineRefFromPassageSelection: function(selectedText, sourceText, level) {
+        const span = app.resolveBookletLineSpanFromPassageText(selectedText, sourceText, level);
+        if(!span || !Number.isFinite(span.start)) return null;
+        const range = { from: span.start, to: span.end != null ? span.end : span.start };
+        const lineRef = app.formatLineRefFromRange ? app.formatLineRefFromRange(range) : "";
+        if(!lineRef) return null;
+        return { range, lineRef, span };
+    },
+    /** Current window selection when it sits inside a passage pane (Lab, Quote Select, teacher preview, editor). */
+    getPassageTextSelection: function() {
+        if(typeof document === "undefined" || typeof window === "undefined") return null;
+        try {
+            const sel = window.getSelection();
+            if(!sel || sel.rangeCount < 1 || sel.isCollapsed) return null;
+            const text = String(sel.toString() || "").replace(/\s+/g, " ").trim();
+            if(text.length < 3) return null;
+            const roots = [
+                document.getElementById("teacher-passage-preview-output"),
+                document.getElementById("source-inline"),
+                document.getElementById("source-inline-select"),
+                document.getElementById("source-lab-wrap"),
+                document.getElementById("source-inline-select-wrap"),
+                document.querySelector("#modal-admin #ai-input.source-editor")
+            ].filter(Boolean);
+            const nodeInPassage = (node) => {
+                if(!node || !roots.length) return false;
+                let el = node.nodeType === 3 ? node.parentElement : node;
+                while(el) {
+                    if(roots.some(root => root === el || root.contains(el))) return true;
+                    el = el.parentElement;
+                }
+                return false;
+            };
+            if(!nodeInPassage(sel.anchorNode) && !nodeInPassage(sel.focusNode)) return null;
+            return { text: text };
+        } catch(e) { return null; }
+    },
     /** Return 1-based line number where quote appears in source, or null. Uses explicit line numbers (e.g. "1. text") or line order. */
     getLineNumberForQuote: function(quote, sourceText) {
         const span = app.getQuoteBookletLineSpan(quote, sourceText);
@@ -27842,6 +27926,12 @@ const admin = {
             admin.syncQuestionsFromListCore(preferredMount ? { preferredMount } : undefined);
         });
         lineRefInp.addEventListener("change", (e) => admin.syncQuestionsFromList(true, e.target));
+        const pickLinesBtn = document.createElement("button");
+        pickLinesBtn.type = "button";
+        pickLinesBtn.className = "btn btn-outline btn-small question-line-ref-from-selection";
+        pickLinesBtn.textContent = "From selection";
+        pickLinesBtn.title = "Highlight passage text in the Lab, Quote Select passage, or Level Bank preview (Show whole insert), then click to fill the Lines box from booklet numbers.";
+        pickLinesBtn.onclick = () => admin.applyLineRefFromPassageSelectionForQuestionIndex(i);
         input.addEventListener("change", (e) => admin.syncQuestionsFromList(true, e.target));
         input.addEventListener("input", (e) => {
             const preferredMount = e.target && e.target.closest(".questions-list-mount");
@@ -27866,7 +27956,10 @@ const admin = {
         row.appendChild(moveWrap);
         row.appendChild(input);
         const showLineRef = !!(appData && appData.component === 1);
-        if(showLineRef) row.appendChild(lineRefInp);
+        if(showLineRef) {
+            row.appendChild(lineRefInp);
+            row.appendChild(pickLinesBtn);
+        }
         row.appendChild(removeBtn);
         outer.appendChild(row);
         const excerptWrap = document.createElement("div");
@@ -32954,11 +33047,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             </div>
             ${showLineWindowPreview ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:1px dashed var(--border);border-radius:8px;background:rgba(0,150,136,0.06);">
                 <div style="font-weight:700;margin-bottom:6px;">Quote Select — line window &amp; preview</div>
-                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;"><strong>Booklet lines</strong> matches <strong>Focus questions → Lines</strong> for the question picked in the row. With <strong>excerpt</strong> on, Quote Select shows <strong>one row per line</strong> in the window with the real insert line numbers (same as this preview). Tick <strong>every #</strong> in the grid to show <strong>every</strong> line number on the <em>full</em> passage instead of only 5/10/15 ticks. Use the header <strong>Whole insert / Question-focused</strong> radios so this preview matches the Lab and Quote Select passage. Re-export <strong>Student App</strong> after changing these so the bundled lesson matches.</p>
+                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;"><strong>Booklet lines</strong> matches <strong>Focus questions → Lines</strong> for the question picked in the row. <strong>Faster setup:</strong> <strong>Show whole insert</strong> → highlight the relevant passage → <strong>Set lines from selection</strong> (or <strong>From selection</strong> on the Focus row). With <strong>excerpt</strong> on, Quote Select shows <strong>one row per line</strong> in the window with the real insert line numbers (same as this preview). Tick <strong>every #</strong> in the grid to show <strong>every</strong> line number on the <em>full</em> passage instead of only 5/10/15 ticks. Use the header <strong>Whole insert / Question-focused</strong> radios so this preview matches the Lab and Quote Select passage. Re-export <strong>Student App</strong> after changing these so the bundled lesson matches.</p>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
                     <label style="font-size:0.85rem;">Level <select id="teacher-passage-preview-level">${Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => `<option value="${i + 1}">L${i + 1}</option>`).join("")}</select></label>
                     <label style="font-size:0.85rem;display:flex;align-items:center;gap:6px;">Booklet lines <input type="text" id="teacher-passage-preview-line-window-input" autocomplete="off" style="width:7em;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:0.85rem;"></label>
+                    <button type="button" class="btn btn-outline btn-small" onclick="admin.showTeacherWholePassageForPicking()">Show whole insert</button>
                     <button type="button" class="btn btn-primary btn-small" onclick="admin.showTeacherPassagePreview()">Show line window</button>
+                    <button type="button" class="btn btn-outline btn-small" onclick="admin.applyLineRefFromPassageSelectionForPreviewLevel()">Set lines from selection</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.openTeacherQuoteSelectPreview()">Open Quote Select</button>
                     <label style="font-size:0.8rem;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="teacher-preview-affirm-cb" ${userState && userState.teacherPreviewAffirmStep ? "checked" : ""} onchange="admin.setTeacherAffirmPreview(this.checked)"> Preview affirm step</label>
                 </div>
@@ -33171,6 +33266,82 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         app.save();
         ui.renderLab();
         ui.renderSelection();
+    },
+    levelForQuestionId: function(qid) {
+        const levelBank = app.getLevelBank();
+        const activeLevels = app.getActiveLevels();
+        const normQ = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        for(let li = 0; li < activeLevels.length; li++) {
+            const lvl = activeLevels[li];
+            const ent = levelBank[lvl];
+            const ids = ent && Array.isArray(ent.questionIds) ? ent.questionIds : [];
+            if(ids.some(id => normQ(id) === normQ(qid))) return lvl;
+        }
+        const idx = questions.findIndex(q => q && normQ(q.id) === normQ(qid));
+        if(idx >= 0 && activeLevels[idx] != null) return activeLevels[idx];
+        return activeLevels[0] || 1;
+    },
+    _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText) {
+        if(!q || !q.id) return false;
+        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : app.getSourceText();
+        const resolved = app.resolveLineRefFromPassageSelection(pickText, src, lvl);
+        if(!resolved || !resolved.lineRef) return false;
+        q.lineRef = resolved.lineRef;
+        app.save();
+        admin._mirrorLineRefToFocusQuestionInputs(q.id, resolved.lineRef);
+        if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+        if(admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
+        alert("Lines set to " + resolved.lineRef + " (booklet " + resolved.range.from + "–" + resolved.range.to + "). Preview updated — check the excerpt matches your highlight.");
+        return true;
+    },
+    applyLineRefFromPassageSelectionForQuestionIndex: function(questionIndex) {
+        if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
+        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
+        if(!pick || !pick.text) return alert("Highlight passage text first (Reading Lab, Quote Select passage, or Level Bank preview with Show whole insert), then click From selection.");
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const q = questions[questionIndex];
+        if(!q || !q.id) return;
+        const lvl = admin.levelForQuestionId(q.id);
+        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text)) {
+            alert("Could not map that selection to booklet lines. Try a longer highlight, use Show whole insert in Level Bank, or check Booklet line 1 / passage layout.");
+        }
+    },
+    applyLineRefFromPassageSelectionForPreviewLevel: function() {
+        if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
+        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
+        if(!pick || !pick.text) return alert("Highlight passage text in the preview below (or Lab / Quote Select), then click Set lines from selection.");
+        const pvLvl = document.getElementById("teacher-passage-preview-level");
+        const lvl = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
+        if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
+        const entry = appData.settings.levelBank[lvl] || {};
+        const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
+        const qid = ids.length ? ids[0] : "";
+        if(!qid) return alert("Pick a question in the Level Bank row’s Question column first.");
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const q = questions.find(qq => qq && normQid(qq.id) === normQid(qid));
+        if(!q) return alert("Focus question not found for this level.");
+        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text)) {
+            alert("Could not map that selection to booklet lines. Try a longer highlight, Show whole insert, or check Booklet line 1 / passage layout.");
+        }
+    },
+    showTeacherWholePassageForPicking: function() {
+        const out = document.getElementById("teacher-passage-preview-output");
+        const sel = document.getElementById("teacher-passage-preview-level");
+        if(!out) return;
+        out.classList.add("architect-passage-line-wrap");
+        const lvl = sel ? parseInt(sel.value, 10) || 1 : 1;
+        const src = (appData && appData.component === 2 && admin.hasC2DualSource && admin.hasC2DualSource() && app.getSourceTextForLevel)
+            ? app.getSourceTextForLevel(lvl)
+            : (app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : app.getSourceText());
+        if(!src || !String(src).trim()) {
+            out.innerHTML = "<span style=\"color:var(--error)\">No source text loaded.</span>";
+            return;
+        }
+        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\"><strong>Whole insert</strong> — highlight the part for this question, then click <strong>Set lines from selection</strong> (or use <strong>From selection</strong> on the Focus question row).</div>";
+        const body = app.formatSourceHtml ? app.formatSourceHtml(src) : "";
+        out.innerHTML = meta + body;
     },
     showTeacherPassagePreview: function() {
         const out = document.getElementById("teacher-passage-preview-output");
