@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T04:00:00">
+<meta name="architect-build" content="2026-06-02T05:00:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -28091,7 +28091,10 @@ const admin = {
         pickLinesBtn.type = "button";
         pickLinesBtn.className = "btn btn-outline btn-small question-line-ref-from-selection";
         pickLinesBtn.textContent = "From selection";
-        pickLinesBtn.title = "Highlight passage text in the Lab, Quote Select passage, or Level Bank preview (Show whole insert), then click to fill the Lines box from booklet numbers.";
+        pickLinesBtn.title = "Shows the whole insert, then after you highlight passage text click to fill this question’s Lines box from booklet numbers.";
+        const prepPick = () => admin._preparePassageForLineAssignment && admin._preparePassageForLineAssignment({ questionIndex: i });
+        pickLinesBtn.onmousedown = prepPick;
+        lineRefInp.addEventListener("focus", prepPick);
         pickLinesBtn.onclick = () => admin.applyLineRefFromPassageSelectionForQuestionIndex(i);
         input.addEventListener("change", (e) => admin.syncQuestionsFromList(true, e.target));
         input.addEventListener("input", (e) => {
@@ -33208,7 +33211,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             </div>
             ${showLineWindowPreview ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:1px dashed var(--border);border-radius:8px;background:rgba(0,150,136,0.06);">
                 <div style="font-weight:700;margin-bottom:6px;">Quote Select — line window &amp; preview</div>
-                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;"><strong>Booklet lines</strong> = the <strong>margin line numbers on the exam paper</strong> (same value as Focus questions → <strong>Lines</strong>). <strong>Faster setup:</strong> <strong>Show whole insert</strong> → highlight → <strong>Set lines from selection</strong> — the app switches to <strong>Question-focused</strong> and shows only that excerpt in Lab / Quote Select. <strong>Show line window</strong> previews the excerpt here. Ignore the optional <strong>🎨 reader</strong> panel (Window slider) — that is for auto-scroll reading, not line setup. Re-export <strong>Student App</strong> after changing these so the bundled lesson matches.</p>
+                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;"><strong>Booklet lines</strong> = <strong>margin line numbers on the exam paper</strong> (same as Focus questions → <strong>Lines</strong>). <strong>Each question:</strong> pick that question in the level row’s <strong>Q</strong> column (or use the matching Focus question row) → <strong>Show whole insert</strong> → highlight its section → <strong>Set lines from selection</strong>. The passage stays <strong>whole</strong> while you assign every question; use <strong>Show line window</strong> or Lab / Quote Select <strong>Question-focused</strong> to preview one excerpt. Re-export <strong>Student App</strong> after changes.</p>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
                     <label style="font-size:0.85rem;">Level <select id="teacher-passage-preview-level">${Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => `<option value="${i + 1}">L${i + 1}</option>`).join("")}</select></label>
                     <label style="font-size:0.85rem;display:flex;align-items:center;gap:6px;">Booklet lines <input type="text" id="teacher-passage-preview-line-window-input" autocomplete="off" style="width:7em;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:0.85rem;"></label>
@@ -33264,6 +33267,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     admin._scheduleLevelBankSave();
                     admin.refreshLevelBankRowMutex(lvl);
                     admin._liteStudentRefresh();
+                    if(admin._preparePassageForLineAssignment) admin._preparePassageForLineAssignment({ level: lvl });
                     return;
                 }
                 if(t.matches(".level-bank-input, input[data-key]")) admin.updateLevelBank(t);
@@ -33402,9 +33406,17 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         }
         if(pvLvl && !pvLvl.dataset.wiredPreviewLvl) {
             pvLvl.dataset.wiredPreviewLvl = "1";
-            pvLvl.addEventListener("change", () => admin._syncTeacherPreviewLineWindowInput());
+            pvLvl.addEventListener("change", () => {
+                admin._syncTeacherPreviewLineWindowInput();
+                if(admin._preparePassageForLineAssignment) admin._preparePassageForLineAssignment({ level: parseInt(pvLvl.value, 10) || 1 });
+            });
         }
         admin._syncTeacherPreviewLineWindowInput();
+        const lbWrap = document.getElementById("level-bank-editor");
+        if(lbWrap && !lbWrap.dataset.passageLineAssignWholeInit && admin._preparePassageForLineAssignment) {
+            lbWrap.dataset.passageLineAssignWholeInit = "1";
+            admin._preparePassageForLineAssignment({ level: parseInt(pvLvl && pvLvl.value, 10) || 1 });
+        }
     },
     renderLevelBank: function(opts) {
         opts = opts || {};
@@ -33443,31 +33455,41 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(idx >= 0 && activeLevels[idx] != null) return activeLevels[idx];
         return activeLevels[0] || 1;
     },
+    /**
+     * Line-assignment mode: keep the **whole insert** visible so each question can be picked from the full passage.
+     * Does not change student excerpt settings — only teacher picking scope + Level Bank preview.
+     */
+    _preparePassageForLineAssignment: function(opts) {
+        opts = opts || {};
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        if(opts.questionIndex != null && questions[opts.questionIndex]) {
+            const q = questions[opts.questionIndex];
+            const qLvl = admin.levelForQuestionId(q.id);
+            const pvLvl = document.getElementById("teacher-passage-preview-level");
+            if(pvLvl && qLvl) pvLvl.value = String(qLvl);
+            if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+        } else if(opts.level != null) {
+            const pvLvl = document.getElementById("teacher-passage-preview-level");
+            if(pvLvl) pvLvl.value = String(parseInt(opts.level, 10) || 1);
+            if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+        }
+        if(!appData.meta) appData.meta = {};
+        appData.meta.passageDisplayScope = "whole";
+        if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("whole");
+        else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+        if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
+    },
     _enableQuestionFocusedPassageAfterLinePick: function(lvl) {
         const level = parseInt(lvl, 10) || 1;
         if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
         if(!appData.settings.levelBank[level]) appData.settings.levelBank[level] = {};
+        /** Student Quote Select excerpt for this level only — do **not** switch global passage scope (that blocked picking lines for the next question). */
         appData.settings.levelBank[level].passageExamExcerpt = true;
-        if(!appData.meta) appData.meta = {};
-        /** Only switch scope when still on whole insert — respect an explicit Question-focused choice. */
-        const curScope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
-        if(curScope !== "focused") {
-            appData.meta.passageDisplayScope = "focused";
-            if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("focused", { skipRefresh: true });
-        }
-        ["reader-window-lab", "reader-window-select"].forEach(id => {
-            const w = document.getElementById(id);
-            if(w) w.classList.add("hidden");
-        });
-        if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-        else {
-            if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
-            if(userState && userState.view === "select" && typeof ui !== "undefined" && ui.renderSelection) ui.renderSelection();
-        }
+        app.save({ skipRender: true, silent: true });
     },
     _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText) {
         if(!q || !q.id) return false;
-        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : app.getSourceText();
+        const src = app.getSourceText ? app.getSourceText() : "";
         const resolved = app.resolveLineRefFromPassageSelection(pickText, src, lvl);
         if(!resolved || !resolved.lineRef) return false;
         q.lineRef = resolved.lineRef;
@@ -33475,17 +33497,22 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         app.save();
         admin._mirrorLineRefToFocusQuestionInputs(q.id, resolved.lineRef);
         if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
-        if(admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
+        admin._preparePassageForLineAssignment({ level: lvl });
         const span = resolved.range.from === resolved.range.to
             ? ("line " + resolved.range.from)
             : ("lines " + resolved.range.from + "–" + resolved.range.to);
-        alert("Booklet " + span + " saved to the Lines box (" + resolved.lineRef + "). These are the exam margin line numbers — the main passage and preview now show that excerpt only (Question-focused).");
+        alert("Booklet " + span + " saved to " + (q.id || "this question") + "’s Lines box (" + resolved.lineRef + ").\n\nThe passage stays on **whole insert** so you can assign the next question. Use **Show line window** or switch Lab / Quote Select to **Question-focused** when you want to preview one question’s excerpt.");
         return true;
     },
     applyLineRefFromPassageSelectionForQuestionIndex: function(questionIndex) {
         if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
+        const scope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
+        if(scope === "focused") {
+            admin._preparePassageForLineAssignment({ questionIndex: questionIndex });
+            return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **From selection** again.");
+        }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return alert("Highlight passage text first (Reading Lab, Quote Select passage, or Level Bank preview with Show whole insert), then click From selection.");
+        if(!pick || !pick.text) return alert("Highlight passage text first (Level Bank preview with **Show whole insert**, Lab, or Quote Select), then click **From selection**.");
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const q = questions[questionIndex];
         if(!q || !q.id) return;
@@ -33496,8 +33523,15 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     applyLineRefFromPassageSelectionForPreviewLevel: function() {
         if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
+        const scope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
+        const pvLvl = document.getElementById("teacher-passage-preview-level");
+        const lvlPre = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
+        if(scope === "focused") {
+            admin._preparePassageForLineAssignment({ level: lvlPre });
+            return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **Set lines from selection** again.");
+        }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return alert("Highlight passage text in the preview below (or Lab / Quote Select), then click Set lines from selection.");
+        if(!pick || !pick.text) return alert("Click **Show whole insert**, highlight passage text in the preview below (or Lab / Quote Select), then click **Set lines from selection**.");
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         const lvl = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
         if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
@@ -33526,7 +33560,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             out.innerHTML = "<span style=\"color:var(--error)\">No source text loaded.</span>";
             return;
         }
-        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\"><strong>Whole insert</strong> — highlight the part for this question, then click <strong>Set lines from selection</strong> (or use <strong>From selection</strong> on the Focus question row).</div>";
+        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\"><strong>Whole insert</strong> — highlight the part for <em>this</em> question, then click <strong>Set lines from selection</strong> (or <strong>From selection</strong> on that Focus question row). Repeat for each question; use <strong>Show line window</strong> to preview one question’s excerpt.</div>";
         const body = app.formatSourceHtml ? app.formatSourceHtml(src) : "";
         out.innerHTML = meta + body;
     },
