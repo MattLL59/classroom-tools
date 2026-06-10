@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T09:00:00">
-<meta name="architect-deploy" content="recovery-boot-select-fix">
+<meta name="architect-build" content="2026-06-02T10:00:00">
+<meta name="architect-deploy" content="admin-passage-defer-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -16871,14 +16871,36 @@ const app = {
         const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
         if(!st.trim()) return false;
         if(st.length >= app.ADMIN_PASSAGE_DEFER_CHARS) return true;
+        if(app.isHeavyLesson && app.isHeavyLesson(appData)) return true;
         if(app.isStructuredPassageSource && app.isStructuredPassageSource(st)) {
-            if(st.length >= 6000) return true;
+            if(st.length >= 4000) return true;
             try {
                 const o = app.parseStructuredPassageSource(st);
-                if(o && o.lines && o.lines.length >= 35) return true;
+                if(o && o.lines && o.lines.length >= 20) return true;
             } catch(eDf) {}
         }
+        if(st.length >= 12000) return true;
         return false;
+    },
+    _studentPassagePaintScheduled: false,
+    /** Paint Lab + Quote Select passage only — never hydrates #ai-input (Editing Suite stays on placeholder until demand). */
+    scheduleDeferredStudentPassagePaint: function() {
+        if(!app._passageDisplaysDeferred || app._studentPassagePaintScheduled) return;
+        app._studentPassagePaintScheduled = true;
+        const run = function() {
+            if(!app._passageDisplaysDeferred) return;
+            app._passageDisplaysDeferred = false;
+            try {
+                if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
+                if(typeof ui.renderLab === "function") ui.renderLab();
+                if(userState && userState.view === "select" && typeof ui.renderSelection === "function") {
+                    const keepPending = String(ui._freeSelectPendingQuote || "").trim();
+                    ui.renderSelection(null, keepPending ? { skipPassage: true } : {});
+                }
+            } catch(ePaint) { console.warn("Deferred student passage paint:", ePaint); }
+        };
+        setTimeout(run, 60);
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2500 });
     },
     /** Caps run on repair/import so AI dumps and huge quote banks cannot freeze the tab. */
     enforceLessonSizeLimits: function(safe, opts) {
@@ -16952,7 +16974,8 @@ const app = {
         if(el) el.innerHTML = `<div style="padding:10px;opacity:0.75;">Loading passage…</div>`;
         const run = function() {
             try {
-                if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+                if(typeof admin !== "undefined" && admin.syncSourceEditorMode) admin.syncSourceEditorMode({ hydratePassage: true });
+                else if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
                 app._adminPassageHydrateDone = true;
             } catch(eLoad) {
                 console.warn("loadAdminPassageOnDemand:", eLoad);
@@ -16989,9 +17012,13 @@ const app = {
             if(!app._deferAdminPassageUntilDemand) app.hydratePassageForAdminEditor();
             return;
         }
+        if(opts.studentOnly) {
+            app.scheduleDeferredStudentPassagePaint();
+            return;
+        }
         app._passageDisplaysDeferred = false;
         try {
-            if(!app._adminPassageHydrateDone && app.syncAdminAiInputFromLesson && appData && appData.component !== 2) {
+            if(!opts.skipAdminEditor && !app._deferAdminPassageUntilDemand && !app._adminPassageHydrateDone && app.syncAdminAiInputFromLesson && appData && appData.component !== 2) {
                 app.syncAdminAiInputFromLesson({ force: true });
                 app._adminPassageHydrateDone = true;
             }
@@ -17794,7 +17821,8 @@ const ui = {
      */
     refreshAllPassageDisplays: function(overrideCanon) {
         if(app._passageDisplaysDeferred && typeof app.finishDeferredPassageHydration === "function") {
-            app.finishDeferredPassageHydration({ adminEditorOnly: !!(document.getElementById("modal-admin") && document.getElementById("modal-admin").classList.contains("open")) });
+            const admOpen = !!(document.getElementById("modal-admin") && document.getElementById("modal-admin").classList.contains("open"));
+            app.finishDeferredPassageHydration(admOpen ? { adminEditorOnly: true } : { studentOnly: true });
             if(app._passageDisplaysDeferred) return;
         }
         const st = overrideCanon != null ? overrideCanon : (appData && typeof appData.sourceText === "string" ? appData.sourceText : "");
@@ -18100,7 +18128,7 @@ const ui = {
         let dispBundleInit = null;
         const levInitDisp = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
         const scopeInitDisp = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
-        const deferPassageInit = true;
+        const deferPassageInit = !!(typeof app.isHeavyLesson === "function" && app.isHeavyLesson(appData));
         const paintStudentPassageHtml = function(html, bundle) {
             const inline = document.getElementById("source-inline");
             const introText = document.getElementById("intro-text");
@@ -18134,16 +18162,8 @@ const ui = {
             }
         }
         paintStudentPassageHtml(dispPassageHtml, dispBundleInit);
-        if(deferPassageInit) {
-            const runFullPassagePaint = function() {
-                try {
-                    app._passageDisplaysDeferred = false;
-                    if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
-                    if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection();
-                } catch(ePassDefer) { console.warn("Deferred passage paint:", ePassDefer); }
-            };
-            if(typeof requestIdleCallback === "function") requestIdleCallback(runFullPassagePaint, { timeout: 3000 });
-            else setTimeout(runFullPassagePaint, 250);
+        if(deferPassageInit && app.scheduleDeferredStudentPassagePaint) {
+            app.scheduleDeferredStudentPassagePaint();
         }
         const Lc = appData && appData.component2Layout ? appData.component2Layout : null;
         const hasC2Layout = Lc && ((Lc.resourcePaperText || "").trim() || (Lc.questionPaperPage3Text || "").trim());
@@ -18280,6 +18300,7 @@ const ui = {
         } finally {
             ui._initInProgress = false;
             ui._initPassageBuilt = false;
+            if(app._passageDisplaysDeferred && app.scheduleDeferredStudentPassagePaint) app.scheduleDeferredStudentPassagePaint();
             if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
             else if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
             try {
@@ -19208,28 +19229,25 @@ const ui = {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
         app._adminLiteOpen = true;
-        /** Do not force full #ai-input rebuild on open — that froze the tab on large C1 inserts. */
-        if(typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration()) {
-            app._deferAdminPassageUntilDemand = true;
-            app._adminPassageHydrateDone = false;
-        }
+        /** Never build #ai-input on Data open — placeholder + on-demand load only (sync was freezing the tab). */
+        app._deferAdminPassageUntilDemand = true;
+        app._adminPassageHydrateDone = false;
         ui.openModal("modal-admin");
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         const run = () => {
+            const tabOpts = { skipPassageHydrate: true, skipC2Fill: true };
             try {
-                if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true, skipPassageChrome: true });
-                if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
-                    app.setAdminPassageDeferredPlaceholder();
+                if(typeof admin !== "undefined") {
+                    if(admin.bindTabsOnly) admin.bindTabsOnly();
+                    if(admin.activateAdminTab) admin.activateAdminTab("edit", tabOpts);
                 }
+                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true, skipPassageChrome: true, skipSourceSync: true, skipTabActivate: true });
+                if(typeof app.setAdminPassageDeferredPlaceholder === "function") app.setAdminPassageDeferredPlaceholder();
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
-                    if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                    if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-                    if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
-                        app.setAdminPassageDeferredPlaceholder();
-                    }
+                    if(typeof admin !== "undefined" && admin.placeC1SourceWrapForAdminTab) admin.placeC1SourceWrapForAdminTab();
+                    if(typeof app.setAdminPassageDeferredPlaceholder === "function") app.setAdminPassageDeferredPlaceholder();
                 } catch(e2) { console.error(e2); }
             }
         };
@@ -25236,7 +25254,8 @@ const admin = {
         }
     },
     /** Switch Teacher Settings tab (works even if initTabs has not run yet). */
-    activateAdminTab: function(key) {
+    activateAdminTab: function(key, opts) {
+        opts = opts || {};
         const modal = document.getElementById("modal-admin");
         if(!modal) return;
         const valid = { reward: 1, edit: 1, ai: 1, export: 1 };
@@ -25252,8 +25271,8 @@ const admin = {
         tabs.forEach(t => t.classList.toggle("hidden", t.dataset.tab !== k));
         try { localStorage.setItem("tsa_admin_tab", k); } catch(eStore) {}
         try {
-            if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
-            if(k === "edit" && appData && appData.component === 2 && typeof admin.fillC2PooledEditorFromLayout === "function") {
+            if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode(opts);
+            if(k === "edit" && appData && appData.component === 2 && !opts.skipC2Fill && typeof admin.fillC2PooledEditorFromLayout === "function") {
                 admin.fillC2PooledEditorFromLayout();
             }
             if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
@@ -25300,8 +25319,13 @@ const admin = {
     renderAll: function(opts) {
         opts = opts || {};
         const deferHeavy = !!(opts.lite || opts.skipLevelBank);
-        try { admin.initTabs(); } catch(eTabs) {}
-        try { admin.syncUI({ lite: deferHeavy }); } catch(eSync) {}
+        const tabOpts = { skipPassageHydrate: !!(opts.lite || opts.skipSourceSync), skipC2Fill: !!(opts.lite || opts.skipSourceSync) };
+        if(opts.skipTabActivate) {
+            try { admin.bindTabsOnly(); } catch(eTb) {}
+        } else {
+            try { admin.initTabs(); } catch(eTabs) {}
+        }
+        try { admin.syncUI({ lite: deferHeavy, skipSourceSync: !!opts.skipSourceSync }); } catch(eSync) {}
         try {
             const lvl = typeof currentConfigLevel === "number" ? currentConfigLevel : 1;
             if(!opts.skipLevelBank) {
@@ -25332,7 +25356,9 @@ const admin = {
         }
         try { if(!opts.skipPassageChrome && app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
         try { if(!opts.skipPassageChrome && app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
-        try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
+        if(!opts.skipTabActivate) {
+            try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit", tabOpts); } catch(eTab) {}
+        }
     },
     ensureSelectionData: () => {
         if(!appData.selection || typeof appData.selection !== "object") {
@@ -25446,14 +25472,17 @@ const admin = {
             const preset = document.getElementById("selection-stage-preset");
             if(preset) preset.value = "custom";
         }
-        admin.refreshQuestionsList({ skipSanitize: true, skipLevelBank: lite });
+        if(!lite) admin.refreshQuestionsList({ skipSanitize: true, skipLevelBank: lite });
+        else if(typeof requestIdleCallback === "function") requestIdleCallback(() => { try { admin.refreshQuestionsList({ skipSanitize: true, skipLevelBank: true }); } catch(eQ) {} }, { timeout: 1500 });
+        else setTimeout(() => { try { admin.refreshQuestionsList({ skipSanitize: true, skipLevelBank: true }); } catch(eQ) {} }, 0);
         const loadModeSel = document.getElementById("past-paper-load-mode");
         if(loadModeSel) loadModeSel.value = String(appData.component === 2 ? 2 : 1);
         admin.syncPastPaperLabels();
-        admin.syncSourceEditorMode();
+        if(!opts.skipSourceSync) admin.syncSourceEditorMode(opts);
         if(!lite && !appData.isStandalone) admin.restorePastPaperFilesFromIdb();
     },
-    syncSourceEditorMode: function() {
+    syncSourceEditorMode: function(opts) {
+        opts = opts || {};
         if(!appData) return;
         const showC2Ui = !!(admin.shouldShowLevelBankC2Column && admin.shouldShowLevelBankC2Column());
         if(showC2Ui && (!appData.component2Layout || typeof appData.component2Layout !== "object")) {
@@ -25487,9 +25516,12 @@ const admin = {
         }
         if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
         if(!useC2Editors) {
-            if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+            const deferEditor = !!(opts.skipPassageHydrate || app._deferAdminPassageUntilDemand || (app.shouldDeferAdminPassageHydration && app.shouldDeferAdminPassageHydration()));
+            if(deferEditor && typeof app.setAdminPassageDeferredPlaceholder === "function") {
                 app.setAdminPassageDeferredPlaceholder();
-            } else if(app.syncAdminAiInputFromLesson) {
+            } else if(opts.hydratePassage && app.syncAdminAiInputFromLesson) {
+                app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+            } else if(!deferEditor && app._adminPassageHydrateDone && app.syncAdminAiInputFromLesson) {
                 app.syncAdminAiInputFromLesson({ force: false });
             }
         }
