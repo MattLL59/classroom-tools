@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T05:00:00">
+<meta name="architect-build" content="2026-06-02T06:00:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -7120,7 +7120,7 @@ const app = {
         const has = !!(el.querySelector && el.querySelector(".source-with-line-numbers"));
         wrap.classList.toggle("architect-passage-line-mode", has);
         if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
-        if(typeof app.syncEditorWJECAnchorRangePreview === "function") app.syncEditorWJECAnchorRangePreview();
+        if(typeof app.scheduleSyncEditorWJECAnchorRangePreview === "function") app.scheduleSyncEditorWJECAnchorRangePreview();
     },
     setAiInputValue: function(html) {
         const el = document.getElementById("ai-input");
@@ -8075,7 +8075,7 @@ const app = {
             const eEl = document.getElementById("c1-passage-wjec-end-anchor");
             if(sEl && m && m.passageWJECStartAnchor != null) sEl.value = String(m.passageWJECStartAnchor);
             if(eEl && m && m.passageWJECEndAnchor != null) eEl.value = String(m.passageWJECEndAnchor);
-            if(typeof app.syncEditorWJECAnchorRangePreview === "function") app.syncEditorWJECAnchorRangePreview();
+            if(typeof app.scheduleSyncEditorWJECAnchorRangePreview === "function") app.scheduleSyncEditorWJECAnchorRangePreview();
         } catch(eW) {}
     },
     /** Debounced live preview while typing WJEC body anchors in the Editing Suite. */
@@ -8193,12 +8193,15 @@ const app = {
             if(isHead && startA) prose.classList.add("architect-passage-anchor-outside");
             else if(!isHead && endA) prose.classList.add("architect-passage-anchor-outside");
         });
-        if(firstInside && typeof firstInside.scrollIntoView === "function") {
-            try {
-                firstInside.scrollIntoView({ block: "nearest", behavior: "smooth" });
-            } catch(eSc) {
-                try { firstInside.scrollIntoView(true); } catch(eSc2) {}
-            }
+        if(firstInside && typeof firstInside.scrollIntoView === "function" && !app._wjecAnchorPreviewScrollTimer) {
+            app._wjecAnchorPreviewScrollTimer = setTimeout(function() {
+                app._wjecAnchorPreviewScrollTimer = null;
+                try {
+                    firstInside.scrollIntoView({ block: "nearest", behavior: "auto" });
+                } catch(eSc) {
+                    try { firstInside.scrollIntoView(true); } catch(eSc2) {}
+                }
+            }, 120);
         }
     },
     /**
@@ -28091,11 +28094,11 @@ const admin = {
         pickLinesBtn.type = "button";
         pickLinesBtn.className = "btn btn-outline btn-small question-line-ref-from-selection";
         pickLinesBtn.textContent = "From selection";
-        pickLinesBtn.title = "Shows the whole insert, then after you highlight passage text click to fill this question’s Lines box from booklet numbers.";
-        const prepPick = () => admin._preparePassageForLineAssignment && admin._preparePassageForLineAssignment({ questionIndex: i });
-        pickLinesBtn.onmousedown = prepPick;
-        lineRefInp.addEventListener("focus", prepPick);
-        pickLinesBtn.onclick = () => admin.applyLineRefFromPassageSelectionForQuestionIndex(i);
+        pickLinesBtn.title = "Click first to show the whole insert, then highlight passage text and click again to fill this question’s Lines box.";
+        pickLinesBtn.onclick = () => {
+            if(admin._preparePassageForLineAssignment) admin._preparePassageForLineAssignment({ questionIndex: i, previewOnly: true });
+            admin.applyLineRefFromPassageSelectionForQuestionIndex(i);
+        };
         input.addEventListener("change", (e) => admin.syncQuestionsFromList(true, e.target));
         input.addEventListener("input", (e) => {
             const preferredMount = e.target && e.target.closest(".questions-list-mount");
@@ -33267,7 +33270,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     admin._scheduleLevelBankSave();
                     admin.refreshLevelBankRowMutex(lvl);
                     admin._liteStudentRefresh();
-                    if(admin._preparePassageForLineAssignment) admin._preparePassageForLineAssignment({ level: lvl });
+                    if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
                     return;
                 }
                 if(t.matches(".level-bank-input, input[data-key]")) admin.updateLevelBank(t);
@@ -33406,16 +33409,12 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         }
         if(pvLvl && !pvLvl.dataset.wiredPreviewLvl) {
             pvLvl.dataset.wiredPreviewLvl = "1";
-            pvLvl.addEventListener("change", () => {
-                admin._syncTeacherPreviewLineWindowInput();
-                if(admin._preparePassageForLineAssignment) admin._preparePassageForLineAssignment({ level: parseInt(pvLvl.value, 10) || 1 });
-            });
+            pvLvl.addEventListener("change", () => admin._syncTeacherPreviewLineWindowInput());
         }
         admin._syncTeacherPreviewLineWindowInput();
-        const lbWrap = document.getElementById("level-bank-editor");
-        if(lbWrap && !lbWrap.dataset.passageLineAssignWholeInit && admin._preparePassageForLineAssignment) {
-            lbWrap.dataset.passageLineAssignWholeInit = "1";
-            admin._preparePassageForLineAssignment({ level: parseInt(pvLvl && pvLvl.value, 10) || 1 });
+        const out = document.getElementById("teacher-passage-preview-output");
+        if(out && !String(out.innerHTML || "").trim()) {
+            out.innerHTML = "<span style=\"font-size:0.82rem;opacity:0.85;\">Click <strong>Show whole insert</strong> to load the passage for line assignment (keeps the Editing Suite responsive on open).</span>";
         }
     },
     renderLevelBank: function(opts) {
@@ -33461,23 +33460,41 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
      */
     _preparePassageForLineAssignment: function(opts) {
         opts = opts || {};
-        const questions = Array.isArray(appData.questions) ? appData.questions : [];
-        if(opts.questionIndex != null && questions[opts.questionIndex]) {
-            const q = questions[opts.questionIndex];
-            const qLvl = admin.levelForQuestionId(q.id);
-            const pvLvl = document.getElementById("teacher-passage-preview-level");
-            if(pvLvl && qLvl) pvLvl.value = String(qLvl);
-            if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
-        } else if(opts.level != null) {
-            const pvLvl = document.getElementById("teacher-passage-preview-level");
-            if(pvLvl) pvLvl.value = String(parseInt(opts.level, 10) || 1);
-            if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+        if(app._passageLineAssignPrepRunning) return;
+        app._passageLineAssignPrepRunning = true;
+        try {
+            const questions = Array.isArray(appData.questions) ? appData.questions : [];
+            if(opts.questionIndex != null && questions[opts.questionIndex]) {
+                const q = questions[opts.questionIndex];
+                const qLvl = admin.levelForQuestionId(q.id);
+                const pvLvl = document.getElementById("teacher-passage-preview-level");
+                if(pvLvl && qLvl) pvLvl.value = String(qLvl);
+                if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+            } else if(opts.level != null) {
+                const pvLvl = document.getElementById("teacher-passage-preview-level");
+                if(pvLvl) pvLvl.value = String(parseInt(opts.level, 10) || 1);
+                if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+            }
+            const curScope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
+            if(!appData.meta) appData.meta = {};
+            if(curScope !== "whole") {
+                appData.meta.passageDisplayScope = "whole";
+                if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("whole", { skipRefresh: !!opts.previewOnly });
+                else if(!opts.previewOnly && typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+            }
+            const showPreview = () => {
+                if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
+                app._passageLineAssignPrepRunning = false;
+            };
+            if(opts.previewOnly !== false) {
+                if(typeof requestIdleCallback === "function") requestIdleCallback(showPreview, { timeout: 400 });
+                else setTimeout(showPreview, 0);
+            } else {
+                app._passageLineAssignPrepRunning = false;
+            }
+        } catch(ePrep) {
+            app._passageLineAssignPrepRunning = false;
         }
-        if(!appData.meta) appData.meta = {};
-        appData.meta.passageDisplayScope = "whole";
-        if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("whole");
-        else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-        if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
     },
     _enableQuestionFocusedPassageAfterLinePick: function(lvl) {
         const level = parseInt(lvl, 10) || 1;
