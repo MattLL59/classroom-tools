@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T10:00:00">
-<meta name="architect-deploy" content="admin-passage-defer-fix">
+<meta name="architect-build" content="2026-06-02T11:00:00">
+<meta name="architect-deploy" content="admin-tab-switch-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -572,7 +572,7 @@
     .btn-danger { background: var(--error); color: white; }
     .btn-outline { background: var(--card); border: 2px solid var(--border); color: var(--text); }
     .btn-small { padding: 4px 8px; font-size: 0.8rem; width: auto; margin: 0; }
-    .tab-bar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+    .tab-bar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; position:relative; z-index:2; }
     .tab-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(0, 150, 136, 0.08); }
     .filter-bar { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 5px; margin-bottom: 10px; }
     .filter-btn { flex: 1; min-width: 80px; padding: 8px; font-size: 0.85rem; }
@@ -19229,6 +19229,13 @@ const ui = {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
         app._adminLiteOpen = true;
+        if(typeof admin !== "undefined") {
+            admin._liteEditPanelsDone = false;
+            if(admin._liteEditPanelsTimer && typeof cancelIdleCallback === "function") {
+                try { cancelIdleCallback(admin._liteEditPanelsTimer); } catch(eCi) {}
+            }
+            admin._liteEditPanelsTimer = null;
+        }
         /** Never build #ai-input on Data open — placeholder + on-demand load only (sync was freezing the tab). */
         app._deferAdminPassageUntilDemand = true;
         app._adminPassageHydrateDone = false;
@@ -19241,7 +19248,7 @@ const ui = {
                     if(admin.bindTabsOnly) admin.bindTabsOnly();
                     if(admin.activateAdminTab) admin.activateAdminTab("edit", tabOpts);
                 }
-                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true, skipPassageChrome: true, skipSourceSync: true, skipTabActivate: true });
+                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true, skipPassageChrome: true, skipSourceSync: true, skipTabActivate: true, skipHeavyPanels: true });
                 if(typeof app.setAdminPassageDeferredPlaceholder === "function") app.setAdminPassageDeferredPlaceholder();
             } catch(e) {
                 console.error("Settings render failed:", e);
@@ -25253,6 +25260,24 @@ const admin = {
             alert("Could not re-extract mark scheme: " + (e.message || String(e)));
         }
     },
+    /** Sync opts for Teacher Settings tabs — skip heavy passage/C2 work during lite open. */
+    getAdminTabSyncOpts: function() {
+        return {
+            skipPassageHydrate: !!(app._deferAdminPassageUntilDemand || app._adminLiteOpen),
+            skipC2Fill: !!app._adminLiteOpen,
+            deferSync: true
+        };
+    },
+    _runActivateAdminTabSync: function(k, opts) {
+        opts = opts || {};
+        try {
+            if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode(opts);
+            if(k === "edit" && appData && appData.component === 2 && !opts.skipC2Fill && typeof admin.fillC2PooledEditorFromLayout === "function") {
+                admin.fillC2PooledEditorFromLayout();
+            }
+            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+        } catch(eSync) { console.warn("activateAdminTab sync:", eSync); }
+    },
     /** Switch Teacher Settings tab (works even if initTabs has not run yet). */
     activateAdminTab: function(key, opts) {
         opts = opts || {};
@@ -25270,31 +25295,49 @@ const admin = {
         buttons.forEach(b => b.classList.toggle("active", b.dataset.tab === k));
         tabs.forEach(t => t.classList.toggle("hidden", t.dataset.tab !== k));
         try { localStorage.setItem("tsa_admin_tab", k); } catch(eStore) {}
-        try {
-            if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode(opts);
-            if(k === "edit" && appData && appData.component === 2 && !opts.skipC2Fill && typeof admin.fillC2PooledEditorFromLayout === "function") {
-                admin.fillC2PooledEditorFromLayout();
-            }
-            if(k === "edit" && typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-        } catch(eSync) {}
+        const syncOpts = Object.assign({}, opts);
+        if(syncOpts.deferSync == null) syncOpts.deferSync = true;
+        const runSync = function() { admin._runActivateAdminTabSync(k, syncOpts); };
+        if(syncOpts.deferSync === false) runSync();
+        else if(typeof requestAnimationFrame === "function") requestAnimationFrame(runSync);
+        else setTimeout(runSync, 0);
     },
     goAdminTab: function(key) {
-        if(!admin.tabsBound && admin.initTabs) {
-            try { admin.initTabs(); } catch(e) {}
-        }
-        admin.activateAdminTab(key);
+        if(!admin.tabsBound && admin.bindTabsOnly) admin.bindTabsOnly();
+        const opts = admin.getAdminTabSyncOpts ? admin.getAdminTabSyncOpts() : {};
+        if(key === "edit" && app._adminLiteOpen && admin.scheduleLiteEditPanels) admin.scheduleLiteEditPanels();
+        admin.activateAdminTab(key, opts);
     },
     bindTabsOnly: function() {
         const wrap = document.getElementById("admin-tabs");
         if(!wrap) return;
-        admin.setTab = (key) => admin.activateAdminTab(key);
+        admin.setTab = (key) => admin.goAdminTab(key);
         if(admin.tabsBound) return;
-        Array.from(wrap.querySelectorAll(".tab-btn")).forEach(btn => {
-            if(btn.dataset.tabClickBound) return;
-            btn.dataset.tabClickBound = "1";
-            btn.addEventListener("click", () => admin.activateAdminTab(btn.dataset.tab));
-        });
+        /** Buttons already use onclick="admin.goAdminTab(...)" — do not add duplicate listeners (doubled sync froze tab switches). */
         admin.tabsBound = true;
+    },
+    _liteEditPanelsDone: false,
+    _liteEditPanelsTimer: null,
+    scheduleLiteEditPanels: function() {
+        if(admin._liteEditPanelsDone) return;
+        if(admin._liteEditPanelsTimer) return;
+        const run = function() {
+            admin._liteEditPanelsTimer = null;
+            const adm = document.getElementById("modal-admin");
+            if(!adm || !adm.classList.contains("open")) return;
+            const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
+            if(tab !== "edit") return;
+            admin._liteEditPanelsDone = true;
+            try { if(admin.renderLevelBank) admin.renderLevelBank(); } catch(eLb) {}
+            try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) {}
+            try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
+            try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
+        };
+        if(typeof requestIdleCallback === "function") {
+            admin._liteEditPanelsTimer = requestIdleCallback(run, { timeout: 3500 });
+        } else {
+            admin._liteEditPanelsTimer = setTimeout(run, 200);
+        }
     },
     initTabs: () => {
         const wrap = document.getElementById("admin-tabs");
@@ -25306,7 +25349,7 @@ const admin = {
             if(saved === "controls") saved = "reward";
             if(saved !== "reward" && saved !== "edit" && saved !== "ai" && saved !== "export") saved = "edit";
         } catch(e) { saved = "edit"; }
-        admin.activateAdminTab(saved);
+        admin.goAdminTab(saved);
     },
     scheduleDeferredAdminPanels: function() {
         try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) { console.warn("renderQuotesBank:", eQb); }
@@ -25336,7 +25379,7 @@ const admin = {
         try { admin.bindAiAutoPrompt(); } catch(eAi) {}
         try { admin.ensureAiStepVisible(); } catch(eStep) {}
         try { admin.refreshTemplateDisplay(); } catch(eTpl) {}
-        if(deferHeavy) {
+        if(deferHeavy && !opts.skipHeavyPanels) {
             const fillHeavy = function() {
                 try {
                     const adm = document.getElementById("modal-admin");
@@ -25349,7 +25392,7 @@ const admin = {
             };
             if(typeof requestIdleCallback === "function") requestIdleCallback(fillHeavy, { timeout: 1200 });
             else setTimeout(fillHeavy, 120);
-        } else {
+        } else if(!deferHeavy) {
             try { admin.renderQuotesBank(); } catch(eQb) {}
             try { admin.renderSelectionEditor(); } catch(eSel) {}
             try { admin.renderGlobalList(); } catch(eGl) {}
