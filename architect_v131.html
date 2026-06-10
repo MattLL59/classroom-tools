@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T06:00:00">
+<meta name="architect-build" content="2026-06-02T07:00:00">
 <meta name="architect-deploy" content="level-bank-q1-dropdown-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -16206,6 +16206,9 @@ const app = {
         app._adminPassageHydrateInFlight = false;
         app._heavyLessonOnLoad = false;
         app._passageDisplaysDeferred = false;
+        if(typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration()) {
+            app._deferAdminPassageUntilDemand = true;
+        }
         try { app.enforceLessonSizeLimits(appData, { alert: true, alertDelay: 1200 }); } catch(eLim) {}
 
         if(!appData.isStandalone) {
@@ -16853,6 +16856,21 @@ const app = {
     /** Disabled — defer/lite admin broke passage editing and Tap quote select. */
     preferLiteAdmin: function() { return false; },
     applyPassageDeferFromLoad: function(rawBytes) { return false; },
+    /** True when building #ai-input on Data open would likely freeze the tab (large / structured insert). Lab + Quote Select still use saved JSON. */
+    shouldDeferAdminPassageHydration: function() {
+        if(!appData || appData.component === 2) return false;
+        const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
+        if(!st.trim()) return false;
+        if(st.length >= app.ADMIN_PASSAGE_DEFER_CHARS) return true;
+        if(app.isStructuredPassageSource && app.isStructuredPassageSource(st)) {
+            if(st.length >= 6000) return true;
+            try {
+                const o = app.parseStructuredPassageSource(st);
+                if(o && o.lines && o.lines.length >= 35) return true;
+            } catch(eDf) {}
+        }
+        return false;
+    },
     /** Caps run on repair/import so AI dumps and huge quote banks cannot freeze the tab. */
     enforceLessonSizeLimits: function(safe, opts) {
         opts = opts || {};
@@ -16898,7 +16916,6 @@ const app = {
     _deferAdminPassageUntilDemand: false,
     _adminLiteOpen: false,
     ADMIN_PASSAGE_DEFER_CHARS: 28000,
-    shouldDeferAdminPassageHydration: function() { return false; },
     setAdminPassageDeferredPlaceholder: function() {
         const el = document.getElementById("ai-input");
         if(!el || el.getAttribute("contenteditable") !== "true") return;
@@ -17013,7 +17030,7 @@ const app = {
         }
         app._heavyLessonOnLoad = false;
         app._passageDisplaysDeferred = false;
-        app._deferAdminPassageUntilDemand = false;
+        app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
     },
@@ -19157,24 +19174,29 @@ const ui = {
     openAdmin: () => {
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         ui._pauseSelectionGate = true;
-        app._adminLiteOpen = false;
-        app._deferAdminPassageUntilDemand = false;
-        try {
-            if(typeof app.ensureAdminReady === "function") app.ensureAdminReady();
-            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-        } catch(ePrep) {}
+        app._adminLiteOpen = true;
+        /** Do not force full #ai-input rebuild on open — that froze the tab on large C1 inserts. */
+        if(typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration()) {
+            app._deferAdminPassageUntilDemand = true;
+            app._adminPassageHydrateDone = false;
+        }
         ui.openModal("modal-admin");
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         const run = () => {
             try {
                 if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true });
+                if(admin.renderAll) admin.renderAll({ skipLevelBank: true, lite: true, skipPassageChrome: true });
+                if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+                    app.setAdminPassageDeferredPlaceholder();
+                }
             } catch(e) {
                 console.error("Settings render failed:", e);
                 try {
                     if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                    if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
                     if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+                    if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+                        app.setAdminPassageDeferredPlaceholder();
+                    }
                 } catch(e2) { console.error(e2); }
             }
         };
@@ -25272,8 +25294,8 @@ const admin = {
             try { admin.renderSelectionEditor(); } catch(eSel) {}
             try { admin.renderGlobalList(); } catch(eGl) {}
         }
-        try { if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
-        try { if(app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
+        try { if(!opts.skipPassageChrome && app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta(); } catch(eBk) {}
+        try { if(!opts.skipPassageChrome && app.applyExamPassageInsertWidthCh) app.applyExamPassageInsertWidthCh(); } catch(eCh) {}
         try { admin.activateAdminTab(localStorage.getItem("tsa_admin_tab") || "edit"); } catch(eTab) {}
     },
     ensureSelectionData: () => {
@@ -25428,7 +25450,13 @@ const admin = {
             if(c2AiHint) c2AiHint.classList.add("hidden");
         }
         if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-        if(!useC2Editors && app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: false });
+        if(!useC2Editors) {
+            if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+                app.setAdminPassageDeferredPlaceholder();
+            } else if(app.syncAdminAiInputFromLesson) {
+                app.syncAdminAiInputFromLesson({ force: false });
+            }
+        }
     },
     /**
      * One #source-text-single-wrap / #ai-input: park it under Editing Suite for C1 (default tab) or under Load & AI when that tab is active,
@@ -25452,7 +25480,6 @@ const admin = {
         const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
         const target = (tab === "ai" ? mountAi : (mountEdit || mountAi));
         if(target && singleWrap.parentNode !== target) target.appendChild(singleWrap);
-        if(app.syncAdminAiInputFromLesson) app.syncAdminAiInputFromLesson({ force: false });
     },
     /** One-click: lesson was loaded as C1 but teacher wants Editing Suite C2 passages — no full re-import required. */
     promoteLessonToComponent2: function() {
@@ -33479,8 +33506,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             if(!appData.meta) appData.meta = {};
             if(curScope !== "whole") {
                 appData.meta.passageDisplayScope = "whole";
-                if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("whole", { skipRefresh: !!opts.previewOnly });
-                else if(!opts.previewOnly && typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
+                if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("whole");
             }
             const showPreview = () => {
                 if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
@@ -33525,7 +33551,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
         const scope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
         if(scope === "focused") {
-            admin._preparePassageForLineAssignment({ questionIndex: questionIndex });
+            admin._preparePassageForLineAssignment({ questionIndex: questionIndex, previewOnly: false });
             return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **From selection** again.");
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
@@ -33544,7 +33570,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         const lvlPre = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
         if(scope === "focused") {
-            admin._preparePassageForLineAssignment({ level: lvlPre });
+            admin._preparePassageForLineAssignment({ level: lvlPre, previewOnly: false });
             return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **Set lines from selection** again.");
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
