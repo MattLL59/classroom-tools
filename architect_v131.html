@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T12:00:00">
-<meta name="architect-deploy" content="data-menu-instant-open">
+<meta name="architect-build" content="2026-06-02T14:00:00">
+<meta name="architect-deploy" content="admin-tab-delegate-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1190,6 +1190,11 @@
                 m.style.display = "flex";
                 m.style.visibility = "visible";
                 m.style.pointerEvents = "auto";
+                m.style.zIndex = "10200";
+                try {
+                    if(typeof admin !== "undefined" && admin.bindTabsOnly) admin.bindTabsOnly();
+                    if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+                } catch(eBind) { console.warn("Data tab bind fallback:", eBind); }
             } else {
                 alert("Settings panel is still loading. Wait a few seconds and try again, or hard-refresh the page.");
             }
@@ -1516,10 +1521,10 @@
             <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="ui.openModal('modal-manual')" title="Instruction manual">?</button> <button type="button" class="icon-btn" id="btn-admin-modal-close" data-admin-close="1" onclick="ui.closeTeacherSettings(event)" title="Close Teacher Settings">✕</button></div>
             <div class="modal-body">
                 <div class="tab-bar" id="admin-tabs">
-                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward" onclick="admin.goAdminTab('reward')">Reward</button>
-                    <button type="button" class="btn btn-outline btn-small tab-btn active" data-tab="edit" onclick="admin.goAdminTab('edit')">Editing Suite</button>
-                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai" onclick="admin.goAdminTab('ai')">Load & AI</button>
-                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export" onclick="admin.goAdminTab('export')">Lobby</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward">Reward</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn active" data-tab="edit">Editing Suite</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai">Load & AI</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export">Lobby</button>
                 </div>
                 <div class="admin-tab hidden" data-tab="reward">
                 <details class="admin-section" open>
@@ -16959,10 +16964,19 @@ const app = {
         el.innerHTML = `<div class="architect-admin-passage-placeholder" style="padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:0.88rem;line-height:1.45;">
             <div style="font-weight:700;margin-bottom:6px;">Passage not loaded in editor</div>
             <div style="margin-bottom:10px;opacity:0.9;">Your saved lesson has about <strong>${kb}k</strong> characters of source text. Building the full exam layout here as soon as you open Data was crashing the browser.</div>
-            <button type="button" class="btn btn-primary btn-small" onclick="app.loadAdminPassageOnDemand()">Load passage in editor</button>
+            <button type="button" class="btn btn-primary btn-small" id="admin-load-passage-btn">Load passage in editor</button>
             <span style="font-size:0.8rem;opacity:0.75;margin-left:8px;">Lab and Quote Select still use the saved passage.</span>
         </div>`;
         if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+        const loadBtn = document.getElementById("admin-load-passage-btn");
+        if(loadBtn && !loadBtn.dataset.bound) {
+            loadBtn.dataset.bound = "1";
+            loadBtn.addEventListener("click", function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                app.loadAdminPassageOnDemand();
+            });
+        }
     },
     loadAdminPassageOnDemand: function() {
         if(!appData || appData.component === 2) return;
@@ -19156,6 +19170,7 @@ const ui = {
         adm.style.visibility = "visible";
         adm.style.opacity = "1";
         adm.style.pointerEvents = "auto";
+        adm.style.zIndex = "10200";
         adm.setAttribute("aria-hidden", "false");
         const body = adm.querySelector(".modal-body");
         if(body && body.scrollTop === 0) body.scrollTop = 0;
@@ -19253,8 +19268,7 @@ const ui = {
                     if(saved === "controls") saved = "reward";
                     if(saved !== "reward" && saved !== "edit" && saved !== "ai" && saved !== "export") saved = "edit";
                 } catch(eLs) {}
-                admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-                admin.hydrateAdminTabPanel(saved);
+                admin.goAdminTab(saved);
             } catch(e) {
                 console.error("Settings shell failed:", e);
             }
@@ -25307,11 +25321,7 @@ const admin = {
     goAdminTab: function(key) {
         if(!admin.tabsBound && admin.bindTabsOnly) admin.bindTabsOnly();
         admin.activateAdminTab(key, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-        const run = function() {
-            try { admin.hydrateAdminTabPanel(key); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
-        };
-        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1200 });
-        else setTimeout(run, 0);
+        try { admin.hydrateAdminTabPanel(key); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
     },
     _adminShellFormSynced: false,
     /** Lightweight form fields only — no passage editor, question rows, or IndexedDB. */
@@ -25365,10 +25375,9 @@ const admin = {
                 else setTimeout(fillQ, 0);
             } else if(k === "export") {
                 try { admin.syncPastPaperLabels(); } catch(eLbl) {}
+                try { admin.syncPastPaperExtractButtons(); } catch(eBtn) {}
                 if(!appData.isStandalone && admin.restorePastPaperFilesFromIdb) {
-                    const fillIdb = function() { try { admin.restorePastPaperFilesFromIdb(); } catch(eIdb) {} };
-                    if(typeof requestIdleCallback === "function") requestIdleCallback(fillIdb, { timeout: 3000 });
-                    else setTimeout(fillIdb, 0);
+                    admin.restorePastPaperFilesFromIdb().catch(function(eIdb) { console.warn("restorePastPaperFilesFromIdb:", eIdb); });
                 }
             }
         } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
@@ -25377,8 +25386,19 @@ const admin = {
         const wrap = document.getElementById("admin-tabs");
         if(!wrap) return;
         admin.setTab = (key) => admin.goAdminTab(key);
-        if(admin.tabsBound) return;
-        /** Buttons already use onclick="admin.goAdminTab(...)" — do not add duplicate listeners (doubled sync froze tab switches). */
+        if(wrap.dataset.tabsDelegateBound === "1") {
+            admin.tabsBound = true;
+            return;
+        }
+        wrap.dataset.tabsDelegateBound = "1";
+        wrap.addEventListener("click", function(ev) {
+            const btn = ev.target && ev.target.closest ? ev.target.closest(".tab-btn") : null;
+            if(!btn || !wrap.contains(btn)) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const tab = btn.dataset.tab;
+            if(tab) admin.goAdminTab(tab);
+        });
         admin.tabsBound = true;
     },
     _liteEditPanelsDone: false,
@@ -34926,6 +34946,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     }
 };
 
+try {
+    if(typeof app !== "undefined") window.app = app;
+    if(typeof ui !== "undefined") window.ui = ui;
+    if(typeof admin !== "undefined") window.admin = admin;
+} catch(eWin) {}
 (function() {
     const bootTabs = function() {
         try {
