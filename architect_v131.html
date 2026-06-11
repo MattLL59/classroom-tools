@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T16:00:00">
-<meta name="architect-deploy" content="admin-modal-click-fix">
+<meta name="architect-build" content="2026-06-02T18:00:00">
+<meta name="architect-deploy" content="admin-esc-emergency-close">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -713,13 +713,16 @@
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
-        pointer-events: auto !important;
+        pointer-events: none !important;
         align-items: center;
         align-content: flex-start;
         padding: 52px 0 10px 0;
         box-sizing: border-box;
         z-index: 50000 !important;
         background: rgba(15, 24, 28, 0.62);
+    }
+    #modal-admin.modal.open .modal-content {
+        pointer-events: auto !important;
     }
     #modal-admin .modal-header,
     #modal-admin #admin-tabs,
@@ -1202,11 +1205,14 @@
             } catch(e) { console.error("Data button:", e); }
             var m = document.getElementById("modal-admin");
             if(m) {
+                m.classList.remove("modal-hidden");
                 m.classList.add("open");
                 m.style.display = "flex";
                 m.style.visibility = "visible";
+                m.style.opacity = "1";
                 m.style.pointerEvents = "auto";
                 m.style.zIndex = "50000";
+                m.setAttribute("aria-hidden", "false");
                 try {
                     if(typeof admin !== "undefined") {
                         if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
@@ -1538,7 +1544,7 @@
 
     <div id="modal-admin" class="modal">
         <div class="modal-content">
-            <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="return window.ui&&ui.openModal('modal-manual'),!1" title="Instruction manual">?</button> <button type="button" class="icon-btn" id="btn-admin-modal-close" data-admin-close="1" onclick="return window.ui&&ui.closeTeacherSettings(event),!1" title="Close Teacher Settings">✕</button></div>
+            <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="return window.ui&&ui.openModal('modal-manual'),!1" title="Instruction manual">?</button> <button type="button" class="icon-btn" id="btn-admin-modal-close" data-admin-close="1" onclick="return window.__tsaEmergencyCloseAdmin&&window.__tsaEmergencyCloseAdmin(event),!1" title="Close Teacher Settings">✕</button></div>
             <div class="modal-body">
                 <div class="tab-bar" id="admin-tabs">
                     <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward" onclick="return window.admin&&admin.goAdminTab('reward'),!1">Reward</button>
@@ -16255,7 +16261,11 @@ const app = {
                         for(let i = 0; i < modalIds.length; i++) {
                             const mid = modalIds[i];
                             const m = document.getElementById(mid);
-                            if(!m || !m.classList.contains("open")) continue;
+                            if(mid === "modal-admin") {
+                                const vis = (typeof window.__tsaAdminShellVisible === "function" && window.__tsaAdminShellVisible())
+                                    || (typeof ui !== "undefined" && typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible());
+                                if(!vis) continue;
+                            } else if(!m || !m.classList.contains("open")) continue;
                             ev.preventDefault();
                             if(mid === "modal-admin" && typeof ui.closeTeacherSettings === "function") ui.closeTeacherSettings(ev);
                             else if(mid === "modal-admin" && typeof ui.closeModal === "function") ui.closeModal(mid);
@@ -19114,19 +19124,30 @@ const ui = {
         return !!(ui._adminCloseGuardUntil && Date.now() < ui._adminCloseGuardUntil);
     },
     _finishAdminModalClose: function() {
+        ui._hideAdminModalNow();
+        ui._scheduleAdminModalCloseWork();
+    },
+    /** Hide Teacher Settings immediately — never block on save/render first. */
+    _hideAdminModalNow: function() {
         const el = document.getElementById("modal-admin");
         app._adminLiteOpen = false;
         if(typeof admin !== "undefined") admin._adminShellFormSynced = false;
-        ui._flushPendingLevelBankSave();
+        ui._pauseSelectionGate = false;
+        if(el) ui.hideModalShell(el);
+        ui._beginAdminCloseGuard(450);
+    },
+    _scheduleAdminModalCloseWork: function() {
+        const work = function() { ui._runAdminModalCloseWork(); };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(work, { timeout: 2500 });
+        else setTimeout(work, 0);
+    },
+    _runAdminModalCloseWork: function() {
         if(typeof admin !== "undefined" && admin._levelBankFullRenderTimer) {
             clearTimeout(admin._levelBankFullRenderTimer);
             admin._levelBankFullRenderTimer = null;
         }
-        ui.hideModalShell(el);
-        ui._pauseSelectionGate = false;
-        app._adminLiteOpen = false;
-        ui._beginAdminCloseGuard(450);
-        const defer = () => {
+        ui._flushPendingLevelBankSave();
+        const defer = function() {
             const adm = document.getElementById("modal-admin");
             if(adm && adm.classList.contains("open") && !adm.classList.contains("modal-hidden")) return;
             try {
@@ -19141,9 +19162,13 @@ const ui = {
         if(typeof admin === "undefined" || !admin._levelBankSaveTimer) return;
         clearTimeout(admin._levelBankSaveTimer);
         admin._levelBankSaveTimer = null;
-        try {
-            app.save({ skipRender: true, silent: true, skipQuestionPersist: true, skipExtractCache: true });
-        } catch(e) {}
+        const run = function() {
+            try {
+                app.save({ skipRender: true, silent: true, skipQuestionPersist: true, skipExtractCache: true });
+            } catch(e) {}
+        };
+        if(typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3000 });
+        else setTimeout(run, 50);
     },
     _deferAfterAdminClose: function() {
         const skipHeavy = ui._adminCloseSkipsPassageWork && ui._adminCloseSkipsPassageWork();
@@ -19178,14 +19203,14 @@ const ui = {
         }
     },
     isAdminModalVisible: function() {
+        if(typeof window.__tsaAdminShellVisible === "function") return window.__tsaAdminShellVisible();
         const adm = document.getElementById("modal-admin");
         if(!adm || adm.classList.contains("modal-hidden")) return false;
-        if(!adm.classList.contains("open")) return false;
         try {
             const st = window.getComputedStyle(adm);
-            return st.display !== "none" && st.visibility !== "hidden" && st.opacity !== "0";
+            return st.display !== "none" && st.visibility !== "hidden" && parseFloat(st.opacity) > 0.01;
         } catch(e) {
-            return true;
+            return adm.classList.contains("open");
         }
     },
     showAdminModalShell: function() {
@@ -19254,10 +19279,9 @@ const ui = {
             if(ev.stopPropagation) ev.stopPropagation();
             if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
         }
-        ui._beginAdminCloseGuard(450);
         try {
-            if(appData && !appData.isStandalone) ui._finishAdminModalClose();
-            else ui.closeModal("modal-admin");
+            ui._hideAdminModalNow();
+            ui._scheduleAdminModalCloseWork();
         } catch(eClose) {
             console.warn("closeTeacherSettings:", eClose);
             ui.hideModalShell(document.getElementById("modal-admin"));
@@ -19268,13 +19292,8 @@ const ui = {
     closeModal: (id) => {
         const el = document.getElementById(id);
         if(id === "modal-admin") {
-            if(appData && !appData.isStandalone) {
-                ui._finishAdminModalClose();
-                return;
-            }
-            ui.hideModalShell(el);
-            ui._beginAdminCloseGuard(450);
-            if(id === 'modal-source') { ui.stopReader(); }
+            ui._hideAdminModalNow();
+            ui._scheduleAdminModalCloseWork();
             return;
         }
         ui.hideModalShell(el);
@@ -19313,9 +19332,6 @@ const ui = {
                     if(saved !== "reward" && saved !== "edit" && saved !== "ai" && saved !== "export") saved = "edit";
                 } catch(eLs) {}
                 admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-                setTimeout(function() {
-                    try { admin.hydrateAdminTabPanel(saved); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
-                }, 120);
             }
         } catch(e) {
             console.error("Settings shell failed:", e);
@@ -25432,22 +25448,27 @@ const admin = {
             }
         } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
     },
-    /** Document capture for close + tabs — survives overlay/stacking issues and missing window.ui at parse time. */
+    /** Document capture for close + tabs + keyboard — survives overlay/stacking and blocked main thread on save. */
     bindAdminModalChromeOnce: function() {
         if(document.body.dataset.adminChromeBound === "1") return;
         document.body.dataset.adminChromeBound = "1";
-        document.addEventListener("click", function(ev) {
+        const adminModalOpen = function() {
+            if(typeof window.__tsaAdminShellVisible === "function" && window.__tsaAdminShellVisible()) return true;
+            return typeof ui !== "undefined" && ui.isAdminModalVisible && ui.isAdminModalVisible();
+        };
+        const emergencyCloseAdmin = function(ev) {
+            if(typeof window.__tsaEmergencyCloseAdmin === "function") return window.__tsaEmergencyCloseAdmin(ev);
+            if(typeof ui !== "undefined" && ui.closeTeacherSettings) ui.closeTeacherSettings(ev);
+        };
+        const handleAdminPointer = function(ev) {
+            if(!adminModalOpen()) return;
             const adm = document.getElementById("modal-admin");
-            if(!adm || !adm.classList.contains("open") || adm.classList.contains("modal-hidden")) return;
-            try {
-                const st = window.getComputedStyle(adm);
-                if(st.display === "none" || st.visibility === "hidden" || st.pointerEvents === "none") return;
-            } catch(eSt) {}
+            if(!adm) return;
             const closeBtn = ev.target && ev.target.closest ? ev.target.closest("#btn-admin-modal-close, [data-admin-close]") : null;
             if(closeBtn && adm.contains(closeBtn)) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                if(typeof ui !== "undefined" && ui.closeTeacherSettings) ui.closeTeacherSettings(ev);
+                emergencyCloseAdmin(ev);
                 return;
             }
             const tabBtn = ev.target && ev.target.closest ? ev.target.closest("#admin-tabs .tab-btn") : null;
@@ -25457,12 +25478,37 @@ const admin = {
                 const tab = tabBtn.dataset.tab;
                 if(tab && admin.goAdminTab) admin.goAdminTab(tab);
             }
+        };
+        document.addEventListener("mousedown", handleAdminPointer, true);
+        document.addEventListener("click", handleAdminPointer, true);
+        document.addEventListener("keydown", function(ev) {
+            if(!adminModalOpen()) return;
+            if(ev.key === "Escape") {
+                ev.preventDefault();
+                ev.stopPropagation();
+                emergencyCloseAdmin(ev);
+                return;
+            }
+            if((ev.key === "Enter" || ev.key === " ") && ev.target && ev.target.closest) {
+                const closeBtn = ev.target.closest("#btn-admin-modal-close, [data-admin-close]");
+                if(closeBtn) {
+                    ev.preventDefault();
+                    emergencyCloseAdmin(ev);
+                    return;
+                }
+                const tabBtn = ev.target.closest("#admin-tabs .tab-btn");
+                if(tabBtn && tabBtn.dataset.tab && admin.goAdminTab) {
+                    ev.preventDefault();
+                    admin.goAdminTab(tabBtn.dataset.tab);
+                }
+            }
         }, true);
     },
     bindAdminModalClose: function() {
         const closeBtn = document.getElementById("btn-admin-modal-close");
         if(!closeBtn) return;
         closeBtn.onclick = function(ev) {
+            if(typeof window.__tsaEmergencyCloseAdmin === "function") return window.__tsaEmergencyCloseAdmin(ev);
             if(ev) { ev.preventDefault(); ev.stopPropagation(); }
             if(typeof ui !== "undefined" && ui.closeTeacherSettings) ui.closeTeacherSettings(ev);
             return false;
@@ -35042,6 +35088,66 @@ try {
     if(typeof admin !== "undefined") window.admin = admin;
 } catch(eWin) {}
 (function() {
+    window.__tsaAdminShellVisible = function() {
+        const m = document.getElementById("modal-admin");
+        if(!m || m.classList.contains("modal-hidden")) return false;
+        try {
+            const st = window.getComputedStyle(m);
+            return st.display !== "none" && st.visibility !== "hidden" && parseFloat(st.opacity) > 0.01;
+        } catch(e) {
+            return m.classList.contains("open") || m.style.display === "flex";
+        }
+    };
+    window.__tsaHideAdminShellNow = function() {
+        const m = document.getElementById("modal-admin");
+        if(!m || !window.__tsaAdminShellVisible()) return false;
+        m.classList.remove("open");
+        m.classList.add("modal-hidden");
+        m.style.display = "none";
+        m.style.visibility = "hidden";
+        m.style.opacity = "0";
+        m.style.pointerEvents = "none";
+        m.style.removeProperty("z-index");
+        m.setAttribute("aria-hidden", "true");
+        const content = m.querySelector(".modal-content");
+        if(content) content.style.transform = "";
+        if(typeof app !== "undefined") app._adminLiteOpen = false;
+        return true;
+    };
+    window.__tsaScheduleAdminCloseCleanup = function() {
+        const tick = function(n) {
+            if(typeof ui !== "undefined" && ui._scheduleAdminModalCloseWork) {
+                try {
+                    ui._pauseSelectionGate = false;
+                    if(ui._beginAdminCloseGuard) ui._beginAdminCloseGuard(450);
+                    ui._scheduleAdminModalCloseWork();
+                } catch(e) {}
+                return;
+            }
+            if(n < 120) setTimeout(function() { tick(n + 1); }, 50);
+        };
+        setTimeout(function() { tick(0); }, 0);
+    };
+    window.__tsaEmergencyCloseAdmin = function(ev) {
+        if(ev) {
+            if(ev.preventDefault) ev.preventDefault();
+            if(ev.stopPropagation) ev.stopPropagation();
+            if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+        }
+        if(!window.__tsaHideAdminShellNow()) return false;
+        window.__tsaScheduleAdminCloseCleanup();
+        return false;
+    };
+    if(!window.__tsaAdminEscEmergencyBound) {
+        window.__tsaAdminEscEmergencyBound = true;
+        document.addEventListener("keydown", function(ev) {
+            if(ev.key !== "Escape") return;
+            if(!window.__tsaAdminShellVisible()) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            window.__tsaEmergencyCloseAdmin(ev);
+        }, true);
+    }
     const bootTabs = function() {
         try {
             if(typeof admin !== "undefined") {
