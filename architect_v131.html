@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-02T14:00:00">
-<meta name="architect-deploy" content="admin-tab-delegate-fix">
+<meta name="architect-build" content="2026-06-02T15:00:00">
+<meta name="architect-deploy" content="admin-tab-onclick-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -573,6 +573,15 @@
     .btn-outline { background: var(--card); border: 2px solid var(--border); color: var(--text); }
     .btn-small { padding: 4px 8px; font-size: 0.8rem; width: auto; margin: 0; }
     .tab-bar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; position:relative; z-index:2; }
+    #modal-admin #admin-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: var(--bg);
+        padding: 4px 0 10px 0;
+        margin-bottom: 10px;
+    }
+    #modal-admin .modal-content { pointer-events: auto; position: relative; z-index: 1; }
     .tab-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(0, 150, 136, 0.08); }
     .filter-bar { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 5px; margin-bottom: 10px; }
     .filter-btn { flex: 1; min-width: 80px; padding: 8px; font-size: 0.85rem; }
@@ -1521,10 +1530,10 @@
             <div class="modal-header" title="Drag this bar to move the window so you can see the Lab or Quote Select behind it. Double-click the bar to recenter.">Teacher Settings <button class="icon-btn" onclick="ui.openModal('modal-manual')" title="Instruction manual">?</button> <button type="button" class="icon-btn" id="btn-admin-modal-close" data-admin-close="1" onclick="ui.closeTeacherSettings(event)" title="Close Teacher Settings">✕</button></div>
             <div class="modal-body">
                 <div class="tab-bar" id="admin-tabs">
-                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward">Reward</button>
-                    <button type="button" class="btn btn-outline btn-small tab-btn active" data-tab="edit">Editing Suite</button>
-                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai">Load & AI</button>
-                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export">Lobby</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="reward" onclick="return window.admin&&admin.goAdminTab('reward'),!1">Reward</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn active" data-tab="edit" onclick="return window.admin&&admin.goAdminTab('edit'),!1">Editing Suite</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai" onclick="return window.admin&&admin.goAdminTab('ai'),!1">Load & AI</button>
+                    <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export" onclick="return window.admin&&admin.goAdminTab('export'),!1">Lobby</button>
                 </div>
                 <div class="admin-tab hidden" data-tab="reward">
                 <details class="admin-section" open>
@@ -19031,6 +19040,12 @@ const ui = {
         }
         if(id === "modal-source") { /* modal removed – no-op */ }
         if(id !== "modal-admin") return;
+        try {
+            if(typeof app !== "undefined") window.app = app;
+            if(typeof ui !== "undefined") window.ui = ui;
+            if(typeof admin !== "undefined") window.admin = admin;
+            if(typeof admin !== "undefined" && admin.bindTabsOnly) admin.bindTabsOnly();
+        } catch(eBind) {}
         const runAdminModalSync = function() {
             try {
                 if(typeof admin !== "undefined" && admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
@@ -19164,6 +19179,11 @@ const ui = {
         if(ui._adminCloseGuardActive()) return false;
         const adm = document.getElementById("modal-admin");
         if(!adm) return false;
+        try {
+            if(typeof app !== "undefined") window.app = app;
+            if(typeof ui !== "undefined") window.ui = ui;
+            if(typeof admin !== "undefined") window.admin = admin;
+        } catch(eWin) {}
         adm.classList.remove("modal-hidden");
         adm.classList.add("open");
         adm.style.display = "flex";
@@ -19172,6 +19192,11 @@ const ui = {
         adm.style.pointerEvents = "auto";
         adm.style.zIndex = "10200";
         adm.setAttribute("aria-hidden", "false");
+        const content = adm.querySelector(".modal-content");
+        if(content) content.style.pointerEvents = "auto";
+        try {
+            if(typeof admin !== "undefined" && admin.bindTabsOnly) admin.bindTabsOnly();
+        } catch(eTabs) { console.warn("bindTabsOnly on open:", eTabs); }
         const body = adm.querySelector(".modal-body");
         if(body && body.scrollTop === 0) body.scrollTop = 0;
         return true;
@@ -25320,8 +25345,13 @@ const admin = {
     },
     goAdminTab: function(key) {
         if(!admin.tabsBound && admin.bindTabsOnly) admin.bindTabsOnly();
-        admin.activateAdminTab(key, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-        try { admin.hydrateAdminTabPanel(key); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
+        const k = (key === "reward" || key === "edit" || key === "ai" || key === "export") ? key : "edit";
+        admin.activateAdminTab(k, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
+        const runHyd = function() {
+            try { admin.hydrateAdminTabPanel(k); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
+        };
+        if(typeof requestAnimationFrame === "function") requestAnimationFrame(runHyd);
+        else setTimeout(runHyd, 0);
     },
     _adminShellFormSynced: false,
     /** Lightweight form fields only — no passage editor, question rows, or IndexedDB. */
@@ -25386,19 +25416,23 @@ const admin = {
         const wrap = document.getElementById("admin-tabs");
         if(!wrap) return;
         admin.setTab = (key) => admin.goAdminTab(key);
-        if(wrap.dataset.tabsDelegateBound === "1") {
-            admin.tabsBound = true;
-            return;
-        }
-        wrap.dataset.tabsDelegateBound = "1";
-        wrap.addEventListener("click", function(ev) {
-            const btn = ev.target && ev.target.closest ? ev.target.closest(".tab-btn") : null;
-            if(!btn || !wrap.contains(btn)) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const tab = btn.dataset.tab;
+        const handleTab = function(tab, ev) {
+            if(ev) { ev.preventDefault(); ev.stopPropagation(); }
             if(tab) admin.goAdminTab(tab);
+        };
+        Array.from(wrap.querySelectorAll(".tab-btn")).forEach(btn => {
+            const tab = btn.dataset.tab;
+            if(!tab) return;
+            btn.onclick = function(ev) { handleTab(tab, ev); return false; };
         });
+        if(wrap.dataset.tabsDelegateBound !== "1") {
+            wrap.dataset.tabsDelegateBound = "1";
+            wrap.addEventListener("click", function(ev) {
+                const btn = ev.target && ev.target.closest ? ev.target.closest(".tab-btn") : null;
+                if(!btn || !wrap.contains(btn)) return;
+                handleTab(btn.dataset.tab, ev);
+            }, true);
+        }
         admin.tabsBound = true;
     },
     _liteEditPanelsDone: false,
