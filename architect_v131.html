@@ -713,7 +713,7 @@
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
-        pointer-events: none !important;
+        pointer-events: auto !important;
         align-items: center;
         align-content: flex-start;
         padding: 52px 0 10px 0;
@@ -721,7 +721,16 @@
         z-index: 50000 !important;
         background: rgba(15, 24, 28, 0.62);
     }
-    #modal-admin.modal.open .modal-content {
+    #modal-admin.modal.open .modal-content,
+    #modal-admin.modal.open .modal-body,
+    #modal-admin.modal.open button,
+    #modal-admin.modal.open input,
+    #modal-admin.modal.open select,
+    #modal-admin.modal.open textarea,
+    #modal-admin.modal.open label,
+    #modal-admin.modal.open details,
+    #modal-admin.modal.open summary,
+    #modal-admin.modal.open .btn {
         pointer-events: auto !important;
     }
     #modal-admin .modal-header,
@@ -1213,14 +1222,15 @@
                 m.style.pointerEvents = "auto";
                 m.style.zIndex = "50000";
                 m.setAttribute("aria-hidden", "false");
-                try {
-                    if(typeof admin !== "undefined") {
-                        if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
-                        if(admin.bindTabsOnly) admin.bindTabsOnly();
-                        if(admin.bindAdminModalClose) admin.bindAdminModalClose();
-                    }
-                    if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                } catch(eBind) { console.warn("Data tab bind fallback:", eBind); }
+        try {
+            if(typeof admin !== "undefined") {
+                if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
+                if(admin.bindTabsOnly) admin.bindTabsOnly();
+                if(admin.bindAdminModalClose) admin.bindAdminModalClose();
+            }
+            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+        } catch(eBind) { console.warn("Data tab bind fallback:", eBind); }
             } else {
                 alert("Settings panel is still loading. Wait a few seconds and try again, or hard-refresh the page.");
             }
@@ -16313,14 +16323,15 @@ const app = {
             else document.getElementById("emergency-reset").style.display = "block";
         }
     },
-    /** Wire admin tabs + form controls once the page shell is up (safe to call repeatedly). */
+    /** Wire admin tabs once the page shell is up — no tab hydrate here (avoids blocking clicks if Data opens during init). */
     ensureAdminReady: function() {
         if(!appData || appData.isStandalone || typeof admin === "undefined") return;
         if(!document.getElementById("modal-admin")) return;
-        try { if(admin.initTabs) admin.initTabs(); } catch(e1) {}
-        try { if(admin.activateAdminTab) admin.activateAdminTab("edit"); } catch(e1b) {}
+        try { if(admin.bindTabsOnly) admin.bindTabsOnly(); } catch(e1) {}
+        try { if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce(); } catch(e1b) {}
+        try { if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate(); } catch(e1c) {}
         const runSync = function() {
-            try { if(admin.syncUI) admin.syncUI({ skipLevelBank: true }); } catch(e2) {}
+            try { if(admin.syncFormFieldsOnly) admin.syncFormFieldsOnly(); } catch(e2) {}
         };
         if(typeof requestIdleCallback === "function") requestIdleCallback(runSync, { timeout: 2500 });
         else setTimeout(runSync, 80);
@@ -17849,6 +17860,7 @@ const ui = {
     },
 
     _initInProgress: false,
+    _pendingAdminOpen: false,
     _initPassageBuilt: false,
     /** After passage innerHTML update: line gutters need normal white-space on the host and reader band inset (inline pre-wrap and :has() are unreliable). */
     syncPassageLineLayoutShell: function(wrapEl, hostEl, html) {
@@ -18372,6 +18384,10 @@ const ui = {
             } catch(eBtn) {}
             if(typeof app.ensureAdminReady === "function") {
                 try { app.ensureAdminReady(); } catch(eAdm) {}
+            }
+            if(ui._pendingAdminOpen) {
+                ui._pendingAdminOpen = false;
+                setTimeout(function() { try { ui.showTeacherSettings(); } catch(ePo) {} }, 0);
             }
         }
     },
@@ -19238,6 +19254,7 @@ const ui = {
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindTabsOnly) admin.bindTabsOnly();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
             }
@@ -19251,6 +19268,10 @@ const ui = {
         if(ev && ev.preventDefault) ev.preventDefault();
         if(ev && ev.stopPropagation) ev.stopPropagation();
         if(ui._adminCloseGuardActive()) return;
+        if(ui._initInProgress) {
+            ui._pendingAdminOpen = true;
+            return;
+        }
         const adm = document.getElementById("modal-admin");
         if(adm && adm.classList.contains("open") && !(ui.isAdminModalVisible && ui.isAdminModalVisible())) {
             ui.hideModalShell(adm);
@@ -19322,6 +19343,7 @@ const ui = {
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
                 admin.bindTabsOnly();
@@ -23133,6 +23155,8 @@ const ui = {
     }
 };
 
+try { window.ui = ui; } catch(eUiWin) {}
+
 /* --- ADMIN --- */
 const admin = {
     aiAutoBound: false,
@@ -25386,8 +25410,9 @@ const admin = {
         const runHyd = function() {
             try { admin.hydrateAdminTabPanel(k); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
         };
-        if(typeof requestAnimationFrame === "function") requestAnimationFrame(runHyd);
-        else setTimeout(runHyd, 0);
+        if(typeof requestIdleCallback === "function") requestIdleCallback(runHyd, { timeout: 4000 });
+        else if(typeof requestAnimationFrame === "function") requestAnimationFrame(runHyd);
+        else setTimeout(runHyd, 50);
     },
     _adminShellFormSynced: false,
     /** Lightweight form fields only — no passage editor, question rows, or IndexedDB. */
@@ -25448,6 +25473,47 @@ const admin = {
             }
         } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
     },
+    /** Capture-phase click delegate for Editing Suite buttons — inline onclick can fail when main thread is busy or scope is wrong. */
+    bindAdminPanelClickDelegate: function() {
+        const adm = document.getElementById("modal-admin");
+        if(!adm || adm.dataset.adminPanelDelegateBound === "1") return;
+        adm.dataset.adminPanelDelegateBound = "1";
+        adm.addEventListener("click", function(ev) {
+            if(ev.target.closest("[data-admin-close], #btn-admin-modal-close")) return;
+            if(ev.target.closest("#admin-tabs .tab-btn")) return;
+            const el = ev.target.closest("button[onclick], input[onclick][type='button'], input[onclick][type='submit']");
+            if(!el || !adm.contains(el) || el.disabled) return;
+            const onAttr = el.getAttribute("onclick");
+            if(!onAttr || !onAttr.trim()) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            ev.stopImmediatePropagation();
+            try {
+                const A = window.admin || (typeof admin !== "undefined" ? admin : null);
+                const U = window.ui || (typeof ui !== "undefined" ? ui : null);
+                const P = window.app || (typeof app !== "undefined" ? app : null);
+                const fn = new Function("event", "admin", "ui", "app", "with(this){ " + onAttr + " }");
+                fn.call(el, ev, A, U, P);
+            } catch(eClick) {
+                console.warn("admin panel click:", onAttr, eClick);
+            }
+        }, true);
+        adm.addEventListener("change", function(ev) {
+            const el = ev.target;
+            if(!el || !adm.contains(el)) return;
+            const onAttr = el.getAttribute && el.getAttribute("onchange");
+            if(!onAttr || !onAttr.trim()) return;
+            try {
+                const A = window.admin || (typeof admin !== "undefined" ? admin : null);
+                const U = window.ui || (typeof ui !== "undefined" ? ui : null);
+                const P = window.app || (typeof app !== "undefined" ? app : null);
+                const fn = new Function("event", "admin", "ui", "app", "with(this){ " + onAttr + " }");
+                fn.call(el, ev, A, U, P);
+            } catch(eCh) {
+                console.warn("admin panel change:", onAttr, eCh);
+            }
+        }, true);
+    },
     /** Document capture for close + tabs + keyboard — survives overlay/stacking and blocked main thread on save. */
     bindAdminModalChromeOnce: function() {
         if(document.body.dataset.adminChromeBound === "1") return;
@@ -25479,7 +25545,6 @@ const admin = {
                 if(tab && admin.goAdminTab) admin.goAdminTab(tab);
             }
         };
-        document.addEventListener("mousedown", handleAdminPointer, true);
         document.addEventListener("click", handleAdminPointer, true);
         document.addEventListener("keydown", function(ev) {
             if(!adminModalOpen()) return;
@@ -35083,6 +35148,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     }
 };
 
+try { window.admin = admin; } catch(eAdmWin) {}
+
 try {
     if(typeof app !== "undefined") window.app = app;
     if(typeof ui !== "undefined") window.ui = ui;
@@ -35153,6 +35220,7 @@ try {
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindTabsOnly) admin.bindTabsOnly();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
             }
