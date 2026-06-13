@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-13T21:00:00">
-<meta name="architect-deploy" content="admin-wire-panel-buttons">
+<meta name="architect-build" content="2026-06-13T22:00:00">
+<meta name="architect-deploy" content="admin-panel-pointerup-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1225,7 +1225,7 @@
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
-                if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindTabsOnly) admin.bindTabsOnly();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
             }
@@ -16336,7 +16336,7 @@ const app = {
         if(!document.getElementById("modal-admin")) return;
         try { if(admin.bindTabsOnly) admin.bindTabsOnly(); } catch(e1) {}
         try { if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce(); } catch(e1b) {}
-        try { if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons(); } catch(e1c) {}
+        try { if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate(); } catch(e1c) {}
         const runSync = function() {
             try { if(admin.syncFormFieldsOnly) admin.syncFormFieldsOnly(); } catch(e2) {}
         };
@@ -19281,14 +19281,14 @@ const ui = {
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
-                if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindTabsOnly) admin.bindTabsOnly();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
             }
         } catch(eTabs) { console.warn("admin chrome bind on open:", eTabs); }
         const body = adm.querySelector(".modal-body");
         if(body && body.scrollTop === 0) body.scrollTop = 0;
-        try { if(typeof admin !== "undefined" && admin.wireAdminPanelButtons) admin.wireAdminPanelButtons(adm); } catch(eWire) {}
+        try { if(typeof admin !== "undefined" && admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate(); } catch(eWire) {}
         return true;
     },
     /** Data button — always opens Teacher Settings (close with ✕ or Esc only). */
@@ -19298,6 +19298,20 @@ const ui = {
         if(ui._adminCloseGuardActive()) return;
         if(ui._initInProgress) {
             ui._pendingAdminOpen = true;
+            try {
+                if(typeof app !== "undefined") {
+                    app._adminLiteOpen = true;
+                    app._deferAdminPassageUntilDemand = true;
+                }
+                if(ui.showAdminModalShell && ui.showAdminModalShell()) {
+                    if(typeof admin !== "undefined") {
+                        if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+                        if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
+                        if(admin.bindTabsOnly) admin.bindTabsOnly();
+                        if(admin.goAdminTab) admin.goAdminTab("edit");
+                    }
+                }
+            } catch(eEarly) { console.warn("showTeacherSettings during init:", eEarly); }
             return;
         }
         const adm = document.getElementById("modal-admin");
@@ -19371,7 +19385,7 @@ const ui = {
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
-                if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindAdminModalDragOnce) admin.bindAdminModalDragOnce();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
                 admin.bindTabsOnly();
@@ -25505,7 +25519,7 @@ const admin = {
     wireAdminPanelButtons: function(root) {
         root = root || document.getElementById("modal-admin");
         if(!root) return;
-        const wireOne = function(el, attr, evtName, altEvt) {
+        const wireOne = function(el, attr, evtNames) {
             if(!el || el.dataset.adminWired === "1") return;
             const onAttr = el.getAttribute && el.getAttribute(attr);
             if(!onAttr || !onAttr.trim()) return;
@@ -25517,30 +25531,93 @@ const admin = {
                 return;
             }
             el.dataset.adminWired = "1";
+            el.dataset.adminOnclick = onAttr;
             el.removeAttribute(attr);
             const run = function(ev) {
+                if(ev && ev.type === "mouseup" && ev.button !== 0) return;
+                if(ev && ev.type === "pointerup" && ev.button !== 0) return;
                 const A = window.admin;
                 const U = window.ui;
                 const P = window.app;
                 if(!A) return;
                 try { compiled.call(el, ev, A, U, P); } catch(eR) { console.warn("admin wire run:", eR); }
             };
-            el.addEventListener(evtName, run, false);
-            if(altEvt) el.addEventListener(altEvt, run, false);
+            (evtNames || ["click"]).forEach(function(evtName) {
+                el.addEventListener(evtName, run, false);
+            });
         };
         root.querySelectorAll("button[onclick], input[type='button'][onclick], input[type='submit'][onclick]").forEach(function(el) {
             const md = el.getAttribute("onmousedown") || "";
-            const alt = md.indexOf("preventDefault") >= 0 ? "mouseup" : null;
-            wireOne(el, "onclick", "click", alt);
-            if(md) el.removeAttribute("onmousedown");
+            const pd = el.getAttribute("onpointerdown") || "";
+            const blockClick = md.indexOf("preventDefault") >= 0 || pd.indexOf("preventDefault") >= 0;
+            const evts = blockClick ? ["pointerup", "mouseup", "click"] : ["click"];
+            wireOne(el, "onclick", evts);
+            if(md.indexOf("preventDefault") >= 0) el.removeAttribute("onmousedown");
         });
         root.querySelectorAll("select[onchange], input[onchange], textarea[onchange]").forEach(function(el) {
-            wireOne(el, "onchange", "change", null);
+            wireOne(el, "onchange", ["change"]);
         });
+        if(!root.dataset.adminWireObserved) {
+            root.dataset.adminWireObserved = "1";
+            try {
+                const obs = new MutationObserver(function() {
+                    try { admin.wireAdminPanelButtons(root); } catch(eObs) {}
+                });
+                obs.observe(root, { childList: true, subtree: true });
+            } catch(eMo) {}
+        }
     },
-    /** @deprecated use wireAdminPanelButtons */
+    /** Capture-phase fallback for panel buttons (mouseup/pointerup for toolbar mousedown preventDefault). */
     bindAdminPanelClickDelegate: function() {
-        if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons();
+        const adm = document.getElementById("modal-admin");
+        if(!adm) return;
+        if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons(adm);
+        if(adm.dataset.adminPanelDelegateBound === "1") return;
+        adm.dataset.adminPanelDelegateBound = "1";
+        const runPanelAction = function(el, ev) {
+            if(!el || el.disabled || el.dataset.adminWired === "1") return false;
+            const onAttr = (el.getAttribute && el.getAttribute("onclick")) || el.dataset.adminOnclick || "";
+            if(!onAttr.trim()) return false;
+            if(ev && ev.type === "mouseup" && ev.button !== 0) return false;
+            if(ev && ev.type === "pointerup" && ev.button !== 0) return false;
+            if(ev) { ev.preventDefault(); ev.stopPropagation(); }
+            try {
+                const A = window.admin || (typeof admin !== "undefined" ? admin : null);
+                const U = window.ui || (typeof ui !== "undefined" ? ui : null);
+                const P = window.app || (typeof app !== "undefined" ? app : null);
+                const fn = new Function("event", "admin", "ui", "app", "with(this){ " + onAttr + " }");
+                fn.call(el, ev, A, U, P);
+            } catch(eClick) {
+                console.warn("admin panel click:", onAttr.slice(0, 80), eClick);
+            }
+            return true;
+        };
+        const handlePanelPointer = function(ev) {
+            if(ev.target && ev.target.closest && ev.target.closest("[data-admin-close], #btn-admin-modal-close, #admin-tabs .tab-btn")) return;
+            const el = ev.target && ev.target.closest
+                ? ev.target.closest("button[onclick], button[data-admin-onclick], input[onclick][type='button'], input[onclick][type='submit']")
+                : null;
+            if(!el || !adm.contains(el)) return;
+            runPanelAction(el, ev);
+        };
+        ["click", "mouseup", "pointerup"].forEach(function(evtName) {
+            adm.addEventListener(evtName, handlePanelPointer, true);
+        });
+        adm.addEventListener("change", function(ev) {
+            const el = ev.target;
+            if(!el || !adm.contains(el) || el.dataset.adminWired === "1") return;
+            const onAttr = el.getAttribute && el.getAttribute("onchange");
+            if(!onAttr || !onAttr.trim()) return;
+            try {
+                const A = window.admin || (typeof admin !== "undefined" ? admin : null);
+                const U = window.ui || (typeof ui !== "undefined" ? ui : null);
+                const P = window.app || (typeof app !== "undefined" ? app : null);
+                const fn = new Function("event", "admin", "ui", "app", "with(this){ " + onAttr + " }");
+                fn.call(el, ev, A, U, P);
+            } catch(eCh) {
+                console.warn("admin panel change:", onAttr, eCh);
+            }
+        }, true);
     },
     /** Document capture for close + tabs + keyboard — survives overlay/stacking and blocked main thread on save. */
     bindAdminModalChromeOnce: function() {
@@ -35249,7 +35326,7 @@ try {
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
-                if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons();
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                 if(admin.bindTabsOnly) admin.bindTabsOnly();
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
             }
