@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T17:00:00">
-<meta name="architect-deploy" content="c1-anchor-ui-visible-f806">
+<meta name="architect-build" content="2026-06-14T18:00:00">
+<meta name="architect-deploy" content="c1-anchor-excerpt-fix-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15662,39 +15662,49 @@ const app = {
         const endA = words.length > 2 ? words.slice(-Math.min(6, words.length)).join(" ") : startA;
         return { startA, endA };
     },
+    /** Normalize phrase text for anchor matching (quotes, ellipsis, whitespace). */
+    _normalizePassageAnchorPhrase: function(str) {
+        return String(str || "").toLowerCase().replace(/[""''…\u2026]/g, "").replace(/\s+/g, " ").trim();
+    },
     /**
-     * Map start/end phrase anchors to a booklet line window using the same layout rows as excerpt slicing.
-     * @returns {{ lineRange?: {from:number,to:number}, err?: string }}
+     * Find start/end char indices in normalized layout passage text for anchor phrases.
+     * Uses the same DOM rows as excerpt slicing (not sparse WJEC margin numbers alone).
+     * @returns {{ startIdx: number, endIdx: number, rows: Array<{num?:number,body:string}>, rowStarts: number[], nFull: string }|{ err: string }}
      */
-    resolveLineRangeFromPassageAnchors: function(sourceText, startA, endA, level) {
+    resolvePassageAnchorCharSpan: function(sourceText, startA, endA, level) {
         startA = startA != null ? String(startA).trim() : "";
         endA = endA != null ? String(endA).trim() : "";
         if(!startA && !endA) return { err: "empty" };
         const lvl = parseInt(level, 10) || 1;
         const s0 = String(sourceText || "").trim();
         if(!s0) return { err: "no-source" };
+        const normalize = app._normalizePassageAnchorPhrase;
         const rows = (app.getDomRowsForExamLineSlicing && app.getDomRowsForExamLineSlicing(s0, lvl)) || app.parseWJECStyleBookletRows(s0) || [];
-        const normalize = (str) => String(str || "").toLowerCase().replace(/[""''…\u2026]/g, "").replace(/\s+/g, " ").trim();
-        const mapSpanToRange = function(rowList, startIdx, endIdx) {
-            if(!rowList.length || endIdx <= startIdx) return null;
-            const bodies = rowList.map(r => String(r.body != null ? r.body : "").replace(/\s+/g, " ").trim());
-            const rowStarts = [];
-            let nFull = "";
-            for(let i = 0; i < bodies.length; i++) {
-                if(i > 0) nFull += " ";
-                rowStarts[i] = nFull.length;
-                nFull += normalize(bodies[i]);
+        const findStartIdx = function(nFull, phrase) {
+            const np = normalize(phrase);
+            if(!np) return 0;
+            let ix = nFull.indexOf(np);
+            if(ix >= 0) return ix;
+            const words = np.split(/\s+/).filter(w => w.length >= 3);
+            if(words.length >= 2) {
+                const head = words.slice(0, Math.min(4, words.length)).join(" ");
+                ix = nFull.indexOf(head);
+                if(ix >= 0) return ix;
             }
-            const charToRowNum = (charIdx) => {
-                const idx = Math.max(0, charIdx);
-                for(let i = rowStarts.length - 1; i >= 0; i--) {
-                    if(idx >= rowStarts[i]) return rowList[i].num;
-                }
-                return rowList[0].num;
-            };
-            const from = charToRowNum(startIdx);
-            const to = charToRowNum(Math.max(startIdx, endIdx - 1));
-            return { from: Math.min(from, to), to: Math.max(from, to) };
+            return -1;
+        };
+        const findEndIdx = function(nFull, phrase) {
+            const np = normalize(phrase);
+            if(!np) return nFull.length;
+            let li = nFull.lastIndexOf(np);
+            if(li >= 0) return li + np.length;
+            const words = np.split(/\s+/).filter(w => w.length >= 3);
+            if(words.length >= 2) {
+                const tail = words.slice(-Math.min(4, words.length)).join(" ");
+                li = nFull.lastIndexOf(tail);
+                if(li >= 0) return li + tail.length;
+            }
+            return -1;
         };
         if(rows.length) {
             const bodies = rows.map(r => String(r.body != null ? r.body : "").replace(/\s+/g, " ").trim());
@@ -15707,31 +15717,83 @@ const app = {
             }
             let startIdx = 0;
             if(startA) {
-                startIdx = nFull.indexOf(normalize(startA));
+                startIdx = findStartIdx(nFull, startA);
                 if(startIdx < 0) return { err: "start-not-found" };
             }
             let endIdx = nFull.length;
             if(endA) {
-                const li = nFull.lastIndexOf(normalize(endA));
-                if(li < 0) return { err: "end-not-found" };
-                endIdx = li + normalize(endA).length;
+                endIdx = findEndIdx(nFull, endA);
+                if(endIdx < 0) return { err: "end-not-found" };
             }
             if(endIdx <= startIdx) return { err: "range-inverted" };
-            const lineRange = mapSpanToRange(rows, startIdx, endIdx);
-            return lineRange ? { lineRange } : { err: "no-rows" };
+            return { startIdx: startIdx, endIdx: endIdx, rows: rows, rowStarts: rowStarts, nFull: nFull };
         }
         const span = app.resolveWJECBookletAnchorPlainSpan(s0, startA, endA);
         if(!span || !span.ok || !span.linePlains || !span.lineStarts) return { err: span && span.err ? span.err : "no-structured" };
-        const charToLineNum = (charIdx) => {
-            const idx = Math.max(0, charIdx);
-            for(let i = span.lineStarts.length - 1; i >= 0; i--) {
-                if(idx >= span.lineStarts[i]) return i + 1;
-            }
-            return 1;
+        const pseudoRows = span.linePlains.map((body, ix) => ({ num: ix + 1, body: body }));
+        return {
+            startIdx: span.startIdx || 0,
+            endIdx: span.endIdx != null ? span.endIdx : span.linePlains.join(" ").length,
+            rows: pseudoRows,
+            rowStarts: span.lineStarts,
+            nFull: span.linePlains.map(p => normalize(p)).join(" ")
         };
-        const from = charToLineNum(span.startIdx);
-        const to = charToLineNum(Math.max(span.startIdx, (span.endIdx != null ? span.endIdx : span.linePlains.join(" ").length) - 1));
-        return { lineRange: { from: Math.min(from, to), to: Math.max(from, to) } };
+    },
+    /**
+     * Map phrase anchors to **layout row indices** (1-based, inclusive) in {@link getDomRowsForExamLineSlicing} rows.
+     * @returns {{ rowFrom?: number, rowTo?: number, err?: string }}
+     */
+    resolvePassageAnchorRowSpan: function(sourceText, startA, endA, level) {
+        const span = app.resolvePassageAnchorCharSpan(sourceText, startA, endA, level);
+        if(!span || span.err) return { err: span && span.err ? span.err : "no-span" };
+        if(!span.rows || !span.rowStarts || !span.rowStarts.length) return { err: "no-rows" };
+        const charToRowIx = (charIdx) => {
+            const idx = Math.max(0, charIdx);
+            for(let i = span.rowStarts.length - 1; i >= 0; i--) {
+                if(idx >= span.rowStarts[i]) return i;
+            }
+            return 0;
+        };
+        const fromIx = charToRowIx(span.startIdx);
+        const toIx = charToRowIx(Math.max(span.startIdx, span.endIdx - 1));
+        return { rowFrom: fromIx + 1, rowTo: toIx + 1 };
+    },
+    /**
+     * Slice layout rows by phrase anchors (row index, not booklet margin numbers).
+     * @returns {{ rows: Array<{num?:number,body:string}>, plain: string, rowSpan?: {from:number,to:number}, err?: string }}
+     */
+    slicePassageRowsFromAnchors: function(sourceText, startA, endA, level) {
+        const span = app.resolvePassageAnchorCharSpan(sourceText, startA, endA, level);
+        if(!span || span.err) return { rows: [], plain: "", err: span && span.err ? span.err : "no-span" };
+        if(!span.rows || !span.rowStarts || !span.rowStarts.length) return { rows: [], plain: "", err: "no-rows" };
+        const charToRowIx = (charIdx) => {
+            const idx = Math.max(0, charIdx);
+            for(let i = span.rowStarts.length - 1; i >= 0; i--) {
+                if(idx >= span.rowStarts[i]) return i;
+            }
+            return 0;
+        };
+        const fromIx = charToRowIx(span.startIdx);
+        const toIx = charToRowIx(Math.max(span.startIdx, span.endIdx - 1));
+        const slice = span.rows.slice(fromIx, toIx + 1).map(r => ({
+            num: r && typeof r.num === "number" && Number.isFinite(r.num) ? r.num : undefined,
+            body: String(r.body != null ? r.body : "").replace(/\s+$/,"")
+        }));
+        const plain = slice.map(r => r.body).join("\n").trim();
+        return { rows: slice, plain: plain, rowSpan: { from: fromIx + 1, to: toIx + 1 } };
+    },
+    /**
+     * Map start/end phrase anchors to a booklet line window using the same layout rows as excerpt slicing.
+     * @returns {{ lineRange?: {from:number,to:number}, err?: string }}
+     */
+    resolveLineRangeFromPassageAnchors: function(sourceText, startA, endA, level) {
+        const sliced = app.slicePassageRowsFromAnchors(sourceText, startA, endA, level);
+        if(sliced.err) return { err: sliced.err };
+        if(!sliced.rows || !sliced.rows.length) return { err: "no-rows" };
+        const nums = sliced.rows.map(r => r && typeof r.num === "number" && Number.isFinite(r.num) ? r.num : null).filter(n => n != null);
+        if(nums.length) return { lineRange: { from: Math.min(...nums), to: Math.max(...nums) }, rowSpan: sliced.rowSpan };
+        if(sliced.rowSpan) return { lineRange: { from: sliced.rowSpan.from, to: sliced.rowSpan.to }, rowSpan: sliced.rowSpan };
+        return { err: "no-rows" };
     },
     /**
      * Resolves passage line window for Quote Select: Level Bank question ids (current navigated question’s Lines box first, then siblings in bank order), then prompt text, then phrase anchors.
@@ -15756,6 +15818,14 @@ const app = {
         let windowSource = "";
         let anchorStart = "";
         let anchorEnd = "";
+        let anchorRowSpan = null;
+        let anchorErr = "";
+        const srcForSlice = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
+        const lineRefSliceOk = (lr) => {
+            if(!lr || typeof lr.from !== "number" || typeof lr.to !== "number") return false;
+            const ex = app.slicePlainByExamLineRange(srcForSlice, lr, lvl);
+            return !!(ex && String(ex).trim());
+        };
         const applyLineRef = (row, tag, qidHint) => {
             let ref = row && typeof row.lineRef === "string" ? row.lineRef.trim() : "";
             if(!ref && qidHint && typeof app.getQuestionLineRef === "function") ref = app.getQuestionLineRef(qidHint);
@@ -15779,14 +15849,45 @@ const app = {
                 endA = anc.endA || "";
             }
             if(!startA && !endA) return false;
-            const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
-            const resolved = app.resolveLineRangeFromPassageAnchors(src, startA, endA, lvl);
-            if(!resolved || !resolved.lineRange) return false;
-            lineRange = resolved.lineRange;
+            const sliced = app.slicePassageRowsFromAnchors(srcForSlice, startA, endA, lvl);
+            if(!sliced || !sliced.rows || !sliced.rows.length || !String(sliced.plain || "").trim()) {
+                anchorErr = sliced && sliced.err ? sliced.err : "no-rows";
+                return false;
+            }
+            anchorErr = "";
+            anchorRowSpan = sliced.rowSpan || null;
+            const nums = sliced.rows.map(r => r && typeof r.num === "number" && Number.isFinite(r.num) ? r.num : null).filter(n => n != null);
+            if(nums.length) lineRange = { from: Math.min(...nums), to: Math.max(...nums) };
+            else if(anchorRowSpan) lineRange = { from: anchorRowSpan.from, to: anchorRowSpan.to };
+            else return false;
             windowSource = "anchors:" + (row && row.id ? row.id : (qidHint || ""));
             anchorStart = startA;
             anchorEnd = endA;
             return true;
+        };
+        const resolveForQuestion = (qid) => {
+            const q = findQById(qid);
+            let startA = q && typeof q.passageStartAnchor === "string" ? q.passageStartAnchor.trim() : "";
+            let endA = q && typeof q.passageEndAnchor === "string" ? q.passageEndAnchor.trim() : "";
+            if((!startA && !endA) && typeof app.getQuestionPassageAnchors === "function") {
+                const anc = app.getQuestionPassageAnchors(qid);
+                startA = anc.startA || "";
+                endA = anc.endA || "";
+            }
+            const hasAnchors = !!(startA || endA);
+            if(hasAnchors && applyAnchors(q, qid)) return true;
+            if(applyLineRef(q, "lineRef:", qid)) {
+                if(lineRefSliceOk(lineRange)) return true;
+                const savedRange = lineRange;
+                const savedSource = windowSource;
+                lineRange = null;
+                windowSource = "";
+                if(hasAnchors && applyAnchors(q, qid)) return true;
+                lineRange = savedRange;
+                windowSource = savedSource;
+                return true;
+            }
+            return false;
         };
         if(ids && ids.length) {
             /** Prefer the **navigated** focus question’s Lines box, then other Level Bank ids — avoids a sibling row’s stale line ref winning while the prompt / affirm text come from {@link getCurrentQuestionIdForLevel}. */
@@ -15800,25 +15901,17 @@ const app = {
                 }
             }
             for(let i = 0; i < orderedIds.length; i++) {
-                const qid = orderedIds[i];
-                if(applyLineRef(findQById(qid), "lineRef:", qid)) break;
-            }
-            if(!lineRange) {
-                for(let i = 0; i < orderedIds.length; i++) {
-                    const qid = orderedIds[i];
-                    if(applyAnchors(findQById(qid), qid)) break;
-                }
+                if(resolveForQuestion(orderedIds[i])) break;
             }
         }
-        if(!lineRange) applyLineRef(findQById(currentQId), "lineRef:", currentQId);
-        if(!lineRange) applyAnchors(findQById(currentQId), currentQId);
+        if(!lineRange) resolveForQuestion(currentQId);
         if(!lineRange) {
             lineRange = app.parseLineRangeFromQuestion(promptText) || null;
             if(lineRange) windowSource = "question_prompt";
         }
         const displayFromPrompt = app.parseLineRangeFromQuestion(promptText) || null;
         const displayLineRange = displayFromPrompt || lineRange || null;
-        return { lineRange, displayLineRange, currentQId: currentQId || null, windowSource, anchorStart, anchorEnd };
+        return { lineRange, displayLineRange, currentQId: currentQId || null, windowSource, anchorStart, anchorEnd, anchorRowSpan, anchorErr };
     },
     /**
      * One row per `.source-line-row` in stored passage HTML — fixes slicing when {@link cleanSourceText} collapses the insert to few newlines.
@@ -16012,8 +16105,7 @@ const app = {
         return out;
     },
     /** Quote Select / Lab excerpt: booklet rows for the line window. WJEC **5 / 10 / 15…** unless Level Bank <strong>every #</strong> is on (same as whole passage). @param {number} [level] Same as {@link sliceExamLineRangeRows}. */
-    formatSourceHtmlExamLineWindow: function(sourceText, range, level) {
-        const sliceRows = app.sliceExamLineRangeRows(sourceText, range, level);
+    formatSourceHtmlFromSliceRows: function(sliceRows, level) {
         if(!sliceRows || !sliceRows.length) return "";
         const lvl = parseInt(level, 10) || 1;
         const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
@@ -16037,6 +16129,10 @@ const app = {
             pdfPhysicalLines: false,
             examMarginMultiplesOf5Only: false
         }) || "";
+    },
+    formatSourceHtmlExamLineWindow: function(sourceText, range, level) {
+        const sliceRows = app.sliceExamLineRangeRows(sourceText, range, level);
+        return app.formatSourceHtmlFromSliceRows(sliceRows, level);
     },
     /**
      * Shared Lab / Quote Select / refresh passage HTML: **whole** insert vs **focused** line-window excerpt for the current level.
@@ -16067,10 +16163,20 @@ const app = {
             const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank.</div>`;
             selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
-            const ex = app.slicePlainByExamLineRange(sourceText, lineRange, lvl);
+            const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
+            let ex = "";
+            let excerptBody = "";
+            if(anchorWin && (lineWinResolved.anchorStart || lineWinResolved.anchorEnd)) {
+                const sliced = app.slicePassageRowsFromAnchors(sourceText, lineWinResolved.anchorStart, lineWinResolved.anchorEnd, lvl);
+                ex = sliced && sliced.plain ? sliced.plain : "";
+                if(sliced && sliced.rows && sliced.rows.length)
+                    excerptBody = app.formatSourceHtmlFromSliceRows(sliced.rows, lvl);
+            }
+            if(!ex || !ex.trim()) ex = app.slicePlainByExamLineRange(sourceText, lineRange, lvl);
+            if(!excerptBody || !String(excerptBody).trim())
+                excerptBody = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(sourceText, lineRange, lvl) : "";
             if(ex && ex.trim()) {
                 useExcerpt = true;
-                const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
                 const spanLab = anchorWin && (lineWinResolved.anchorStart || lineWinResolved.anchorEnd)
                     ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start of insert") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end of insert"))
                     : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
@@ -16078,14 +16184,21 @@ const app = {
                     ? "Phrase anchors"
                     : "Exam-style window";
                 const banner = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;opacity:0.9;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--primary);background:rgba(0,150,136,0.08);">${bannerNote}: <strong>${spanLab}</strong> — excerpt only (evidence is still checked against the full passage).</div>`;
-                let excerptBody = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(sourceText, lineRange, lvl) : "";
                 if(!excerptBody || !String(excerptBody).trim())
                     excerptBody = app.formatSourceHtml(ex.trim(), { skipStoredStructuredFallback: true, excerptProse: true });
                 selPassageHtml += banner + excerptBody;
             } else {
                 excerptSliceFailed = true;
-                const spanLab = labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
-                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. If you meant <strong>lines 1–15</strong>, use <code>1-15</code> (with a dash), not <code>115</code>. Or set <strong>Start / End phrase</strong> anchors. The full passage was <strong>not</strong> loaded.</div>`;
+                const anchorErr = lineWinResolved && lineWinResolved.anchorErr ? String(lineWinResolved.anchorErr) : "";
+                const anchorErrLab = anchorErr === "start-not-found" ? "Start phrase not found in passage."
+                    : anchorErr === "end-not-found" ? "End phrase not found in passage."
+                    : anchorErr === "range-inverted" ? "End phrase comes before start phrase."
+                    : "";
+                const spanLab = anchorWin && (lineWinResolved.anchorStart || lineWinResolved.anchorEnd)
+                    ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end"))
+                    : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
+                const errDetail = anchorErrLab || `If you meant <strong>lines 1–15</strong>, use <code>1-15</code> (with a dash), not <code>115</code>. Or set <strong>Start / End phrase</strong> anchors with exact words from the passage.`;
+                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} The full passage was <strong>not</strong> loaded.</div>`;
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -18424,6 +18537,7 @@ const ui = {
         if(!excerptOn) return "whole";
         const win = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null;
         if(win && win.lineRange) return "focused";
+        if(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0) return "focused";
         return "whole";
     },
     setPassageDisplayScope: function(scope, opts) {
@@ -29228,6 +29342,10 @@ const admin = {
             const syncAnchors = (e) => {
                 const preferredMount = e && e.target && e.target.closest(".questions-list-mount");
                 admin.syncQuestionsFromListCore(preferredMount ? { preferredMount } : undefined);
+                if(typeof ui !== "undefined" && ui.getPassageDisplayScope && ui.getPassageDisplayScope() === "focused" && typeof ui.refreshSourceDisplay === "function") {
+                    const st = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
+                    ui.refreshSourceDisplay(st, { forcePassage: true });
+                }
             };
             startAnchorInp.addEventListener("input", syncAnchors);
             endAnchorInp.addEventListener("input", syncAnchors);
@@ -34524,6 +34642,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         else delete q.passageEndAnchor;
         app.save();
         if(admin._mirrorPassageAnchorsToFocusQuestionInputs) admin._mirrorPassageAnchorsToFocusQuestionInputs(qid, sa, ea);
+        if(admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
     },
     /** Push saved lineRef from appData into Focus rows before sync (avoids sync clearing preview-only edits when DOM was empty). */
     _pushLineRefsFromAppDataToFocusInputs: function() {
@@ -34830,8 +34949,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             out.innerHTML = "<span style=\"color:var(--error)\">No source text loaded.</span>";
             return;
         }
-        if(!win.lineRange) {
-            out.innerHTML = "<span style=\"color:var(--error)\">No line window — set <strong>Booklet lines</strong> in the Level Bank preview panel (e.g. <code>1-5</code>) or the same <strong>Lines</strong> box next to the Focus question, or type <code>Read lines 1–5</code> in the question text. Pick that question in the level row’s <strong>Question</strong> column.</span>";
+        if(!win.lineRange && !(win.anchorStart || win.anchorEnd)) {
+            out.innerHTML = "<span style=\"color:var(--error)\">No line window — set <strong>Booklet lines</strong> in the Level Bank preview panel (e.g. <code>1-5</code>) or the same <strong>Lines</strong> box next to the Focus question, or <strong>Start / End phrase</strong> anchors, or type <code>Read lines 1–5</code> in the question text. Pick that question in the level row’s <strong>Question</strong> column.</span>";
             return;
         }
         const disp = win.displayLineRange;
