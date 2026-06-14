@@ -1025,9 +1025,12 @@
     .pick-screen.hidden { opacity: 0; pointer-events: none; }
     .pick-title { font-size: 1.4rem; font-weight: 800; color: var(--primary); }
 
-    #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483640; background: #d32f2f; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; pointer-events: auto; max-width: min(96vw, 520px); }
+    #emergency-reset-backdrop { position: fixed; inset: 0; z-index: 2147483639; background: rgba(0,0,0,0.55); display: none; pointer-events: auto; }
+    #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483640; background: #d32f2f; color: white; padding: 20px 28px 20px 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; pointer-events: auto; max-width: min(96vw, 520px); }
     #emergency-reset .btn { pointer-events: auto; cursor: pointer; position: relative; z-index: 1; }
     #emergency-reset a { color: #ffecb3; text-decoration: underline; pointer-events: auto; }
+    #emergency-reset .crash-close-x { position: absolute; top: 8px; right: 10px; background: transparent; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 4px 8px; opacity: 0.9; }
+    #emergency-reset .crash-close-x:hover { opacity: 1; }
     #architect-deploy-ribbon {
         position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
         background: #004d40; color: #e0f2f1; font-size: 0.78rem; line-height: 1.35;
@@ -1049,7 +1052,10 @@
 
     <div id="save-status" style="position:fixed; top:10px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:white; padding:5px 15px; border-radius:20px; font-size:0.8rem; opacity:0; transition:0.3s; z-index:3000;">💾 Saved</div>
 
-    <div id="emergency-reset">
+    <div id="emergency-reset-backdrop" aria-hidden="true"></div>
+
+    <div id="emergency-reset" role="alertdialog" aria-labelledby="crash-summary">
+        <button type="button" class="crash-close-x" id="btn-emergency-close-x" title="Dismiss (Escape)" onclick="window.__tsaDismissCrashPanel&&window.__tsaDismissCrashPanel(); return false;">✕</button>
         <h2>⚠️ App Crashed or frozen</h2>
         <p id="crash-summary">Something went wrong while loading or running the app (this is not always corrupted saved data).</p>
         <p id="crash-manual" style="font-size:0.82rem;line-height:1.45;margin:10px 0 0 0;text-align:left;opacity:0.95;">
@@ -1057,9 +1063,9 @@
             <a id="crash-recovery-link" href="architect_v131.html?recovery=1&amp;b=1">recovery mode</a> (starts without your saved lesson).
         </p>
         <pre id="crash-detail" style="display:none; text-align:left; max-width:min(92vw,520px); max-height:40vh; overflow:auto; font-size:0.7rem; white-space:pre-wrap; background:rgba(0,0,0,0.25); padding:8px; border-radius:4px; margin-top:8px;"></pre>
-        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:10px;" id="btn-reset-lesson-only">Reset lesson data only</button>
-        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:6px;" id="btn-emergency-reset-all">Emergency reset (clear all site data)</button>
-        <button type="button" class="btn btn-outline" style="background:#e8f5e9; color:#1b5e20; margin-top:6px;" id="btn-emergency-dismiss">Dismiss — try to continue</button>
+        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:10px;" id="btn-reset-lesson-only" onclick="window.__tsaResetLessonOnly&&window.__tsaResetLessonOnly(); return false;">Reset lesson data only</button>
+        <button type="button" class="btn btn-outline" style="background:white; color:black; margin-top:6px;" id="btn-emergency-reset-all" onclick="window.__tsaEmergencyResetAll&&window.__tsaEmergencyResetAll(); return false;">Emergency reset (clear all site data)</button>
+        <button type="button" class="btn btn-outline" style="background:#e8f5e9; color:#1b5e20; margin-top:6px;" id="btn-emergency-dismiss" onclick="window.__tsaDismissCrashPanel&&window.__tsaDismissCrashPanel(); return false;">Dismiss — try to continue</button>
         <button type="button" class="btn btn-outline" style="background:#fff8e1; color:#333; margin-top:6px; display:none;" id="btn-load-heavy-lesson">Load saved lesson anyway (may crash)</button>
     </div>
     <script>
@@ -1090,12 +1096,24 @@
             try {
                 window.__tsaCrashPanelActive = false;
                 window.__tsaCrashOom = false;
+                window.__tsaCrashSuppressedUntil = Date.now() + 60000;
                 var box = document.getElementById("emergency-reset");
+                var back = document.getElementById("emergency-reset-backdrop");
                 if(box) box.style.display = "none";
+                if(back) back.style.display = "none";
+                document.body.classList.remove("tsa-boot-in-progress");
+                window.__tsaBootInProgress = false;
+                if(typeof app !== "undefined" && app._onBootComplete) app._onBootComplete();
+                if(typeof app !== "undefined" && app.restoreDeployRibbon) app.restoreDeployRibbon();
+                if(typeof ui !== "undefined" && ui.dismissBlockingOverlays) ui.dismissBlockingOverlays();
             } catch(e) {}
         };
         window.__tsaShowCrashEarly = function(detail) {
             try {
+                if(window.__tsaCrashSuppressedUntil && Date.now() < window.__tsaCrashSuppressedUntil) {
+                    var oomNow = /out of memory|invalid string length|allocation failed|array buffer allocation/i.test(String(detail || ""));
+                    if(!oomNow) return;
+                }
                 var splash = document.getElementById("splash-screen");
                 var celeb = document.getElementById("celebration-overlay");
                 var intro = document.getElementById("intro-text-screen");
@@ -1114,8 +1132,20 @@
                     sum.textContent = "Out of memory (OOM): the browser ran out of RAM loading your saved lesson — usually a very large passage. Use Reset lesson data only below.";
                 }
                 var dismissBtn = document.getElementById("btn-emergency-dismiss");
+                var closeX = document.getElementById("btn-emergency-close-x");
                 if(dismissBtn) dismissBtn.style.display = oom ? "none" : "inline-block";
+                if(closeX) closeX.style.display = oom ? "none" : "block";
                 if(pre && dStr) { pre.style.display = "block"; pre.textContent = dStr; }
+                var back = document.getElementById("emergency-reset-backdrop");
+                if(back) {
+                    back.style.display = "block";
+                    if(!back.dataset.bound) {
+                        back.dataset.bound = "1";
+                        back.addEventListener("click", function() {
+                            if(!window.__tsaCrashOom && typeof window.__tsaDismissCrashPanel === "function") window.__tsaDismissCrashPanel();
+                        });
+                    }
+                }
                 if(box) box.style.display = "block";
                 window.__tsaCrashPanelActive = true;
             } catch(e) {}
@@ -1124,9 +1154,11 @@
             var b1 = document.getElementById("btn-reset-lesson-only");
             var b2 = document.getElementById("btn-emergency-reset-all");
             var b3 = document.getElementById("btn-emergency-dismiss");
+            var b4 = document.getElementById("btn-emergency-close-x");
             if(b1 && !b1.dataset.bound) { b1.dataset.bound = "1"; b1.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaResetLessonOnly(); }); }
             if(b2 && !b2.dataset.bound) { b2.dataset.bound = "1"; b2.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaEmergencyResetAll(); }); }
             if(b3 && !b3.dataset.bound) { b3.dataset.bound = "1"; b3.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaDismissCrashPanel(); }); }
+            if(b4 && !b4.dataset.bound) { b4.dataset.bound = "1"; b4.addEventListener("click", function(ev) { ev.preventDefault(); ev.stopPropagation(); window.__tsaDismissCrashPanel(); }); }
             var rec = document.getElementById("crash-recovery-link");
             if(rec) {
                 try {
@@ -1312,13 +1344,25 @@
                     if(j.build !== raw) {
                         rib.classList.add("deploy-mismatch");
                         var fixUrl = j.pagesUrl || pagesUrl;
-                        rib.innerHTML = "Wrong copy loaded: this file says <strong>" + raw + "</strong> but Pages serves <strong>" + j.build + "</strong> · <a href=\"" + fixUrl + "\">use " + fixUrl + "</a>";
+                        rib.innerHTML = "Wrong copy loaded: this file says <strong>" + raw + "</strong> but Pages serves <strong>" + j.build + "</strong> · <a href=\"" + fixUrl + "\">open latest build</a>"
+                            + " <button type=\"button\" id=\"tsa-mismatch-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\">Dismiss</button>";
+                        var md = document.getElementById("tsa-mismatch-dismiss");
+                        if(md && !md.dataset.bound) {
+                            md.dataset.bound = "1";
+                            md.addEventListener("click", function(ev) {
+                                ev.preventDefault();
+                                rib.classList.remove("deploy-mismatch");
+                                if(typeof app !== "undefined" && app.restoreDeployRibbon) app.restoreDeployRibbon();
+                            });
+                        }
                         try {
                             if(/architect_v131\.html/i.test(location.pathname || "") && !sessionStorage.getItem("tsaBuildReload")) {
                                 sessionStorage.setItem("tsaBuildReload", "1");
                                 location.replace(fixUrl);
                             }
                         } catch(eReload) {}
+                    } else {
+                        try { sessionStorage.removeItem("tsaBuildReload"); } catch(eClr) {}
                     }
                 }).catch(function() {});
             }
@@ -16219,7 +16263,9 @@ const app = {
                 let detail = parts.join("\n");
                 if(err && err.stack) detail += "\n\n" + err.stack;
                 else if(err && err.message) detail += "\n\n" + err.message;
-                if(/out of memory|invalid string length|allocation failed/i.test(String(msg || "") + detail)) {
+                const oom = /out of memory|invalid string length|allocation failed/i.test(String(msg || "") + detail);
+                if(!oom && window.__tsaCrashSuppressedUntil && Date.now() < window.__tsaCrashSuppressedUntil) return;
+                if(oom) {
                     detail = "Out of memory while loading or rendering the lesson.\n\nClick Reset lesson data only on the red panel, or open recovery mode from the link below.\n\n" + detail;
                 }
                 window.__tsaShowCrash(detail);
@@ -16228,6 +16274,8 @@ const app = {
                 if(typeof app !== "undefined" && app.isImportingPdf) return;
                 const r = ev && ev.reason;
                 const detail = (r && r.stack) ? String(r.message || r) + "\n\n" + r.stack : String(r || "Unhandled promise rejection");
+                if(window.__tsaCrashSuppressedUntil && Date.now() < window.__tsaCrashSuppressedUntil
+                    && !/out of memory|invalid string length|allocation failed/i.test(detail)) return;
                 window.__tsaShowCrash(detail);
             });
         }
@@ -16316,7 +16364,15 @@ const app = {
                 if(btn) btn.addEventListener("click", function() {
                     window.__tsaUserConfirmedHeavyLoad = true;
                     window.__tsaDeferHeavyLessonGate = false;
-                    try { app.init(); } catch(eGo) { console.warn(eGo); }
+                    app._showBootBanner("Loading large saved lesson…");
+                    document.body.classList.add("tsa-boot-in-progress");
+                    window.__tsaBootInProgress = true;
+                    setTimeout(function() {
+                        try { app.init(); } catch(eGo) {
+                            console.warn(eGo);
+                            if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash((eGo && eGo.message ? eGo.message : String(eGo)) + (eGo && eGo.stack ? "\n\n" + eGo.stack : ""));
+                        }
+                    }, 0);
                 });
                 const skip = document.getElementById("tsa-heavy-skip-btn");
                 if(skip) skip.addEventListener("click", function() {
@@ -16353,8 +16409,10 @@ const app = {
             const d = localStorage.getItem('tsa_v5_1_data');
             if(d) {
                 try {
-                    if(d.length > 6000000 && typeof window.__tsaShowCrash === "function") {
-                        window.__tsaShowCrash("Saved lesson data is very large (" + Math.round(d.length / 1000000) + " MB). Click Reset lesson data only on the red panel.");
+                    if(d.length > 6000000 && typeof app.showLessonLoadNotices === "function") {
+                        setTimeout(function() {
+                            app.showLessonLoadNotices(["Saved lesson is very large (" + Math.round(d.length / 1000000) + " MB). Loading may be slow — use Reset lesson data if the tab freezes."]);
+                        }, 800);
                     }
                     appData = app.repair(JSON.parse(d));
                     if(app.dedupeLessonPassageInMemory) app.dedupeLessonPassageInMemory(appData);
@@ -17254,7 +17312,9 @@ const app = {
     getPassageDeferPlaceholderHtml: function() {
         return `<div class="architect-passage-deferred" style="padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:0.88rem;line-height:1.45;opacity:0.9;">
             <div style="font-weight:700;margin-bottom:6px;">Large passage — loading on demand</div>
-            <div>Your lesson saved successfully. The full exam passage is not built at startup (that was causing out-of-memory crashes). Open <strong>Quote Select</strong> or <strong>Data → Editing Suite</strong> to load it. Questions and quotes still work.</div>
+            <div style="margin-bottom:10px;">Your lesson saved successfully. The full exam passage is not built at startup (that was causing out-of-memory crashes). Questions and quotes still work.</div>
+            <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app!=='undefined'&&app.scheduleDeferredStudentPassagePaint)app.scheduleDeferredStudentPassagePaint();">Load passage now</button>
+            <span style="font-size:0.8rem;opacity:0.75;margin-left:8px;">Or open <strong>Quote Select</strong> / <strong>Data → Editing Suite</strong>.</span>
         </div>`;
     },
     _adminPassageHydrateDone: false,
@@ -19429,10 +19489,12 @@ const ui = {
             }
         });
         const er = document.getElementById("emergency-reset");
+        const erBack = document.getElementById("emergency-reset-backdrop");
         if(er && er.style.display === "block" && window.__tsaCrashPanelActive && !window.__tsaCrashOom && typeof window.__tsaDismissCrashPanel === "function") {
             window.__tsaDismissCrashPanel();
         } else if(er && er.style.display !== "block" && !window.__tsaDeferHeavyLessonGate && !window.__tsaCrashPanelActive) {
             er.style.display = "none";
+            if(erBack) erBack.style.display = "none";
         }
     },
     /** True when admin passage was not loaded (placeholder) — skip heavy persist/refresh on close. */
