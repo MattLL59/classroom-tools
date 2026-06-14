@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T13:00:00">
-<meta name="architect-deploy" content="c1-lobby-dismiss-fix-f806">
+<meta name="architect-build" content="2026-06-14T14:00:00">
+<meta name="architect-deploy" content="c1-crash-dismiss-harden-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -6648,7 +6648,9 @@ const app = {
             const out = {
                 id: (q && typeof q.id === "string") ? q.id : ("q" + (i + 1)),
                 prompt: (q && typeof q.prompt === "string") ? q.prompt : "",
-                lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined
+                lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
+                passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined
             };
             if(q && typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) out.answerPassageExcerpt = q.answerPassageExcerpt.trim();
             if(q && typeof q.marks === "number" && q.marks >= 1) out.marks = q.marks;
@@ -6659,7 +6661,9 @@ const app = {
                 const out = {
                     id: (q && typeof q.id === "string") ? q.id : ("q" + (i + 1)),
                     prompt: (q && typeof q.prompt === "string") ? q.prompt : "",
-                    lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined
+                    lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                    passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
+                    passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined
                 };
                 if(q && typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) out.answerPassageExcerpt = q.answerPassageExcerpt.trim();
                 if(q && typeof q.marks === "number" && q.marks >= 1) out.marks = q.marks;
@@ -15606,9 +15610,116 @@ const app = {
         }
         return "";
     },
+    /** Start/end phrase anchors for a focus question (appData first, then live Focus inputs). */
+    getQuestionPassageAnchors: function(qid, opts) {
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const target = normQid(qid);
+        if(!target) return { startA: "", endA: "" };
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const q = questions.find(qq => qq && normQid(qq.id) === target);
+        let startA = q && typeof q.passageStartAnchor === "string" ? q.passageStartAnchor.trim() : "";
+        let endA = q && typeof q.passageEndAnchor === "string" ? q.passageEndAnchor.trim() : "";
+        if((startA || endA) || (opts && opts.skipDom)) return { startA, endA };
+        if(typeof document === "undefined") return { startA, endA };
+        const mounts = document.querySelectorAll(".questions-list-mount");
+        for(let mi = 0; mi < mounts.length; mi++) {
+            const rows = mounts[mi].children;
+            for(let ri = 0; ri < rows.length; ri++) {
+                const pin = rows[ri].querySelector("input.question-prompt-input");
+                if(!pin || normQid(pin.dataset.qid) !== target) continue;
+                const sa = rows[ri].querySelector("input.question-passage-start-anchor");
+                const ea = rows[ri].querySelector("input.question-passage-end-anchor");
+                if(sa && String(sa.value || "").trim()) startA = String(sa.value || "").trim();
+                if(ea && String(ea.value || "").trim()) endA = String(ea.value || "").trim();
+                return { startA, endA };
+            }
+        }
+        return { startA, endA };
+    },
+    /** First/last words of a passage highlight → anchor phrases (same idea as WJEC body anchors). */
+    derivePassageAnchorsFromSelectionText: function(selectedText) {
+        const sel = String(selectedText || "").replace(/\s+/g, " ").trim();
+        if(sel.length < 6) return null;
+        const words = sel.split(/\s+/).filter(Boolean);
+        if(!words.length) return null;
+        const headN = Math.min(6, words.length);
+        const startA = words.slice(0, headN).join(" ");
+        const endA = words.length > 2 ? words.slice(-Math.min(6, words.length)).join(" ") : startA;
+        return { startA, endA };
+    },
     /**
-     * Resolves passage line window for Quote Select: Level Bank question ids (current navigated question’s Lines box first, then siblings in bank order), then prompt text.
-     * @returns {{ lineRange: {from:number,to:number}|null, displayLineRange: {from:number,to:number}|null, currentQId: string|null, windowSource: string }}
+     * Map start/end phrase anchors to a booklet line window using the same layout rows as excerpt slicing.
+     * @returns {{ lineRange?: {from:number,to:number}, err?: string }}
+     */
+    resolveLineRangeFromPassageAnchors: function(sourceText, startA, endA, level) {
+        startA = startA != null ? String(startA).trim() : "";
+        endA = endA != null ? String(endA).trim() : "";
+        if(!startA && !endA) return { err: "empty" };
+        const lvl = parseInt(level, 10) || 1;
+        const s0 = String(sourceText || "").trim();
+        if(!s0) return { err: "no-source" };
+        const rows = (app.getDomRowsForExamLineSlicing && app.getDomRowsForExamLineSlicing(s0, lvl)) || app.parseWJECStyleBookletRows(s0) || [];
+        const normalize = (str) => String(str || "").toLowerCase().replace(/[""''…\u2026]/g, "").replace(/\s+/g, " ").trim();
+        const mapSpanToRange = function(rowList, startIdx, endIdx) {
+            if(!rowList.length || endIdx <= startIdx) return null;
+            const bodies = rowList.map(r => String(r.body != null ? r.body : "").replace(/\s+/g, " ").trim());
+            const rowStarts = [];
+            let nFull = "";
+            for(let i = 0; i < bodies.length; i++) {
+                if(i > 0) nFull += " ";
+                rowStarts[i] = nFull.length;
+                nFull += normalize(bodies[i]);
+            }
+            const charToRowNum = (charIdx) => {
+                const idx = Math.max(0, charIdx);
+                for(let i = rowStarts.length - 1; i >= 0; i--) {
+                    if(idx >= rowStarts[i]) return rowList[i].num;
+                }
+                return rowList[0].num;
+            };
+            const from = charToRowNum(startIdx);
+            const to = charToRowNum(Math.max(startIdx, endIdx - 1));
+            return { from: Math.min(from, to), to: Math.max(from, to) };
+        };
+        if(rows.length) {
+            const bodies = rows.map(r => String(r.body != null ? r.body : "").replace(/\s+/g, " ").trim());
+            const rowStarts = [];
+            let nFull = "";
+            for(let i = 0; i < bodies.length; i++) {
+                if(i > 0) nFull += " ";
+                rowStarts[i] = nFull.length;
+                nFull += normalize(bodies[i]);
+            }
+            let startIdx = 0;
+            if(startA) {
+                startIdx = nFull.indexOf(normalize(startA));
+                if(startIdx < 0) return { err: "start-not-found" };
+            }
+            let endIdx = nFull.length;
+            if(endA) {
+                const li = nFull.lastIndexOf(normalize(endA));
+                if(li < 0) return { err: "end-not-found" };
+                endIdx = li + normalize(endA).length;
+            }
+            if(endIdx <= startIdx) return { err: "range-inverted" };
+            const lineRange = mapSpanToRange(rows, startIdx, endIdx);
+            return lineRange ? { lineRange } : { err: "no-rows" };
+        }
+        const span = app.resolveWJECBookletAnchorPlainSpan(s0, startA, endA);
+        if(!span || !span.ok || !span.linePlains || !span.lineStarts) return { err: span && span.err ? span.err : "no-structured" };
+        const charToLineNum = (charIdx) => {
+            const idx = Math.max(0, charIdx);
+            for(let i = span.lineStarts.length - 1; i >= 0; i--) {
+                if(idx >= span.lineStarts[i]) return i + 1;
+            }
+            return 1;
+        };
+        const from = charToLineNum(span.startIdx);
+        const to = charToLineNum(Math.max(span.startIdx, (span.endIdx != null ? span.endIdx : span.linePlains.join(" ").length) - 1));
+        return { lineRange: { from: Math.min(from, to), to: Math.max(from, to) } };
+    },
+    /**
+     * Resolves passage line window for Quote Select: Level Bank question ids (current navigated question’s Lines box first, then siblings in bank order), then prompt text, then phrase anchors.
      * `lineRange` = technical window (Lines box first, then prompt) for excerpt slicing / quote-in-window checks.
      * `displayLineRange` = span to show students (prompt “Read lines 8–12…” first when present, else same as `lineRange`).
      */
@@ -15628,6 +15739,8 @@ const app = {
         const promptText = app.getQuestionForLevel(lvl);
         let lineRange = null;
         let windowSource = "";
+        let anchorStart = "";
+        let anchorEnd = "";
         const applyLineRef = (row, tag, qidHint) => {
             let ref = row && typeof row.lineRef === "string" ? row.lineRef.trim() : "";
             if(!ref && qidHint && typeof app.getQuestionLineRef === "function") ref = app.getQuestionLineRef(qidHint);
@@ -15640,6 +15753,25 @@ const app = {
                 return true;
             }
             return false;
+        };
+        const applyAnchors = (row, qidHint) => {
+            if(!row && qidHint) row = findQById(qidHint);
+            let startA = row && typeof row.passageStartAnchor === "string" ? row.passageStartAnchor.trim() : "";
+            let endA = row && typeof row.passageEndAnchor === "string" ? row.passageEndAnchor.trim() : "";
+            if((!startA && !endA) && qidHint && typeof app.getQuestionPassageAnchors === "function") {
+                const anc = app.getQuestionPassageAnchors(qidHint);
+                startA = anc.startA || "";
+                endA = anc.endA || "";
+            }
+            if(!startA && !endA) return false;
+            const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
+            const resolved = app.resolveLineRangeFromPassageAnchors(src, startA, endA, lvl);
+            if(!resolved || !resolved.lineRange) return false;
+            lineRange = resolved.lineRange;
+            windowSource = "anchors:" + (row && row.id ? row.id : (qidHint || ""));
+            anchorStart = startA;
+            anchorEnd = endA;
+            return true;
         };
         if(ids && ids.length) {
             /** Prefer the **navigated** focus question’s Lines box, then other Level Bank ids — avoids a sibling row’s stale line ref winning while the prompt / affirm text come from {@link getCurrentQuestionIdForLevel}. */
@@ -15656,15 +15788,22 @@ const app = {
                 const qid = orderedIds[i];
                 if(applyLineRef(findQById(qid), "lineRef:", qid)) break;
             }
+            if(!lineRange) {
+                for(let i = 0; i < orderedIds.length; i++) {
+                    const qid = orderedIds[i];
+                    if(applyAnchors(findQById(qid), qid)) break;
+                }
+            }
         }
         if(!lineRange) applyLineRef(findQById(currentQId), "lineRef:", currentQId);
+        if(!lineRange) applyAnchors(findQById(currentQId), currentQId);
         if(!lineRange) {
             lineRange = app.parseLineRangeFromQuestion(promptText) || null;
             if(lineRange) windowSource = "question_prompt";
         }
         const displayFromPrompt = app.parseLineRangeFromQuestion(promptText) || null;
         const displayLineRange = displayFromPrompt || lineRange || null;
-        return { lineRange, displayLineRange, currentQId: currentQId || null, windowSource };
+        return { lineRange, displayLineRange, currentQId: currentQId || null, windowSource, anchorStart, anchorEnd };
     },
     /**
      * One row per `.source-line-row` in stored passage HTML — fixes slicing when {@link cleanSourceText} collapses the insert to few newlines.
@@ -15910,14 +16049,20 @@ const app = {
         if(scope === "whole") {
             selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         } else if(scope === "focused" && !lineRange) {
-            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> (Focus questions → <strong>Lines</strong> box, or text like “Read lines 1–8” in the question). None is set in this lesson yet.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Set booklet lines for this question, then reload Quote Select — the excerpt loads only that window (not the full insert).</div>`;
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank.</div>`;
             selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
             const ex = app.slicePlainByExamLineRange(sourceText, lineRange, lvl);
             if(ex && ex.trim()) {
                 useExcerpt = true;
-                const spanLab = labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
-                const banner = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;opacity:0.9;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--primary);background:rgba(0,150,136,0.08);">Exam-style window: <strong>${spanLab}</strong> — rows whose stored insert line (<code>data-src-line</code> / margin) falls in that range when possible; otherwise the first N passage <strong>rows</strong> (each row may be a whole paragraph). Evidence is still checked against the full passage.</div>`;
+                const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
+                const spanLab = anchorWin && (lineWinResolved.anchorStart || lineWinResolved.anchorEnd)
+                    ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start of insert") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end of insert"))
+                    : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
+                const bannerNote = anchorWin
+                    ? "Phrase anchors"
+                    : "Exam-style window";
+                const banner = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;opacity:0.9;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--primary);background:rgba(0,150,136,0.08);">${bannerNote}: <strong>${spanLab}</strong> — excerpt only (evidence is still checked against the full passage).</div>`;
                 let excerptBody = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(sourceText, lineRange, lvl) : "";
                 if(!excerptBody || !String(excerptBody).trim())
                     excerptBody = app.formatSourceHtml(ex.trim(), { skipStoredStructuredFallback: true, excerptProse: true });
@@ -15925,7 +16070,7 @@ const app = {
             } else {
                 excerptSliceFailed = true;
                 const spanLab = labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
-                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. Try <strong>1–8</strong> for the first eight passage rows, or use exact margin numbers from your insert. The full passage was <strong>not</strong> loaded (saves memory on large inserts).</div>`;
+                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. Try <strong>1–8</strong> for the first eight passage rows, set <strong>Start / End phrase</strong> anchors on the focus question, or use exact margin numbers from your insert. The full passage was <strong>not</strong> loaded (saves memory on large inserts).</div>`;
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -17430,7 +17575,7 @@ const app = {
         const snap = {
             component: data.component,
             sourceTextLen: typeof data.sourceText === "string" ? data.sourceText.length : 0,
-            questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef }) : [],
+            questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef, passageStartAnchor: q.passageStartAnchor, passageEndAnchor: q.passageEndAnchor }) : [],
             question: typeof data.question === "string" ? data.question : "",
             meta: data.meta && typeof data.meta === "object" ? { title: data.meta.title } : {}
         };
@@ -29042,6 +29187,39 @@ const admin = {
         }
         row.appendChild(removeBtn);
         outer.appendChild(row);
+        if(showLineRef) {
+            const anchorRow = document.createElement("div");
+            anchorRow.className = "question-passage-anchor-row";
+            anchorRow.style.cssText = "display:flex; gap:6px; align-items:center; flex-wrap:wrap; width:100%; margin-top:4px;";
+            const anchorLab = document.createElement("span");
+            anchorLab.style.cssText = "font-size:0.72rem; opacity:0.85; white-space:nowrap;";
+            anchorLab.textContent = "Excerpt anchors:";
+            anchorLab.title = "Optional start/end phrases (exact words from the passage). Used when booklet line numbers do not slice cleanly — same idea as WJEC body anchors.";
+            const startAnchorInp = document.createElement("input");
+            startAnchorInp.type = "text";
+            startAnchorInp.className = "question-passage-start-anchor";
+            startAnchorInp.placeholder = "starts at e.g. Lucy was born";
+            startAnchorInp.value = (q && typeof q.passageStartAnchor === "string") ? q.passageStartAnchor : "";
+            startAnchorInp.style.cssText = "flex:1; min-width:120px; padding:5px 6px; border:1px solid var(--border); border-radius:4px; font-size:0.78rem;";
+            startAnchorInp.autocomplete = "off";
+            const endAnchorInp = document.createElement("input");
+            endAnchorInp.type = "text";
+            endAnchorInp.className = "question-passage-end-anchor";
+            endAnchorInp.placeholder = "ends after e.g. good earner";
+            endAnchorInp.value = (q && typeof q.passageEndAnchor === "string") ? q.passageEndAnchor : "";
+            endAnchorInp.style.cssText = "flex:1; min-width:120px; padding:5px 6px; border:1px solid var(--border); border-radius:4px; font-size:0.78rem;";
+            endAnchorInp.autocomplete = "off";
+            const syncAnchors = (e) => {
+                const preferredMount = e && e.target && e.target.closest(".questions-list-mount");
+                admin.syncQuestionsFromListCore(preferredMount ? { preferredMount } : undefined);
+            };
+            startAnchorInp.addEventListener("input", syncAnchors);
+            endAnchorInp.addEventListener("input", syncAnchors);
+            anchorRow.appendChild(anchorLab);
+            anchorRow.appendChild(startAnchorInp);
+            anchorRow.appendChild(endAnchorInp);
+            outer.appendChild(anchorRow);
+        }
         const excerptWrap = document.createElement("div");
         excerptWrap.className = "question-answer-passage-excerpt-wrap";
         excerptWrap.style.cssText = "width:100%; margin-top:6px;";
@@ -29232,6 +29410,8 @@ const admin = {
         const rows = rowEls.map((row) => {
             const inp = row.querySelector("input.question-prompt-input") || row.querySelector("input[type='text']");
             const lineRefEl = row.querySelector("input.question-line-ref-input");
+            const startAnchorEl = row.querySelector("input.question-passage-start-anchor");
+            const endAnchorEl = row.querySelector("input.question-passage-end-anchor");
             const ws = row.querySelector("input.question-include-ws");
             const excerptEl = row.querySelector("textarea.question-answer-passage-excerpt");
             let raw = inp ? String(inp.value || "").trim() : "";
@@ -29244,6 +29424,8 @@ const admin = {
                 prompt: raw,
                 qid: inp ? (inp.dataset.qid || "").trim() : "",
                 lineRefRaw: lineRefEl ? String(lineRefEl.value || "").trim() : "",
+                startAnchorRaw: startAnchorEl ? String(startAnchorEl.value || "").trim() : "",
+                endAnchorRaw: endAnchorEl ? String(endAnchorEl.value || "").trim() : "",
                 hasWsCb: !!ws,
                 includeWS: ws ? !!ws.checked : null,
                 excerptRaw: excerptEl ? String(excerptEl.value || "").trim() : "",
@@ -29270,6 +29452,12 @@ const admin = {
             }
             if(lrTrim) o.lineRef = lrTrim;
             else if(old && old.lineRef) delete o.lineRef;
+            const saTrim = r.startAnchorRaw != null ? String(r.startAnchorRaw).trim() : "";
+            if(saTrim) o.passageStartAnchor = saTrim;
+            else if(old && old.passageStartAnchor) delete o.passageStartAnchor;
+            const eaTrim = r.endAnchorRaw != null ? String(r.endAnchorRaw).trim() : "";
+            if(eaTrim) o.passageEndAnchor = eaTrim;
+            else if(old && old.passageEndAnchor) delete o.passageEndAnchor;
             const exTrim = r.excerptRaw != null ? String(r.excerptRaw).trim() : "";
             if(exTrim) o.answerPassageExcerpt = exTrim;
             if(r.hasWsCb && r.includeWS !== null) o.includeInWorksheet = !!r.includeWS;
@@ -31723,6 +31911,8 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                         id: (q && q.id) ? q.id : ("q" + (i + 1)),
                         prompt: (q && typeof q.prompt === "string") ? q.prompt : (typeof q === "string" ? q : ""),
                         lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                        passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
+                        passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined,
                         includeInWorksheet: q && q.includeInWorksheet === true
                     }));
                 }
@@ -32394,6 +32584,8 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                         id: (q && q.id) ? q.id : "q" + (i+1),
                         prompt: (q && typeof q.prompt === "string") ? q.prompt : (typeof q === "string" ? q : ""),
                         lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                        passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
+                        passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined,
                         includeInWorksheet: q && q.includeInWorksheet === true
                     };
                     if(q && typeof q.worksheetInferenceModel === "string" && q.worksheetInferenceModel.trim()) {
@@ -34295,6 +34487,20 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             });
         });
     },
+    _mirrorPassageAnchorsToFocusQuestionInputs: function(qid, startA, endA) {
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const target = normQid(qid);
+        Array.from(document.querySelectorAll(".questions-list-mount")).forEach(mount => {
+            Array.from(mount.children).forEach(row => {
+                const pin = row.querySelector("input.question-prompt-input");
+                if(!pin || normQid(pin.dataset.qid) !== target) return;
+                const sa = row.querySelector("input.question-passage-start-anchor");
+                const ea = row.querySelector("input.question-passage-end-anchor");
+                if(sa) sa.value = String(startA || "");
+                if(ea) ea.value = String(endA || "");
+            });
+        });
+    },
     _applyTeacherPreviewLineRefFromPreview: function(raw) {
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         const lvl = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
@@ -34422,19 +34628,38 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText) {
         if(!q || !q.id) return false;
         const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
+        const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pickText) : null;
+        if(anchors) {
+            if(anchors.startA) q.passageStartAnchor = anchors.startA;
+            if(anchors.endA) q.passageEndAnchor = anchors.endA;
+            if(admin._mirrorPassageAnchorsToFocusQuestionInputs) admin._mirrorPassageAnchorsToFocusQuestionInputs(q.id, anchors.startA, anchors.endA);
+        }
         const resolved = app.resolveLineRefFromPassageSelection(pickText, src, lvl);
-        if(!resolved || !resolved.lineRef) return false;
-        q.lineRef = resolved.lineRef;
-        admin._enableQuestionFocusedPassageAfterLinePick(lvl);
-        app.save();
-        admin._mirrorLineRefToFocusQuestionInputs(q.id, resolved.lineRef);
-        if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
-        admin._preparePassageForLineAssignment({ level: lvl });
-        const span = resolved.range.from === resolved.range.to
-            ? ("line " + resolved.range.from)
-            : ("lines " + resolved.range.from + "–" + resolved.range.to);
-        alert("Booklet " + span + " saved to " + (q.id || "this question") + "’s Lines box (" + resolved.lineRef + ").\n\nExcerpt is on for this level (students see only these lines). The passage stays on **whole insert** here so you can assign the next question. Use **Show line window** or **Question-focused** to preview the excerpt.");
-        return true;
+        if(resolved && resolved.lineRef) {
+            q.lineRef = resolved.lineRef;
+            admin._enableQuestionFocusedPassageAfterLinePick(lvl);
+            app.save();
+            admin._mirrorLineRefToFocusQuestionInputs(q.id, resolved.lineRef);
+            if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+            admin._preparePassageForLineAssignment({ level: lvl });
+            const span = resolved.range.from === resolved.range.to
+                ? ("line " + resolved.range.from)
+                : ("lines " + resolved.range.from + "–" + resolved.range.to);
+            const anchorNote = anchors ? "\n\nPhrase anchors also saved (backup if line numbers drift)." : "";
+            alert("Booklet " + span + " saved to " + (q.id || "this question") + "’s Lines box (" + resolved.lineRef + ")." + anchorNote + "\n\nExcerpt is on for this level (students see only these lines). The passage stays on **whole insert** here so you can assign the next question. Use **Show line window** or **Question-focused** to preview the excerpt.");
+            return true;
+        }
+        if(anchors && app.resolveLineRangeFromPassageAnchors) {
+            const ar = app.resolveLineRangeFromPassageAnchors(src, anchors.startA, anchors.endA, lvl);
+            if(ar && ar.lineRange) {
+                admin._enableQuestionFocusedPassageAfterLinePick(lvl);
+                app.save();
+                admin._preparePassageForLineAssignment({ level: lvl });
+                alert("Could not map selection to booklet line numbers, but **phrase anchors** were saved.\n\nStart: “" + anchors.startA + "”\nEnd: “" + anchors.endA + "”\n\nTurn on **Question-focused** to preview the excerpt.");
+                return true;
+            }
+        }
+        return false;
     },
     applyLineRefFromPassageSelectionForQuestionIndex: function(questionIndex) {
         if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
