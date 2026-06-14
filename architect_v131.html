@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-13T23:00:00">
-<meta name="architect-deploy" content="admin-defer-heavy-boot">
+<meta name="architect-build" content="2026-06-14T00:00:00">
+<meta name="architect-deploy" content="admin-boot-rewire">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -16181,8 +16181,7 @@ const app = {
                     const detail = (eDef && eDef.stack) ? (eDef.message + "\n\n" + eDef.stack) : String(eDef);
                     if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash(detail);
                 } finally {
-                    window.__tsaBootInProgress = false;
-                    document.body.classList.remove("tsa-boot-in-progress");
+                    app._onBootComplete();
                     app._hideBootBanner();
                 }
             }, 0);
@@ -16212,7 +16211,31 @@ const app = {
             }
         } catch(eB) {}
     },
+    _onBootComplete: function() {
+        window.__tsaBootInProgress = false;
+        window.__tsaBootComplete = true;
+        document.body.classList.remove("tsa-boot-in-progress");
+        try {
+            if(typeof admin !== "undefined") {
+                const adm = document.getElementById("modal-admin");
+                if(adm) {
+                    delete adm.dataset.adminPanelDelegateBound;
+                    adm.querySelectorAll("[data-admin-wired]").forEach(function(el) {
+                        delete el.dataset.adminWired;
+                    });
+                }
+                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
+                if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+            }
+        } catch(eDone) { console.warn("boot complete rewire:", eDone); }
+    },
     _showHeavyLessonGate: function() {
+        if(!appData && typeof defaultData !== "undefined") {
+            try {
+                appData = app.repair(JSON.parse(JSON.stringify(defaultData)));
+                app._lessonGatePending = true;
+            } catch(eSk) {}
+        }
         const mb = window.__tsaLessonBytes ? Math.round(window.__tsaLessonBytes / 1000000) : 0;
         app._showBootBanner("Large saved lesson (" + (mb || "?") + " MB) — click Load lesson to continue, or use recovery / Reset lesson data.");
         try {
@@ -16415,9 +16438,10 @@ const app = {
             }
         };
         if(app._heavyLessonOnLoad || app._passageDisplaysDeferred || app._deferAdminPassageUntilDemand) {
-            setTimeout(runUiInit, 0);
+            setTimeout(function() { runUiInit(); app._onBootComplete(); }, 0);
         } else {
             runUiInit();
+            app._onBootComplete();
         }
     },
     /** Wire admin tabs once the page shell is up — no tab hydrate here (avoids blocking clicks if Data opens during init). */
@@ -25660,7 +25684,9 @@ const admin = {
                     const P = window.app;
                     if(!A) return;
                     if(typeof appData === "undefined" || !appData) {
-                        if(window.__tsaBootInProgress) console.warn("Lesson still loading — retry button in a moment.");
+                        if(window.__tsaBootInProgress || window.__tsaDeferHeavyLessonGate) {
+                            setTimeout(exec, 120);
+                        }
                         return;
                     }
                     try { compiled.call(el, ev, A, U, P); } catch(eR) { console.warn("admin wire run:", eR); }
