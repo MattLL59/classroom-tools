@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T10:00:00">
-<meta name="architect-deploy" content="c1-focused-scope-refresh">
+<meta name="architect-build" content="2026-06-14T11:00:00">
+<meta name="architect-deploy" content="c1-line-window-slice-fix">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15523,6 +15523,31 @@ const app = {
         }
         return null;
     },
+    /** Lines box value for a focus question — appData first, then live Focus / Level Bank inputs. */
+    getQuestionLineRef: function(qid, opts) {
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        const target = normQid(qid);
+        if(!target) return "";
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const q = questions.find(qq => qq && normQid(qq.id) === target);
+        if(q && typeof q.lineRef === "string" && q.lineRef.trim()) return q.lineRef.trim();
+        if(opts && opts.skipDom) return "";
+        if(typeof document === "undefined") return "";
+        const mounts = document.querySelectorAll(".questions-list-mount");
+        for(let mi = 0; mi < mounts.length; mi++) {
+            const rows = mounts[mi].children;
+            for(let ri = 0; ri < rows.length; ri++) {
+                const pin = rows[ri].querySelector("input.question-prompt-input");
+                const lr = rows[ri].querySelector("input.question-line-ref-input");
+                if(!pin || !lr) continue;
+                if(normQid(pin.dataset.qid) === target) {
+                    const v = String(lr.value || "").trim();
+                    if(v) return v;
+                }
+            }
+        }
+        return "";
+    },
     /**
      * Resolves passage line window for Quote Select: Level Bank question ids (current navigated question’s Lines box first, then siblings in bank order), then prompt text.
      * @returns {{ lineRange: {from:number,to:number}|null, displayLineRange: {from:number,to:number}|null, currentQId: string|null, windowSource: string }}
@@ -15533,7 +15558,8 @@ const app = {
         const lvl = parseInt(level, 10) || 1;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank[lvl] || {};
-        const ids = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+        const bankIds = levelEntry && Array.isArray(levelEntry.questionIds) && levelEntry.questionIds.length ? levelEntry.questionIds : null;
+        const ids = bankIds || (typeof app.resolveQuestionIdsForLevel === "function" ? app.resolveQuestionIdsForLevel(lvl) : null);
         const questions = Array.isArray(appData.questions) ? appData.questions : [{ id: "q1", prompt: appData.question || "" }];
         const hasMultipleQuestions = !!(ids && ids.length > 1);
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
@@ -15544,12 +15570,15 @@ const app = {
         const promptText = app.getQuestionForLevel(lvl);
         let lineRange = null;
         let windowSource = "";
-        const applyLineRef = (row, tag) => {
-            if(!row || typeof row.lineRef !== "string" || !row.lineRef.trim()) return false;
-            const lr = app.parseLineRangeFromQuestion(row.lineRef.trim());
+        const applyLineRef = (row, tag, qidHint) => {
+            let ref = row && typeof row.lineRef === "string" ? row.lineRef.trim() : "";
+            if(!ref && qidHint && typeof app.getQuestionLineRef === "function") ref = app.getQuestionLineRef(qidHint);
+            if(!ref && row && row.id && typeof app.getQuestionLineRef === "function") ref = app.getQuestionLineRef(row.id);
+            if(!ref) return false;
+            const lr = app.parseLineRangeFromQuestion(ref);
             if(lr) {
                 lineRange = lr;
-                windowSource = tag + (row.id || "");
+                windowSource = tag + (row && row.id ? row.id : (qidHint || ""));
                 return true;
             }
             return false;
@@ -15566,10 +15595,11 @@ const app = {
                 }
             }
             for(let i = 0; i < orderedIds.length; i++) {
-                if(applyLineRef(findQById(orderedIds[i]), "lineRef:")) break;
+                const qid = orderedIds[i];
+                if(applyLineRef(findQById(qid), "lineRef:", qid)) break;
             }
         }
-        if(!lineRange) applyLineRef(findQById(currentQId), "lineRef:");
+        if(!lineRange) applyLineRef(findQById(currentQId), "lineRef:", currentQId);
         if(!lineRange) {
             lineRange = app.parseLineRangeFromQuestion(promptText) || null;
             if(lineRange) windowSource = "question_prompt";
@@ -15689,15 +15719,13 @@ const app = {
         const L = (level != null && level !== "") ? parseInt(level, 10) : ((typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1);
         const rows = app.getDomRowsForExamLineSlicing(s0, L);
         if(rows.length) {
-            let slice = [];
+            const requestedCount = to - from + 1;
             const byBooklet = rows.filter(r => r && typeof r.num === "number" && r.num >= from && r.num <= to);
-            if(byBooklet.length) slice = byBooklet;
-            else {
-                const anyBookletNum = rows.some(r => r && typeof r.num === "number" && Number.isFinite(r.num) && r.num >= 1);
-                if(!anyBookletNum && from >= 1 && from <= rows.length) {
-                    slice = rows.slice(from - 1, Math.min(to, rows.length));
-                }
-            }
+            let slice = [];
+            if(byBooklet.length >= requestedCount) slice = byBooklet;
+            else if(from === 1 && to <= rows.length) slice = rows.slice(from - 1, Math.min(to, rows.length));
+            else if(byBooklet.length) slice = byBooklet;
+            else if(from >= 1 && from <= rows.length) slice = rows.slice(from - 1, Math.min(to, rows.length));
             if(!slice.length) return "";
             return slice.map(r => String(r.body != null ? r.body : "").replace(/\s+$/,"")).join("\n").trim();
         }
@@ -15724,15 +15752,13 @@ const app = {
         const L = (level != null && level !== "") ? parseInt(level, 10) : ((typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1);
         const rows = app.getDomRowsForExamLineSlicing(s0, L);
         if(rows.length) {
-            let slice = [];
+            const requestedCount = to - from + 1;
             const byBooklet = rows.filter(r => r && typeof r.num === "number" && r.num >= from && r.num <= to);
-            if(byBooklet.length) slice = byBooklet;
-            else {
-                const anyBookletNum = rows.some(r => r && typeof r.num === "number" && Number.isFinite(r.num) && r.num >= 1);
-                if(!anyBookletNum && from >= 1 && from <= rows.length) {
-                    slice = rows.slice(from - 1, Math.min(to, rows.length));
-                }
-            }
+            let slice = [];
+            if(byBooklet.length >= requestedCount) slice = byBooklet;
+            else if(from === 1 && to <= rows.length) slice = rows.slice(from - 1, Math.min(to, rows.length));
+            else if(byBooklet.length) slice = byBooklet;
+            else if(from >= 1 && from <= rows.length) slice = rows.slice(from - 1, Math.min(to, rows.length));
             if(!slice.length) return [];
             return slice.map(r => ({
                 num: r && typeof r.num === "number" && Number.isFinite(r.num) ? r.num : undefined,
@@ -34222,7 +34248,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText) {
         if(!q || !q.id) return false;
-        const src = app.getSourceText ? app.getSourceText() : "";
+        const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
         const resolved = app.resolveLineRefFromPassageSelection(pickText, src, lvl);
         if(!resolved || !resolved.lineRef) return false;
         q.lineRef = resolved.lineRef;
