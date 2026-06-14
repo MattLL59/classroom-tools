@@ -102,7 +102,35 @@ git push -u origin <your-branch> --force-with-lease
 
 ---
 
-## 6. Longer-term (reduces pain further)
+## 6. Delete branch after merge?
+
+**Yes — safe and recommended** once the PR is merged to `main`.
+
+| Question | Answer |
+|----------|--------|
+| Does deleting the branch delete the code? | **No.** Merged code lives on `main` forever. |
+| Does deleting the branch break GitHub Pages? | **No.** Pages deploys from `main` (this repo), not feature branches. |
+| Should you delete `main`? | **Never.** |
+| What if GitHub shows "Delete branch"? | Click it for the **merged feature branch** only. |
+
+**Why delete:** avoids opening PRs from stale branches, rebasing the wrong branch, or editing code that is not what users get on Pages.
+
+**When to keep a branch:** only if you are still actively committing on it for a follow-up PR. After merge, either delete it or run `./scripts/rebase-on-main.sh` on a fresh owner branch (see §3).
+
+### Correct rhythm for you
+
+1. One **owner branch** per hotspot (e.g. `cursor/v131-admin-shell-f806` for Data modal).
+2. Open PR → review → **merge to `main`**.
+3. **Delete the merged feature branch** on GitHub (button on the PR).
+4. Locally: `git checkout main && git pull origin main`.
+5. Next fix: `git checkout -b cursor/v131-admin-shell-f806` (same name is fine) from updated `main`.
+6. Bump build, commit, push, **new PR**.
+
+Deleting branches did **not** cause the dead buttons. That comes from loading the wrong file, cached HTML, or the lesson-load gate blocking JS.
+
+---
+
+## 7. Longer-term (reduces pain further)
 
 - Extract `architect-admin-shell.js` (modal chrome, Esc, tabs) from the monolith when a deploy split is acceptable.
 - Worksheet **3b** as separate HTML (per `PASSAGE_V131_CHECKLIST.md`) — keeps worksheet diffs out of v131.
