@@ -34,4 +34,25 @@ if(version.rev) {
 
 fs.writeFileSync(versionPath, JSON.stringify(version, null, 2) + "\n");
 fs.writeFileSync(htmlPath, html);
+
+const indexPath = path.join(root, "index.html");
+if(fs.existsSync(indexPath)) {
+    let indexHtml = fs.readFileSync(indexPath, "utf8");
+    const relLink = `${version.app}?b=${cacheBust}`;
+    indexHtml = indexHtml.replace(/href="architect_v131\.html\?b=\d+"/g, `href="${relLink}"`);
+    const desc = `Revision tool · build ${version.build} · ${version.gitCommit}`;
+    indexHtml = indexHtml.replace(
+        /(<span class="app-desc" id="lobby-architect-desc">)[^<]*(<\/span>)/,
+        `$1${desc}$2`
+    );
+    if(!indexHtml.includes('id="lobby-architect-desc"')) {
+        indexHtml = indexHtml.replace(
+            /(<a href="architect_v131\.html\?b=\d+"[^>]*>[\s\S]*?<span class="app-desc">)[^<]*(<\/span>)/,
+            `$1${desc}$2`
+        );
+    }
+    fs.writeFileSync(indexPath, indexHtml);
+    console.log(`Synced lobby link → index.html (${relLink})`);
+}
+
 console.log(`Synced ${version.build} · ${version.gitCommit} → architect_v131.html meta tags`);
