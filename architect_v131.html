@@ -1035,6 +1035,10 @@
     }
     #architect-deploy-ribbon a { color: #80cbc4; }
     #architect-deploy-ribbon.deploy-mismatch { background: #b71c1c; color: #fff; }
+    #architect-deploy-ribbon.lesson-loading { background: #5d4037; color: #fff; }
+    body.tsa-boot-in-progress { cursor: wait; }
+    body.tsa-boot-in-progress #modal-admin.modal.open button,
+    body.tsa-boot-in-progress #modal-admin.modal.open summary { cursor: pointer; }
     body.architect-ribbon-visible { padding-top: 34px; }
     body.architect-ribbon-visible header.no-print { margin-top: 0; }
 </style>
@@ -1123,6 +1127,14 @@
         else bindRecoveryButtons();
         try {
             if(/\brecovery=1\b/i.test(location.search)) window.__tsaSkipLessonLoad = true;
+            if(!window.__tsaSkipLessonLoad && typeof window.STANDALONE_LESSON === "undefined") {
+                var rawLesson = localStorage.getItem("tsa_v5_1_data");
+                if(rawLesson) {
+                    window.__tsaLessonBytes = rawLesson.length;
+                    if(rawLesson.length >= 2500000) window.__tsaDeferHeavyLessonGate = true;
+                    if(rawLesson.length >= 400000) window.__tsaPresetDeferAdminPassage = true;
+                }
+            }
         } catch(eCh) {}
     })();
     </script>
@@ -16125,31 +16137,101 @@ const app = {
         return items;
     },
     init: function() {
-        window.__tsaShowCrash = function(detail) {
-            if(typeof window.__tsaShowCrashEarly === "function") window.__tsaShowCrashEarly(detail);
-            else try {
-                const box = document.getElementById("emergency-reset");
-                if(box) box.style.display = "block";
-            } catch(e) {}
-        };
-        window.onerror = function(msg, src, line, col, err) {
-            if(typeof app !== "undefined" && app.isImportingPdf) return;
-            const parts = [msg, src && line != null ? src + ":" + line + (col != null ? ":" + col : "") : ""].filter(Boolean);
-            let detail = parts.join("\n");
-            if(err && err.stack) detail += "\n\n" + err.stack;
-            else if(err && err.message) detail += "\n\n" + err.message;
-            if(/out of memory|invalid string length|allocation failed/i.test(String(msg || "") + detail)) {
-                detail = "Out of memory while loading or rendering the lesson.\n\nClick Reset lesson data only on the red panel, or open recovery mode from the link below.\n\n" + detail;
+        if(!window.__tsaInitCoreBound) {
+            window.__tsaInitCoreBound = true;
+            window.__tsaShowCrash = function(detail) {
+                if(typeof window.__tsaShowCrashEarly === "function") window.__tsaShowCrashEarly(detail);
+                else try {
+                    const box = document.getElementById("emergency-reset");
+                    if(box) box.style.display = "block";
+                } catch(e) {}
+            };
+            window.onerror = function(msg, src, line, col, err) {
+                if(typeof app !== "undefined" && app.isImportingPdf) return;
+                const parts = [msg, src && line != null ? src + ":" + line + (col != null ? ":" + col : "") : ""].filter(Boolean);
+                let detail = parts.join("\n");
+                if(err && err.stack) detail += "\n\n" + err.stack;
+                else if(err && err.message) detail += "\n\n" + err.message;
+                if(/out of memory|invalid string length|allocation failed/i.test(String(msg || "") + detail)) {
+                    detail = "Out of memory while loading or rendering the lesson.\n\nClick Reset lesson data only on the red panel, or open recovery mode from the link below.\n\n" + detail;
+                }
+                window.__tsaShowCrash(detail);
+            };
+            window.addEventListener("unhandledrejection", function(ev) {
+                if(typeof app !== "undefined" && app.isImportingPdf) return;
+                const r = ev && ev.reason;
+                const detail = (r && r.stack) ? String(r.message || r) + "\n\n" + r.stack : String(r || "Unhandled promise rejection");
+                window.__tsaShowCrash(detail);
+            });
+        }
+        if(window.__tsaDeferHeavyLessonGate && !window.__tsaUserConfirmedHeavyLoad) {
+            app._showHeavyLessonGate();
+            return;
+        }
+        const deferLoad = !window.__tsaSkipLessonLoad && typeof window.STANDALONE_LESSON === "undefined"
+            && window.__tsaLessonBytes && window.__tsaLessonBytes > 120000;
+        if(deferLoad) {
+            app._showBootBanner("Loading saved lesson — Data panel stays usable; buttons activate when load finishes.");
+            document.body.classList.add("tsa-boot-in-progress");
+            window.__tsaBootInProgress = true;
+            try { if(typeof app.ensureAdminReady === "function") app.ensureAdminReady(); } catch(eAdm0) {}
+            setTimeout(function() {
+                try { app._initLoadLessonAndState(); }
+                catch(eDef) {
+                    const detail = (eDef && eDef.stack) ? (eDef.message + "\n\n" + eDef.stack) : String(eDef);
+                    if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash(detail);
+                } finally {
+                    window.__tsaBootInProgress = false;
+                    document.body.classList.remove("tsa-boot-in-progress");
+                    app._hideBootBanner();
+                }
+            }, 0);
+            return;
+        }
+        app._initLoadLessonAndState();
+    },
+    _showBootBanner: function(msg) {
+        try {
+            const rib = document.getElementById("architect-deploy-ribbon");
+            if(rib) {
+                rib.classList.add("lesson-loading");
+                rib.textContent = msg || "Loading lesson…";
             }
-            window.__tsaShowCrash(detail);
-        };
-        window.addEventListener("unhandledrejection", function(ev) {
-            if(typeof app !== "undefined" && app.isImportingPdf) return;
-            const r = ev && ev.reason;
-            const detail = (r && r.stack) ? String(r.message || r) + "\n\n" + r.stack : String(r || "Unhandled promise rejection");
-            window.__tsaShowCrash(detail);
-        });
-
+        } catch(eB) {}
+    },
+    _hideBootBanner: function() {
+        try {
+            const rib = document.getElementById("architect-deploy-ribbon");
+            if(rib) {
+                rib.classList.remove("lesson-loading");
+                const m = document.querySelector("meta[name=\"architect-build\"]");
+                const dep = document.querySelector("meta[name=\"architect-deploy\"]");
+                const raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
+                const commit = dep && dep.getAttribute("content") ? String(dep.getAttribute("content")).trim() : "";
+                if(raw) rib.textContent = "GitHub Pages build " + raw + (commit ? " · " + commit : "") + " · lesson loaded";
+            }
+        } catch(eB) {}
+    },
+    _showHeavyLessonGate: function() {
+        const mb = window.__tsaLessonBytes ? Math.round(window.__tsaLessonBytes / 1000000) : 0;
+        app._showBootBanner("Large saved lesson (" + (mb || "?") + " MB) — click Load lesson to continue, or use recovery / Reset lesson data.");
+        try {
+            const rib = document.getElementById("architect-deploy-ribbon");
+            if(rib && !document.getElementById("tsa-heavy-load-btn")) {
+                rib.innerHTML = "Large saved lesson (<strong>" + (mb || "?") + " MB</strong>) can freeze the browser. "
+                    + "<button type=\"button\" id=\"tsa-heavy-load-btn\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Load lesson</button>"
+                    + "<a href=\"architect_v131.html?recovery=1&amp;b=" + Date.now() + "\" style=\"color:#80cbc4;\">recovery (skip saved lesson)</a>";
+                const btn = document.getElementById("tsa-heavy-load-btn");
+                if(btn) btn.addEventListener("click", function() {
+                    window.__tsaUserConfirmedHeavyLoad = true;
+                    window.__tsaDeferHeavyLessonGate = false;
+                    try { app.init(); } catch(eGo) { console.warn(eGo); }
+                });
+            }
+        } catch(eG) {}
+        try { if(typeof app.ensureAdminReady === "function") app.ensureAdminReady(); } catch(eAdm) {}
+    },
+    _initLoadLessonAndState: function() {
         // CHECK FOR INJECTED STANDALONE DATA
         if (typeof window.STANDALONE_LESSON !== 'undefined') {
             appData = app.repair(window.STANDALONE_LESSON);
@@ -16261,8 +16343,9 @@ const app = {
         } catch(eNorm) {}
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
-        app._heavyLessonOnLoad = false;
-        app._passageDisplaysDeferred = false;
+        if(window.__tsaPresetDeferAdminPassage && !app._deferAdminPassageUntilDemand) app._deferAdminPassageUntilDemand = true;
+        if(!app._heavyLessonOnLoad) app._heavyLessonOnLoad = false;
+        if(!app._passageDisplaysDeferred) app._passageDisplaysDeferred = false;
         if(typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration()) {
             app._deferAdminPassageUntilDemand = true;
         }
@@ -16317,22 +16400,30 @@ const app = {
 
         if(ui._sendToBuilderGuard) ui._sendToBuilderGuard = false;
         if(ui._runBuilderInProgress) ui._runBuilderInProgress = false;
-        try {
-            if(typeof app.applyExamPassageInsertWidthCh === "function") {
-                const heavyInit = app.isHeavyLesson && app.isHeavyLesson(appData);
-                app.applyExamPassageInsertWidthCh(heavyInit ? { skipDomSync: true } : {});
+        const runUiInit = function() {
+            try {
+                if(typeof app.applyExamPassageInsertWidthCh === "function") {
+                    const heavyInit = app.isHeavyLesson && app.isHeavyLesson(appData);
+                    app.applyExamPassageInsertWidthCh(heavyInit ? { skipDomSync: true } : {});
+                }
+                if(typeof admin !== "undefined" && admin.derivePointsFromQuestions) admin.derivePointsFromQuestions();
+                ui.init();
+            } catch(e) {
+                const detail = (e && e.stack) ? (e.message + "\n\n" + e.stack) : String(e);
+                if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash(detail);
+                else document.getElementById("emergency-reset").style.display = "block";
             }
-            if(typeof admin !== "undefined" && admin.derivePointsFromQuestions) admin.derivePointsFromQuestions();
-            ui.init();
-        } catch(e) {
-            const detail = (e && e.stack) ? (e.message + "\n\n" + e.stack) : String(e);
-            if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash(detail);
-            else document.getElementById("emergency-reset").style.display = "block";
+        };
+        if(app._heavyLessonOnLoad || app._passageDisplaysDeferred || app._deferAdminPassageUntilDemand) {
+            setTimeout(runUiInit, 0);
+        } else {
+            runUiInit();
         }
     },
     /** Wire admin tabs once the page shell is up — no tab hydrate here (avoids blocking clicks if Data opens during init). */
     ensureAdminReady: function() {
-        if(!appData || appData.isStandalone || typeof admin === "undefined") return;
+        if(appData && appData.isStandalone) return;
+        if(typeof admin === "undefined") return;
         if(!document.getElementById("modal-admin")) return;
         try { if(admin.bindTabsOnly) admin.bindTabsOnly(); } catch(e1) {}
         try { if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce(); } catch(e1b) {}
@@ -16915,9 +17006,25 @@ const app = {
         if(st.length >= app.HEAVY_SOURCE_CHARS) return true;
         return false;
     },
-    /** Disabled — defer/lite admin broke passage editing and Tap quote select. */
-    preferLiteAdmin: function() { return false; },
-    applyPassageDeferFromLoad: function(rawBytes) { return false; },
+    /** Re-enabled: large saved lessons defer passage DOM until teacher demands it (keeps Data responsive). */
+    applyPassageDeferFromLoad: function(rawBytes) {
+        const n = parseInt(rawBytes, 10) || 0;
+        if(n >= app.HEAVY_STORAGE_BYTES) {
+            app._heavyLessonOnLoad = true;
+            app._passageDisplaysDeferred = true;
+            app._deferAdminPassageUntilDemand = true;
+            return true;
+        }
+        if(n >= 500000) {
+            app._deferAdminPassageUntilDemand = true;
+            return true;
+        }
+        if(n >= 280000) {
+            app._passageDisplaysDeferred = true;
+            return true;
+        }
+        return false;
+    },
     /** True when building #ai-input on Data open would likely freeze the tab (large / structured insert). Lab + Quote Select still use saved JSON. */
     shouldDeferAdminPassageHydration: function() {
         if(!appData || appData.component === 2) return false;
@@ -18336,27 +18443,34 @@ const ui = {
             const eaInit = document.getElementById("essay-area");
             if(eaInit) eaInit.value = userState.essay;
         }
-        ui.switchView(userState.view, true);
-        ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
-        if(ui.syncDeskOwnWordsLayout) ui.syncDeskOwnWordsLayout(userState.level || 1);
-        if(userState.view === "desk") {
-            const lvl = userState.level || 1;
-            const queueHandled = app.clearDeskQueueIfQuotesAlreadySaved && app.clearDeskQueueIfQuotesAlreadySaved(lvl);
-            if(!queueHandled && Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
-                if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
-                    ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, stayOnQuoteSelect: true });
-                } else if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
-                    ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, stayOnQuoteSelect: true });
-                } else {
-                    app.flushDeskQueueToEssayIfNeeded();
+        const finishViewSwitch = function() {
+            ui.switchView(userState.view, true);
+            ui.syncDeskCompanionNav && ui.syncDeskCompanionNav();
+            if(ui.syncDeskOwnWordsLayout) ui.syncDeskOwnWordsLayout(userState.level || 1);
+            if(userState.view === "desk") {
+                const lvl = userState.level || 1;
+                const queueHandled = app.clearDeskQueueIfQuotesAlreadySaved && app.clearDeskQueueIfQuotesAlreadySaved(lvl);
+                if(!queueHandled && Array.isArray(userState.deskQueue) && userState.deskQueue.length) {
+                    if(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl)) {
+                        ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, stayOnQuoteSelect: true });
+                    } else if(app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl)) {
+                        ui.sendSelectionQuotesDirectToAnswer({ useDeskQueue: true, stayOnQuoteSelect: true });
+                    } else {
+                        app.flushDeskQueueToEssayIfNeeded();
+                    }
                 }
+                const ownWordsInit = app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(userState.level || 1);
+                if(ownWordsInit && ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
+                if(!ownWordsInit && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+                if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
+                ui.updateMarksDisplay();
+                if(ui.renderDeskQuoteTabs) ui.renderDeskQuoteTabs();
             }
-            const ownWordsInit = app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(userState.level || 1);
-            if(ownWordsInit && ui.clearDeskSentenceBuilder) ui.clearDeskSentenceBuilder();
-            if(!ownWordsInit && ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
-            if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
-            ui.updateMarksDisplay();
-            if(ui.renderDeskQuoteTabs) ui.renderDeskQuoteTabs();
+        };
+        if(app._passageDisplaysDeferred || app._heavyLessonOnLoad || app._deferAdminPassageUntilDemand) {
+            setTimeout(finishViewSwitch, 0);
+        } else {
+            finishViewSwitch();
         }
         const navLab = document.getElementById("nav-lab");
         const navDesk = document.getElementById("nav-desk");
@@ -18388,9 +18502,10 @@ const ui = {
             else if(typeof ui.forceHideSplash === "function") ui.forceHideSplash();
             try {
                 const admBoot = document.getElementById("modal-admin");
-                if(admBoot && ui.hideModalShell && !app._adminLiteOpen) ui.hideModalShell(admBoot);
+                const adminStillOpen = admBoot && (typeof ui.isAdminModalVisible === "function" ? ui.isAdminModalVisible() : admBoot.classList.contains("open"));
+                if(admBoot && ui.hideModalShell && !app._adminLiteOpen && !adminStillOpen) ui.hideModalShell(admBoot);
             } catch(eAdmBoot) {}
-            app._adminLiteOpen = false;
+            if(!(typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible())) app._adminLiteOpen = false;
             document.body.classList.add("tsa-init-done");
             if((app._initSaveNeeded || app._extractCacheMergedOnLoad) && typeof app.flushInitPersistence === "function") {
                 try { app.flushInitPersistence(); } catch(eFlush) {}
@@ -19396,6 +19511,9 @@ const ui = {
                     if(saved !== "reward" && saved !== "edit" && saved !== "ai" && saved !== "export") saved = "edit";
                 } catch(eLs) {}
                 admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
+                if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+                    try { app.setAdminPassageDeferredPlaceholder(); } catch(ePh) {}
+                }
             }
         } catch(e) {
             console.error("Settings shell failed:", e);
@@ -25536,11 +25654,19 @@ const admin = {
             const run = function(ev) {
                 if(ev && ev.type === "mouseup" && ev.button !== 0) return;
                 if(ev && ev.type === "pointerup" && ev.button !== 0) return;
-                const A = window.admin;
-                const U = window.ui;
-                const P = window.app;
-                if(!A) return;
-                try { compiled.call(el, ev, A, U, P); } catch(eR) { console.warn("admin wire run:", eR); }
+                const exec = function() {
+                    const A = window.admin;
+                    const U = window.ui;
+                    const P = window.app;
+                    if(!A) return;
+                    if(typeof appData === "undefined" || !appData) {
+                        if(window.__tsaBootInProgress) console.warn("Lesson still loading — retry button in a moment.");
+                        return;
+                    }
+                    try { compiled.call(el, ev, A, U, P); } catch(eR) { console.warn("admin wire run:", eR); }
+                };
+                if(window.__tsaBootInProgress) setTimeout(exec, 50);
+                else exec();
             };
             (evtNames || ["click"]).forEach(function(evtName) {
                 el.addEventListener(evtName, run, false);
@@ -25719,10 +25845,18 @@ const admin = {
             const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
             if(tab !== "edit") return;
             admin._liteEditPanelsDone = true;
-            try { if(admin.renderLevelBank) admin.renderLevelBank(); } catch(eLb) {}
-            try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) {}
-            try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
-            try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
+            try { if(admin.syncFormFieldsOnly) admin.syncFormFieldsOnly(); } catch(eSf) {}
+            const runHeavy = function() {
+                const adm2 = document.getElementById("modal-admin");
+                if(!adm2 || !adm2.classList.contains("open")) return;
+                try { if(admin.renderLevelBank) admin.renderLevelBank({ skipSyncFromList: true }); } catch(eLb) {}
+                try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(eQb) {}
+                try { if(admin.renderSelectionEditor) admin.renderSelectionEditor(); } catch(eSel) {}
+                try { if(admin.renderGlobalList) admin.renderGlobalList(); } catch(eGl) {}
+                try { if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate(); } catch(eWire) {}
+            };
+            if(typeof requestIdleCallback === "function") requestIdleCallback(runHeavy, { timeout: 8000 });
+            else setTimeout(runHeavy, 300);
         };
         if(typeof requestIdleCallback === "function") {
             admin._liteEditPanelsTimer = requestIdleCallback(run, { timeout: 3500 });
