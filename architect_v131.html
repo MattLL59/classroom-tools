@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T11:00:00">
-<meta name="architect-deploy" content="c1-line-window-slice-fix">
+<meta name="architect-build" content="2026-06-14T12:00:00">
+<meta name="architect-deploy" content="c1-excerpt-fast-path">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -15675,6 +15675,11 @@ const app = {
         const L = Number.isFinite(lvl) && lvl >= 1 ? lvl : ((typeof app.getEffectiveLevel === "function" && app.getEffectiveLevel()) || (typeof userState !== "undefined" && userState && userState.level) || 1);
         let raw = String(sourceText || "").trim();
         if(!raw) return [];
+        const stCanon = (appData && typeof appData.sourceText === "string") ? String(appData.sourceText).length : 0;
+        const bf = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
+        const cacheKey = L + "|" + bf + "|" + stCanon + "|" + raw.length;
+        if(app._examLineSliceRowsCache && app._examLineSliceRowsCache.key === cacheKey && Array.isArray(app._examLineSliceRowsCache.rows))
+            return app._examLineSliceRowsCache.rows.slice();
         let sp = null;
         if(app.parseStructuredPassageSource) {
             const rawTrim = raw.replace(/^\uFEFF/, "").trim();
@@ -15688,6 +15693,26 @@ const app = {
                 sp = app.parseStructuredPassageSource(st);
             if(!sp)
                 sp = app.parseStructuredPassageSource(raw);
+        }
+        if(sp && app.expandStructuredPassageLineEntries) {
+            const oPrep = typeof app._passagePrepareForDisplay === "function" ? app._passagePrepareForDisplay(sp) : sp;
+            const expandOpts = { forceInsertWidthSplitForEditor: true, displayTrustStoredRows: true };
+            let expanded = app.expandStructuredPassageLineEntries(oPrep, expandOpts);
+            if(!expanded.length && sp.lines && sp.lines.length)
+                expanded = app.expandStructuredPassageLineEntries(sp, expandOpts);
+            if(expanded.length) {
+                const domRowsFast = expanded.map(function(row, ix) {
+                    const body = row.html != null && String(row.html).trim()
+                        ? (app.htmlFragmentToPlainText ? app.htmlFragmentToPlainText(row.html) : String(row.text != null ? row.text : ""))
+                        : String(row.text != null ? row.text : "");
+                    let num = typeof row.n === "number" && Number.isFinite(row.n) ? row.n : (ix + 1);
+                    return { num: num, body: body };
+                });
+                if(domRowsFast.length) {
+                    app._examLineSliceRowsCache = { key: cacheKey, rows: domRowsFast };
+                    return domRowsFast;
+                }
+            }
         }
         if(sp && app.formatStructuredPassageHtml) {
             const bank = app.getLevelBank ? app.getLevelBank() : {};
@@ -15823,10 +15848,12 @@ const app = {
         const labelRange = (Object.prototype.hasOwnProperty.call(opts, "displayLineRange") && opts.displayLineRange !== undefined ? opts.displayLineRange : null) || lineWinResolved.displayLineRange || lineRange;
         let excerptSliceFailed = false;
         let useExcerpt = false;
-        let selPassageHtml = warnHtml + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
-        if(scope === "focused" && !lineRange) {
-            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> (Focus questions → <strong>Lines</strong> box, or text like “Read lines 1–8” in the question). None is set in this lesson yet — showing the <strong>whole passage</strong>.</div>`;
-            selPassageHtml = warnHtml + noWin + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
+        let selPassageHtml = warnHtml;
+        if(scope === "whole") {
+            selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
+        } else if(scope === "focused" && !lineRange) {
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> (Focus questions → <strong>Lines</strong> box, or text like “Read lines 1–8” in the question). None is set in this lesson yet.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Set booklet lines for this question, then reload Quote Select — the excerpt loads only that window (not the full insert).</div>`;
+            selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
             const ex = app.slicePlainByExamLineRange(sourceText, lineRange, lvl);
             if(ex && ex.trim()) {
@@ -15836,11 +15863,11 @@ const app = {
                 let excerptBody = typeof app.formatSourceHtmlExamLineWindow === "function" ? app.formatSourceHtmlExamLineWindow(sourceText, lineRange, lvl) : "";
                 if(!excerptBody || !String(excerptBody).trim())
                     excerptBody = app.formatSourceHtml(ex.trim(), { skipStoredStructuredFallback: true, excerptProse: true });
-                selPassageHtml = warnHtml + banner + excerptBody;
+                selPassageHtml += banner + excerptBody;
             } else {
                 excerptSliceFailed = true;
                 const spanLab = labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
-                selPassageHtml = warnHtml + `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. Check line numbers match stored insert lines (<code>data-src-line</code>) or try <strong>1–5</strong> for the first five passage rows. Showing full passage below.</div>` + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
+                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. Try <strong>1–8</strong> for the first eight passage rows, or use exact margin numbers from your insert. The full passage was <strong>not</strong> loaded (saves memory on large inserts).</div>`;
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -17101,11 +17128,11 @@ const app = {
             if(!app._passageDisplaysDeferred) return;
             app._passageDisplaysDeferred = false;
             try {
-                if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay();
-                if(typeof ui.renderLab === "function") ui.renderLab();
+                if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(typeof ui.renderLab === "function") ui.renderLab(null, { skipPassage: false });
                 if(userState && userState.view === "select" && typeof ui.renderSelection === "function") {
                     const keepPending = String(ui._freeSelectPendingQuote || "").trim();
-                    ui.renderSelection(null, keepPending ? { skipPassage: true } : {});
+                    ui.renderSelection(null, keepPending ? { skipPassage: true } : { skipPassage: false });
                 }
             } catch(ePaint) { console.warn("Deferred student passage paint:", ePaint); }
         };
@@ -19250,7 +19277,8 @@ const ui = {
                 }
             }
             const skipPass = !!(ui._initInProgress && ui._initPassageBuilt);
-            ui.renderSelection(null, skipPass ? { skipPassage: true } : {});
+            if(!skipPass && app._passageDisplaysDeferred) app._passageDisplaysDeferred = false;
+            ui.renderSelection(null, skipPass ? { skipPassage: true } : { skipPassage: false });
         } else if(v === "desk") {
             const lvlDesk = userState.level || 1;
             const queueCleared = app.clearDeskQueueIfQuotesAlreadySaved && app.clearDeskQueueIfQuotesAlreadySaved(lvlDesk);
