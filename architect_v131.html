@@ -1029,7 +1029,7 @@
     #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483640; background: #d32f2f; color: white; padding: 20px 28px 20px 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; pointer-events: auto; max-width: min(96vw, 520px); }
     #emergency-reset .btn { pointer-events: auto; cursor: pointer; position: relative; z-index: 1; }
     #emergency-reset a { color: #ffecb3; text-decoration: underline; pointer-events: auto; }
-    #emergency-reset .crash-close-x { position: absolute; top: 8px; right: 10px; background: transparent; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 4px 8px; opacity: 0.9; }
+    #emergency-reset .crash-close-x { position: absolute; top: 8px; right: 10px; background: transparent; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 4px 8px; opacity: 0.9; z-index: 2; pointer-events: auto; }
     #emergency-reset .crash-close-x:hover { opacity: 1; }
     #architect-deploy-ribbon {
         position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
@@ -1342,25 +1342,31 @@
                 fetch("architect-version.json?t=" + Date.now()).then(function(r) { return r.json(); }).then(function(j) {
                     if(!j || !j.build) return;
                     if(j.build !== raw) {
+                        var mismatchDismissed = false;
+                        try { mismatchDismissed = !!sessionStorage.getItem("tsaMismatchDismissed"); } catch(eMd) {}
                         rib.classList.add("deploy-mismatch");
                         var fixUrl = j.pagesUrl || pagesUrl;
                         rib.innerHTML = "Wrong copy loaded: this file says <strong>" + raw + "</strong> but Pages serves <strong>" + j.build + "</strong> · <a href=\"" + fixUrl + "\">open latest build</a>"
-                            + " <button type=\"button\" id=\"tsa-mismatch-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\">Dismiss</button>";
+                            + " <button type=\"button\" id=\"tsa-mismatch-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\" onclick=\"try{sessionStorage.setItem('tsaMismatchDismissed','1');}catch(e){}if(typeof app!=='undefined'&&app.restoreDeployRibbon)app.restoreDeployRibbon();return false;\">Dismiss</button>";
                         var md = document.getElementById("tsa-mismatch-dismiss");
                         if(md && !md.dataset.bound) {
                             md.dataset.bound = "1";
                             md.addEventListener("click", function(ev) {
                                 ev.preventDefault();
+                                ev.stopPropagation();
+                                try { sessionStorage.setItem("tsaMismatchDismissed", "1"); } catch(eMs) {}
                                 rib.classList.remove("deploy-mismatch");
                                 if(typeof app !== "undefined" && app.restoreDeployRibbon) app.restoreDeployRibbon();
                             });
                         }
-                        try {
-                            if(/architect_v131\.html/i.test(location.pathname || "") && !sessionStorage.getItem("tsaBuildReload")) {
-                                sessionStorage.setItem("tsaBuildReload", "1");
-                                location.replace(fixUrl);
-                            }
-                        } catch(eReload) {}
+                        if(!mismatchDismissed) {
+                            try {
+                                if(/architect_v131\.html/i.test(location.pathname || "") && !sessionStorage.getItem("tsaBuildReload")) {
+                                    sessionStorage.setItem("tsaBuildReload", "1");
+                                    location.replace(fixUrl);
+                                }
+                            } catch(eReload) {}
+                        }
                     } else {
                         try { sessionStorage.removeItem("tsaBuildReload"); } catch(eClr) {}
                     }
@@ -16160,7 +16166,8 @@ const app = {
         if(scope === "whole") {
             selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         } else if(scope === "focused" && !lineRange) {
-            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank.</div>`;
+            const dismissBtn = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageWindowHint)ui.dismissPassageWindowHint(${lvl});return false;" title="Dismiss this notice">✕ Dismiss</button>`;
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);">${dismissBtn}<strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank. <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${lvl});return false;">Show whole passage instead</button></div>`;
             selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
             const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
@@ -16198,7 +16205,8 @@ const app = {
                     ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end"))
                     : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
                 const errDetail = anchorErrLab || `If you meant <strong>lines 1–15</strong>, use <code>1-15</code> (with a dash), not <code>115</code>. Or set <strong>Start / End phrase</strong> anchors with exact words from the passage.`;
-                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} The full passage was <strong>not</strong> loaded.</div>`;
+                const dismissBtn = `<button type="button" style="float:right;background:#fff;border:1px solid #ffcdd2;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${lvl});return false;" title="Dismiss and show whole passage">✕ Dismiss</button>`;
+                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">${dismissBtn}Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${lvl});return false;">Show whole passage instead</button></div>`;
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -16632,6 +16640,7 @@ const app = {
                 rib.innerHTML = "Large saved lesson (<strong>" + (mb || "?") + " MB</strong>) can freeze the browser. "
                     + "<button type=\"button\" id=\"tsa-heavy-load-btn\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Load lesson</button>"
                     + "<button type=\"button\" id=\"tsa-heavy-skip-btn\" style=\"background:#e8f5e9;border:1px solid #81c784;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Start without saved lesson</button>"
+                    + "<button type=\"button\" id=\"tsa-heavy-dismiss-btn\" style=\"background:#eceff1;border:1px solid #b0bec5;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Dismiss bar</button>"
                     + "<a href=\"architect_v131.html?recovery=1&amp;b=" + Date.now() + "\" style=\"color:#80cbc4;\">recovery (skip saved lesson)</a>";
                 const btn = document.getElementById("tsa-heavy-load-btn");
                 if(btn) btn.addEventListener("click", function() {
@@ -16657,6 +16666,22 @@ const app = {
                     } catch(eU) {
                         location.href = "architect_v131.html?recovery=1&b=" + Date.now();
                     }
+                });
+                const dismissBar = document.getElementById("tsa-heavy-dismiss-btn");
+                if(dismissBar) dismissBar.addEventListener("click", function(ev) {
+                    ev.preventDefault();
+                    window.__tsaDeferHeavyLessonGate = false;
+                    window.__tsaUserConfirmedHeavyLoad = true;
+                    if(typeof app.restoreDeployRibbon === "function") app.restoreDeployRibbon();
+                    else if(typeof app._hideBootBanner === "function") app._hideBootBanner();
+                    document.body.classList.remove("tsa-boot-in-progress");
+                    window.__tsaBootInProgress = false;
+                    setTimeout(function() {
+                        try { app.init(); } catch(eGo) {
+                            console.warn(eGo);
+                            if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash((eGo && eGo.message ? eGo.message : String(eGo)) + (eGo && eGo.stack ? "\n\n" + eGo.stack : ""));
+                        }
+                    }, 0);
                 });
             }
         } catch(eG) {}
@@ -17533,6 +17558,10 @@ const app = {
     showLessonLoadNotices: function(messages) {
         const msgs = Array.isArray(messages) ? messages.filter(Boolean) : [];
         if(!msgs.length) return;
+        try {
+            const dismissed = sessionStorage.getItem("tsaLessonNoticeDismissed");
+            if(dismissed && Date.now() - parseInt(dismissed, 10) < 604800000) return;
+        } catch(eDn) {}
         const rib = document.getElementById("architect-deploy-ribbon");
         if(!rib) {
             console.warn("Lesson notices:", msgs.join(" · "));
@@ -17541,12 +17570,14 @@ const app = {
         rib.classList.add("lesson-loading");
         const esc = typeof app.escapeHtml === "function" ? app.escapeHtml(msgs.join(" · ")) : msgs.join(" · ");
         rib.innerHTML = "<span>⚠ " + esc + "</span>"
-            + " <button type=\"button\" id=\"tsa-notice-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\">Dismiss</button>";
+            + " <button type=\"button\" id=\"tsa-notice-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\" onclick=\"try{sessionStorage.setItem('tsaLessonNoticeDismissed',String(Date.now()));}catch(e){}if(typeof app!=='undefined'&&app.restoreDeployRibbon)app.restoreDeployRibbon();return false;\">Dismiss</button>";
         const btn = document.getElementById("tsa-notice-dismiss");
         if(btn && !btn.dataset.bound) {
             btn.dataset.bound = "1";
             btn.addEventListener("click", function(ev) {
                 ev.preventDefault();
+                ev.stopPropagation();
+                try { sessionStorage.setItem("tsaLessonNoticeDismissed", String(Date.now())); } catch(eLs) {}
                 if(typeof app.restoreDeployRibbon === "function") app.restoreDeployRibbon();
             });
         }
@@ -18539,6 +18570,38 @@ const ui = {
         if(win && win.lineRange) return "focused";
         if(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0) return "focused";
         return "whole";
+    },
+    _passageHintDismissKey: function(level) {
+        return "L" + (parseInt(level, 10) || 1);
+    },
+    isPassageWindowHintDismissed: function(level) {
+        const map = userState && userState.passageWindowHintDismissed;
+        const ts = map && map[ui._passageHintDismissKey(level)];
+        if(!ts) return false;
+        return (Date.now() - ts) < 86400000;
+    },
+    /** Hide passage excerpt / line-window warnings; optionally switch to whole insert. */
+    dismissPassageWindowHint: function(level, opts) {
+        opts = opts || {};
+        if(!userState.passageWindowHintDismissed || typeof userState.passageWindowHintDismissed !== "object") userState.passageWindowHintDismissed = {};
+        userState.passageWindowHintDismissed[ui._passageHintDismissKey(level)] = Date.now();
+        if(typeof app.save === "function") app.save();
+        const el = document.getElementById("selection-passage-window-hint");
+        if(el) {
+            el.classList.add("hidden");
+            el.innerHTML = "";
+        }
+        if(opts.showWhole && typeof ui.setPassageDisplayScope === "function") {
+            ui.setPassageDisplayScope("whole");
+            return;
+        }
+        const st = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText();
+        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(st, { forcePassage: true });
+        if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection(st, { skipPassage: true });
+        else if(typeof ui.renderLab === "function") ui.renderLab(st, { skipPassage: false });
+    },
+    dismissPassageExcerptError: function(level) {
+        ui.dismissPassageWindowHint(level, { showWhole: true });
     },
     setPassageDisplayScope: function(scope, opts) {
         let s = scope === "focused" ? "focused" : "whole";
@@ -21497,21 +21560,28 @@ const ui = {
             const scopeFocusedHint = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" && ui.getEffectivePassageDisplayScopeForLevel(level) === "focused";
             const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
             const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange;
-            if(excerptSliceFailed && wantsPassageWindow && lineRange) {
+            const hintDismissed = typeof ui.isPassageWindowHintDismissed === "function" && ui.isPassageWindowHintDismissed(level);
+            const dismissHintBtn = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageWindowHint)ui.dismissPassageWindowHint(${level});return false;">✕ Dismiss</button>`;
+            const dismissWholeBtn = `<button type="button" class="btn btn-outline btn-small" style="margin-top:8px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${level});return false;">Show whole passage instead</button>`;
+            if(!hintDismissed && excerptSliceFailed && wantsPassageWindow && lineRange) {
                 passageHintEl.classList.remove("hidden");
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.08);font-size:0.86rem;line-height:1.45;">
+                    ${dismissHintBtn}
                     <div style="font-weight:700;margin-bottom:4px;">Excerpt slice empty</div>
-                    <div style="opacity:0.94;">Your line window parsed (${lineRange.from}–${lineRange.to}) but no text was extracted — usually margin numbers don’t match (e.g. exam ticks 5,10,15…). Try <strong>1–5</strong> in the Lines box for the <em>first five physical rows</em>, or use the exact margin numbers from your insert.</div>
+                    <div style="opacity:0.94;">Your line window parsed (${lineRange.from}–${lineRange.to}) but no text was extracted — usually margin numbers don’t match (e.g. exam ticks 5,10,15…). Try <strong>1–5</strong> in the Lines box for the <em>first five physical rows</em>, set <strong>Start / End phrase</strong> anchors, or use the exact margin numbers from your insert.</div>
+                    ${dismissWholeBtn}
                 </div>`;
-            } else if(showMissingLineWindowHint) {
+            } else if(!hintDismissed && showMissingLineWindowHint) {
                 passageHintEl.classList.remove("hidden");
                 const isTeacher = !appData.isStandalone;
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:var(--error);background:rgba(244,67,54,0.07);font-size:0.86rem;line-height:1.45;">
+                    ${dismissHintBtn}
                     <div style="font-weight:700;margin-bottom:6px;">Line window not found — excerpt / affirm are switched on but idle</div>
                     <div style="opacity:0.94;">${isTeacher
-                        ? `Set which booklet lines this question uses: <strong>Editing Suite → Focus questions</strong> → small box <strong>Lines 1–5</strong> (or type <code style="font-size:0.82em;">Read lines 1–5</code> in the question text). Match the <strong>Level Bank</strong> question dropdown to this row, <strong>save</strong>, then open the student link / QR again so the phone picks up the change.`
+                        ? `Set which booklet lines this question uses: <strong>Editing Suite → Focus questions</strong> → small box <strong>Lines 1–5</strong> (or type <code style="font-size:0.82em;">Read lines 1–5</code> in the question text). Match the <strong>Level Bank</strong> question dropdown to this row, <strong>save</strong>, then open the student link / QR again so the phone picks up the change. Or use <strong>Start / End phrase</strong> anchors.`
                         : `This version of the lesson has not stored which lines to use. Ask your teacher to add a line range to the question, then reload.`}
                     </div>
+                    ${dismissWholeBtn}
                 </div>`;
             } else {
                 passageHintEl.classList.add("hidden");
