@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T01:00:00">
-<meta name="architect-deploy" content="fix-pvlvl-syntax-error">
+<meta name="architect-build" content="2026-06-14T08:00:00">
+<meta name="architect-deploy" content="c1-excerpt-scope-wire">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -18058,8 +18058,26 @@ const ui = {
         if(ps === "focused" || ps === "whole") return ps;
         return "whole";
     },
+    /**
+     * Lab / Quote Select / intro rendering: global Question-focused, or per-level excerpt when a line window exists.
+     * {@link admin._preparePassageForLineAssignment} sets {@link app._passageLinePickForceWhole} so teachers can assign the next question from the full insert.
+     */
+    getEffectivePassageDisplayScopeForLevel: function(level) {
+        if(app._passageLinePickForceWhole) return "whole";
+        const global = ui.getPassageDisplayScope();
+        if(global === "focused") return "focused";
+        const lvl = parseInt(level, 10) || 1;
+        const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
+        const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
+        const excerptOn = !!(levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true");
+        if(!excerptOn) return "whole";
+        const win = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null;
+        if(win && win.lineRange) return "focused";
+        return "whole";
+    },
     setPassageDisplayScope: function(scope, opts) {
         let s = scope === "focused" ? "focused" : "whole";
+        if(s === "focused") app._passageLinePickForceWhole = false;
         try {
             localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, s);
         } catch(eS) {}
@@ -18151,7 +18169,7 @@ const ui = {
         let html;
         let bundleForShell = null;
         const levRefresh = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
-        const scopeRefresh = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+        const scopeRefresh = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" ? ui.getEffectivePassageDisplayScopeForLevel(levRefresh) : (typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole");
         if(src && typeof src === "object" && src.resourcePaper != null && src.questionPaperPage3 != null) {
             const h1 = app.formatSourceHtml(src.resourcePaper || "");
             const h2 = app.formatSourceHtml(src.questionPaperPage3 || "");
@@ -18337,7 +18355,7 @@ const ui = {
         }
         let dispBundleInit = null;
         const levInitDisp = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
-        const scopeInitDisp = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+        const scopeInitDisp = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" ? ui.getEffectivePassageDisplayScopeForLevel(levInitDisp) : (typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole");
         const deferPassageInit = !!(typeof app.isHeavyLesson === "function" && app.isHeavyLesson(appData));
         const paintStudentPassageHtml = function(html, bundle) {
             const inline = document.getElementById("source-inline");
@@ -18997,7 +19015,7 @@ const ui = {
                 ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>`
                 : "";
             const levLab = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
-            const scopeLab = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+            const scopeLab = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" ? ui.getEffectivePassageDisplayScopeForLevel(levLab) : (typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole");
             const strSrc = typeof src === "string" ? src : "";
             const lineWinLab = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levLab) : null;
             const paneOptsLab = { warnHtml: warn, scope: scopeLab };
@@ -20977,7 +20995,7 @@ const ui = {
                 if(selWrap) ui.syncPassageLineLayoutShell(selWrap, inlineSelect, ph);
             } else if(hasSource) {
                 const warn = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
-                let scopeSel = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
+                let scopeSel = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" ? ui.getEffectivePassageDisplayScopeForLevel(level) : (typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole");
                 const bundle = typeof app.buildPassagePaneHtmlForLevel === "function"
                     ? app.buildPassagePaneHtmlForLevel(level, sourceText, { warnHtml: warn, scope: scopeSel, lineRange: lineRange, displayLineRange: lineWinEarly.displayLineRange })
                     : null;
@@ -20998,7 +21016,7 @@ const ui = {
         }
         const passageHintEl = document.getElementById("selection-passage-window-hint");
         if(passageHintEl) {
-            const scopeFocusedHint = typeof ui.getPassageDisplayScope === "function" && ui.getPassageDisplayScope() === "focused";
+            const scopeFocusedHint = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" && ui.getEffectivePassageDisplayScopeForLevel(level) === "focused";
             const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
             const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange;
             if(excerptSliceFailed && wantsPassageWindow && lineRange) {
@@ -34170,6 +34188,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
             const curScope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
             if(!appData.meta) appData.meta = {};
+            app._passageLinePickForceWhole = true;
             if(curScope !== "whole") {
                 appData.meta.passageDisplayScope = "whole";
                 if(typeof ui !== "undefined" && ui.setPassageDisplayScope) ui.setPassageDisplayScope("whole");
@@ -34210,19 +34229,21 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const span = resolved.range.from === resolved.range.to
             ? ("line " + resolved.range.from)
             : ("lines " + resolved.range.from + "–" + resolved.range.to);
-        alert("Booklet " + span + " saved to " + (q.id || "this question") + "’s Lines box (" + resolved.lineRef + ").\n\nThe passage stays on **whole insert** so you can assign the next question. Use **Show line window** or switch Lab / Quote Select to **Question-focused** when you want to preview one question’s excerpt.");
+        alert("Booklet " + span + " saved to " + (q.id || "this question") + "’s Lines box (" + resolved.lineRef + ").\n\nExcerpt is on for this level (students see only these lines). The passage stays on **whole insert** here so you can assign the next question. Use **Show line window** or **Question-focused** to preview the excerpt.");
         return true;
     },
     applyLineRefFromPassageSelectionForQuestionIndex: function(questionIndex) {
         if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
-        const scope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const qPre = questions[questionIndex];
+        const lvlPre = qPre && qPre.id ? admin.levelForQuestionId(qPre.id) : 1;
+        const scope = typeof ui !== "undefined" && ui.getEffectivePassageDisplayScopeForLevel ? ui.getEffectivePassageDisplayScopeForLevel(lvlPre) : (ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole");
         if(scope === "focused") {
             admin._preparePassageForLineAssignment({ questionIndex: questionIndex, previewOnly: false });
             return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **From selection** again.");
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
         if(!pick || !pick.text) return alert("Highlight passage text first (Level Bank preview with **Show whole insert**, Lab, or Quote Select), then click **From selection**.");
-        const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const q = questions[questionIndex];
         if(!q || !q.id) return;
         const lvl = admin.levelForQuestionId(q.id);
@@ -34232,9 +34253,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     applyLineRefFromPassageSelectionForPreviewLevel: function() {
         if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
-        const scope = typeof ui !== "undefined" && ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole";
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         const lvlPre = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
+        const scope = typeof ui !== "undefined" && ui.getEffectivePassageDisplayScopeForLevel ? ui.getEffectivePassageDisplayScopeForLevel(lvlPre) : (ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole");
         if(scope === "focused") {
             admin._preparePassageForLineAssignment({ level: lvlPre, previewOnly: false });
             return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **Set lines from selection** again.");
@@ -34314,6 +34335,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     openTeacherQuoteSelectPreview: function() {
         const sel = document.getElementById("teacher-passage-preview-level");
         const lvl = sel ? parseInt(sel.value, 10) || 1 : 1;
+        app._passageLinePickForceWhole = false;
         userState.level = lvl;
         app.save();
         ui.switchView("select", true);
@@ -34377,6 +34399,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             return;
         } else if(key === "passageExamExcerpt") {
             appData.settings.levelBank[lvl].passageExamExcerpt = el.checked;
+            if(el.checked) app._passageLinePickForceWhole = false;
         } else if(key === "passageConfirmLinesFirst") {
             appData.settings.levelBank[lvl].passageConfirmLinesFirst = el.checked;
         } else if(key === "passageQuoteSelectEveryLineNumber") {
