@@ -2192,6 +2192,7 @@
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-19th-btn" onclick="admin.reExtract19thFromPages()" style="margin-left:8px;" title="Re-extract 19th C passage from Questions PDF (C2 only)">Re-extract 19th C</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-resource-btn" onclick="admin.reExtractResourceFromPages()" style="margin-left:8px;" title="Re-extract 21st C resource passage from Resource PDF">Re-extract resource</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-markscheme-btn" onclick="admin.reExtractMarkSchemeFromPages()" style="margin-left:8px;" title="Re-extract mark scheme from Mark scheme PDF">Re-extract mark scheme</button>
+                    <div id="past-paper-extract-notice" style="display:none;margin-top:10px;"></div>
                     <button type="button" class="btn btn-outline btn-small" style="margin-top:6px;" onclick="admin.clearPastPaperPdfCacheConfirm()">Clear saved PDFs from this browser</button>
                 </details>
                 <details class="admin-section" open>
@@ -17910,18 +17911,67 @@ const app = {
             if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
         }
     },
+    hidePastPaperExtractNotice: function() {
+        const el = document.getElementById("past-paper-extract-notice");
+        if(el) {
+            el.innerHTML = "";
+            el.style.display = "none";
+        }
+    },
+    showPastPaperExtractNotice: function(msgHtml, opts) {
+        opts = opts || {};
+        let el = document.getElementById("past-paper-extract-notice");
+        if(!el) {
+            const anchor = document.getElementById("past-paper-extract-btn");
+            if(anchor && anchor.parentElement) {
+                el = document.createElement("div");
+                el.id = "past-paper-extract-notice";
+                el.style.cssText = "margin-top:10px;";
+                anchor.parentElement.insertBefore(el, anchor.nextSibling);
+            }
+        }
+        if(!el) {
+            if(typeof app.showLessonLoadNotices === "function") app.showLessonLoadNotices([String(msgHtml || "").replace(/<[^>]+>/g, " ")]);
+            return;
+        }
+        const dismiss = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;" onclick="if(typeof app!=='undefined'&&app.hidePastPaperExtractNotice)app.hidePastPaperExtractNotice();return false;">✕ Dismiss</button>`;
+        const loadBtn = opts.showLoadPassage ? ` <button type="button" class="btn btn-primary btn-small" style="margin-top:8px;" onclick="if(typeof app!=='undefined'&&app.finishPassageAfterExtract)app.finishPassageAfterExtract();return false;">Load passage now</button>` : "";
+        el.style.display = "";
+        el.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#00897b;background:rgba(0,150,136,0.08);font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}${loadBtn}</div>`;
+        try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch(eSc) {}
+        if(opts.autoHideMs && opts.autoHideMs > 0) setTimeout(() => app.hidePastPaperExtractNotice(), opts.autoHideMs);
+    },
+    /** After Lobby extract / re-extract: clear defer flags and paint passage (Lab, Quote Select, editor). */
+    finishPassageAfterExtract: function() {
+        app._passageDisplaysDeferred = false;
+        app._deferAdminPassageUntilDemand = false;
+        app._heavyLessonOnLoad = false;
+        app._studentPassagePaintScheduled = false;
+        app._adminPassageHydrateDone = false;
+        try {
+            if(appData && appData.component !== 2 && typeof app.finishC1PassageLayoutAfterLessonLoad === "function") {
+                app.finishC1PassageLayoutAfterLessonLoad();
+            } else if(typeof app.syncAdminAiInputFromLesson === "function") {
+                app.syncAdminAiInputFromLesson({ force: true });
+                app._adminPassageHydrateDone = true;
+            }
+        } catch(eLay) { console.warn("finishPassageAfterExtract layout:", eLay); }
+        try {
+            if(typeof ui !== "undefined") {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(ui.renderLab) ui.renderLab(null, { skipPassage: false });
+                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            }
+        } catch(eUi) { console.warn("finishPassageAfterExtract UI:", eUi); }
+    },
     /** After Lobby Extract text / questions — refresh passage + admin editors immediately (no idle defer). */
     afterPastPaperExtractUi: function(opts) {
         opts = opts || {};
         app.prepareImportedLesson(appData);
         app._deferAdminPassageUntilDemand = false;
+        app._passageDisplaysDeferred = false;
         app._importInProgress = true;
         app._suppressAdminInputFlushOnce = true;
-        try {
-            if(typeof ui !== "undefined" && ui.init) ui.init();
-        } finally {
-            app._suppressAdminInputFlushOnce = false;
-        }
         try {
             if(opts.includeQuestions && typeof admin !== "undefined") {
                 if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
@@ -17949,13 +17999,15 @@ const app = {
                 }
             }
             if(typeof ui !== "undefined") {
-                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-                if(ui.renderLab) ui.renderLab();
-                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection();
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(ui.renderLab) ui.renderLab(null, { skipPassage: false });
+                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
             }
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
         } catch(eF) {
             console.warn("afterPastPaperExtractUi:", eF);
         }
+        app._suppressAdminInputFlushOnce = false;
         app._importInProgress = false;
     },
     clearLessonStorageOnly: function() {
@@ -25765,7 +25817,6 @@ const admin = {
                 loadAsComponent2: loadAsComponent2
             });
         } else {
-            ui.init();
             if(!loadAsComponent2) {
                 app.setAiInputValue((appData.sourceText != null && String(appData.sourceText).trim() !== "" ? appData.sourceText : combined).trim());
             }
@@ -25777,6 +25828,7 @@ const admin = {
             admin.renderAll();
             if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
                 admin.loadC2PassagesIntoEditor({ goToEditTab: false });
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
         }
         try {
             if(app._lastPdfDebug && app._lastPdfDebug.kind === "pastPaper") {
@@ -25794,9 +25846,20 @@ const admin = {
         const resMissing = !!(files.resource && !String(resourcePassageText || "").trim());
         if(includeQuestions) {
             const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
-            alert("Past paper text loaded." + (qCount >= 2 ? " " + qCount + " Section A reading questions were detected and added to the question bank." : qCount === 1 ? " One focus question was detected (the app already retried the full extract and all Questions-PDF pages if needed). If you expected more parts, set the correct Section A reading page(s) (e.g. 1-2) and click Extract questions." : " No Section A reading questions were split — use Load & AI to paste prompts, set Section A reading page(s), click Extract questions, or use Load JSON.") + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : "") + (app._passageDisplaysDeferred ? "\n\nPassage display is deferred to save memory — open Quote Select or use Load passage in editor when you need the full layout." : ""));
+            let msg = "<strong>Past paper loaded.</strong> ";
+            if(qCount >= 2) msg += qCount + " Section A reading questions added to the bank.";
+            else if(qCount === 1) msg += "One focus question detected — set Section A reading page(s) and click <strong>Extract questions</strong> if you expected more.";
+            else msg += "No questions split yet — set Section A reading page(s) and click <strong>Extract questions</strong>, or paste prompts manually.";
+            if(resMissing) msg += " <span style=\"color:var(--error)\">Resource PDF returned no text — try all pages or OCR.</span>";
+            msg += " Passage should appear in Quote Select / Lab now.";
+            app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         } else {
-            alert("Extract text: PDFs cached; resource, questions-PDF passages (C2 layout), and mark scheme updated." + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : " Click Extract questions to fill the question bank from the Questions PDF (Section A reading pages).") + (loadAsComponent2 ? "\n\nOpen Editing Suite → Component 2 — passages to edit (or click Load from lesson there)." : "") + (app._passageDisplaysDeferred ? "\n\nFull passage layout was not built in the browser (memory limit). Text is saved — use Load passage in editor or Quote Select when ready." : ""));
+            let msg = "<strong>Extract text done.</strong> PDFs cached; passages and mark scheme updated.";
+            if(resMissing) msg += " <span style=\"color:var(--error)\">Resource PDF returned no text — try all pages or OCR.</span>";
+            else msg += " Click <strong>Extract questions</strong> next for the question bank.";
+            if(loadAsComponent2) msg += " Open <strong>Editing Suite → Component 2 — passages</strong> to edit.";
+            msg += " Passage should appear in Quote Select / Lab now.";
+            app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         }
     },
     reExtractQuestionsFromPages: async function() {
@@ -25894,13 +25957,13 @@ const admin = {
             admin.autoAssignLevelsByLineRangeIfApplicable();
             app.save({ skipRender: true });
             if(parsed.length >= 1) {
-                alert(parsed.length + " question(s) extracted. Level Bank updated (L1→Q1, …). Check Editing Suite → Level Bank and Focus questions.");
+                app.showPastPaperExtractNotice("<strong>" + parsed.length + " question(s) extracted.</strong> Level Bank updated (L1→Q1, …). Check <strong>Editing Suite → Level Bank</strong> and Focus questions.", { autoHideMs: 15000 });
             } else {
-                alert("No Section A reading questions detected on page 2 — check the page range or paste questions manually in Editing Suite → Focus questions.");
+                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No Section A reading questions detected — check the page range or paste questions in <strong>Focus questions</strong>.</span>");
             }
             admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
-            alert("Could not re-extract: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract questions: " + (e.message || String(e)) + "</span>");
         }
     },
     reExtract19thFromPages: async function() {
@@ -26004,11 +26067,14 @@ const admin = {
             /* Student view follows architectC2SourceView; default is 21st, so the new 19th passage was invisible until toggled. Switch without flushing the pooled editor first — flush would overwrite layout with stale contenteditable if Settings stayed on another tab. */
             admin.setArchitectC2SourceView("19th", { skipFlush: true });
             admin.renderAll();
-            ui.refreshSourceDisplay && ui.refreshSourceDisplay();
-            if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
-            alert("19th C passage re-extracted from page(s) " + (pages && pages.length ? pages.join(", ") : "?") + ". Showing 19th C now. Use header or Quote Select 21st/19th to switch. If a level stays on 21st only, set Level Bank → C2 texts to Both for that level.");
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            else {
+                ui.refreshSourceDisplay && ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            }
+            app.showPastPaperExtractNotice("<strong>19th C passage re-extracted</strong> from page(s) " + (pages && pages.length ? pages.join(", ") : "?") + ". Showing <strong>19th C</strong> now — use header or Quote Select to switch. Set Level Bank → <strong>C2 texts → Both</strong> if a level should show both passages.", { autoHideMs: 18000 });
         } catch(e) {
-            alert("Could not re-extract 19th C: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract 19th C: " + (e.message || String(e)) + "</span>");
         }
     },
     reExtractResourceFromPages: async function() {
@@ -26131,11 +26197,14 @@ const admin = {
             }
             if(!isC2) app.setAiInputValue(appData.sourceText || "");
             admin.renderAll();
-            if(isC2 && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-            if(isC2 && userState.view === "select" && ui.renderSelection) ui.renderSelection();
-            alert("Resource passage re-extracted from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).");
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            else {
+                if(isC2 && ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(isC2 && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            }
+            app.showPastPaperExtractNotice("<strong>Resource passage re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s). Open <strong>Quote Select</strong> or <strong>Lab</strong> to view.", { autoHideMs: 15000 });
         } catch(e) {
-            alert("Could not re-extract resource: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract resource: " + (e.message || String(e)) + "</span>");
         }
     },
     reExtractMarkSchemeFromPages: async function() {
@@ -26158,16 +26227,16 @@ const admin = {
                 texts.push(layoutText.trim());
             }
             const markSchemeText = texts.join("\n\n").trim();
-            if(!markSchemeText) { alert("No text extracted from the selected page(s)."); return; }
+            if(!markSchemeText) { app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No text extracted from the selected mark scheme page(s).</span>"); return; }
             if(!appData) appData = app.repair(defaultData);
             if(!appData.component2Layout || typeof appData.component2Layout !== "object") appData.component2Layout = {};
             appData.component2Layout.markSchemeText = app.normalizeMarkSchemeStorageText(markSchemeText);
             appData.markScheme = app.parseMarkSchemeFromText(markSchemeText);
             app.save();
             admin.renderAll();
-            alert("Mark scheme re-extracted from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).");
+            app.showPastPaperExtractNotice("<strong>Mark scheme re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).", { autoHideMs: 12000 });
         } catch(e) {
-            alert("Could not re-extract mark scheme: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract mark scheme: " + (e.message || String(e)) + "</span>");
         }
     },
     /** Sync opts for Teacher Settings tabs — skip heavy passage/C2 work during lite open. */
@@ -29589,6 +29658,7 @@ const admin = {
     /** After Extract questions: refresh lists, Level Bank L1→Qn, student banners. */
     afterExtractQuestionsUi: function(parsedCount) {
         try {
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
             admin.refreshQuestionsList({ skipLevelBank: true });
             if(typeof admin.syncLevelBankForPastPaperQuestions === "function") admin.syncLevelBankForPastPaperQuestions();
             if(typeof admin.autoAssignLevelsByLineRangeIfApplicable === "function") admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
