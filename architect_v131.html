@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T18:00:00">
-<meta name="architect-deploy" content="c1-anchor-excerpt-fix-f806">
+<meta name="architect-build" content="2026-06-14T24:00:00">
+<meta name="architect-deploy" content="c1-notice-dismiss-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1029,7 +1029,7 @@
     #emergency-reset { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483640; background: #d32f2f; color: white; padding: 20px 28px 20px 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center; display: none; pointer-events: auto; max-width: min(96vw, 520px); }
     #emergency-reset .btn { pointer-events: auto; cursor: pointer; position: relative; z-index: 1; }
     #emergency-reset a { color: #ffecb3; text-decoration: underline; pointer-events: auto; }
-    #emergency-reset .crash-close-x { position: absolute; top: 8px; right: 10px; background: transparent; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 4px 8px; opacity: 0.9; }
+    #emergency-reset .crash-close-x { position: absolute; top: 8px; right: 10px; background: transparent; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 4px 8px; opacity: 0.9; z-index: 2; pointer-events: auto; }
     #emergency-reset .crash-close-x:hover { opacity: 1; }
     #architect-deploy-ribbon {
         position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
@@ -1342,25 +1342,31 @@
                 fetch("architect-version.json?t=" + Date.now()).then(function(r) { return r.json(); }).then(function(j) {
                     if(!j || !j.build) return;
                     if(j.build !== raw) {
+                        var mismatchDismissed = false;
+                        try { mismatchDismissed = !!sessionStorage.getItem("tsaMismatchDismissed"); } catch(eMd) {}
                         rib.classList.add("deploy-mismatch");
                         var fixUrl = j.pagesUrl || pagesUrl;
                         rib.innerHTML = "Wrong copy loaded: this file says <strong>" + raw + "</strong> but Pages serves <strong>" + j.build + "</strong> · <a href=\"" + fixUrl + "\">open latest build</a>"
-                            + " <button type=\"button\" id=\"tsa-mismatch-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\">Dismiss</button>";
+                            + " <button type=\"button\" id=\"tsa-mismatch-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\" onclick=\"try{sessionStorage.setItem('tsaMismatchDismissed','1');}catch(e){}if(typeof app!=='undefined'&&app.restoreDeployRibbon)app.restoreDeployRibbon();return false;\">Dismiss</button>";
                         var md = document.getElementById("tsa-mismatch-dismiss");
                         if(md && !md.dataset.bound) {
                             md.dataset.bound = "1";
                             md.addEventListener("click", function(ev) {
                                 ev.preventDefault();
+                                ev.stopPropagation();
+                                try { sessionStorage.setItem("tsaMismatchDismissed", "1"); } catch(eMs) {}
                                 rib.classList.remove("deploy-mismatch");
                                 if(typeof app !== "undefined" && app.restoreDeployRibbon) app.restoreDeployRibbon();
                             });
                         }
-                        try {
-                            if(/architect_v131\.html/i.test(location.pathname || "") && !sessionStorage.getItem("tsaBuildReload")) {
-                                sessionStorage.setItem("tsaBuildReload", "1");
-                                location.replace(fixUrl);
-                            }
-                        } catch(eReload) {}
+                        if(!mismatchDismissed) {
+                            try {
+                                if(/architect_v131\.html/i.test(location.pathname || "") && !sessionStorage.getItem("tsaBuildReload")) {
+                                    sessionStorage.setItem("tsaBuildReload", "1");
+                                    location.replace(fixUrl);
+                                }
+                            } catch(eReload) {}
+                        }
                     } else {
                         try { sessionStorage.removeItem("tsaBuildReload"); } catch(eClr) {}
                     }
@@ -2186,6 +2192,7 @@
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-19th-btn" onclick="admin.reExtract19thFromPages()" style="margin-left:8px;" title="Re-extract 19th C passage from Questions PDF (C2 only)">Re-extract 19th C</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-resource-btn" onclick="admin.reExtractResourceFromPages()" style="margin-left:8px;" title="Re-extract 21st C resource passage from Resource PDF">Re-extract resource</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-markscheme-btn" onclick="admin.reExtractMarkSchemeFromPages()" style="margin-left:8px;" title="Re-extract mark scheme from Mark scheme PDF">Re-extract mark scheme</button>
+                    <div id="past-paper-extract-notice" style="display:none;margin-top:10px;"></div>
                     <button type="button" class="btn btn-outline btn-small" style="margin-top:6px;" onclick="admin.clearPastPaperPdfCacheConfirm()">Clear saved PDFs from this browser</button>
                 </details>
                 <details class="admin-section" open>
@@ -15662,6 +15669,61 @@ const app = {
         const endA = words.length > 2 ? words.slice(-Math.min(6, words.length)).join(" ") : startA;
         return { startA, endA };
     },
+    /** Widen an existing line window with a new highlight (union of layout row spans when possible). */
+    mergePassageLineRanges: function(sourceText, rangeA, rangeB, level) {
+        if(!rangeA || typeof rangeA.from !== "number") return rangeB || null;
+        if(!rangeB || typeof rangeB.from !== "number") return rangeA;
+        const lvl = parseInt(level, 10) || 1;
+        const s0 = String(sourceText || "").trim();
+        const rowsA = app.sliceExamLineRangeRows ? app.sliceExamLineRangeRows(s0, rangeA, lvl) : [];
+        const rowsB = app.sliceExamLineRangeRows ? app.sliceExamLineRangeRows(s0, rangeB, lvl) : [];
+        if(rowsA.length && rowsB.length && app.getDomRowsForExamLineSlicing) {
+            const allRows = app.getDomRowsForExamLineSlicing(s0, lvl) || [];
+            const idxOf = (sliceRow) => {
+                for(let i = 0; i < allRows.length; i++) {
+                    if(String(allRows[i].body || "").trim() === String(sliceRow.body || "").trim()) return i;
+                }
+                return -1;
+            };
+            let minIx = allRows.length;
+            let maxIx = -1;
+            rowsA.concat(rowsB).forEach(r => {
+                const ix = idxOf(r);
+                if(ix >= 0) {
+                    minIx = Math.min(minIx, ix);
+                    maxIx = Math.max(maxIx, ix);
+                }
+            });
+            if(minIx <= maxIx && allRows[minIx] && allRows[maxIx]) {
+                const nums = allRows.slice(minIx, maxIx + 1).map(r => r && typeof r.num === "number" ? r.num : null).filter(n => n != null);
+                if(nums.length) return { from: Math.min(...nums), to: Math.max(...nums) };
+                return { from: minIx + 1, to: maxIx + 1 };
+            }
+        }
+        return { from: Math.min(rangeA.from, rangeB.from), to: Math.max(rangeA.to, rangeB.to) };
+    },
+    /** Expand start/end phrase anchors on a question to include a new highlight. */
+    mergePassageAnchorsIntoQuestion: function(q, newAnchors, sourceText, level) {
+        if(!q || !newAnchors) return;
+        const src = String(sourceText || "").trim();
+        const lvl = parseInt(level, 10) || 1;
+        const oldStart = q.passageStartAnchor != null ? String(q.passageStartAnchor).trim() : "";
+        const oldEnd = q.passageEndAnchor != null ? String(q.passageEndAnchor).trim() : "";
+        if(!oldStart && !oldEnd) {
+            if(newAnchors.startA) q.passageStartAnchor = newAnchors.startA;
+            if(newAnchors.endA) q.passageEndAnchor = newAnchors.endA;
+            return;
+        }
+        const spanOld = app.resolvePassageAnchorCharSpan ? app.resolvePassageAnchorCharSpan(src, oldStart, oldEnd, lvl) : null;
+        const spanNew = app.resolvePassageAnchorCharSpan ? app.resolvePassageAnchorCharSpan(src, newAnchors.startA, newAnchors.endA, lvl) : null;
+        if(spanOld && !spanOld.err && spanNew && !spanNew.err) {
+            if(spanNew.startIdx < spanOld.startIdx && newAnchors.startA) q.passageStartAnchor = newAnchors.startA;
+            if(spanNew.endIdx > spanOld.endIdx && newAnchors.endA) q.passageEndAnchor = newAnchors.endA;
+            return;
+        }
+        if(newAnchors.startA) q.passageStartAnchor = newAnchors.startA;
+        if(newAnchors.endA) q.passageEndAnchor = newAnchors.endA;
+    },
     /** Normalize phrase text for anchor matching (quotes, ellipsis, whitespace). */
     _normalizePassageAnchorPhrase: function(str) {
         return String(str || "").toLowerCase().replace(/[""''…\u2026]/g, "").replace(/\s+/g, " ").trim();
@@ -16160,7 +16222,8 @@ const app = {
         if(scope === "whole") {
             selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         } else if(scope === "focused" && !lineRange) {
-            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);"><strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank.</div>`;
+            const dismissBtn = app.noticeActionBtn("dismiss-passage-window-hint", { level: lvl, style: "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Dismiss this notice" });
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);">${dismissBtn}<strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank. ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
             selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
             const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
@@ -16198,7 +16261,8 @@ const app = {
                     ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end"))
                     : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
                 const errDetail = anchorErrLab || `If you meant <strong>lines 1–15</strong>, use <code>1-15</code> (with a dash), not <code>115</code>. Or set <strong>Start / End phrase</strong> anchors with exact words from the passage.`;
-                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} The full passage was <strong>not</strong> loaded.</div>`;
+                const dismissBtn = app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, style: "float:right;background:#fff;border:1px solid #ffcdd2;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Dismiss and show whole passage" });
+                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">${dismissBtn}Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -16588,6 +16652,10 @@ const app = {
     },
     _hideBootBanner: function() {
         try {
+            if(typeof app.restoreDeployRibbon === "function") {
+                app.restoreDeployRibbon();
+                return;
+            }
             const rib = document.getElementById("architect-deploy-ribbon");
             if(rib) {
                 rib.classList.remove("lesson-loading");
@@ -16632,6 +16700,7 @@ const app = {
                 rib.innerHTML = "Large saved lesson (<strong>" + (mb || "?") + " MB</strong>) can freeze the browser. "
                     + "<button type=\"button\" id=\"tsa-heavy-load-btn\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Load lesson</button>"
                     + "<button type=\"button\" id=\"tsa-heavy-skip-btn\" style=\"background:#e8f5e9;border:1px solid #81c784;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Start without saved lesson</button>"
+                    + "<button type=\"button\" id=\"tsa-heavy-dismiss-btn\" style=\"background:#eceff1;border:1px solid #b0bec5;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin:0 6px;\">Dismiss bar</button>"
                     + "<a href=\"architect_v131.html?recovery=1&amp;b=" + Date.now() + "\" style=\"color:#80cbc4;\">recovery (skip saved lesson)</a>";
                 const btn = document.getElementById("tsa-heavy-load-btn");
                 if(btn) btn.addEventListener("click", function() {
@@ -16657,6 +16726,22 @@ const app = {
                     } catch(eU) {
                         location.href = "architect_v131.html?recovery=1&b=" + Date.now();
                     }
+                });
+                const dismissBar = document.getElementById("tsa-heavy-dismiss-btn");
+                if(dismissBar) dismissBar.addEventListener("click", function(ev) {
+                    ev.preventDefault();
+                    window.__tsaDeferHeavyLessonGate = false;
+                    window.__tsaUserConfirmedHeavyLoad = true;
+                    if(typeof app.restoreDeployRibbon === "function") app.restoreDeployRibbon();
+                    else if(typeof app._hideBootBanner === "function") app._hideBootBanner();
+                    document.body.classList.remove("tsa-boot-in-progress");
+                    window.__tsaBootInProgress = false;
+                    setTimeout(function() {
+                        try { app.init(); } catch(eGo) {
+                            console.warn(eGo);
+                            if(typeof window.__tsaShowCrash === "function") window.__tsaShowCrash((eGo && eGo.message ? eGo.message : String(eGo)) + (eGo && eGo.stack ? "\n\n" + eGo.stack : ""));
+                        }
+                    }, 0);
                 });
             }
         } catch(eG) {}
@@ -16856,6 +16941,7 @@ const app = {
     },
     /** Wire admin tabs once the page shell is up — no tab hydrate here (avoids blocking clicks if Data opens during init). */
     ensureAdminReady: function() {
+        try { if(typeof app.bindArchitectNoticeDelegation === "function") app.bindArchitectNoticeDelegation(); } catch(eN) {}
         if(appData && appData.isStandalone) return;
         if(typeof admin === "undefined") return;
         if(!document.getElementById("modal-admin")) return;
@@ -17491,6 +17577,7 @@ const app = {
                     const keepPending = String(ui._freeSelectPendingQuote || "").trim();
                     ui.renderSelection(null, keepPending ? { skipPassage: true } : { skipPassage: false });
                 }
+                app.hidePastPaperExtractNotice();
             } catch(ePaint) { console.warn("Deferred student passage paint:", ePaint); }
         };
         setTimeout(run, 60);
@@ -17533,6 +17620,10 @@ const app = {
     showLessonLoadNotices: function(messages) {
         const msgs = Array.isArray(messages) ? messages.filter(Boolean) : [];
         if(!msgs.length) return;
+        try {
+            const dismissed = sessionStorage.getItem("tsaLessonNoticeDismissed");
+            if(dismissed && Date.now() - parseInt(dismissed, 10) < 604800000) return;
+        } catch(eDn) {}
         const rib = document.getElementById("architect-deploy-ribbon");
         if(!rib) {
             console.warn("Lesson notices:", msgs.join(" · "));
@@ -17541,12 +17632,14 @@ const app = {
         rib.classList.add("lesson-loading");
         const esc = typeof app.escapeHtml === "function" ? app.escapeHtml(msgs.join(" · ")) : msgs.join(" · ");
         rib.innerHTML = "<span>⚠ " + esc + "</span>"
-            + " <button type=\"button\" id=\"tsa-notice-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\">Dismiss</button>";
+            + " <button type=\"button\" id=\"tsa-notice-dismiss\" style=\"background:#fff3e0;border:1px solid #ffb74d;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:inherit;color:inherit;margin-left:8px;\" onclick=\"try{sessionStorage.setItem('tsaLessonNoticeDismissed',String(Date.now()));}catch(e){}if(typeof app!=='undefined'&&app.restoreDeployRibbon)app.restoreDeployRibbon();return false;\">Dismiss</button>";
         const btn = document.getElementById("tsa-notice-dismiss");
         if(btn && !btn.dataset.bound) {
             btn.dataset.bound = "1";
             btn.addEventListener("click", function(ev) {
                 ev.preventDefault();
+                ev.stopPropagation();
+                try { sessionStorage.setItem("tsaLessonNoticeDismissed", String(Date.now())); } catch(eLs) {}
                 if(typeof app.restoreDeployRibbon === "function") app.restoreDeployRibbon();
             });
         }
@@ -17556,6 +17649,7 @@ const app = {
             const rib = document.getElementById("architect-deploy-ribbon");
             if(!rib) return;
             rib.classList.remove("lesson-loading");
+            rib.classList.remove("deploy-mismatch");
             const m = document.querySelector("meta[name=\"architect-build\"]");
             const dep = document.querySelector("meta[name=\"architect-deploy\"]");
             const raw = m && m.getAttribute("content") ? String(m.getAttribute("content")).trim() : "";
@@ -17583,10 +17677,13 @@ const app = {
         }
     },
     getPassageDeferPlaceholderHtml: function() {
+        const dismiss = app.noticeActionBtn("dismiss-defer-passage", { style: "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Hide this notice" });
+        const loadBtn = app.noticeActionBtn("load-deferred-passage", { label: "Load passage now", className: "btn btn-primary btn-small" });
         return `<div class="architect-passage-deferred" style="padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:0.88rem;line-height:1.45;opacity:0.9;">
+            ${dismiss}
             <div style="font-weight:700;margin-bottom:6px;">Large passage — loading on demand</div>
             <div style="margin-bottom:10px;">Your lesson saved successfully. The full exam passage is not built at startup (that was causing out-of-memory crashes). Questions and quotes still work.</div>
-            <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app!=='undefined'&&app.scheduleDeferredStudentPassagePaint)app.scheduleDeferredStudentPassagePaint();">Load passage now</button>
+            ${loadBtn}
             <span style="font-size:0.8rem;opacity:0.75;margin-left:8px;">Or open <strong>Quote Select</strong> / <strong>Data → Editing Suite</strong>.</span>
         </div>`;
     },
@@ -17819,18 +17916,130 @@ const app = {
             if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
         }
     },
+    noticeActionBtn: function(action, opts) {
+        opts = opts || {};
+        const style = opts.style || "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;";
+        const title = opts.title ? ` title="${String(opts.title).replace(/"/g, "&quot;")}"` : "";
+        const label = opts.label || "✕ Dismiss";
+        const cls = opts.className ? ` class="${opts.className}"` : "";
+        const lvl = opts.level != null ? ` data-level="${parseInt(opts.level, 10) || 1}"` : "";
+        return `<button type="button"${cls} data-tsa-notice-action="${action}"${lvl}${title} style="${style}">${label}</button>`;
+    },
+    handleArchitectNoticeAction: function(btn, ev) {
+        if(ev) { ev.preventDefault(); ev.stopPropagation(); }
+        const action = btn && btn.dataset ? btn.dataset.tsaNoticeAction : "";
+        const lvl = parseInt(btn && btn.dataset ? btn.dataset.level : "", 10) || 1;
+        switch(action) {
+            case "dismiss-past-paper-extract":
+                app.hidePastPaperExtractNotice();
+                break;
+            case "dismiss-passage-pick":
+                if(typeof admin !== "undefined" && admin._hidePassagePickNotice) admin._hidePassagePickNotice();
+                break;
+            case "dismiss-passage-window-hint":
+                if(typeof ui !== "undefined" && ui.dismissPassageWindowHint) ui.dismissPassageWindowHint(lvl);
+                break;
+            case "dismiss-passage-excerpt-error":
+                if(typeof ui !== "undefined" && ui.dismissPassageExcerptError) ui.dismissPassageExcerptError(lvl);
+                break;
+            case "load-deferred-passage":
+                if(typeof app.scheduleDeferredStudentPassagePaint === "function") app.scheduleDeferredStudentPassagePaint();
+                break;
+            case "load-passage-after-extract":
+                if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+                break;
+            case "dismiss-defer-passage":
+                if(btn && btn.closest) {
+                    const box = btn.closest(".architect-passage-deferred");
+                    if(box) box.style.display = "none";
+                }
+                break;
+            default:
+                break;
+        }
+    },
+    bindArchitectNoticeDelegation: function() {
+        if(document.body.dataset.architectNoticeBound === "1") return;
+        document.body.dataset.architectNoticeBound = "1";
+        document.addEventListener("click", function(ev) {
+            const btn = ev.target && ev.target.closest ? ev.target.closest("[data-tsa-notice-action]") : null;
+            if(!btn) return;
+            app.handleArchitectNoticeAction(btn, ev);
+        }, true);
+    },
+    _pastPaperExtractNoticeTimer: null,
+    hidePastPaperExtractNotice: function() {
+        if(app._pastPaperExtractNoticeTimer) {
+            clearTimeout(app._pastPaperExtractNoticeTimer);
+            app._pastPaperExtractNoticeTimer = null;
+        }
+        const el = document.getElementById("past-paper-extract-notice");
+        if(el) {
+            el.innerHTML = "";
+            el.style.display = "none";
+        }
+    },
+    showPastPaperExtractNotice: function(msgHtml, opts) {
+        opts = opts || {};
+        let el = document.getElementById("past-paper-extract-notice");
+        if(!el) {
+            const anchor = document.getElementById("past-paper-extract-btn");
+            if(anchor && anchor.parentElement) {
+                el = document.createElement("div");
+                el.id = "past-paper-extract-notice";
+                el.style.cssText = "margin-top:10px;";
+                anchor.parentElement.insertBefore(el, anchor.nextSibling);
+            }
+        }
+        if(!el) {
+            if(typeof app.showLessonLoadNotices === "function") app.showLessonLoadNotices([String(msgHtml || "").replace(/<[^>]+>/g, " ")]);
+            return;
+        }
+        const dismiss = app.noticeActionBtn("dismiss-past-paper-extract");
+        const loadBtn = opts.showLoadPassage ? " " + app.noticeActionBtn("load-passage-after-extract", { label: "Load passage now", className: "btn btn-primary btn-small", style: "margin-top:8px;" }) : "";
+        el.style.display = "";
+        el.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#00897b;background:rgba(0,150,136,0.08);font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}${loadBtn}</div>`;
+        try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch(eSc) {}
+        if(opts.autoHideMs && opts.autoHideMs > 0) {
+            if(app._pastPaperExtractNoticeTimer) clearTimeout(app._pastPaperExtractNoticeTimer);
+            app._pastPaperExtractNoticeTimer = setTimeout(function() {
+                app._pastPaperExtractNoticeTimer = null;
+                app.hidePastPaperExtractNotice();
+            }, opts.autoHideMs);
+        }
+    },
+    /** After Lobby extract / re-extract: clear defer flags and paint passage (Lab, Quote Select, editor). */
+    finishPassageAfterExtract: function() {
+        app.hidePastPaperExtractNotice();
+        app._passageDisplaysDeferred = false;
+        app._deferAdminPassageUntilDemand = false;
+        app._heavyLessonOnLoad = false;
+        app._studentPassagePaintScheduled = false;
+        app._adminPassageHydrateDone = false;
+        try {
+            if(appData && appData.component !== 2 && typeof app.finishC1PassageLayoutAfterLessonLoad === "function") {
+                app.finishC1PassageLayoutAfterLessonLoad();
+            } else if(typeof app.syncAdminAiInputFromLesson === "function") {
+                app.syncAdminAiInputFromLesson({ force: true });
+                app._adminPassageHydrateDone = true;
+            }
+        } catch(eLay) { console.warn("finishPassageAfterExtract layout:", eLay); }
+        try {
+            if(typeof ui !== "undefined") {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(ui.renderLab) ui.renderLab(null, { skipPassage: false });
+                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            }
+        } catch(eUi) { console.warn("finishPassageAfterExtract UI:", eUi); }
+    },
     /** After Lobby Extract text / questions — refresh passage + admin editors immediately (no idle defer). */
     afterPastPaperExtractUi: function(opts) {
         opts = opts || {};
         app.prepareImportedLesson(appData);
         app._deferAdminPassageUntilDemand = false;
+        app._passageDisplaysDeferred = false;
         app._importInProgress = true;
         app._suppressAdminInputFlushOnce = true;
-        try {
-            if(typeof ui !== "undefined" && ui.init) ui.init();
-        } finally {
-            app._suppressAdminInputFlushOnce = false;
-        }
         try {
             if(opts.includeQuestions && typeof admin !== "undefined") {
                 if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
@@ -17858,13 +18067,15 @@ const app = {
                 }
             }
             if(typeof ui !== "undefined") {
-                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-                if(ui.renderLab) ui.renderLab();
-                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection();
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(ui.renderLab) ui.renderLab(null, { skipPassage: false });
+                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
             }
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
         } catch(eF) {
             console.warn("afterPastPaperExtractUi:", eF);
         }
+        app._suppressAdminInputFlushOnce = false;
         app._importInProgress = false;
     },
     clearLessonStorageOnly: function() {
@@ -18539,6 +18750,38 @@ const ui = {
         if(win && win.lineRange) return "focused";
         if(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0) return "focused";
         return "whole";
+    },
+    _passageHintDismissKey: function(level) {
+        return "L" + (parseInt(level, 10) || 1);
+    },
+    isPassageWindowHintDismissed: function(level) {
+        const map = userState && userState.passageWindowHintDismissed;
+        const ts = map && map[ui._passageHintDismissKey(level)];
+        if(!ts) return false;
+        return (Date.now() - ts) < 86400000;
+    },
+    /** Hide passage excerpt / line-window warnings; optionally switch to whole insert. */
+    dismissPassageWindowHint: function(level, opts) {
+        opts = opts || {};
+        if(!userState.passageWindowHintDismissed || typeof userState.passageWindowHintDismissed !== "object") userState.passageWindowHintDismissed = {};
+        userState.passageWindowHintDismissed[ui._passageHintDismissKey(level)] = Date.now();
+        if(typeof app.save === "function") app.save();
+        const el = document.getElementById("selection-passage-window-hint");
+        if(el) {
+            el.classList.add("hidden");
+            el.innerHTML = "";
+        }
+        if(opts.showWhole && typeof ui.setPassageDisplayScope === "function") {
+            ui.setPassageDisplayScope("whole");
+            return;
+        }
+        const st = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : app.getSourceText();
+        if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(st, { forcePassage: true });
+        if(userState && userState.view === "select" && typeof ui.renderSelection === "function") ui.renderSelection(st, { skipPassage: true });
+        else if(typeof ui.renderLab === "function") ui.renderLab(st, { skipPassage: false });
+    },
+    dismissPassageExcerptError: function(level) {
+        ui.dismissPassageWindowHint(level, { showWhole: true });
     },
     setPassageDisplayScope: function(scope, opts) {
         let s = scope === "focused" ? "focused" : "whole";
@@ -19674,6 +19917,7 @@ const ui = {
         if(navEl) navEl.classList.add("active");
         userState.view = v;
         if(!appData.isStandalone && !ui._initInProgress) app.save();
+        if((v === "select" || v === "desk") && typeof app.hidePastPaperExtractNotice === "function") app.hidePastPaperExtractNotice();
         if(v === "select") {
             if(!ui._initInProgress) {
                 const lvlReturn = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
@@ -21497,21 +21741,28 @@ const ui = {
             const scopeFocusedHint = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" && ui.getEffectivePassageDisplayScopeForLevel(level) === "focused";
             const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
             const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange;
-            if(excerptSliceFailed && wantsPassageWindow && lineRange) {
+            const hintDismissed = typeof ui.isPassageWindowHintDismissed === "function" && ui.isPassageWindowHintDismissed(level);
+            const dismissHintBtn = app.noticeActionBtn("dismiss-passage-window-hint", { level: level });
+            const dismissWholeBtn = app.noticeActionBtn("dismiss-passage-excerpt-error", { level: level, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-top:8px;" });
+            if(!hintDismissed && excerptSliceFailed && wantsPassageWindow && lineRange) {
                 passageHintEl.classList.remove("hidden");
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.08);font-size:0.86rem;line-height:1.45;">
+                    ${dismissHintBtn}
                     <div style="font-weight:700;margin-bottom:4px;">Excerpt slice empty</div>
-                    <div style="opacity:0.94;">Your line window parsed (${lineRange.from}–${lineRange.to}) but no text was extracted — usually margin numbers don’t match (e.g. exam ticks 5,10,15…). Try <strong>1–5</strong> in the Lines box for the <em>first five physical rows</em>, or use the exact margin numbers from your insert.</div>
+                    <div style="opacity:0.94;">Your line window parsed (${lineRange.from}–${lineRange.to}) but no text was extracted — usually margin numbers don’t match (e.g. exam ticks 5,10,15…). Try <strong>1–5</strong> in the Lines box for the <em>first five physical rows</em>, set <strong>Start / End phrase</strong> anchors, or use the exact margin numbers from your insert.</div>
+                    ${dismissWholeBtn}
                 </div>`;
-            } else if(showMissingLineWindowHint) {
+            } else if(!hintDismissed && showMissingLineWindowHint) {
                 passageHintEl.classList.remove("hidden");
                 const isTeacher = !appData.isStandalone;
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:var(--error);background:rgba(244,67,54,0.07);font-size:0.86rem;line-height:1.45;">
+                    ${dismissHintBtn}
                     <div style="font-weight:700;margin-bottom:6px;">Line window not found — excerpt / affirm are switched on but idle</div>
                     <div style="opacity:0.94;">${isTeacher
-                        ? `Set which booklet lines this question uses: <strong>Editing Suite → Focus questions</strong> → small box <strong>Lines 1–5</strong> (or type <code style="font-size:0.82em;">Read lines 1–5</code> in the question text). Match the <strong>Level Bank</strong> question dropdown to this row, <strong>save</strong>, then open the student link / QR again so the phone picks up the change.`
+                        ? `Set which booklet lines this question uses: <strong>Editing Suite → Focus questions</strong> → small box <strong>Lines 1–5</strong> (or type <code style="font-size:0.82em;">Read lines 1–5</code> in the question text). Match the <strong>Level Bank</strong> question dropdown to this row, <strong>save</strong>, then open the student link / QR again so the phone picks up the change. Or use <strong>Start / End phrase</strong> anchors.`
                         : `This version of the lesson has not stored which lines to use. Ask your teacher to add a line range to the question, then reload.`}
                     </div>
+                    ${dismissWholeBtn}
                 </div>`;
             } else {
                 passageHintEl.classList.add("hidden");
@@ -25635,7 +25886,6 @@ const admin = {
                 loadAsComponent2: loadAsComponent2
             });
         } else {
-            ui.init();
             if(!loadAsComponent2) {
                 app.setAiInputValue((appData.sourceText != null && String(appData.sourceText).trim() !== "" ? appData.sourceText : combined).trim());
             }
@@ -25647,6 +25897,7 @@ const admin = {
             admin.renderAll();
             if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
                 admin.loadC2PassagesIntoEditor({ goToEditTab: false });
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
         }
         try {
             if(app._lastPdfDebug && app._lastPdfDebug.kind === "pastPaper") {
@@ -25664,9 +25915,20 @@ const admin = {
         const resMissing = !!(files.resource && !String(resourcePassageText || "").trim());
         if(includeQuestions) {
             const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
-            alert("Past paper text loaded." + (qCount >= 2 ? " " + qCount + " Section A reading questions were detected and added to the question bank." : qCount === 1 ? " One focus question was detected (the app already retried the full extract and all Questions-PDF pages if needed). If you expected more parts, set the correct Section A reading page(s) (e.g. 1-2) and click Extract questions." : " No Section A reading questions were split — use Load & AI to paste prompts, set Section A reading page(s), click Extract questions, or use Load JSON.") + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : "") + (app._passageDisplaysDeferred ? "\n\nPassage display is deferred to save memory — open Quote Select or use Load passage in editor when you need the full layout." : ""));
+            let msg = "<strong>Past paper loaded.</strong> ";
+            if(qCount >= 2) msg += qCount + " Section A reading questions added to the bank.";
+            else if(qCount === 1) msg += "One focus question detected — set Section A reading page(s) and click <strong>Extract questions</strong> if you expected more.";
+            else msg += "No questions split yet — set Section A reading page(s) and click <strong>Extract questions</strong>, or paste prompts manually.";
+            if(resMissing) msg += " <span style=\"color:var(--error)\">Resource PDF returned no text — try all pages or OCR.</span>";
+            msg += " Passage should appear in Quote Select / Lab now.";
+            app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         } else {
-            alert("Extract text: PDFs cached; resource, questions-PDF passages (C2 layout), and mark scheme updated." + (resMissing ? " No text could be read from the Resource PDF — try clearing the Resource page range (all pages), or use an OCR’d PDF / paste the passage in the Component 2 boxes." : " Click Extract questions to fill the question bank from the Questions PDF (Section A reading pages).") + (loadAsComponent2 ? "\n\nOpen Editing Suite → Component 2 — passages to edit (or click Load from lesson there)." : "") + (app._passageDisplaysDeferred ? "\n\nFull passage layout was not built in the browser (memory limit). Text is saved — use Load passage in editor or Quote Select when ready." : ""));
+            let msg = "<strong>Extract text done.</strong> PDFs cached; passages and mark scheme updated.";
+            if(resMissing) msg += " <span style=\"color:var(--error)\">Resource PDF returned no text — try all pages or OCR.</span>";
+            else msg += " Click <strong>Extract questions</strong> next for the question bank.";
+            if(loadAsComponent2) msg += " Open <strong>Editing Suite → Component 2 — passages</strong> to edit.";
+            msg += " Passage should appear in Quote Select / Lab now.";
+            app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         }
     },
     reExtractQuestionsFromPages: async function() {
@@ -25764,13 +26026,13 @@ const admin = {
             admin.autoAssignLevelsByLineRangeIfApplicable();
             app.save({ skipRender: true });
             if(parsed.length >= 1) {
-                alert(parsed.length + " question(s) extracted. Level Bank updated (L1→Q1, …). Check Editing Suite → Level Bank and Focus questions.");
+                app.showPastPaperExtractNotice("<strong>" + parsed.length + " question(s) extracted.</strong> Level Bank updated (L1→Q1, …). Check <strong>Editing Suite → Level Bank</strong> and Focus questions.", { autoHideMs: 15000 });
             } else {
-                alert("No Section A reading questions detected on page 2 — check the page range or paste questions manually in Editing Suite → Focus questions.");
+                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No Section A reading questions detected — check the page range or paste questions in <strong>Focus questions</strong>.</span>");
             }
             admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
-            alert("Could not re-extract: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract questions: " + (e.message || String(e)) + "</span>");
         }
     },
     reExtract19thFromPages: async function() {
@@ -25874,11 +26136,14 @@ const admin = {
             /* Student view follows architectC2SourceView; default is 21st, so the new 19th passage was invisible until toggled. Switch without flushing the pooled editor first — flush would overwrite layout with stale contenteditable if Settings stayed on another tab. */
             admin.setArchitectC2SourceView("19th", { skipFlush: true });
             admin.renderAll();
-            ui.refreshSourceDisplay && ui.refreshSourceDisplay();
-            if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
-            alert("19th C passage re-extracted from page(s) " + (pages && pages.length ? pages.join(", ") : "?") + ". Showing 19th C now. Use header or Quote Select 21st/19th to switch. If a level stays on 21st only, set Level Bank → C2 texts to Both for that level.");
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            else {
+                ui.refreshSourceDisplay && ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            }
+            app.showPastPaperExtractNotice("<strong>19th C passage re-extracted</strong> from page(s) " + (pages && pages.length ? pages.join(", ") : "?") + ". Showing <strong>19th C</strong> now — use header or Quote Select to switch. Set Level Bank → <strong>C2 texts → Both</strong> if a level should show both passages.", { autoHideMs: 18000 });
         } catch(e) {
-            alert("Could not re-extract 19th C: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract 19th C: " + (e.message || String(e)) + "</span>");
         }
     },
     reExtractResourceFromPages: async function() {
@@ -26001,11 +26266,14 @@ const admin = {
             }
             if(!isC2) app.setAiInputValue(appData.sourceText || "");
             admin.renderAll();
-            if(isC2 && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
-            if(isC2 && userState.view === "select" && ui.renderSelection) ui.renderSelection();
-            alert("Resource passage re-extracted from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).");
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            else {
+                if(isC2 && ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(isC2 && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            }
+            app.showPastPaperExtractNotice("<strong>Resource passage re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s). Open <strong>Quote Select</strong> or <strong>Lab</strong> to view.", { autoHideMs: 15000 });
         } catch(e) {
-            alert("Could not re-extract resource: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract resource: " + (e.message || String(e)) + "</span>");
         }
     },
     reExtractMarkSchemeFromPages: async function() {
@@ -26028,16 +26296,16 @@ const admin = {
                 texts.push(layoutText.trim());
             }
             const markSchemeText = texts.join("\n\n").trim();
-            if(!markSchemeText) { alert("No text extracted from the selected page(s)."); return; }
+            if(!markSchemeText) { app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No text extracted from the selected mark scheme page(s).</span>"); return; }
             if(!appData) appData = app.repair(defaultData);
             if(!appData.component2Layout || typeof appData.component2Layout !== "object") appData.component2Layout = {};
             appData.component2Layout.markSchemeText = app.normalizeMarkSchemeStorageText(markSchemeText);
             appData.markScheme = app.parseMarkSchemeFromText(markSchemeText);
             app.save();
             admin.renderAll();
-            alert("Mark scheme re-extracted from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).");
+            app.showPastPaperExtractNotice("<strong>Mark scheme re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).", { autoHideMs: 12000 });
         } catch(e) {
-            alert("Could not re-extract mark scheme: " + (e.message || String(e)));
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract mark scheme: " + (e.message || String(e)) + "</span>");
         }
     },
     /** Sync opts for Teacher Settings tabs — skip heavy passage/C2 work during lite open. */
@@ -26242,6 +26510,7 @@ const admin = {
         };
         const handlePanelPointer = function(ev) {
             if(ev.target && ev.target.closest && ev.target.closest("[data-admin-close], #btn-admin-modal-close, #admin-tabs .tab-btn")) return;
+            if(ev.target && ev.target.closest && ev.target.closest("[data-tsa-notice-action]")) return;
             const el = ev.target && ev.target.closest
                 ? ev.target.closest("button[onclick], button[data-admin-onclick], input[onclick][type='button'], input[onclick][type='submit']")
                 : null;
@@ -29281,7 +29550,7 @@ const admin = {
         pickLinesBtn.type = "button";
         pickLinesBtn.className = "btn btn-outline btn-small question-line-ref-from-selection";
         pickLinesBtn.textContent = "From selection";
-        pickLinesBtn.title = "Click first to show the whole insert, then highlight passage text and click again to fill this question’s Lines box.";
+        pickLinesBtn.title = "Click to show the whole insert, highlight passage text (include missing lines to extend), then click again to update Lines + phrase anchors.";
         pickLinesBtn.onclick = () => {
             if(admin._preparePassageForLineAssignment) admin._preparePassageForLineAssignment({ questionIndex: i, previewOnly: true });
             admin.applyLineRefFromPassageSelectionForQuestionIndex(i);
@@ -29459,6 +29728,7 @@ const admin = {
     /** After Extract questions: refresh lists, Level Bank L1→Qn, student banners. */
     afterExtractQuestionsUi: function(parsedCount) {
         try {
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
             admin.refreshQuestionsList({ skipLevelBank: true });
             if(typeof admin.syncLevelBankForPastPaperQuestions === "function") admin.syncLevelBankForPastPaperQuestions();
             if(typeof admin.autoAssignLevelsByLineRangeIfApplicable === "function") admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
@@ -34786,6 +35056,34 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(idx >= 0 && activeLevels[idx] != null) return activeLevels[idx];
         return activeLevels[0] || 1;
     },
+    _hidePassagePickNotice: function() {
+        const host = document.getElementById("teacher-passage-pick-notice");
+        if(host) {
+            host.innerHTML = "";
+            host.style.display = "none";
+        }
+    },
+    _showPassagePickNotice: function(msgHtml, opts) {
+        opts = opts || {};
+        let host = document.getElementById("teacher-passage-pick-notice");
+        const out = document.getElementById("teacher-passage-preview-output");
+        if(!host && out && out.parentElement) {
+            host = document.createElement("div");
+            host.id = "teacher-passage-pick-notice";
+            host.style.cssText = "margin-bottom:8px;";
+            out.parentElement.insertBefore(host, out);
+        }
+        if(!host) {
+            if(typeof app.showLessonLoadNotices === "function") app.showLessonLoadNotices([String(msgHtml || "").replace(/<[^>]+>/g, " ")]);
+            return;
+        }
+        const dismiss = app.noticeActionBtn("dismiss-passage-pick");
+        host.style.display = "";
+        host.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#00897b;background:rgba(0,150,136,0.08);font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}</div>`;
+        if(opts.autoHideMs && opts.autoHideMs > 0) {
+            setTimeout(() => admin._hidePassagePickNotice(), opts.autoHideMs);
+        }
+    },
     /**
      * Line-assignment mode: keep the **whole insert** visible so each question can be picked from the full passage.
      * Does not change student excerpt settings — only teacher picking scope + Level Bank preview.
@@ -34836,37 +35134,45 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         appData.settings.levelBank[level].passageExamExcerpt = true;
         app.save({ skipRender: true, silent: true });
     },
-    _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText) {
+    _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText, opts) {
+        opts = opts || {};
         if(!q || !q.id) return false;
         const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
         const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pickText) : null;
         if(anchors) {
-            if(anchors.startA) q.passageStartAnchor = anchors.startA;
-            if(anchors.endA) q.passageEndAnchor = anchors.endA;
-            if(admin._mirrorPassageAnchorsToFocusQuestionInputs) admin._mirrorPassageAnchorsToFocusQuestionInputs(q.id, anchors.startA, anchors.endA);
+            if(opts.extend && app.mergePassageAnchorsIntoQuestion) app.mergePassageAnchorsIntoQuestion(q, anchors, src, lvl);
+            else {
+                if(anchors.startA) q.passageStartAnchor = anchors.startA;
+                if(anchors.endA) q.passageEndAnchor = anchors.endA;
+            }
+            if(admin._mirrorPassageAnchorsToFocusQuestionInputs) admin._mirrorPassageAnchorsToFocusQuestionInputs(q.id, q.passageStartAnchor || "", q.passageEndAnchor || "");
         }
         const resolved = app.resolveLineRefFromPassageSelection(pickText, src, lvl);
         if(resolved && resolved.lineRef) {
-            q.lineRef = resolved.lineRef;
+            let range = resolved.range;
+            if(opts.extend && q.lineRef && app.parseLineRangeFromQuestion && app.mergePassageLineRanges) {
+                const prev = app.parseLineRangeFromQuestion(q.lineRef);
+                if(prev) range = app.mergePassageLineRanges(src, prev, range, lvl) || range;
+            }
+            q.lineRef = app.formatLineRefFromRange ? app.formatLineRefFromRange(range) : resolved.lineRef;
             admin._enableQuestionFocusedPassageAfterLinePick(lvl);
             app.save();
-            admin._mirrorLineRefToFocusQuestionInputs(q.id, resolved.lineRef);
+            admin._mirrorLineRefToFocusQuestionInputs(q.id, q.lineRef);
             if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
             admin._preparePassageForLineAssignment({ level: lvl });
-            const span = resolved.range.from === resolved.range.to
-                ? ("line " + resolved.range.from)
-                : ("lines " + resolved.range.from + "–" + resolved.range.to);
-            const anchorNote = anchors ? "\n\nPhrase anchors also saved (backup if line numbers drift)." : "";
-            alert("Booklet " + span + " saved to " + (q.id || "this question") + "’s Lines box (" + resolved.lineRef + ")." + anchorNote + "\n\nExcerpt is on for this level (students see only these lines). The passage stays on **whole insert** here so you can assign the next question. Use **Show line window** or **Question-focused** to preview the excerpt.");
+            const span = range.from === range.to ? ("line " + range.from) : ("lines " + range.from + "–" + range.to);
+            const extendNote = opts.extend ? " Window <strong>extended</strong> to include your new highlight." : "";
+            const anchorNote = anchors ? " Phrase anchors updated." : "";
+            admin._showPassagePickNotice("<strong>Booklet " + span + "</strong> saved to " + (q.id || "this question") + "’s Lines box (<code>" + q.lineRef + "</code>)."+ extendNote + anchorNote + " Excerpt is on for this level. The preview stays on <strong>whole insert</strong> so you can add more — highlight missing text and click <strong>From selection</strong> again to extend.", { autoHideMs: 12000 });
             return true;
         }
         if(anchors && app.resolveLineRangeFromPassageAnchors) {
-            const ar = app.resolveLineRangeFromPassageAnchors(src, anchors.startA, anchors.endA, lvl);
+            const ar = app.resolveLineRangeFromPassageAnchors(src, q.passageStartAnchor || anchors.startA, q.passageEndAnchor || anchors.endA, lvl);
             if(ar && ar.lineRange) {
                 admin._enableQuestionFocusedPassageAfterLinePick(lvl);
                 app.save();
                 admin._preparePassageForLineAssignment({ level: lvl });
-                alert("Could not map selection to booklet line numbers, but **phrase anchors** were saved.\n\nStart: “" + anchors.startA + "”\nEnd: “" + anchors.endA + "”\n\nTurn on **Question-focused** to preview the excerpt.");
+                admin._showPassagePickNotice("Phrase anchors saved for " + (q.id || "this question") + ". Start: <strong>“" + (q.passageStartAnchor || anchors.startA) + "”</strong> · End: <strong>“" + (q.passageEndAnchor || anchors.endA) + "”</strong>. Turn on <strong>Question-focused</strong> or <strong>Show line window</strong> to preview.", { autoHideMs: 12000 });
                 return true;
             }
         }
@@ -34878,17 +35184,32 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const qPre = questions[questionIndex];
         const lvlPre = qPre && qPre.id ? admin.levelForQuestionId(qPre.id) : 1;
         const scope = typeof ui !== "undefined" && ui.getEffectivePassageDisplayScopeForLevel ? ui.getEffectivePassageDisplayScopeForLevel(lvlPre) : (ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole");
+        const pickEarly = app.getPassageTextSelection && app.getPassageTextSelection();
         if(scope === "focused") {
             admin._preparePassageForLineAssignment({ questionIndex: questionIndex, previewOnly: false });
-            return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **From selection** again.");
+            if(pickEarly && pickEarly.text) {
+                const q = questions[questionIndex];
+                if(q && q.id) {
+                    const lvl = admin.levelForQuestionId(q.id);
+                    setTimeout(() => {
+                        if(admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pickEarly.text, { extend: true })) return;
+                        admin._showPassagePickNotice("Could not extend from that highlight. Click <strong>Show whole insert</strong>, select a longer span (include the missing lines), then <strong>From selection</strong> again.");
+                    }, 300);
+                    return;
+                }
+            }
+            admin._showPassagePickNotice("Showing <strong>whole insert</strong> so you can add missing lines. Highlight the <em>full</em> span you need (old + new text), then click <strong>From selection</strong> — the window will <strong>extend</strong>, not replace.");
+            if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
+            return;
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return alert("Highlight passage text first (Level Bank preview with **Show whole insert**, Lab, or Quote Select), then click **From selection**.");
+        if(!pick || !pick.text) return admin._showPassagePickNotice("Highlight passage text first (<strong>Show whole insert</strong> in Level Bank, Lab, or Quote Select), then click <strong>From selection</strong>.");
         const q = questions[questionIndex];
         if(!q || !q.id) return;
         const lvl = admin.levelForQuestionId(q.id);
-        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text)) {
-            alert("Could not map that selection to booklet lines. Try a longer highlight, use Show whole insert in Level Bank, or check Booklet line 1 / passage layout.");
+        const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
+        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text, { extend: hasWindow })) {
+            admin._showPassagePickNotice("Could not map that selection. Try a longer highlight, <strong>Show whole insert</strong>, or check Booklet line 1 / passage layout.");
         }
     },
     applyLineRefFromPassageSelectionForPreviewLevel: function() {
@@ -34896,24 +35217,46 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         const lvlPre = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
         const scope = typeof ui !== "undefined" && ui.getEffectivePassageDisplayScopeForLevel ? ui.getEffectivePassageDisplayScopeForLevel(lvlPre) : (ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole");
+        const pickEarly = app.getPassageTextSelection && app.getPassageTextSelection();
         if(scope === "focused") {
             admin._preparePassageForLineAssignment({ level: lvlPre, previewOnly: false });
-            return alert("The passage was showing only one question’s excerpt. It is now the **whole insert** — highlight the lines for this question, then click **Set lines from selection** again.");
+            if(pickEarly && pickEarly.text) {
+                const lvl = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
+                if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
+                const entry = appData.settings.levelBank[lvl] || {};
+                const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
+                const qid = ids.length ? ids[0] : "";
+                const questions = Array.isArray(appData.questions) ? appData.questions : [];
+                const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+                const q = questions.find(qq => qq && normQid(qq.id) === normQid(qid));
+                if(q) {
+                    setTimeout(() => {
+                        const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
+                        if(admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pickEarly.text, { extend: hasWindow })) return;
+                        admin._showPassagePickNotice("Could not extend from that highlight. Click <strong>Show whole insert</strong>, select a longer span, then <strong>Set lines from selection</strong> again.");
+                    }, 300);
+                    return;
+                }
+            }
+            admin._showPassagePickNotice("Showing <strong>whole insert</strong> so you can add missing lines. Highlight the full span, then click <strong>Set lines from selection</strong> again to <strong>extend</strong> the window.");
+            if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
+            return;
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return alert("Click **Show whole insert**, highlight passage text in the preview below (or Lab / Quote Select), then click **Set lines from selection**.");
+        if(!pick || !pick.text) return admin._showPassagePickNotice("Click <strong>Show whole insert</strong>, highlight passage text, then click <strong>Set lines from selection</strong>.");
         const lvl = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
         if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
         const entry = appData.settings.levelBank[lvl] || {};
         const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
         const qid = ids.length ? ids[0] : "";
-        if(!qid) return alert("Pick a question in the Level Bank row’s Question column first.");
+        if(!qid) return admin._showPassagePickNotice("Pick a question in the Level Bank row’s <strong>Question</strong> column first.");
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const q = questions.find(qq => qq && normQid(qq.id) === normQid(qid));
-        if(!q) return alert("Focus question not found for this level.");
-        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text)) {
-            alert("Could not map that selection to booklet lines. Try a longer highlight, Show whole insert, or check Booklet line 1 / passage layout.");
+        if(!q) return admin._showPassagePickNotice("Focus question not found for this level.");
+        const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
+        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text, { extend: hasWindow })) {
+            admin._showPassagePickNotice("Could not map that selection. Try a longer highlight, <strong>Show whole insert</strong>, or check Booklet line 1 / passage layout.");
         }
     },
     showTeacherWholePassageForPicking: function() {
@@ -36146,6 +36489,7 @@ try {
     }
     const bootTabs = function() {
         try {
+            if(typeof app !== "undefined" && app.bindArchitectNoticeDelegation) app.bindArchitectNoticeDelegation();
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
                 if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
