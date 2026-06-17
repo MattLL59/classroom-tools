@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T24:00:00">
+<meta name="architect-build" content="2026-06-14T25:00:00">
 <meta name="architect-deploy" content="c1-notice-dismiss-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -1645,6 +1645,7 @@
                     <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai" onclick="return window.admin&&admin.goAdminTab('ai'),!1">Load & AI</button>
                     <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export" onclick="return window.admin&&admin.goAdminTab('export'),!1">Lobby</button>
                 </div>
+                <div id="architect-extract-toast" style="display:none;margin:8px 0 4px 0;"></div>
                 <div class="admin-tab hidden" data-tab="reward">
                 <details class="admin-section" open>
                     <summary class="admin-h">🎁 Reward (Level Complete)</summary>
@@ -17968,20 +17969,40 @@ const app = {
         }, true);
     },
     _pastPaperExtractNoticeTimer: null,
+    _pastPaperExtractNoticeUserDismissed: false,
+    _pastPaperExtractInFlight: false,
+    _wirePastPaperExtractNoticeButtons: function(root) {
+        const host = root || document.getElementById("architect-extract-toast") || document.getElementById("past-paper-extract-notice");
+        if(!host) return;
+        host.querySelectorAll("[data-tsa-notice-action]").forEach(function(btn) {
+            if(btn.dataset.noticeBound === "1") return;
+            btn.dataset.noticeBound = "1";
+            btn.addEventListener("click", function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if(typeof app.handleArchitectNoticeAction === "function") app.handleArchitectNoticeAction(btn, ev);
+            }, true);
+        });
+    },
     hidePastPaperExtractNotice: function() {
+        app._pastPaperExtractNoticeUserDismissed = true;
         if(app._pastPaperExtractNoticeTimer) {
             clearTimeout(app._pastPaperExtractNoticeTimer);
             app._pastPaperExtractNoticeTimer = null;
         }
-        const el = document.getElementById("past-paper-extract-notice");
-        if(el) {
-            el.innerHTML = "";
-            el.style.display = "none";
-        }
+        ["architect-extract-toast", "past-paper-extract-notice"].forEach(function(id) {
+            const el = document.getElementById(id);
+            if(el) {
+                el.innerHTML = "";
+                el.style.display = "none";
+            }
+        });
     },
     showPastPaperExtractNotice: function(msgHtml, opts) {
         opts = opts || {};
-        let el = document.getElementById("past-paper-extract-notice");
+        if(app._pastPaperExtractNoticeUserDismissed && !opts.force) return;
+        let el = document.getElementById("architect-extract-toast");
+        if(!el) el = document.getElementById("past-paper-extract-notice");
         if(!el) {
             const anchor = document.getElementById("past-paper-extract-btn");
             if(anchor && anchor.parentElement) {
@@ -17999,6 +18020,7 @@ const app = {
         const loadBtn = opts.showLoadPassage ? " " + app.noticeActionBtn("load-passage-after-extract", { label: "Load passage now", className: "btn btn-primary btn-small", style: "margin-top:8px;" }) : "";
         el.style.display = "";
         el.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#00897b;background:rgba(0,150,136,0.08);font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}${loadBtn}</div>`;
+        app._wirePastPaperExtractNoticeButtons(el);
         try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch(eSc) {}
         if(opts.autoHideMs && opts.autoHideMs > 0) {
             if(app._pastPaperExtractNoticeTimer) clearTimeout(app._pastPaperExtractNoticeTimer);
@@ -18010,7 +18032,6 @@ const app = {
     },
     /** After Lobby extract / re-extract: clear defer flags and paint passage (Lab, Quote Select, editor). */
     finishPassageAfterExtract: function() {
-        app.hidePastPaperExtractNotice();
         app._passageDisplaysDeferred = false;
         app._deferAdminPassageUntilDemand = false;
         app._heavyLessonOnLoad = false;
@@ -25585,12 +25606,16 @@ const admin = {
         return [];
     },
     extractPastPaperText: async function(opts) {
+        if(app._pastPaperExtractInFlight) return;
         const includeQuestions = !(opts && opts.questions === false);
         const files = admin.pastPaperFiles;
         if(!files.questions && !files.resource && !files.markscheme) return;
         if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        app._pastPaperExtractInFlight = true;
+        app._pastPaperExtractNoticeUserDismissed = false;
         try {
-            app._lastPdfDebug = {
+            try {
+                app._lastPdfDebug = {
                 kind: "pastPaper",
                 at: (new Date()).toISOString(),
                 lastAction: includeQuestions ? "extractText+questions" : "extractText",
@@ -25930,14 +25955,20 @@ const admin = {
             msg += " Passage should appear in Quote Select / Lab now.";
             app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         }
+        } finally {
+            app._pastPaperExtractInFlight = false;
+        }
     },
     reExtractQuestionsFromPages: async function() {
+        if(admin._reExtractQuestionsInFlight) return;
         const f = admin.pastPaperFiles && admin.pastPaperFiles.questions;
         if(!f) {
             alert("Load the Questions PDF first, then run Extract text to cache it, then Extract questions.");
             return;
         }
         if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        admin._reExtractQuestionsInFlight = true;
+        app._pastPaperExtractNoticeUserDismissed = false;
         const loadModeEl = document.getElementById("past-paper-load-mode");
         const isC2 = loadModeEl && Number(loadModeEl.value) === 2;
         let pages = isC2 ? admin.getQuestionPagesForQuestionsSpec() : admin.getQuestionPageSpec();
@@ -26025,14 +26056,16 @@ const admin = {
             admin.syncLevelBankForPastPaperQuestions();
             admin.autoAssignLevelsByLineRangeIfApplicable();
             app.save({ skipRender: true });
+            admin.afterExtractQuestionsUi(parsed.length);
             if(parsed.length >= 1) {
                 app.showPastPaperExtractNotice("<strong>" + parsed.length + " question(s) extracted.</strong> Level Bank updated (L1→Q1, …). Check <strong>Editing Suite → Level Bank</strong> and Focus questions.", { autoHideMs: 15000 });
             } else {
-                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No Section A reading questions detected — check the page range or paste questions in <strong>Focus questions</strong>.</span>");
+                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No Section A reading questions detected — check the page range or paste questions in <strong>Focus questions</strong>.</span>", { autoHideMs: 20000 });
             }
-            admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
-            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract questions: " + (e.message || String(e)) + "</span>");
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract questions: " + (e.message || String(e)) + "</span>", { autoHideMs: 20000 });
+        } finally {
+            admin._reExtractQuestionsInFlight = false;
         }
     },
     reExtract19thFromPages: async function() {
@@ -26490,10 +26523,18 @@ const admin = {
         if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons(adm);
         if(adm.dataset.adminPanelDelegateBound === "1") return;
         adm.dataset.adminPanelDelegateBound = "1";
+        const _panelActionLastAt = typeof WeakMap !== "undefined" ? new WeakMap() : null;
         const runPanelAction = function(el, ev) {
             if(!el || el.disabled || el.dataset.adminWired === "1") return false;
             const onAttr = (el.getAttribute && el.getAttribute("onclick")) || el.dataset.adminOnclick || "";
             if(!onAttr.trim()) return false;
+            if(ev && ev.type !== "click") return false;
+            if(_panelActionLastAt) {
+                const now = Date.now();
+                const last = _panelActionLastAt.get(el) || 0;
+                if(now - last < 500) return false;
+                _panelActionLastAt.set(el, now);
+            }
             if(ev && ev.type === "mouseup" && ev.button !== 0) return false;
             if(ev && ev.type === "pointerup" && ev.button !== 0) return false;
             if(ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -26517,9 +26558,7 @@ const admin = {
             if(!el || !adm.contains(el)) return;
             runPanelAction(el, ev);
         };
-        ["click", "mouseup", "pointerup"].forEach(function(evtName) {
-            adm.addEventListener(evtName, handlePanelPointer, true);
-        });
+        adm.addEventListener("click", handlePanelPointer, true);
         adm.addEventListener("change", function(ev) {
             const el = ev.target;
             if(!el || !adm.contains(el) || el.dataset.adminWired === "1") return;
