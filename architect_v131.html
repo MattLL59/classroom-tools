@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T22:00:00">
-<meta name="architect-deploy" content="c1-extend-passage-pick-f806">
+<meta name="architect-build" content="2026-06-14T26:00:00">
+<meta name="architect-deploy" content="c1-replace-alerts-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1645,6 +1645,7 @@
                     <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="ai" onclick="return window.admin&&admin.goAdminTab('ai'),!1">Load & AI</button>
                     <button type="button" class="btn btn-outline btn-small tab-btn" data-tab="export" onclick="return window.admin&&admin.goAdminTab('export'),!1">Lobby</button>
                 </div>
+                <div id="architect-extract-toast" style="display:none;margin:8px 0 4px 0;"></div>
                 <div class="admin-tab hidden" data-tab="reward">
                 <details class="admin-section" open>
                     <summary class="admin-h">🎁 Reward (Level Complete)</summary>
@@ -11437,7 +11438,7 @@ const app = {
         else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
         if(typeof app.save === "function") app.save();
         if(!opts.silent && w.lines && w.lines.length) {
-            alert("Passage layout synced: " + w.lines.length + " stored lines.\n\nQuote Select, Lab, and Student App now use the same rows.\nRe-export Student App after this. Hard-refresh and confirm the build stamp in the page header.");
+            app.showArchitectAdminToast("<strong>Passage layout synced:</strong> " + w.lines.length + " stored lines. Quote Select, Lab, and Student App now use the same rows. Re-export Student App after this.", { honorUserDismiss: false, autoHideMs: 18000 });
         }
     },
     /**
@@ -16222,8 +16223,8 @@ const app = {
         if(scope === "whole") {
             selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         } else if(scope === "focused" && !lineRange) {
-            const dismissBtn = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageWindowHint)ui.dismissPassageWindowHint(${lvl});return false;" title="Dismiss this notice">✕ Dismiss</button>`;
-            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);">${dismissBtn}<strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank. <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${lvl});return false;">Show whole passage instead</button></div>`;
+            const dismissBtn = app.noticeActionBtn("dismiss-passage-window-hint", { level: lvl, style: "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Dismiss this notice" });
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);">${dismissBtn}<strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank. ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
             selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
             const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
@@ -16261,8 +16262,8 @@ const app = {
                     ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end"))
                     : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
                 const errDetail = anchorErrLab || `If you meant <strong>lines 1–15</strong>, use <code>1-15</code> (with a dash), not <code>115</code>. Or set <strong>Start / End phrase</strong> anchors with exact words from the passage.`;
-                const dismissBtn = `<button type="button" style="float:right;background:#fff;border:1px solid #ffcdd2;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${lvl});return false;" title="Dismiss and show whole passage">✕ Dismiss</button>`;
-                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">${dismissBtn}Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${lvl});return false;">Show whole passage instead</button></div>`;
+                const dismissBtn = app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, style: "float:right;background:#fff;border:1px solid #ffcdd2;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Dismiss and show whole passage" });
+                selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">${dismissBtn}Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -16941,6 +16942,7 @@ const app = {
     },
     /** Wire admin tabs once the page shell is up — no tab hydrate here (avoids blocking clicks if Data opens during init). */
     ensureAdminReady: function() {
+        try { if(typeof app.bindArchitectNoticeDelegation === "function") app.bindArchitectNoticeDelegation(); } catch(eN) {}
         if(appData && appData.isStandalone) return;
         if(typeof admin === "undefined") return;
         if(!document.getElementById("modal-admin")) return;
@@ -17576,6 +17578,7 @@ const app = {
                     const keepPending = String(ui._freeSelectPendingQuote || "").trim();
                     ui.renderSelection(null, keepPending ? { skipPassage: true } : { skipPassage: false });
                 }
+                app.hidePastPaperExtractNotice();
             } catch(ePaint) { console.warn("Deferred student passage paint:", ePaint); }
         };
         setTimeout(run, 60);
@@ -17675,10 +17678,13 @@ const app = {
         }
     },
     getPassageDeferPlaceholderHtml: function() {
+        const dismiss = app.noticeActionBtn("dismiss-defer-passage", { style: "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Hide this notice" });
+        const loadBtn = app.noticeActionBtn("load-deferred-passage", { label: "Load passage now", className: "btn btn-primary btn-small" });
         return `<div class="architect-passage-deferred" style="padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:0.88rem;line-height:1.45;opacity:0.9;">
+            ${dismiss}
             <div style="font-weight:700;margin-bottom:6px;">Large passage — loading on demand</div>
             <div style="margin-bottom:10px;">Your lesson saved successfully. The full exam passage is not built at startup (that was causing out-of-memory crashes). Questions and quotes still work.</div>
-            <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app!=='undefined'&&app.scheduleDeferredStudentPassagePaint)app.scheduleDeferredStudentPassagePaint();">Load passage now</button>
+            ${loadBtn}
             <span style="font-size:0.8rem;opacity:0.75;margin-left:8px;">Or open <strong>Quote Select</strong> / <strong>Data → Editing Suite</strong>.</span>
         </div>`;
     },
@@ -17716,7 +17722,19 @@ const app = {
     loadAdminPassageOnDemand: function() {
         if(!appData || appData.component === 2) return;
         const stLen = typeof appData.sourceText === "string" ? appData.sourceText.length : 0;
-        if(stLen > 50000 && !confirm("This passage is about " + Math.round(stLen / 1000) + "k characters. Loading it in the editor may crash the browser. Continue anyway?")) return;
+        if(stLen > 50000) {
+            app.showArchitectAdminToast("This passage is about <strong>" + Math.round(stLen / 1000) + "k</strong> characters. Loading it in the editor may be slow or crash the tab.", {
+                honorUserDismiss: false,
+                confirmYes: "Load anyway",
+                confirmNo: "Cancel",
+                onConfirm: function() { app._loadAdminPassageOnDemandCore(); }
+            });
+            return;
+        }
+        app._loadAdminPassageOnDemandCore();
+    },
+    _loadAdminPassageOnDemandCore: function() {
+        if(!appData || appData.component === 2) return;
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         const el = document.getElementById("ai-input");
@@ -17911,16 +17929,118 @@ const app = {
             if(userState.view === "select" && ui.renderSelection) ui.renderSelection();
         }
     },
-    hidePastPaperExtractNotice: function() {
-        const el = document.getElementById("past-paper-extract-notice");
-        if(el) {
-            el.innerHTML = "";
-            el.style.display = "none";
+    noticeActionBtn: function(action, opts) {
+        opts = opts || {};
+        const style = opts.style || "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;";
+        const title = opts.title ? ` title="${String(opts.title).replace(/"/g, "&quot;")}"` : "";
+        const label = opts.label || "✕ Dismiss";
+        const cls = opts.className ? ` class="${opts.className}"` : "";
+        const lvl = opts.level != null ? ` data-level="${parseInt(opts.level, 10) || 1}"` : "";
+        return `<button type="button"${cls} data-tsa-notice-action="${action}"${lvl}${title} style="${style}">${label}</button>`;
+    },
+    handleArchitectNoticeAction: function(btn, ev) {
+        if(ev) { ev.preventDefault(); ev.stopPropagation(); }
+        const action = btn && btn.dataset ? btn.dataset.tsaNoticeAction : "";
+        const lvl = parseInt(btn && btn.dataset ? btn.dataset.level : "", 10) || 1;
+        switch(action) {
+            case "dismiss-past-paper-extract":
+            case "dismiss-admin-toast":
+            case "dismiss-passage-pick":
+                app.hideArchitectAdminToast();
+                if(action === "dismiss-passage-pick" && typeof admin !== "undefined" && admin._hidePassagePickNotice) admin._hidePassagePickNotice();
+                break;
+            case "admin-toast-confirm":
+                app.hideArchitectAdminToast(false);
+                if(typeof app._adminToastOnConfirm === "function") {
+                    try { app._adminToastOnConfirm(); } catch(eCf) { console.warn("admin toast confirm:", eCf); }
+                }
+                app._adminToastOnConfirm = null;
+                app._adminToastOnCancel = null;
+                break;
+            case "admin-toast-cancel":
+                app.hideArchitectAdminToast();
+                if(typeof app._adminToastOnCancel === "function") {
+                    try { app._adminToastOnCancel(); } catch(eCx) { console.warn("admin toast cancel:", eCx); }
+                }
+                app._adminToastOnConfirm = null;
+                app._adminToastOnCancel = null;
+                break;
+            case "dismiss-passage-window-hint":
+                if(typeof ui !== "undefined" && ui.dismissPassageWindowHint) ui.dismissPassageWindowHint(lvl);
+                break;
+            case "dismiss-passage-excerpt-error":
+                if(typeof ui !== "undefined" && ui.dismissPassageExcerptError) ui.dismissPassageExcerptError(lvl);
+                break;
+            case "load-deferred-passage":
+                if(typeof app.scheduleDeferredStudentPassagePaint === "function") app.scheduleDeferredStudentPassagePaint();
+                break;
+            case "load-passage-after-extract":
+                if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+                break;
+            case "dismiss-defer-passage":
+                if(btn && btn.closest) {
+                    const box = btn.closest(".architect-passage-deferred");
+                    if(box) box.style.display = "none";
+                }
+                break;
+            default:
+                break;
         }
     },
-    showPastPaperExtractNotice: function(msgHtml, opts) {
+    bindArchitectNoticeDelegation: function() {
+        if(document.body.dataset.architectNoticeBound === "1") return;
+        document.body.dataset.architectNoticeBound = "1";
+        document.addEventListener("click", function(ev) {
+            const btn = ev.target && ev.target.closest ? ev.target.closest("[data-tsa-notice-action]") : null;
+            if(!btn) return;
+            app.handleArchitectNoticeAction(btn, ev);
+        }, true);
+    },
+    _pastPaperExtractNoticeTimer: null,
+    _pastPaperExtractNoticeUserDismissed: false,
+    _pastPaperExtractInFlight: false,
+    _adminToastOnConfirm: null,
+    _adminToastOnCancel: null,
+    _wireAdminNoticeButtons: function(root) {
+        const host = root || document.getElementById("architect-extract-toast") || document.getElementById("past-paper-extract-notice");
+        if(!host) return;
+        host.querySelectorAll("[data-tsa-notice-action]").forEach(function(btn) {
+            if(btn.dataset.noticeBound === "1") return;
+            btn.dataset.noticeBound = "1";
+            btn.addEventListener("click", function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if(typeof app.handleArchitectNoticeAction === "function") app.handleArchitectNoticeAction(btn, ev);
+            }, true);
+        });
+    },
+    hideArchitectAdminToast: function(markDismissed) {
+        if(markDismissed !== false) app._pastPaperExtractNoticeUserDismissed = true;
+        if(app._pastPaperExtractNoticeTimer) {
+            clearTimeout(app._pastPaperExtractNoticeTimer);
+            app._pastPaperExtractNoticeTimer = null;
+        }
+        app._adminToastOnConfirm = null;
+        app._adminToastOnCancel = null;
+        ["architect-extract-toast", "past-paper-extract-notice"].forEach(function(id) {
+            const el = document.getElementById(id);
+            if(el) {
+                el.innerHTML = "";
+                el.style.display = "none";
+            }
+        });
+    },
+    hidePastPaperExtractNotice: function() {
+        app.hideArchitectAdminToast();
+    },
+    /** Dismissable in-app message bar (replaces blocking alert/confirm in teacher tools). */
+    showArchitectAdminToast: function(msgHtml, opts) {
         opts = opts || {};
-        let el = document.getElementById("past-paper-extract-notice");
+        const honorDismiss = opts.honorUserDismiss !== false;
+        if(honorDismiss && app._pastPaperExtractNoticeUserDismissed && !opts.force) return;
+        if(opts.force || opts.resetDismiss) app._pastPaperExtractNoticeUserDismissed = false;
+        let el = document.getElementById("architect-extract-toast");
+        if(!el) el = document.getElementById("past-paper-extract-notice");
         if(!el) {
             const anchor = document.getElementById("past-paper-extract-btn");
             if(anchor && anchor.parentElement) {
@@ -17931,15 +18051,45 @@ const app = {
             }
         }
         if(!el) {
-            if(typeof app.showLessonLoadNotices === "function") app.showLessonLoadNotices([String(msgHtml || "").replace(/<[^>]+>/g, " ")]);
+            console.warn("Admin toast:", String(msgHtml || "").replace(/<[^>]+>/g, " "));
             return;
         }
-        const dismiss = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;" onclick="if(typeof app!=='undefined'&&app.hidePastPaperExtractNotice)app.hidePastPaperExtractNotice();return false;">✕ Dismiss</button>`;
-        const loadBtn = opts.showLoadPassage ? ` <button type="button" class="btn btn-primary btn-small" style="margin-top:8px;" onclick="if(typeof app!=='undefined'&&app.finishPassageAfterExtract)app.finishPassageAfterExtract();return false;">Load passage now</button>` : "";
+        const dismissAction = opts.dismissAction || "dismiss-admin-toast";
+        const dismiss = app.noticeActionBtn(dismissAction);
+        let actionBtns = "";
+        if(opts.confirmYes) {
+            actionBtns += " " + app.noticeActionBtn("admin-toast-confirm", { label: opts.confirmYes, className: "btn btn-primary btn-small", style: "margin-top:8px;margin-right:6px;" });
+        }
+        if(opts.confirmNo) {
+            actionBtns += " " + app.noticeActionBtn("admin-toast-cancel", { label: opts.confirmNo, className: "btn btn-outline btn-small", style: "margin-top:8px;" });
+        }
+        if(opts.showLoadPassage) {
+            actionBtns += " " + app.noticeActionBtn("load-passage-after-extract", { label: "Load passage now", className: "btn btn-primary btn-small", style: "margin-top:8px;" });
+        }
+        app._adminToastOnConfirm = opts.onConfirm || null;
+        app._adminToastOnCancel = opts.onCancel || null;
+        const borderColor = opts.error ? "var(--error)" : "#00897b";
+        const bg = opts.error ? "rgba(244,67,54,0.08)" : "rgba(0,150,136,0.08)";
         el.style.display = "";
-        el.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#00897b;background:rgba(0,150,136,0.08);font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}${loadBtn}</div>`;
+        el.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:${borderColor};background:${bg};font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}${actionBtns}</div>`;
+        app._wireAdminNoticeButtons(el);
         try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch(eSc) {}
-        if(opts.autoHideMs && opts.autoHideMs > 0) setTimeout(() => app.hidePastPaperExtractNotice(), opts.autoHideMs);
+        if(opts.autoHideMs && opts.autoHideMs > 0) {
+            if(app._pastPaperExtractNoticeTimer) clearTimeout(app._pastPaperExtractNoticeTimer);
+            app._pastPaperExtractNoticeTimer = setTimeout(function() {
+                app._pastPaperExtractNoticeTimer = null;
+                app.hideArchitectAdminToast();
+            }, opts.autoHideMs);
+        }
+    },
+    showArchitectAlert: function(msg, opts) {
+        const s = String(msg || "");
+        const html = typeof app.escapeHtml === "function" ? app.escapeHtml(s).replace(/\n/g, "<br>") : s;
+        app.showArchitectAdminToast(html, Object.assign({ honorUserDismiss: false, autoHideMs: 15000 }, opts || {}));
+    },
+    showPastPaperExtractNotice: function(msgHtml, opts) {
+        opts = Object.assign({ force: true, resetDismiss: true, dismissAction: "dismiss-past-paper-extract" }, opts || {});
+        app.showArchitectAdminToast(msgHtml, opts);
     },
     /** After Lobby extract / re-extract: clear defer flags and paint passage (Lab, Quote Select, editor). */
     finishPassageAfterExtract: function() {
@@ -19849,6 +19999,7 @@ const ui = {
         if(navEl) navEl.classList.add("active");
         userState.view = v;
         if(!appData.isStandalone && !ui._initInProgress) app.save();
+        if((v === "select" || v === "desk") && typeof app.hidePastPaperExtractNotice === "function") app.hidePastPaperExtractNotice();
         if(v === "select") {
             if(!ui._initInProgress) {
                 const lvlReturn = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
@@ -21673,8 +21824,8 @@ const ui = {
             const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
             const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange;
             const hintDismissed = typeof ui.isPassageWindowHintDismissed === "function" && ui.isPassageWindowHintDismissed(level);
-            const dismissHintBtn = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageWindowHint)ui.dismissPassageWindowHint(${level});return false;">✕ Dismiss</button>`;
-            const dismissWholeBtn = `<button type="button" class="btn btn-outline btn-small" style="margin-top:8px;" onclick="if(typeof ui!=='undefined'&&ui.dismissPassageExcerptError)ui.dismissPassageExcerptError(${level});return false;">Show whole passage instead</button>`;
+            const dismissHintBtn = app.noticeActionBtn("dismiss-passage-window-hint", { level: level });
+            const dismissWholeBtn = app.noticeActionBtn("dismiss-passage-excerpt-error", { level: level, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-top:8px;" });
             if(!hintDismissed && excerptSliceFailed && wantsPassageWindow && lineRange) {
                 passageHintEl.classList.remove("hidden");
                 passageHintEl.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#ff9800;background:rgba(255,152,0,0.08);font-size:0.86rem;line-height:1.45;">
@@ -24127,8 +24278,12 @@ const admin = {
         if(appData && !appData.isStandalone) app.save();
     },
     clearPastPaperPdfCacheConfirm: function() {
-        if(!confirm("Remove cached PDFs from this browser? You will need to choose the PDF files again before Extract text / Extract questions.")) return;
-        admin.clearPastPaperPdfCache();
+        app.showArchitectAdminToast("Remove cached PDFs from this browser? You will need to choose the PDF files again before <strong>Extract text</strong> / <strong>Extract questions</strong>.", {
+            honorUserDismiss: false,
+            confirmYes: "Clear PDFs",
+            confirmNo: "Cancel",
+            onConfirm: function() { admin.clearPastPaperPdfCache(); }
+        });
     },
     restorePastPaperFilesFromIdb: function() {
         if(!appData || appData.isStandalone) return Promise.resolve();
@@ -25516,12 +25671,16 @@ const admin = {
         return [];
     },
     extractPastPaperText: async function(opts) {
+        if(app._pastPaperExtractInFlight) return;
         const includeQuestions = !(opts && opts.questions === false);
         const files = admin.pastPaperFiles;
         if(!files.questions && !files.resource && !files.markscheme) return;
-        if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
+        app._pastPaperExtractInFlight = true;
+        app._pastPaperExtractNoticeUserDismissed = false;
         try {
-            app._lastPdfDebug = {
+            try {
+                app._lastPdfDebug = {
                 kind: "pastPaper",
                 at: (new Date()).toISOString(),
                 lastAction: includeQuestions ? "extractText+questions" : "extractText",
@@ -25653,11 +25812,11 @@ const admin = {
                 }
                 combined += "—— " + (labels[i] || "PDF") + " ——\n\n" + app.cleanSourceText(pageTexts.join("")) + "\n\n";
             } catch(e) {
-                alert("Could not read " + (f.name || "PDF") + ". " + (e.message || ""));
+                app.showArchitectAlert("Could not read " + (f.name || "PDF") + ". " + (e.message || ""), { error: true });
                 return;
             }
         }
-        if(!combined.trim()) { alert("No text extracted."); return; }
+        if(!combined.trim()) { app.showArchitectAlert("No text extracted from the PDF(s).", { error: true }); return; }
         const questionsPdfAllPagesText = Object.keys(questionsPageTextsByPage)
             .map(n => parseInt(n, 10))
             .filter(n => n >= 1)
@@ -25861,24 +26020,30 @@ const admin = {
             msg += " Passage should appear in Quote Select / Lab now.";
             app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         }
+        } finally {
+            app._pastPaperExtractInFlight = false;
+        }
     },
     reExtractQuestionsFromPages: async function() {
+        if(admin._reExtractQuestionsInFlight) return;
         const f = admin.pastPaperFiles && admin.pastPaperFiles.questions;
         if(!f) {
-            alert("Load the Questions PDF first, then run Extract text to cache it, then Extract questions.");
+            app.showArchitectAlert("Load the Questions PDF first, then run Extract text to cache it, then Extract questions.", { error: true, autoHideMs: 20000 });
             return;
         }
-        if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
+        admin._reExtractQuestionsInFlight = true;
+        app._pastPaperExtractNoticeUserDismissed = false;
         const loadModeEl = document.getElementById("past-paper-load-mode");
         const isC2 = loadModeEl && Number(loadModeEl.value) === 2;
         let pages = isC2 ? admin.getQuestionPagesForQuestionsSpec() : admin.getQuestionPageSpec();
         const c2SectionBAllPages = isC2 && pages === null;
         if(!c2SectionBAllPages && (!pages || pages.length === 0)) {
-            const s = prompt(isC2 ? "Section A reading page(s), e.g. 1-2:" : "Question page(s), e.g. 2 or 2-4 (leave empty for all):");
-            if(s === null) return;
-            const inp = isC2 ? document.getElementById("past-paper-question-pages-questions") : document.getElementById("past-paper-question-pages");
-            if(inp) inp.value = s.trim();
-            pages = isC2 ? admin.getQuestionPagesForQuestionsSpec() : admin.getQuestionPageSpec();
+            app.showArchitectAdminToast(isC2
+                ? "Set <strong>Section A reading page(s)</strong> in the field above (e.g. <code>2</code> or <code>1-2</code>), then click <strong>Extract questions</strong> again."
+                : "Set <strong>Question page(s)</strong> above (e.g. <code>2</code> or <code>2-4</code>), or leave empty for the whole PDF, then click <strong>Extract questions</strong> again.", { honorUserDismiss: false, autoHideMs: 20000 });
+            if(typeof admin.goAdminTab === "function") admin.goAdminTab("export");
+            return;
         }
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
@@ -25902,7 +26067,7 @@ const admin = {
             let fromAll = (pagesToReadFirst.length >= pdf.numPages) ? fromSpec : "";
             /* Prefer selected page(s); if that yields nothing (wrong default), parse the whole Questions PDF. */
             let questionsSectionText = (fromSpec || fromAll).trim();
-            if(!questionsSectionText) { alert("No text extracted from the selected page(s)."); return; }
+            if(!questionsSectionText) { app.showArchitectAlert("No text extracted from the selected page(s).", { error: true }); return; }
             let parsed = admin.finalizeExtractedQuestionPrompts(admin.parseQuestionsFromText(questionsSectionText));
             const restrictRe = admin.isPastPaperQuestionsPageRangeRestricted();
             if(parsed.length === 0 && fromSpec && !fromAll && !restrictRe) {
@@ -25956,34 +26121,34 @@ const admin = {
             admin.syncLevelBankForPastPaperQuestions();
             admin.autoAssignLevelsByLineRangeIfApplicable();
             app.save({ skipRender: true });
+            admin.afterExtractQuestionsUi(parsed.length);
             if(parsed.length >= 1) {
                 app.showPastPaperExtractNotice("<strong>" + parsed.length + " question(s) extracted.</strong> Level Bank updated (L1→Q1, …). Check <strong>Editing Suite → Level Bank</strong> and Focus questions.", { autoHideMs: 15000 });
             } else {
-                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No Section A reading questions detected — check the page range or paste questions in <strong>Focus questions</strong>.</span>");
+                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">No Section A reading questions detected — check the page range or paste questions in <strong>Focus questions</strong>.</span>", { autoHideMs: 20000 });
             }
-            admin.afterExtractQuestionsUi(parsed.length);
         } catch(e) {
-            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract questions: " + (e.message || String(e)) + "</span>");
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract questions: " + (e.message || String(e)) + "</span>", { autoHideMs: 20000 });
+        } finally {
+            admin._reExtractQuestionsInFlight = false;
         }
     },
     reExtract19thFromPages: async function() {
         const f = admin.pastPaperFiles && admin.pastPaperFiles.questions;
         if(!f) {
-            alert("Load the Questions PDF first.");
+            app.showArchitectAlert("Load the Questions PDF first.", { error: true });
             return;
         }
-        if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
         if(!appData || appData.component !== 2 || !appData.component2Layout) {
-            alert("Re-extract 19th C is for Component 2 only. Set Load as = Component 2 first.");
+            app.showArchitectAlert("Re-extract 19th C is for Component 2 only. Set Load as = Component 2 first.", { error: true });
             return;
         }
         let pages = admin.getQuestionPagesFor19thSpec();
         if(!pages || pages.length === 0) {
-            const s = prompt("19th C passage page, e.g. 3:");
-            if(s === null) return;
-            const inp = document.getElementById("past-paper-question-pages-19th");
-            if(inp) inp.value = s.trim();
-            pages = admin.getQuestionPagesFor19thSpec();
+            app.showArchitectAdminToast("Set <strong>19th C passage page</strong> in the Lobby fields (default <code>3</code>), then click <strong>Re-extract 19th C</strong> again.", { honorUserDismiss: false, autoHideMs: 20000 });
+            if(typeof admin.goAdminTab === "function") admin.goAdminTab("export");
+            return;
         }
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
@@ -25999,7 +26164,7 @@ const admin = {
             };
             let usedPages = pages && pages.length ? pages.slice() : [];
             let passageText = await extractPages(usedPages);
-            if(!passageText) { alert("No text extracted from the selected page(s)."); return; }
+            if(!passageText) { app.showArchitectAlert("No text extracted from the selected page(s).", { error: true }); return; }
             const suspiciouslyShort = passageText.length < 1200 || ((passageText.match(/\n/g) || []).length + 1) < 26;
             if(suspiciouslyShort && pdf.numPages && pdf.numPages >= 2) {
                 /* Auto-try: pick the best candidate page (excluding the Section A reading pages if known). */
@@ -26080,10 +26245,10 @@ const admin = {
     reExtractResourceFromPages: async function() {
         const f = admin.pastPaperFiles && admin.pastPaperFiles.resource;
         if(!f) {
-            alert("Load the Resource PDF first, then run Extract text.");
+            app.showArchitectAlert("Load the Resource PDF first, then run Extract text.", { error: true });
             return;
         }
-        if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
         const pages = admin.getResourcePageSpec();
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
@@ -26115,7 +26280,7 @@ const admin = {
             };
             let resourcePassageText = await pullRange(pagesToUse);
             if(!resourcePassageText) resourcePassageText = await pullRange(null);
-            if(!resourcePassageText) { alert("No text extracted from this PDF. If it is a scan (image-only), use an OCR’d PDF or paste the passage manually."); return; }
+            if(!resourcePassageText) { app.showArchitectAlert("No text extracted from this PDF. If it is a scan (image-only), use an OCR'd PDF or paste the passage manually.", { error: true, autoHideMs: 20000 }); return; }
             try {
                 const inp = document.getElementById("past-paper-resource-pages");
                 app._lastPdfDebug = {
@@ -26421,10 +26586,18 @@ const admin = {
         if(admin.wireAdminPanelButtons) admin.wireAdminPanelButtons(adm);
         if(adm.dataset.adminPanelDelegateBound === "1") return;
         adm.dataset.adminPanelDelegateBound = "1";
+        const _panelActionLastAt = typeof WeakMap !== "undefined" ? new WeakMap() : null;
         const runPanelAction = function(el, ev) {
             if(!el || el.disabled || el.dataset.adminWired === "1") return false;
             const onAttr = (el.getAttribute && el.getAttribute("onclick")) || el.dataset.adminOnclick || "";
             if(!onAttr.trim()) return false;
+            if(ev && ev.type !== "click") return false;
+            if(_panelActionLastAt) {
+                const now = Date.now();
+                const last = _panelActionLastAt.get(el) || 0;
+                if(now - last < 500) return false;
+                _panelActionLastAt.set(el, now);
+            }
             if(ev && ev.type === "mouseup" && ev.button !== 0) return false;
             if(ev && ev.type === "pointerup" && ev.button !== 0) return false;
             if(ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -26441,15 +26614,14 @@ const admin = {
         };
         const handlePanelPointer = function(ev) {
             if(ev.target && ev.target.closest && ev.target.closest("[data-admin-close], #btn-admin-modal-close, #admin-tabs .tab-btn")) return;
+            if(ev.target && ev.target.closest && ev.target.closest("[data-tsa-notice-action]")) return;
             const el = ev.target && ev.target.closest
                 ? ev.target.closest("button[onclick], button[data-admin-onclick], input[onclick][type='button'], input[onclick][type='submit']")
                 : null;
             if(!el || !adm.contains(el)) return;
             runPanelAction(el, ev);
         };
-        ["click", "mouseup", "pointerup"].forEach(function(evtName) {
-            adm.addEventListener(evtName, handlePanelPointer, true);
-        });
+        adm.addEventListener("click", handlePanelPointer, true);
         adm.addEventListener("change", function(ev) {
             const el = ev.target;
             if(!el || !adm.contains(el) || el.dataset.adminWired === "1") return;
@@ -34995,6 +35167,12 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     _showPassagePickNotice: function(msgHtml, opts) {
         opts = opts || {};
+        if(typeof app.showArchitectAdminToast === "function") {
+            app.showArchitectAdminToast(msgHtml, Object.assign({ honorUserDismiss: false, dismissAction: "dismiss-passage-pick" }, opts));
+            const legacy = document.getElementById("teacher-passage-pick-notice");
+            if(legacy) { legacy.innerHTML = ""; legacy.style.display = "none"; }
+            return;
+        }
         let host = document.getElementById("teacher-passage-pick-notice");
         const out = document.getElementById("teacher-passage-preview-output");
         if(!host && out && out.parentElement) {
@@ -35007,7 +35185,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             if(typeof app.showLessonLoadNotices === "function") app.showLessonLoadNotices([String(msgHtml || "").replace(/<[^>]+>/g, " ")]);
             return;
         }
-        const dismiss = `<button type="button" style="float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:0.8rem;" onclick="if(typeof admin!=='undefined'&&admin._hidePassagePickNotice)admin._hidePassagePickNotice();return false;">✕ Dismiss</button>`;
+        const dismiss = app.noticeActionBtn("dismiss-passage-pick");
         host.style.display = "";
         host.innerHTML = `<div class="card" style="margin:0;padding:10px 12px;border-color:#00897b;background:rgba(0,150,136,0.08);font-size:0.86rem;line-height:1.45;">${dismiss}${msgHtml}</div>`;
         if(opts.autoHideMs && opts.autoHideMs > 0) {
@@ -35109,7 +35287,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         return false;
     },
     applyLineRefFromPassageSelectionForQuestionIndex: function(questionIndex) {
-        if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
+        if(!appData || appData.component !== 1) return app.showArchitectAlert("Line windows are for Component 1 lessons only.", { error: true });
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const qPre = questions[questionIndex];
         const lvlPre = qPre && qPre.id ? admin.levelForQuestionId(qPre.id) : 1;
@@ -35143,7 +35321,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         }
     },
     applyLineRefFromPassageSelectionForPreviewLevel: function() {
-        if(!appData || appData.component !== 1) return alert("Line windows are for Component 1 lessons only.");
+        if(!appData || appData.component !== 1) return app.showArchitectAlert("Line windows are for Component 1 lessons only.", { error: true });
         const pvLvl = document.getElementById("teacher-passage-preview-level");
         const lvlPre = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
         const scope = typeof ui !== "undefined" && ui.getEffectivePassageDisplayScopeForLevel ? ui.getEffectivePassageDisplayScopeForLevel(lvlPre) : (ui.getPassageDisplayScope ? ui.getPassageDisplayScope() : "whole");
@@ -36419,6 +36597,7 @@ try {
     }
     const bootTabs = function() {
         try {
+            if(typeof app !== "undefined" && app.bindArchitectNoticeDelegation) app.bindArchitectNoticeDelegation();
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
                 if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
