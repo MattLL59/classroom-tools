@@ -997,12 +997,21 @@
     #architect-c2-source-bar:not(.hidden), #architect-c2-source-bar-select:not(.hidden), #header-c2-source-bar:not(.hidden) { display: flex !important; }
     #view-select { display: flex; flex-direction: column; min-height: 0; }
     #view-select-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-    #source-inline-select-wrap { resize: vertical; overflow: hidden; min-height: 140px; max-height: 45vh; }
-    #source-lab-wrap { resize: vertical; overflow: hidden; min-height: 140px; max-height: 60vh; }
-    #view-select.tsa-passage-maximized #source-inline-select-wrap { max-height: min(78vh, 920px) !important; min-height: 52vh !important; flex: 1 1 auto; }
-    #view-select.tsa-passage-maximized #view-select-body { min-height: 55vh; }
+    #source-inline-select-wrap { overflow: hidden; min-height: 140px; max-height: 45vh; flex: 1 1 auto; display: flex; flex-direction: column; }
+    #source-lab-wrap { overflow: hidden; min-height: 140px; max-height: 60vh; }
+    #view-select.tsa-passage-maximized #source-inline-select-wrap { max-height: none !important; min-height: min(82vh, 960px) !important; flex: 1 1 auto; }
+    #view-select.tsa-passage-maximized #view-select-body { min-height: min(78vh, 920px); flex: 1; }
     #view-select.tsa-passage-maximized #selection-area { display: none; }
     #teacher-passage-pick-toolbar .btn.active-pick-mode { box-shadow: inset 0 0 0 2px var(--primary); }
+    .teacher-passage-preview-pane { max-height: 240px; }
+    @media (min-width: 769px) {
+        body.tsa-teacher-desktop .hub.active#view-select { min-height: calc(100vh - 128px); }
+        body.tsa-teacher-desktop #source-inline-select-wrap { max-height: none; min-height: min(68vh, 820px); }
+        body.tsa-teacher-desktop #source-lab-wrap { max-height: none; min-height: min(68vh, 820px); }
+        body.tsa-teacher-desktop #teacher-passage-preview-output { max-height: min(62vh, 720px) !important; }
+        body.tsa-teacher-desktop #selection-reader-controls .reader-label,
+        body.tsa-teacher-desktop #lab-reader-controls .reader-label { display: none !important; }
+    }
 
     @media print { .no-print { display: none; } }
     
@@ -18971,10 +18980,20 @@ const ui = {
         if(appData && appData.isStandalone) return;
         try { app._teacherLinePickMode = sessionStorage.getItem("tsa_teacher_line_pick_mode") === "1"; } catch(e) {}
         if(app._teacherLinePickMode) app._passageLinePickForceWhole = true;
-        try {
-            const max = sessionStorage.getItem("tsa_passage_panel_max") === "1";
-            if(max && typeof ui.setPassagePanelMaximized === "function") ui.setPassagePanelMaximized(true, { refresh: false });
-        } catch(eM) {}
+        if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout();
+    },
+    /** PC teacher: large passage by default (no drag-resize sliders). */
+    syncTeacherDesktopPassageLayout: function(opts) {
+        opts = opts || {};
+        if(appData && appData.isStandalone) return;
+        const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 769px)").matches;
+        document.body.classList.toggle("tsa-teacher-desktop", wide);
+        if(!wide) return;
+        let restored = false;
+        try { restored = sessionStorage.getItem("tsa_passage_panel_restored") === "1"; } catch(eR) {}
+        if(!restored && typeof ui.setPassagePanelMaximized === "function") {
+            ui.setPassagePanelMaximized(true, { refresh: opts.refresh !== false, implicit: true });
+        }
     },
     setTeacherLinePickMode: function(on, opts) {
         opts = opts || {};
@@ -18993,9 +19012,12 @@ const ui = {
         const view = document.getElementById("view-select");
         const onState = !!on;
         if(view) view.classList.toggle("tsa-passage-maximized", onState);
-        try { sessionStorage.setItem("tsa_passage_panel_max", onState ? "1" : "0"); } catch(eS) {}
+        try {
+            sessionStorage.setItem("tsa_passage_panel_max", onState ? "1" : "0");
+            if(!opts.implicit) sessionStorage.setItem("tsa_passage_panel_restored", onState ? "0" : "1");
+        } catch(eS) {}
         const btn = document.getElementById("btn-teacher-maximize-passage");
-        if(btn) btn.textContent = onState ? "Restore layout" : "Maximize passage";
+        if(btn) btn.textContent = onState ? "Show quote cards" : "Maximize passage";
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
         if(opts.refresh !== false && userState && userState.view === "select" && typeof ui.renderSelection === "function") {
             ui.renderSelection(null, { skipPassage: true });
@@ -19031,6 +19053,12 @@ const ui = {
                 if(!userState) return;
                 userState.questionDetailsExpanded = qDet.open;
                 if(typeof app.save === "function") app.save({ skipRender: true, silent: true });
+            });
+        }
+        if(!window.__tsaTeacherDesktopResizeBound) {
+            window.__tsaTeacherDesktopResizeBound = true;
+            window.addEventListener("resize", function() {
+                if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout({ refresh: false });
             });
         }
     },
@@ -21836,6 +21864,7 @@ const ui = {
         const useJustifyStage = !!(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(level));
         const questionTextEarly = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.getQuestionForLevel(level) || (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "");
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
+        if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout({ refresh: false });
         if(typeof ui.syncSelectQuestionCollapse === "function") ui.syncSelectQuestionCollapse();
         ui.renderQuestionBanner();
         if(ui._syncSelectQuestionLabel) ui._syncSelectQuestionLabel({ text: questionTextEarly || "No question text is set for this level.", qNum: 0, total: 0 });
@@ -34973,7 +35002,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.openTeacherQuoteSelectPreview()">Open Quote Select</button>
                     <label style="font-size:0.8rem;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="teacher-preview-affirm-cb" ${userState && userState.teacherPreviewAffirmStep ? "checked" : ""} onchange="admin.setTeacherAffirmPreview(this.checked)"> Preview affirm step</label>
                 </div>
-                <div id="teacher-passage-preview-output" class="architect-passage-line-wrap" style="max-height:240px;overflow:auto;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);line-height:1.5;"></div>
+                <div id="teacher-passage-preview-output" class="architect-passage-line-wrap teacher-passage-preview-pane" style="overflow:auto;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);line-height:1.5;"></div>
             </div>` : ""}
         `;
         const pvLvl = document.getElementById("teacher-passage-preview-level");
@@ -36729,6 +36758,7 @@ try {
         try {
             if(typeof app !== "undefined" && app.bindArchitectNoticeDelegation) app.bindArchitectNoticeDelegation();
             if(typeof ui !== "undefined" && ui.bindTeacherPassagePickToolbarOnce) ui.bindTeacherPassagePickToolbarOnce();
+            if(typeof ui !== "undefined" && ui.syncTeacherDesktopPassageLayout) ui.syncTeacherDesktopPassageLayout({ refresh: false });
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
                 if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
