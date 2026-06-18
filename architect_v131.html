@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T27:00:00">
-<meta name="architect-deploy" content="c1-passage-pick-ux-f806">
+<meta name="architect-build" content="2026-06-14T29:00:00">
+<meta name="architect-deploy" content="c1-passage-auto-pick-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1004,6 +1004,18 @@
     #view-select.tsa-passage-maximized #selection-area { display: none; }
     #teacher-passage-pick-toolbar .btn.active-pick-mode { box-shadow: inset 0 0 0 2px var(--primary); }
     .teacher-passage-preview-pane { max-height: 240px; }
+    .architect-passage-level-pick-wrap .source-line-row.architect-level-window-active {
+        background: rgba(0, 150, 136, 0.22) !important;
+        box-shadow: inset 4px 0 0 var(--primary);
+    }
+    .architect-passage-level-pick-wrap .source-line-row.architect-level-window-assigned {
+        background: rgba(255, 193, 7, 0.14) !important;
+        box-shadow: inset 4px 0 0 #ffb300;
+    }
+    .architect-passage-level-pick-wrap .source-line-row.architect-level-window-active.architect-level-window-assigned {
+        background: rgba(0, 150, 136, 0.28) !important;
+        box-shadow: inset 4px 0 0 var(--primary);
+    }
     @media (min-width: 769px) {
         body.tsa-teacher-desktop .hub.active#view-select { min-height: calc(100vh - 128px); }
         body.tsa-teacher-desktop #source-inline-select-wrap { max-height: none; min-height: min(68vh, 820px); }
@@ -1494,6 +1506,9 @@
                 <button type="button" class="btn btn-outline btn-small" id="btn-teacher-preview-excerpt">Preview this question</button>
                 <button type="button" class="btn btn-outline btn-small" id="btn-teacher-maximize-passage">Maximize passage</button>
                 <span id="teacher-passage-pick-status" style="opacity:0.88; flex:1; min-width:10rem; line-height:1.35;"></span>
+            </div>
+            <div id="teacher-passage-pick-hint" class="hidden" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid var(--primary);background:rgba(0,150,136,0.08);font-size:0.82rem;line-height:1.45;">
+                <strong>Assign by highlighting</strong> — select text in the passage below (like Quote Select). Lines + phrase anchors save for the <strong>current level</strong>. Other levels show as <span style="background:rgba(255,193,7,0.25);padding:0 4px;">amber bands</span>; the active level is <span style="background:rgba(0,150,136,0.25);padding:0 4px;">teal</span>. Change level in the header or Level Bank, then highlight the next span.
             </div>
             <div style="margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;">
                 <div style="font-size:0.85rem; font-weight:600; color:var(--primary);">Source passage</div>
@@ -18820,6 +18835,9 @@ const ui = {
                 ui.syncPassageLineLayoutShell(selWrap, inlineSel, hSel || hLab);
             }
             if(typeof ui.positionReaderWindow === "function") ui.positionReaderWindow();
+            if(app._teacherLinePickMode && typeof admin !== "undefined" && admin.refreshTeacherPassageLevelPickDisplay) {
+                admin.refreshTeacherPassageLevelPickDisplay();
+            }
         };
         if(typeof requestAnimationFrame === "function") requestAnimationFrame(repaint);
         else repaint();
@@ -18978,7 +18996,11 @@ const ui = {
     },
     initTeacherLinePickMode: function() {
         if(appData && appData.isStandalone) return;
-        try { app._teacherLinePickMode = sessionStorage.getItem("tsa_teacher_line_pick_mode") === "1"; } catch(e) {}
+        const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 769px)").matches;
+        try {
+            const stored = sessionStorage.getItem("tsa_teacher_line_pick_mode");
+            app._teacherLinePickMode = stored === null ? !!wide : stored === "1";
+        } catch(e) {}
         if(app._teacherLinePickMode) app._passageLinePickForceWhole = true;
         if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout();
     },
@@ -19061,6 +19083,20 @@ const ui = {
                 if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout({ refresh: false });
             });
         }
+        if(!window.__tsaTeacherPassageAutoPickBound) {
+            window.__tsaTeacherPassageAutoPickBound = true;
+            let autoPickTimer = null;
+            document.addEventListener("mouseup", function(ev) {
+                if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
+                if(ev.target && ev.target.closest && ev.target.closest("button, input, select, textarea, summary, label, [data-tsa-notice-action], .modal-header, #admin-tabs")) return;
+                const inPassage = ev.target && ev.target.closest && ev.target.closest("#teacher-passage-preview-output, #source-inline-select, #source-inline-select-wrap, #source-inline, #source-lab-wrap");
+                if(!inPassage) return;
+                clearTimeout(autoPickTimer);
+                autoPickTimer = setTimeout(function() {
+                    if(typeof admin.tryAutoApplyPassageSelectionForLevel === "function") admin.tryAutoApplyPassageSelectionForLevel();
+                }, 200);
+            }, true);
+        }
     },
     renderTeacherPassagePickToolbar: function(level) {
         const bar = document.getElementById("teacher-passage-pick-toolbar");
@@ -19076,9 +19112,11 @@ const ui = {
         if(wholeBtn) wholeBtn.classList.toggle("active-pick-mode", pickOn);
         if(prevBtn) prevBtn.classList.toggle("active-pick-mode", !pickOn);
         const status = document.getElementById("teacher-passage-pick-status");
+        const hint = document.getElementById("teacher-passage-pick-hint");
+        if(hint) hint.classList.toggle("hidden", !pickOn);
         const win = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null;
         let statusTxt = pickOn
-            ? "Whole insert — highlight text, then <strong>From selection</strong> in Level Bank (or here). Switch level/question for the next crop."
+            ? "Highlight passage text to assign <strong>L" + lvl + "</strong> — saves lines + anchors automatically."
             : "Question-focused excerpt for L" + lvl;
         if(win && win.lineRange) statusTxt += pickOn ? " · L" + lvl + " lines <code>" + win.lineRange.from + "–" + win.lineRange.to + "</code> saved." : " · lines <code>" + win.lineRange.from + "–" + win.lineRange.to + "</code>";
         else if(pickOn) statusTxt += " · L" + lvl + ": no lines yet.";
@@ -19151,6 +19189,9 @@ const ui = {
         else if(labWrap && !(src && typeof src === "object" && src.resourcePaper != null)) labWrap.classList.remove("architect-passage-excerpt-shell");
         if(selWrap && src && typeof src === "object" && src.resourcePaper != null) selWrap.classList.remove("architect-passage-excerpt-shell");
         if(labWrap && src && typeof src === "object" && src.resourcePaper != null) labWrap.classList.remove("architect-passage-excerpt-shell");
+        if(app._teacherLinePickMode && typeof admin !== "undefined" && admin.refreshTeacherPassageLevelPickDisplay) {
+            admin.refreshTeacherPassageLevelPickDisplay(levRefresh);
+        }
     },
     /** Multi-question: show "Question N of M" on its own line so it does not wrap into the middle of the prompt. */
     _syncSelectQuestionLabel: function(opts) {
@@ -35171,7 +35212,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         else delete q.passageEndAnchor;
         app.save();
         if(admin._mirrorPassageAnchorsToFocusQuestionInputs) admin._mirrorPassageAnchorsToFocusQuestionInputs(qid, sa, ea);
-        if(admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
+        if(app._teacherLinePickMode || app._passageLinePickForceWhole) {
+            if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
+        } else if(admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
     },
     /** Push saved lineRef from appData into Focus rows before sync (avoids sync clearing preview-only edits when DOM was empty). */
     _pushLineRefsFromAppDataToFocusInputs: function() {
@@ -35256,8 +35299,17 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(pvLvl && !pvLvl.dataset.wiredPreviewLvl) {
             pvLvl.dataset.wiredPreviewLvl = "1";
             pvLvl.addEventListener("change", () => {
+                const lvl = parseInt(pvLvl.value, 10) || 1;
+                if(userState) {
+                    userState.level = lvl;
+                    if(typeof app.save === "function") app.save({ skipRender: true, silent: true });
+                }
                 admin._syncTeacherPreviewLineWindowInput();
                 admin._syncTeacherPreviewAnchorInputs();
+                if(app._teacherLinePickMode || app._passageLinePickForceWhole) {
+                    if(admin.showTeacherWholePassageForPicking) admin.showTeacherWholePassageForPicking();
+                } else if(admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
+                if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(lvl);
             });
         }
         const startAnc = document.getElementById("teacher-passage-preview-start-anchor");
@@ -35400,6 +35452,84 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         appData.settings.levelBank[level].passageExamExcerpt = true;
         app.save({ skipRender: true, silent: true });
     },
+    _getQuestionForLevelBankLevel: function(lvl) {
+        const level = parseInt(lvl, 10) || 1;
+        if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
+        const entry = appData.settings.levelBank[level] || {};
+        const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
+        const qid = ids.length ? ids[0] : ("q" + level);
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
+        return questions.find(qq => qq && normQid(qq.id) === normQid(qid)) || null;
+    },
+    applyTeacherPassageLevelHighlights: function(containerEl, activeLevel) {
+        if(!containerEl) return;
+        containerEl.classList.add("architect-passage-level-pick-wrap");
+        containerEl.querySelectorAll(".source-line-row").forEach(function(row) {
+            row.classList.remove("architect-level-window-active", "architect-level-window-assigned");
+            row.removeAttribute("data-level-window");
+        });
+        const activeLvl = parseInt(activeLevel, 10) || 1;
+        const levels = typeof app.getActiveLevels === "function" ? app.getActiveLevels() : [1, 2, 3, 4, 5];
+        levels.forEach(function(lvl) {
+            const win = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null;
+            if(!win || !win.lineRange) return;
+            const from = win.lineRange.from;
+            const to = win.lineRange.to;
+            containerEl.querySelectorAll(".source-line-row").forEach(function(row) {
+                const numEl = row.querySelector(".source-line-num");
+                const n = numEl ? parseInt(String(numEl.textContent || "").replace(/\D/g, ""), 10) : NaN;
+                if(!Number.isFinite(n) || n < from || n > to) return;
+                if(lvl === activeLvl) row.classList.add("architect-level-window-active");
+                else row.classList.add("architect-level-window-assigned");
+                row.setAttribute("data-level-window", "L" + lvl);
+            });
+        });
+    },
+    refreshTeacherPassageLevelPickDisplay: function(activeLevel) {
+        const lvl = activeLevel != null ? activeLevel : (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState && userState.level) || 1);
+        const roots = [
+            document.getElementById("teacher-passage-preview-output"),
+            document.getElementById("source-inline-select"),
+            document.getElementById("source-inline")
+        ].filter(Boolean);
+        roots.forEach(function(el) {
+            if(el.id === "teacher-passage-preview-output" && !String(el.innerHTML || "").includes("source-line-row") && !String(el.innerHTML || "").includes("source-with-line-numbers")) return;
+            admin.applyTeacherPassageLevelHighlights(el, lvl);
+        });
+    },
+    applyLineRefFromPassageSelectionForLevel: function(lvl, opts) {
+        opts = opts || {};
+        if(!appData || appData.component !== 1) return false;
+        const level = parseInt(lvl, 10) || 1;
+        const q = admin._getQuestionForLevelBankLevel(level);
+        if(!q || !q.id) {
+            admin._showPassagePickNotice("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.");
+            return false;
+        }
+        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
+        if(!pick || !pick.text) return false;
+        const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
+        if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pick.text, { extend: opts.extend != null ? opts.extend : hasWindow, autoPick: !!opts.autoPick })) {
+            admin.refreshTeacherPassageLevelPickDisplay(level);
+            if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
+            return true;
+        }
+        return false;
+    },
+    tryAutoApplyPassageSelectionForLevel: function() {
+        if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return false;
+        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
+        if(!pick || !pick.text || pick.text.length < 8) return false;
+        let lvl = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState && userState.level) || 1;
+        const pv = document.getElementById("teacher-passage-preview-level");
+        const sel = window.getSelection && window.getSelection();
+        const anchorNode = sel && sel.anchorNode;
+        if(anchorNode && anchorNode.parentElement && anchorNode.parentElement.closest && anchorNode.parentElement.closest("#teacher-passage-preview-output") && pv) {
+            lvl = parseInt(pv.value, 10) || lvl;
+        }
+        return admin.applyLineRefFromPassageSelectionForLevel(lvl, { autoPick: true });
+    },
     _applyLineRefFromPassageSelectionToQuestion: function(q, lvl, pickText, opts) {
         opts = opts || {};
         if(!q || !q.id) return false;
@@ -35425,12 +35555,20 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             app.save();
             admin._mirrorLineRefToFocusQuestionInputs(q.id, q.lineRef);
             if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
-            admin._preparePassageForLineAssignment({ level: lvl });
-            if(!appData.isStandalone && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
+            if(opts.autoPick) {
+                admin.refreshTeacherPassageLevelPickDisplay(lvl);
+            } else {
+                admin._preparePassageForLineAssignment({ level: lvl });
+                if(!appData.isStandalone && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
+            }
             const span = range.from === range.to ? ("line " + range.from) : ("lines " + range.from + "–" + range.to);
-            const extendNote = opts.extend ? " Window <strong>extended</strong> to include your new highlight." : "";
-            const anchorNote = anchors ? " Phrase anchors updated." : "";
-            admin._showPassagePickNotice("<strong>Booklet " + span + "</strong> saved to " + (q.id || "this question") + "’s Lines box (<code>" + q.lineRef + "</code>)."+ extendNote + anchorNote + " Excerpt is on for this level. The preview stays on <strong>whole insert</strong> so you can add more — highlight missing text and click <strong>From selection</strong> again to extend.", { autoHideMs: 12000 });
+            const extendNote = opts.extend ? " Window <strong>extended</strong>." : "";
+            const anchorNote = anchors ? " Anchors updated." : "";
+            if(opts.autoPick) {
+                admin._showPassagePickNotice("<strong>L" + lvl + "</strong> · booklet " + span + " → <code>" + q.lineRef + "</code>." + extendNote + anchorNote + " Switch level and highlight the next span.", { autoHideMs: 6000 });
+            } else {
+                admin._showPassagePickNotice("<strong>Booklet " + span + "</strong> saved to " + (q.id || "this question") + "’s Lines box (<code>" + q.lineRef + "</code>)."+ extendNote + anchorNote + " Excerpt is on for this level. The preview stays on <strong>whole insert</strong> so you can add more — highlight missing text and click <strong>From selection</strong> again to extend.", { autoHideMs: 12000 });
+            }
             return true;
         }
         if(anchors && app.resolveLineRangeFromPassageAnchors) {
@@ -35510,20 +35648,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             return;
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return admin._showPassagePickNotice("Click <strong>Show whole insert</strong>, highlight passage text, then click <strong>Set lines from selection</strong>.");
+        if(!pick || !pick.text) return admin._showPassagePickNotice("Highlight passage text first (<strong>Whole insert</strong> mode), or turn on pick mode in Quote Select.");
         const lvl = pvLvl ? parseInt(pvLvl.value, 10) || 1 : 1;
-        if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
-        const entry = appData.settings.levelBank[lvl] || {};
-        const ids = Array.isArray(entry.questionIds) ? entry.questionIds : [];
-        const qid = ids.length ? ids[0] : "";
-        if(!qid) return admin._showPassagePickNotice("Pick a question in the Level Bank row’s <strong>Question</strong> column first.");
-        const questions = Array.isArray(appData.questions) ? appData.questions : [];
-        const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
-        const q = questions.find(qq => qq && normQid(qq.id) === normQid(qid));
-        if(!q) return admin._showPassagePickNotice("Focus question not found for this level.");
-        const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
-        if(!admin._applyLineRefFromPassageSelectionToQuestion(q, lvl, pick.text, { extend: hasWindow })) {
-            admin._showPassagePickNotice("Could not map that selection. Try a longer highlight, <strong>Show whole insert</strong>, or check Booklet line 1 / passage layout.");
+        if(!admin.applyLineRefFromPassageSelectionForLevel(lvl)) {
+            admin._showPassagePickNotice("Could not map that selection. Try a longer highlight, <strong>Whole insert</strong>, or check Booklet line 1 / passage layout.");
         }
     },
     showTeacherWholePassageForPicking: function() {
@@ -35539,9 +35667,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             out.innerHTML = "<span style=\"color:var(--error)\">No source text loaded.</span>";
             return;
         }
-        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\"><strong>Whole insert</strong> — highlight the part for <em>this</em> question, then click <strong>Set lines from selection</strong> (or <strong>From selection</strong> on that Focus question row). Repeat for each question; use <strong>Show line window</strong> to preview one question’s excerpt.</div>";
+        const meta = "<div style=\"font-size:0.78rem;opacity:0.85;margin-bottom:8px;\"><strong>Whole insert</strong> — highlight the span for <strong>L" + lvl + "</strong>; lines + phrase anchors save automatically (like student Quote Select). Switch level, then highlight the next span. Use <strong>Preview this question</strong> for one level’s excerpt.</div>";
         const body = app.formatSourceHtml ? app.formatSourceHtml(src) : "";
         out.innerHTML = meta + body;
+        if(typeof admin.refreshTeacherPassageLevelPickDisplay === "function") admin.refreshTeacherPassageLevelPickDisplay(lvl);
     },
     showTeacherPassagePreview: function() {
         const out = document.getElementById("teacher-passage-preview-output");
