@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T32:00:00">
-<meta name="architect-deploy" content="c1-build-sync-pick-fix-f806">
+<meta name="architect-build" content="2026-06-14T34:00:00">
+<meta name="architect-deploy" content="c1-apply-excerpt-preview-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -35708,6 +35708,20 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         appData.settings.levelBank[level].passageExamExcerpt = true;
         app.save({ skipRender: true, silent: true });
     },
+    /** After Apply excerpt: leave whole-insert pick mode so Quote Select / preview show the saved window. */
+    _finishTeacherPassageExcerptApply: function(lvl, opts) {
+        opts = opts || {};
+        const level = parseInt(lvl, 10) || 1;
+        app._passageRangeDraft = null;
+        app._passageLinePickForceWhole = false;
+        if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
+        if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
+        if(admin._syncTeacherPreviewAnchorInputs) admin._syncTeacherPreviewAnchorInputs();
+        admin.refreshTeacherPassageLevelPickDisplay(level);
+        if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
+        if(opts.previewAdmin !== false && admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
+        if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
+    },
     _getPassageRangePickLevel: function() {
         const pv = document.getElementById("teacher-passage-preview-level");
         const sel = window.getSelection && window.getSelection();
@@ -35900,7 +35914,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const level = parseInt(lvl, 10) || 1;
         const q = admin._getQuestionForLevelBankLevel(level);
         if(!q || !q.id) {
-            admin._showPassagePickNotice("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.");
+            admin.setPassageRangeWizardStatus("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.", "error");
             return false;
         }
         const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(level) : (app.getSourceText ? app.getSourceText() : "");
@@ -35915,12 +35929,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         admin._enableQuestionFocusedPassageAfterLinePick(level);
         app.save();
         if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
-        admin.refreshTeacherPassageLevelPickDisplay(level);
-        if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
-        admin.renderTeacherPassageRangeWizard(level);
         const span = ar && ar.lineRange ? (ar.lineRange.from === ar.lineRange.to ? ("line " + ar.lineRange.from) : ("lines " + ar.lineRange.from + "–" + ar.lineRange.to)) : "phrase anchors";
-        admin.setPassageRangeWizardStatus("<strong>Saved</strong> · " + span + " · Start: “" + q.passageStartAnchor + "” · End: “" + q.passageEndAnchor + "”", "ok");
-        app._passageRangeDraft = null;
+        admin._finishTeacherPassageExcerptApply(level);
+        admin.setPassageRangeWizardStatus("<strong>Saved</strong> · " + span + " · excerpt shown below. Start: “" + q.passageStartAnchor + "” · End: “" + q.passageEndAnchor + "”", "ok");
         return true;
     },
     applyPassageRangeDraftForLevel: function(lvl) {
@@ -35928,18 +35939,19 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const draft = app._passageRangeDraft || {};
         admin.rememberPassageRangePick();
         const pickText = admin.getPassageRangePickText();
-        if(draft.start && draft.end) return admin._applyPassageStartEndToLevel(level, draft.start, draft.end);
+        const qDraft = admin._getQuestionForLevelBankLevel(level);
+        const startA = String(draft.start || (qDraft && qDraft.passageStartAnchor) || "").trim();
+        const endA = String(draft.end || (qDraft && qDraft.passageEndAnchor) || "").trim();
+        if(startA && endA) return admin._applyPassageStartEndToLevel(level, startA, endA);
         if(pickText && pickText.length >= 4) {
-            const q = admin._getQuestionForLevelBankLevel(level);
+            const q = qDraft || admin._getQuestionForLevelBankLevel(level);
             if(!q || !q.id) {
                 admin.setPassageRangeWizardStatus("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.", "error");
                 return false;
             }
             const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
-            if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pickText, { extend: hasWindow })) {
-                app._passageRangeDraft = null;
-                admin.renderTeacherPassageRangeWizard(level);
-                admin.setPassageRangeWizardStatus("<strong>Excerpt saved</strong> from your highlight.", "ok");
+            if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pickText, { extend: hasWindow, finishApply: true })) {
+                admin.setPassageRangeWizardStatus("<strong>Excerpt saved</strong> from your highlight — passage trimmed below.", "ok");
                 return true;
             }
             admin.setPassageRangeWizardStatus("Could not map that highlight — try a longer span or use Mark start + Mark end.", "error");
@@ -36073,22 +36085,22 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             app.save();
             admin._mirrorLineRefToFocusQuestionInputs(q.id, q.lineRef);
             if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
-            if(opts.autoPick) {
-                admin.refreshTeacherPassageLevelPickDisplay(lvl);
-            } else {
-                admin._preparePassageForLineAssignment({ level: lvl });
-                if(!appData.isStandalone && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
-            }
             const span = range.from === range.to ? ("line " + range.from) : ("lines " + range.from + "–" + range.to);
             const extendNote = opts.extend ? " Window <strong>extended</strong>." : "";
             const anchorNote = anchors ? " Anchors updated." : "";
-            if(opts.autoPick) {
+            if(opts.finishApply) {
+                admin._finishTeacherPassageExcerptApply(lvl);
+                admin._showPassagePickNotice("<strong>Excerpt saved</strong> for " + (q.id || "this question") + " · booklet " + span + " (<code>" + q.lineRef + "</code>)." + (anchors ? " Start: <strong>“" + (q.passageStartAnchor || anchors.startA) + "”</strong> · End: <strong>“" + (q.passageEndAnchor || anchors.endA) + "”</strong>." : "") + extendNote, { autoHideMs: 12000 });
+            } else if(opts.autoPick) {
+                admin.refreshTeacherPassageLevelPickDisplay(lvl);
                 admin._showPassagePickNotice("<strong>L" + lvl + "</strong> · booklet " + span + " → <code>" + q.lineRef + "</code>." + extendNote + anchorNote, { autoHideMs: 6000 });
             } else {
+                admin._preparePassageForLineAssignment({ level: lvl });
+                if(!appData.isStandalone && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
                 admin._showPassagePickNotice("<strong>Excerpt saved</strong> for " + (q.id || "this question") + " · booklet " + span + " (<code>" + q.lineRef + "</code>)." + (anchors ? " Start: <strong>“" + (q.passageStartAnchor || anchors.startA) + "”</strong> · End: <strong>“" + (q.passageEndAnchor || anchors.endA) + "”</strong>." : "") + extendNote, { autoHideMs: 12000 });
             }
             if(typeof admin.renderTeacherPassageRangeWizard === "function") admin.renderTeacherPassageRangeWizard(lvl);
-            app._passageRangeDraft = null;
+            if(!opts.finishApply) app._passageRangeDraft = null;
             return true;
         }
         if(anchors && app.resolveLineRangeFromPassageAnchors) {
@@ -36096,8 +36108,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             if(ar && ar.lineRange) {
                 admin._enableQuestionFocusedPassageAfterLinePick(lvl);
                 app.save();
-                admin._preparePassageForLineAssignment({ level: lvl });
-                admin._showPassagePickNotice("Phrase anchors saved for " + (q.id || "this question") + ". Start: <strong>“" + (q.passageStartAnchor || anchors.startA) + "”</strong> · End: <strong>“" + (q.passageEndAnchor || anchors.endA) + "”</strong>. Turn on <strong>Question-focused</strong> or <strong>Show line window</strong> to preview.", { autoHideMs: 12000 });
+                if(opts.finishApply) {
+                    admin._finishTeacherPassageExcerptApply(lvl);
+                    admin._showPassagePickNotice("Phrase anchors saved for " + (q.id || "this question") + ". Start: <strong>“" + (q.passageStartAnchor || anchors.startA) + "”</strong> · End: <strong>“" + (q.passageEndAnchor || anchors.endA) + "”</strong>. Excerpt shown below.", { autoHideMs: 12000 });
+                } else {
+                    admin._preparePassageForLineAssignment({ level: lvl });
+                    admin._showPassagePickNotice("Phrase anchors saved for " + (q.id || "this question") + ". Start: <strong>“" + (q.passageStartAnchor || anchors.startA) + "”</strong> · End: <strong>“" + (q.passageEndAnchor || anchors.endA) + "”</strong>. Turn on <strong>Question-focused</strong> or <strong>Show line window</strong> to preview.", { autoHideMs: 12000 });
+                }
                 return true;
             }
         }
