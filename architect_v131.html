@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T31:00:00">
-<meta name="architect-deploy" content="c1-passage-pick-focus-f806">
+<meta name="architect-build" content="2026-06-14T32:00:00">
+<meta name="architect-deploy" content="c1-build-sync-pick-fix-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1518,12 +1518,7 @@
                             });
                         }
                         if(!mismatchDismissed) {
-                            try {
-                                if(/architect_v131\.html/i.test(location.pathname || "") && !sessionStorage.getItem("tsaBuildReload")) {
-                                    sessionStorage.setItem("tsaBuildReload", "1");
-                                    location.replace(fixUrl);
-                                }
-                            } catch(eReload) {}
+                            /* Do not auto-reload — it flashes away passage highlights and blocks excerpt picking. User clicks the link if needed. */
                         }
                     } else {
                         try { sessionStorage.removeItem("tsaBuildReload"); } catch(eClr) {}
@@ -19280,6 +19275,11 @@ const ui = {
         }
         if(!document.body.dataset.passageRangeWizardBound) {
             document.body.dataset.passageRangeWizardBound = "1";
+            document.addEventListener("mousedown", function(ev) {
+                const btn = ev.target && ev.target.closest && ev.target.closest("[data-passage-range-action]");
+                if(!btn) return;
+                if(typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick();
+            }, true);
             document.addEventListener("click", function(ev) {
                 const btn = ev.target && ev.target.closest && ev.target.closest("[data-passage-range-action]");
                 if(!btn) return;
@@ -35677,7 +35677,19 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     clearPassageRangeDraft: function() {
         app._passageRangeDraft = null;
+        app._passageRangeLastPick = "";
         if(typeof admin.renderTeacherPassageRangeWizard === "function") admin.renderTeacherPassageRangeWizard();
+    },
+    rememberPassageRangePick: function(fromSelection) {
+        const pick = fromSelection || (app.getPassageTextSelection && app.getPassageTextSelection());
+        if(pick && pick.text && String(pick.text).trim()) {
+            app._passageRangeLastPick = String(pick.text).trim();
+        }
+    },
+    getPassageRangePickText: function() {
+        const live = app.getPassageTextSelection && app.getPassageTextSelection();
+        if(live && live.text && String(live.text).trim()) return String(live.text).trim();
+        return app._passageRangeLastPick ? String(app._passageRangeLastPick).trim() : "";
     },
     renderTeacherPassageRangeWizard: function(activeLevel) {
         if(appData && appData.isStandalone) return;
@@ -35688,8 +35700,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const savedEnd = q && typeof q.passageEndAnchor === "string" ? q.passageEndAnchor.trim() : "";
         const startShow = draft.start || savedStart || "";
         const endShow = draft.end || savedEnd || "";
-        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        const pickText = pick && pick.text ? pick.text : "";
+        const pickText = typeof admin.getPassageRangePickText === "function" ? admin.getPassageRangePickText() : "";
         let estLines = "";
         const src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay(lvl) : (app.getSourceText ? app.getSourceText() : "");
         if(draft.start && draft.end && app.resolveLineRangeFromPassageAnchors) {
@@ -35766,12 +35777,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     refreshPassageRangeWizardFromSelection: function() {
         if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
+        admin.rememberPassageRangePick();
         admin.renderTeacherPassageRangeWizard();
     },
     markPassageRangeStartFromSelection: function() {
-        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return admin._showPassagePickNotice("Highlight the <strong>opening words</strong> where the excerpt should start, then click <strong>Mark start</strong>.");
-        const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pick.text) : null;
+        const pickText = admin.getPassageRangePickText();
+        if(!pickText) return admin._showPassagePickNotice("Highlight the <strong>opening words</strong> where the excerpt should start, then click <strong>Mark start</strong>.");
+        const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pickText) : null;
         if(!anchors || !anchors.startA) return admin._showPassagePickNotice("Highlight a few more words at the <strong>start</strong> of the excerpt.");
         if(!app._passageRangeDraft) app._passageRangeDraft = {};
         app._passageRangeDraft.start = anchors.startA;
@@ -35779,9 +35791,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         admin._showPassagePickNotice("<strong>Start marked:</strong> “" + anchors.startA + "”. Now highlight the <strong>closing words</strong> and click <strong>Mark end</strong>.", { autoHideMs: 8000 });
     },
     markPassageRangeEndFromSelection: function() {
-        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return admin._showPassagePickNotice("Highlight the <strong>closing words</strong> where the excerpt should end, then click <strong>Mark end</strong>.");
-        const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pick.text) : null;
+        const pickText = admin.getPassageRangePickText();
+        if(!pickText) return admin._showPassagePickNotice("Highlight the <strong>closing words</strong> where the excerpt should end, then click <strong>Mark end</strong>.");
+        const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pickText) : null;
         if(!anchors || !anchors.endA) return admin._showPassagePickNotice("Highlight a few more words at the <strong>end</strong> of the excerpt.");
         if(!app._passageRangeDraft) app._passageRangeDraft = {};
         if(!app._passageRangeDraft.start) {
@@ -35823,14 +35835,16 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     applyPassageRangeDraftForLevel: function(lvl) {
         const level = parseInt(lvl, 10) || admin._getPassageRangePickLevel();
         const draft = app._passageRangeDraft || {};
-        const pick = app.getPassageTextSelection && app.getPassageTextSelection();
+        const pickText = admin.getPassageRangePickText();
         if(draft.start && draft.end) return admin._applyPassageStartEndToLevel(level, draft.start, draft.end);
-        if(pick && pick.text && pick.text.length >= 8) {
-            const hasWindow = !!(function() {
-                const q = admin._getQuestionForLevelBankLevel(level);
-                return q && (q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
-            })();
-            if(admin.applyLineRefFromPassageSelectionForLevel(level, { extend: hasWindow })) {
+        if(pickText && pickText.length >= 8) {
+            const q = admin._getQuestionForLevelBankLevel(level);
+            if(!q || !q.id) {
+                admin._showPassagePickNotice("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.");
+                return false;
+            }
+            const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
+            if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pickText, { extend: hasWindow })) {
                 app._passageRangeDraft = null;
                 admin.renderTeacherPassageRangeWizard(level);
                 return true;
@@ -35913,9 +35927,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             return false;
         }
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
-        if(!pick || !pick.text) return false;
+        const pickText = (opts && opts.pickText) || (pick && pick.text) || (typeof admin.getPassageRangePickText === "function" ? admin.getPassageRangePickText() : "");
+        if(!pickText) return false;
         const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
-        if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pick.text, { extend: opts.extend != null ? opts.extend : hasWindow, autoPick: !!opts.autoPick })) {
+        if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pickText, { extend: opts.extend != null ? opts.extend : hasWindow, autoPick: !!opts.autoPick })) {
             admin.refreshTeacherPassageLevelPickDisplay(level);
             if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
             return true;
