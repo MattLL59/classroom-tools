@@ -1069,6 +1069,34 @@
         opacity: 0.45;
         pointer-events: none;
     }
+    .teacher-passage-range-wizard .tsa-range-live-status {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        line-height: 1.4;
+        display: none;
+    }
+    .teacher-passage-range-wizard .tsa-range-live-status.is-visible { display: block; }
+    .teacher-passage-range-wizard .tsa-range-live-status.is-ok {
+        background: rgba(76, 175, 80, 0.12);
+        border: 1px solid rgba(76, 175, 80, 0.45);
+    }
+    .teacher-passage-range-wizard .tsa-range-live-status.is-warn {
+        background: rgba(255, 193, 7, 0.14);
+        border: 1px solid rgba(255, 193, 7, 0.55);
+    }
+    .teacher-passage-range-wizard .tsa-range-live-status.is-error {
+        background: rgba(244, 67, 54, 0.1);
+        border: 1px solid rgba(244, 67, 54, 0.45);
+    }
+    .teacher-passage-range-wizard .tsa-range-start-val.tsa-range-marked,
+    .teacher-passage-range-wizard .tsa-range-end-val.tsa-range-marked {
+        color: var(--primary);
+        background: rgba(0, 150, 136, 0.12);
+        padding: 1px 4px;
+        border-radius: 3px;
+    }
     /* Passage excerpt pick: only wizard + whole passage — hide quote cards, filters, extra chrome */
     body.tsa-passage-pick-focus #view-select.active {
         min-height: calc(100vh - 108px);
@@ -1651,11 +1679,12 @@
                 </div>
                 <div class="tsa-range-actions">
                     <button type="button" class="btn btn-outline btn-small" data-passage-range-action="mark-start">① Mark start</button>
-                    <button type="button" class="btn btn-outline btn-small" data-passage-range-action="mark-end" disabled>② Mark end</button>
-                    <button type="button" class="btn btn-primary btn-small" data-passage-range-action="apply" disabled>Apply excerpt</button>
+                    <button type="button" class="btn btn-outline btn-small" data-passage-range-action="mark-end">② Mark end</button>
+                    <button type="button" class="btn btn-primary btn-small" data-passage-range-action="apply">Apply excerpt</button>
                     <button type="button" class="btn btn-outline btn-small" data-passage-range-action="clear">Clear</button>
                     <button type="button" class="btn btn-outline btn-small" data-passage-range-action="preview">Preview this question</button>
                 </div>
+                <div class="tsa-range-live-status" role="status" aria-live="polite"></div>
             </div>
             <div id="select-passage-scope-row" style="margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;">
                 <div class="tsa-passage-scope-controls" id="tsa-passage-scope-select-controls" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:0.78rem; flex-shrink:0; min-width:min-content;" title="Whole insert vs line window from Focus question / Lines box (stored per question).">
@@ -15847,12 +15876,12 @@ const app = {
     /** First/last words of a passage highlight → anchor phrases (same idea as WJEC body anchors). */
     derivePassageAnchorsFromSelectionText: function(selectedText) {
         const sel = String(selectedText || "").replace(/\s+/g, " ").trim();
-        if(sel.length < 6) return null;
+        if(sel.length < 2) return null;
         const words = sel.split(/\s+/).filter(Boolean);
         if(!words.length) return null;
         const headN = Math.min(6, words.length);
         const startA = words.slice(0, headN).join(" ");
-        const endA = words.length > 2 ? words.slice(-Math.min(6, words.length)).join(" ") : startA;
+        const endA = words.length > 1 ? words.slice(-Math.min(6, words.length)).join(" ") : startA;
         return { startA, endA };
     },
     /** Widen an existing line window with a new highlight (union of layout row spans when possible). */
@@ -16553,13 +16582,15 @@ const app = {
             const sel = window.getSelection();
             if(!sel || sel.rangeCount < 1 || sel.isCollapsed) return null;
             const text = String(sel.toString() || "").replace(/\s+/g, " ").trim();
-            if(text.length < 3) return null;
+            if(text.length < 2) return null;
             const roots = [
                 document.getElementById("teacher-passage-preview-output"),
                 document.getElementById("source-inline"),
                 document.getElementById("source-inline-select"),
+                document.getElementById("source-inline-select-scroll"),
                 document.getElementById("source-lab-wrap"),
                 document.getElementById("source-inline-select-wrap"),
+                document.getElementById("view-select"),
                 document.querySelector("#modal-admin #ai-input.source-editor")
             ].filter(Boolean);
             const nodeInPassage = (node) => {
@@ -16571,8 +16602,9 @@ const app = {
                 }
                 return false;
             };
-            if(!nodeInPassage(sel.anchorNode) && !nodeInPassage(sel.focusNode)) return null;
-            return { text: text };
+            if(nodeInPassage(sel.anchorNode) || nodeInPassage(sel.focusNode)) return { text: text };
+            if(app._teacherLinePickMode && appData && !appData.isStandalone && appData.component === 1) return { text: text };
+            return null;
         } catch(e) { return null; }
     },
     /** Return 1-based line number where quote appears in source, or null. Uses explicit line numbers (e.g. "1. text") or line order. */
@@ -19262,20 +19294,28 @@ const ui = {
         if(!window.__tsaTeacherPassageAutoPickBound) {
             window.__tsaTeacherPassageAutoPickBound = true;
             let rangePreviewTimer = null;
-            document.addEventListener("mouseup", function(ev) {
-                if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
-                if(ev.target && ev.target.closest && ev.target.closest("button, input, select, textarea, summary, label, [data-tsa-notice-action], .modal-header, #admin-tabs, .teacher-passage-range-wizard")) return;
-                const inPassage = ev.target && ev.target.closest && ev.target.closest("#teacher-passage-preview-output, #source-inline-select, #source-inline-select-wrap, #source-inline, #source-lab-wrap");
-                if(!inPassage) return;
+            const scheduleRangePreview = function() {
                 clearTimeout(rangePreviewTimer);
                 rangePreviewTimer = setTimeout(function() {
                     if(typeof admin.refreshPassageRangeWizardFromSelection === "function") admin.refreshPassageRangeWizardFromSelection();
-                }, 120);
+                }, 30);
+            };
+            document.addEventListener("selectionchange", function() {
+                if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
+                scheduleRangePreview();
+            });
+            document.addEventListener("mouseup", function(ev) {
+                if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
+                if(ev.target && ev.target.closest && ev.target.closest("button, input, select, textarea, summary, label, [data-tsa-notice-action], .modal-header, #admin-tabs")) return;
+                const inPassage = ev.target && ev.target.closest && ev.target.closest("#teacher-passage-preview-output, #source-inline-select, #source-inline-select-scroll, #source-inline-select-wrap, #source-inline, #source-lab-wrap");
+                if(!inPassage) return;
+                if(typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick();
+                scheduleRangePreview();
             }, true);
         }
         if(!document.body.dataset.passageRangeWizardBound) {
             document.body.dataset.passageRangeWizardBound = "1";
-            document.addEventListener("mousedown", function(ev) {
+            document.addEventListener("pointerdown", function(ev) {
                 const btn = ev.target && ev.target.closest && ev.target.closest("[data-passage-range-action]");
                 if(!btn) return;
                 if(typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick();
@@ -19284,9 +19324,10 @@ const ui = {
                 const btn = ev.target && ev.target.closest && ev.target.closest("[data-passage-range-action]");
                 if(!btn) return;
                 ev.preventDefault();
+                ev.stopPropagation();
                 const action = btn.getAttribute("data-passage-range-action");
                 if(typeof admin.handlePassageRangeWizardAction === "function") admin.handlePassageRangeWizardAction(action);
-            });
+            }, true);
         }
     },
     renderTeacherPassagePickToolbar: function(level) {
@@ -35237,10 +35278,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     </div>
                     <div class="tsa-range-actions">
                         <button type="button" class="btn btn-outline btn-small" data-passage-range-action="mark-start">① Mark start</button>
-                        <button type="button" class="btn btn-outline btn-small" data-passage-range-action="mark-end" disabled>② Mark end</button>
-                        <button type="button" class="btn btn-primary btn-small" data-passage-range-action="apply" disabled>Apply excerpt</button>
+                        <button type="button" class="btn btn-outline btn-small" data-passage-range-action="mark-end">② Mark end</button>
+                        <button type="button" class="btn btn-primary btn-small" data-passage-range-action="apply">Apply excerpt</button>
                         <button type="button" class="btn btn-outline btn-small" data-passage-range-action="clear">Clear</button>
                     </div>
+                    <div class="tsa-range-live-status" role="status" aria-live="polite"></div>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0;">
                     <label style="font-size:0.85rem;">Level <select id="teacher-passage-preview-level">${Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => `<option value="${i + 1}">L${i + 1}</option>`).join("")}</select></label>
@@ -35678,13 +35720,42 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     clearPassageRangeDraft: function() {
         app._passageRangeDraft = null;
         app._passageRangeLastPick = "";
+        admin.setPassageRangeWizardStatus("", "");
         if(typeof admin.renderTeacherPassageRangeWizard === "function") admin.renderTeacherPassageRangeWizard();
     },
+    setPassageRangeWizardStatus: function(msgHtml, kind) {
+        document.querySelectorAll(".teacher-passage-range-wizard .tsa-range-live-status").forEach(function(el) {
+            if(!msgHtml) {
+                el.classList.remove("is-visible", "is-ok", "is-warn", "is-error");
+                el.innerHTML = "";
+                return;
+            }
+            el.classList.add("is-visible");
+            el.classList.remove("is-ok", "is-warn", "is-error");
+            if(kind === "ok") el.classList.add("is-ok");
+            else if(kind === "warn") el.classList.add("is-warn");
+            else el.classList.add("is-error");
+            el.innerHTML = msgHtml;
+        });
+    },
     rememberPassageRangePick: function(fromSelection) {
-        const pick = fromSelection || (app.getPassageTextSelection && app.getPassageTextSelection());
-        if(pick && pick.text && String(pick.text).trim()) {
-            app._passageRangeLastPick = String(pick.text).trim();
+        let text = "";
+        if(fromSelection && fromSelection.text) text = String(fromSelection.text).trim();
+        else {
+            const pick = app.getPassageTextSelection && app.getPassageTextSelection();
+            if(pick && pick.text) text = String(pick.text).trim();
         }
+        if(!text && typeof window !== "undefined") {
+            try {
+                const sel = window.getSelection && window.getSelection();
+                if(sel && !sel.isCollapsed) text = String(sel.toString() || "").replace(/\s+/g, " ").trim();
+            } catch(eSel) {}
+        }
+        if(text.length >= 2) {
+            app._passageRangeLastPick = text;
+            return true;
+        }
+        return false;
     },
     getPassageRangePickText: function() {
         const live = app.getPassageTextSelection && app.getPassageTextSelection();
@@ -35727,21 +35798,25 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const startEl = wiz.querySelector(".tsa-range-start-val");
             if(startEl) {
                 if(startShow) {
-                    startEl.textContent = startShow + (draft.start ? " (marked)" : " (saved)");
+                    startEl.textContent = "“" + startShow + "”" + (draft.start ? " ✓ marked" : " (saved)");
                     startEl.classList.remove("tsa-range-empty");
+                    startEl.classList.toggle("tsa-range-marked", !!draft.start);
                 } else {
                     startEl.textContent = "not set — highlight the first words students should read";
                     startEl.classList.add("tsa-range-empty");
+                    startEl.classList.remove("tsa-range-marked");
                 }
             }
             const endEl = wiz.querySelector(".tsa-range-end-val");
             if(endEl) {
                 if(endShow) {
-                    endEl.textContent = endShow + (draft.end ? " (marked)" : " (saved)");
+                    endEl.textContent = "“" + endShow + "”" + (draft.end ? " ✓ marked" : " (saved)");
                     endEl.classList.remove("tsa-range-empty");
+                    endEl.classList.toggle("tsa-range-marked", !!draft.end);
                 } else {
                     endEl.textContent = "not set — highlight the last words students should read";
                     endEl.classList.add("tsa-range-empty");
+                    endEl.classList.remove("tsa-range-marked");
                 }
             }
             const hiRow = wiz.querySelector(".tsa-range-highlight-row");
@@ -35770,9 +35845,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const markStartBtn = wiz.querySelector('[data-passage-range-action="mark-start"]');
             const markEndBtn = wiz.querySelector('[data-passage-range-action="mark-end"]');
             const applyBtn = wiz.querySelector('[data-passage-range-action="apply"]');
-            if(markStartBtn) markStartBtn.disabled = !pickText;
-            if(markEndBtn) markEndBtn.disabled = !pickText || !startShow;
-            if(applyBtn) applyBtn.disabled = !(pickText && pickText.length >= 8) && !(draft.start && draft.end);
+            if(markStartBtn) markStartBtn.disabled = false;
+            if(markEndBtn) markEndBtn.disabled = false;
+            if(applyBtn) applyBtn.disabled = false;
         });
     },
     refreshPassageRangeWizardFromSelection: function() {
@@ -35781,20 +35856,35 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         admin.renderTeacherPassageRangeWizard();
     },
     markPassageRangeStartFromSelection: function() {
+        admin.rememberPassageRangePick();
         const pickText = admin.getPassageRangePickText();
-        if(!pickText) return admin._showPassagePickNotice("Highlight the <strong>opening words</strong> where the excerpt should start, then click <strong>Mark start</strong>.");
+        if(!pickText) {
+            admin.setPassageRangeWizardStatus("No highlight found. Drag across the <strong>opening words</strong> in the passage below, then click <strong>Mark start</strong> again.", "error");
+            return false;
+        }
         const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pickText) : null;
-        if(!anchors || !anchors.startA) return admin._showPassagePickNotice("Highlight a few more words at the <strong>start</strong> of the excerpt.");
+        if(!anchors || !anchors.startA) {
+            admin.setPassageRangeWizardStatus("Highlight a few more words at the <strong>start</strong> of the excerpt.", "error");
+            return false;
+        }
         if(!app._passageRangeDraft) app._passageRangeDraft = {};
         app._passageRangeDraft.start = anchors.startA;
         admin.renderTeacherPassageRangeWizard();
-        admin._showPassagePickNotice("<strong>Start marked:</strong> “" + anchors.startA + "”. Now highlight the <strong>closing words</strong> and click <strong>Mark end</strong>.", { autoHideMs: 8000 });
+        admin.setPassageRangeWizardStatus("<strong>Start set:</strong> “" + anchors.startA + "”. Now highlight the <strong>closing words</strong> and click <strong>Mark end</strong>.", "ok");
+        return true;
     },
     markPassageRangeEndFromSelection: function() {
+        admin.rememberPassageRangePick();
         const pickText = admin.getPassageRangePickText();
-        if(!pickText) return admin._showPassagePickNotice("Highlight the <strong>closing words</strong> where the excerpt should end, then click <strong>Mark end</strong>.");
+        if(!pickText) {
+            admin.setPassageRangeWizardStatus("No highlight found. Drag across the <strong>closing words</strong>, then click <strong>Mark end</strong> again.", "error");
+            return false;
+        }
         const anchors = app.derivePassageAnchorsFromSelectionText ? app.derivePassageAnchorsFromSelectionText(pickText) : null;
-        if(!anchors || !anchors.endA) return admin._showPassagePickNotice("Highlight a few more words at the <strong>end</strong> of the excerpt.");
+        if(!anchors || !anchors.endA) {
+            admin.setPassageRangeWizardStatus("Highlight a few more words at the <strong>end</strong> of the excerpt.", "error");
+            return false;
+        }
         if(!app._passageRangeDraft) app._passageRangeDraft = {};
         if(!app._passageRangeDraft.start) {
             const q = admin._getQuestionForLevelBankLevel(admin._getPassageRangePickLevel());
@@ -35802,7 +35892,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         }
         app._passageRangeDraft.end = anchors.endA;
         admin.renderTeacherPassageRangeWizard();
-        admin._showPassagePickNotice("<strong>End marked:</strong> “" + anchors.endA + "”. Click <strong>Apply excerpt</strong> to save.", { autoHideMs: 8000 });
+        admin.setPassageRangeWizardStatus("<strong>End set:</strong> “" + anchors.endA + "”. Click <strong>Apply excerpt</strong> to save.", "ok");
+        return true;
     },
     _applyPassageStartEndToLevel: function(lvl, startA, endA, opts) {
         opts = opts || {};
@@ -35828,31 +35919,38 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
         admin.renderTeacherPassageRangeWizard(level);
         const span = ar && ar.lineRange ? (ar.lineRange.from === ar.lineRange.to ? ("line " + ar.lineRange.from) : ("lines " + ar.lineRange.from + "–" + ar.lineRange.to)) : "phrase anchors";
-        admin._showPassagePickNotice("<strong>L" + level + "</strong> excerpt saved · " + span + ". Start: <strong>“" + q.passageStartAnchor + "”</strong> · End: <strong>“" + q.passageEndAnchor + "”</strong>.", { autoHideMs: 10000 });
+        admin.setPassageRangeWizardStatus("<strong>Saved</strong> · " + span + " · Start: “" + q.passageStartAnchor + "” · End: “" + q.passageEndAnchor + "”", "ok");
         app._passageRangeDraft = null;
         return true;
     },
     applyPassageRangeDraftForLevel: function(lvl) {
         const level = parseInt(lvl, 10) || admin._getPassageRangePickLevel();
         const draft = app._passageRangeDraft || {};
+        admin.rememberPassageRangePick();
         const pickText = admin.getPassageRangePickText();
         if(draft.start && draft.end) return admin._applyPassageStartEndToLevel(level, draft.start, draft.end);
-        if(pickText && pickText.length >= 8) {
+        if(pickText && pickText.length >= 4) {
             const q = admin._getQuestionForLevelBankLevel(level);
             if(!q || !q.id) {
-                admin._showPassagePickNotice("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.");
+                admin.setPassageRangeWizardStatus("Pick a question in Level Bank → <strong>Q</strong> for L" + level + " first.", "error");
                 return false;
             }
             const hasWindow = !!(q.lineRef || q.passageStartAnchor || q.passageEndAnchor);
             if(admin._applyLineRefFromPassageSelectionToQuestion(q, level, pickText, { extend: hasWindow })) {
                 app._passageRangeDraft = null;
                 admin.renderTeacherPassageRangeWizard(level);
+                admin.setPassageRangeWizardStatus("<strong>Excerpt saved</strong> from your highlight.", "ok");
                 return true;
             }
+            admin.setPassageRangeWizardStatus("Could not map that highlight — try a longer span or use Mark start + Mark end.", "error");
             return false;
         }
-        if(draft.start && !draft.end) return admin._showPassagePickNotice("Start is set. Highlight the <strong>closing words</strong> and click <strong>Mark end</strong>, then <strong>Apply excerpt</strong>.");
-        return admin._showPassagePickNotice("Highlight the passage excerpt first — either mark <strong>start</strong> and <strong>end</strong> separately, or drag one highlight from first word to last word.");
+        if(draft.start && !draft.end) {
+            admin.setPassageRangeWizardStatus("Start is set. Highlight the <strong>closing words</strong> and click <strong>Mark end</strong>, then <strong>Apply excerpt</strong>.", "warn");
+            return false;
+        }
+        admin.setPassageRangeWizardStatus("Highlight the excerpt in the passage, then <strong>Mark start</strong> and <strong>Mark end</strong>, or drag one span and click <strong>Apply excerpt</strong>.", "error");
+        return false;
     },
     handlePassageRangeWizardAction: function(action) {
         if(!appData || appData.component !== 1) return;
@@ -36094,7 +36192,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(typeof ui.switchView === "function") ui.switchView("select", true);
         if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
         if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
-        admin._showPassagePickNotice("Full-screen pick — mark <strong>start</strong> and <strong>end</strong> in the panel above the passage, then <strong>Apply excerpt</strong>.", { autoHideMs: 12000 });
+        admin.setPassageRangeWizardStatus("Drag across the <strong>opening words</strong>, click <strong>Mark start</strong>, then the <strong>closing words</strong>, click <strong>Mark end</strong>, then <strong>Apply excerpt</strong>.", "warn");
     },
     showTeacherWholePassageForPicking: function() {
         const out = document.getElementById("teacher-passage-preview-output");
