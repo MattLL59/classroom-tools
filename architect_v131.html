@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T39:00:00">
-<meta name="architect-deploy" content="c1-passage-focus-dock-f806">
+<meta name="architect-build" content="2026-06-14T40:00:00">
+<meta name="architect-deploy" content="c1-passage-scroll-paragraph-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1186,6 +1186,13 @@
     #modal-admin.tsa-c1-passage-focus .admin-tab[data-tab="edit"] > details:not(#admin-c1-source-details) {
         display: none !important;
     }
+    #modal-admin.tsa-c1-passage-focus .admin-tab[data-tab="edit"]:not(.hidden) {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
     #modal-admin.tsa-c1-passage-focus #admin-c1-source-details > p,
     #modal-admin.tsa-c1-passage-focus #admin-c1-source-details > summary .admin-h-extra {
         display: none;
@@ -1258,15 +1265,20 @@
         display: flex;
         flex-direction: column;
         margin-bottom: 0;
+        overflow: hidden;
     }
     #source-text-single-wrap.tsa-c1-passage-focus .c1-passage-chrome-collapsed {
         display: none !important;
     }
     #source-text-single-wrap.tsa-c1-passage-focus #ai-input.source-editor {
         flex: 1 1 auto;
-        min-height: min(68vh, 820px) !important;
+        min-height: 0 !important;
         max-height: none !important;
-        overflow: auto !important;
+        height: auto;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
     }
     .c1-passage-tool-rail {
         flex: 0 0 44px;
@@ -2432,7 +2444,7 @@
                     </div>
                     <div id="c1-passage-rail-flyout-dock" class="c1-passage-rail-flyout-dock" aria-label="Passage tool panel"></div>
                     <aside id="c1-passage-tool-rail" class="c1-passage-tool-rail" aria-label="Passage tools">
-                        <button type="button" class="btn btn-outline btn-small c1-rail-btn" data-rail-action="paragraph" title="¶ Paragraph on this row">¶</button>
+                        <button type="button" tabindex="-1" class="btn btn-outline btn-small c1-rail-btn" data-rail-action="paragraph" title="¶ Paragraph on this row (same as Shift+Enter)">¶</button>
                         <button type="button" class="btn btn-outline btn-small c1-rail-btn" data-rail-action="format" title="Bold / italic / underline">B</button>
                         <button type="button" class="btn btn-outline btn-small c1-rail-btn" data-rail-action="layout" title="Insert width · Sync · Reflow">↔</button>
                         <button type="button" class="btn btn-outline btn-small c1-rail-btn" data-rail-action="sync" title="Sync passage layout">↻</button>
@@ -27482,6 +27494,16 @@ const admin = {
         }
         const rail = document.getElementById("c1-passage-tool-rail");
         if(rail) {
+            rail.addEventListener("pointerdown", function(ev) {
+                const btn = ev.target && ev.target.closest ? ev.target.closest(".c1-rail-btn") : null;
+                if(!btn || !rail.contains(btn) || btn.dataset.railAction !== "paragraph") return;
+                ev.preventDefault();
+                if(admin.preserveSourceToolbarCaretSelection) admin.preserveSourceToolbarCaretSelection(ev);
+            }, true);
+            rail.addEventListener("mousedown", function(ev) {
+                const btn = ev.target && ev.target.closest ? ev.target.closest('.c1-rail-btn[data-rail-action="paragraph"]') : null;
+                if(btn && rail.contains(btn)) ev.preventDefault();
+            }, true);
             rail.addEventListener("click", function(ev) {
                 const btn = ev.target && ev.target.closest ? ev.target.closest(".c1-rail-btn") : null;
                 if(!btn || !rail.contains(btn)) return;
@@ -32662,21 +32684,20 @@ const admin = {
                 return;
             }
             /**
-             * Wrapped continuation row (same `data-arch-stor-idx`): toggling ¶ on row 2+ would gap inside one logical line.
-             * Split at caret first — same path as **Shift+Enter** in the booklet editor.
+             * Same path as **Shift+Enter**: split stored line at caret when possible, then fall back to toggling ¶ on the row.
              */
             const ctxPara = typeof admin._getC1BookletCaretRowContext === "function" ? admin._getC1BookletCaretRowContext(ai, r) : null;
+            if(ctxPara && r.collapsed && typeof admin._splitC1StoredLineAtCaretToNewRow === "function") {
+                const okSplit = admin._splitC1StoredLineAtCaretToNewRow({
+                    storIdx: ctxPara.storIdx,
+                    wrapRows: ctxPara.wrapRows,
+                    activeRow: ctxPara.row,
+                    range: r,
+                    markParagraphStart: true
+                });
+                if(okSplit) return;
+            }
             if(ctxPara && ctxPara.wrapRows.length && ctxPara.wrapRows[0] !== ctxPara.row) {
-                if(typeof admin._splitC1StoredLineAtCaretToNewRow === "function") {
-                    const ok = admin._splitC1StoredLineAtCaretToNewRow({
-                        storIdx: ctxPara.storIdx,
-                        wrapRows: ctxPara.wrapRows,
-                        activeRow: ctxPara.row,
-                        range: r,
-                        markParagraphStart: true
-                    });
-                    if(ok) return;
-                }
                 alert([
                     "This caret is on a wrapped continuation of the same stored line.",
                     "",
