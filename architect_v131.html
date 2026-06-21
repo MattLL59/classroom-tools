@@ -1227,8 +1227,8 @@
         flex: 1 1 auto;
     }
     #modal-admin.tsa-c1-passage-focus .c1-passage-editor-layout {
-        min-height: min(82vh, 920px);
-        flex: 1 1 auto;
+        min-height: 0;
+        flex: 1 1 0;
     }
     #modal-admin.tsa-c1-passage-focus .c1-passage-focus-bar {
         display: none;
@@ -1248,19 +1248,21 @@
     }
     .c1-passage-editor-row {
         display: flex;
-        flex: 1 1 auto;
+        flex: 1 1 0;
         min-height: 0;
         align-items: stretch;
+        overflow: hidden;
     }
     .c1-passage-editor-main {
-        flex: 1 1 auto;
+        flex: 1 1 0;
         min-width: 0;
         min-height: 0;
         display: flex;
         flex-direction: column;
+        overflow: hidden;
     }
     #source-text-single-wrap.tsa-c1-passage-focus {
-        flex: 1 1 auto;
+        flex: 1 1 0;
         min-height: 0;
         display: flex;
         flex-direction: column;
@@ -1271,14 +1273,25 @@
         display: none !important;
     }
     #source-text-single-wrap.tsa-c1-passage-focus #ai-input.source-editor {
-        flex: 1 1 auto;
+        flex: 1 1 0;
         min-height: 0 !important;
-        max-height: none !important;
-        height: auto;
-        overflow-y: auto !important;
+        max-height: 100% !important;
+        height: 100%;
+        overflow-y: scroll !important;
         overflow-x: hidden !important;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
+    }
+    /** Editing Suite C1 passage (normal + focus): bounded height so long inserts scroll inside #ai-input. */
+    #modal-admin #c1-source-editor-mount-edit #ai-input.source-editor,
+    #modal-admin #c1-source-editor-mount-ai #ai-input.source-editor {
+        max-height: min(62vh, 720px);
+        overflow-y: auto !important;
+        overflow-x: hidden;
+    }
+    #modal-admin.tsa-c1-passage-focus #c1-source-editor-mount-edit #ai-input.source-editor,
+    #modal-admin.tsa-c1-passage-focus #c1-source-editor-mount-ai #ai-input.source-editor {
+        max-height: none !important;
     }
     .c1-passage-tool-rail {
         flex: 0 0 44px;
@@ -27499,6 +27512,7 @@ const admin = {
                 if(!btn || !rail.contains(btn) || btn.dataset.railAction !== "paragraph") return;
                 ev.preventDefault();
                 if(admin.preserveSourceToolbarCaretSelection) admin.preserveSourceToolbarCaretSelection(ev);
+                if(admin.applyC1StoredParagraphAtCaret) admin.applyC1StoredParagraphAtCaret();
             }, true);
             rail.addEventListener("mousedown", function(ev) {
                 const btn = ev.target && ev.target.closest ? ev.target.closest('.c1-rail-btn[data-rail-action="paragraph"]') : null;
@@ -27510,10 +27524,7 @@ const admin = {
                 ev.preventDefault();
                 ev.stopPropagation();
                 const action = btn.dataset.railAction;
-                if(action === "paragraph") {
-                    if(admin.toggleParagraphStartAtCaret) admin.toggleParagraphStartAtCaret();
-                    return;
-                }
+                if(action === "paragraph") return;
                 if(action === "sync") {
                     try { app.syncC1PassageLayoutInsertWidthAndNaturalReflow(); } catch(eSync) {
                         alert((eSync && eSync.message) ? eSync.message : String(eSync));
@@ -32323,19 +32334,9 @@ const admin = {
                         if(wantStoredParagraph) {
                             e.preventDefault();
                             const sel0 = window.getSelection();
-                            if(sel0 && sel0.rangeCount && sel0.isCollapsed && typeof admin._getC1BookletCaretRowContext === "function" && typeof admin._splitC1StoredLineAtCaretToNewRow === "function") {
+                            if(sel0 && sel0.rangeCount && typeof admin.applyC1StoredParagraphAtCaret === "function") {
                                 const r0 = sel0.getRangeAt(0);
-                                const ctx = admin._getC1BookletCaretRowContext(sourceEditor, r0);
-                                if(ctx) {
-                                    const okSplit = admin._splitC1StoredLineAtCaretToNewRow({
-                                        storIdx: ctx.storIdx,
-                                        wrapRows: ctx.wrapRows,
-                                        activeRow: ctx.row,
-                                        range: r0,
-                                        markParagraphStart: true
-                                    });
-                                    if(okSplit) return;
-                                }
+                                if(admin.applyC1StoredParagraphAtCaret(sourceEditor, r0)) return;
                             }
                             document.execCommand("insertLineBreak", false, null);
                             return;
@@ -32651,6 +32652,76 @@ const admin = {
             admin._toolbarCaretRangeElId = el.id;
         } catch(eC) {}
     },
+    /** Same stored-paragraph path as Shift+Enter / Ctrl+Enter in the C1 booklet editor. */
+    applyC1StoredParagraphAtCaret: function(ai, range) {
+        try {
+            ai = ai || document.getElementById("ai-input");
+            if(!ai || ai.getAttribute("contenteditable") !== "true") return false;
+            const hasGutters = !!(ai.querySelector && ai.querySelector(".source-with-line-numbers"));
+            if(!hasGutters) {
+                alert("Turn on booklet (line/gutter) layout first (Import PDF / structured passage) so rows exist.");
+                return false;
+            }
+            let r = range;
+            if(!r && admin._toolbarCaretRangeSnapshot && admin._toolbarCaretRangeElId === "ai-input") {
+                const rr = admin._toolbarCaretRangeSnapshot;
+                if(rr && ai.contains(rr.startContainer)) r = rr;
+            }
+            if(!r) {
+                const sel = window.getSelection();
+                if(sel && sel.rangeCount) {
+                    const rr2 = sel.getRangeAt(0);
+                    if(rr2 && ai.contains(rr2.startContainer)) r = rr2;
+                }
+            }
+            if(!r) {
+                alert("Click inside the passage text first, place the caret where the new paragraph should begin, then click ¶.");
+                return false;
+            }
+            const restoreSel = function() {
+                try {
+                    const sel = window.getSelection();
+                    if(sel && r) {
+                        sel.removeAllRanges();
+                        sel.addRange(r);
+                    }
+                    ai.focus({ preventScroll: true });
+                } catch(eRs) {}
+            };
+            if(r.collapsed && typeof admin._getC1BookletCaretRowContext === "function" && typeof admin._splitC1StoredLineAtCaretToNewRow === "function") {
+                const ctx = admin._getC1BookletCaretRowContext(ai, r);
+                if(ctx) {
+                    const okSplit = admin._splitC1StoredLineAtCaretToNewRow({
+                        storIdx: ctx.storIdx,
+                        wrapRows: ctx.wrapRows,
+                        activeRow: ctx.row,
+                        range: r,
+                        markParagraphStart: true
+                    });
+                    if(okSplit) {
+                        admin._toolbarCaretRangeSnapshot = null;
+                        admin._toolbarCaretRangeElId = null;
+                        return true;
+                    }
+                }
+            }
+            restoreSel();
+            try {
+                document.execCommand("styleWithCSS", false, false);
+            } catch(eK) {}
+            document.execCommand("insertLineBreak", false, null);
+            admin._toolbarCaretRangeSnapshot = null;
+            admin._toolbarCaretRangeElId = null;
+            try {
+                if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
+            } catch(eF) {}
+            if(typeof app.save === "function") app.save();
+            return true;
+        } catch(e) {
+            alert(e && e.message ? e.message : String(e));
+            return false;
+        }
+    },
     /** Component 1: toggle paragraph-start marker on the current booklet row (caret location). */
     toggleParagraphStartAtCaret: function() {
         try {
@@ -32684,20 +32755,11 @@ const admin = {
                 return;
             }
             /**
-             * Same path as **Shift+Enter**: split stored line at caret when possible, then fall back to toggling ¶ on the row.
+             * Toolbar ¶ Paragraph toggles row marker only — use {@link applyC1StoredParagraphAtCaret} (Shift+Enter path) from the side rail.
              */
             const ctxPara = typeof admin._getC1BookletCaretRowContext === "function" ? admin._getC1BookletCaretRowContext(ai, r) : null;
-            if(ctxPara && r.collapsed && typeof admin._splitC1StoredLineAtCaretToNewRow === "function") {
-                const okSplit = admin._splitC1StoredLineAtCaretToNewRow({
-                    storIdx: ctxPara.storIdx,
-                    wrapRows: ctxPara.wrapRows,
-                    activeRow: ctxPara.row,
-                    range: r,
-                    markParagraphStart: true
-                });
-                if(okSplit) return;
-            }
             if(ctxPara && ctxPara.wrapRows.length && ctxPara.wrapRows[0] !== ctxPara.row) {
+                if(typeof admin.applyC1StoredParagraphAtCaret === "function" && admin.applyC1StoredParagraphAtCaret(ai, r)) return;
                 alert([
                     "This caret is on a wrapped continuation of the same stored line.",
                     "",
@@ -32781,20 +32843,25 @@ const admin = {
             const splitAt = Math.max(0, Math.min(fullPlain.length, prefix + offsetInCell));
             const left = fullPlain.slice(0, splitAt).replace(/\s+/g, " ").trim();
             const right = fullPlain.slice(splitAt).replace(/\s+/g, " ").trim();
-            if(!left || !right) return false;
+            if(!right) return false;
 
             const pt = typeof app.plainChunkToPassageHtml === "function" ? app.plainChunkToPassageHtml : function(x) { return app.escapeHtml(String(x || "").trim()); };
-            const L0 = Object.assign({}, o0.lines[storIdx]);
-            const L1 = { n: 0, html: pt(right) };
-            L0.html = pt(left);
-            if(opts.markParagraphStart) L1.paragraphStart = true;
-
-            // Insert new line, keep existing paragraphStart on original line as-is.
             const out = { v: o0.v, lines: o0.lines.slice(), examMargin: o0.examMargin };
             if(o0.headHtml != null && String(o0.headHtml).trim()) out.headHtml = String(o0.headHtml).trim();
             if(o0.tailHtml != null && String(o0.tailHtml).trim()) out.tailHtml = String(o0.tailHtml).trim();
-            out.lines.splice(storIdx, 1, L0);
-            out.lines.splice(storIdx + 1, 0, L1);
+
+            if(!left) {
+                const L0 = Object.assign({}, o0.lines[storIdx]);
+                if(opts.markParagraphStart) L0.paragraphStart = true;
+                out.lines[storIdx] = L0;
+            } else {
+                const L0 = Object.assign({}, o0.lines[storIdx]);
+                const L1 = { n: 0, html: pt(right) };
+                L0.html = pt(left);
+                if(opts.markParagraphStart) L1.paragraphStart = true;
+                out.lines.splice(storIdx, 1, L0);
+                out.lines.splice(storIdx + 1, 0, L1);
+            }
             const norm = typeof app.normalizeStructuredPassageV2Sequential === "function" ? app.normalizeStructuredPassageV2Sequential(out) : out;
             const canon = typeof app.serializeStructuredPassageV2 === "function" ? app.serializeStructuredPassageV2(norm) : JSON.stringify(norm);
             if(!canon || !String(canon).trim()) return false;
