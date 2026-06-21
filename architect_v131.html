@@ -1275,9 +1275,8 @@
     #source-text-single-wrap.tsa-c1-passage-focus #ai-input.source-editor {
         flex: 1 1 0;
         min-height: 0 !important;
-        max-height: 100% !important;
-        height: 100%;
-        overflow-y: scroll !important;
+        max-height: none !important;
+        overflow-y: auto !important;
         overflow-x: hidden !important;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
@@ -7533,6 +7532,7 @@ const app = {
     /** True when #ai-input has no real passage (placeholder / lone &lt;br&gt; only). */
     _isAiInputEditorVisuallyEmpty: function(el) {
         if(!el) return true;
+        if(el.querySelector && el.querySelector(".architect-admin-passage-placeholder")) return true;
         const t = (el.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim();
         if(t.length > 0) return false;
         const h = (el.innerHTML || "").trim();
@@ -21048,7 +21048,8 @@ const ui = {
         ui._pauseSelectionGate = true;
         /** Set defer flags before any tab/passage sync — showAdminModalShell used to hydrate #ai-input here and froze Data. */
         app._adminLiteOpen = true;
-        app._deferAdminPassageUntilDemand = true;
+        /** Defer only for large inserts — small/medium lessons should show passage text immediately in Editing Suite. */
+        app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
         app._adminPassageHydrateDone = false;
         if(typeof admin !== "undefined") {
             admin._liteEditPanelsDone = false;
@@ -21078,6 +21079,10 @@ const ui = {
                 admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
                 if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
                     try { app.setAdminPassageDeferredPlaceholder(); } catch(ePh) {}
+                } else if(typeof admin !== "undefined" && admin.syncSourceEditorMode) {
+                    try {
+                        admin.syncSourceEditorMode({ hydratePassage: true, skipPassageHydrate: false });
+                    } catch(eHydr) { console.warn("openAdmin passage hydrate:", eHydr); }
                 }
             }
         } catch(e) {
@@ -27223,6 +27228,8 @@ const admin = {
             if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
             if(app._deferAdminPassageUntilDemand && appData && appData.component !== 2 && typeof app.setAdminPassageDeferredPlaceholder === "function") {
                 if(k === "edit" || k === "ai") app.setAdminPassageDeferredPlaceholder();
+            } else if((k === "edit" || k === "ai") && appData && appData.component !== 2 && typeof admin.syncSourceEditorMode === "function") {
+                try { admin.syncSourceEditorMode({ hydratePassage: true, skipPassageHydrate: false }); } catch(eEd) {}
             }
             if(k === "edit") {
                 if(!app._adminLiteOpen && admin.scheduleLiteEditPanels) admin.scheduleLiteEditPanels();
@@ -27879,6 +27886,12 @@ const admin = {
         const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
         const target = (tab === "ai" ? mountAi : (mountEdit || mountAi));
         if(target && moveEl.parentNode !== target) target.appendChild(moveEl);
+        if(typeof app.syncAdminAiInputFromLesson === "function" && !app._deferAdminPassageUntilDemand && appData.component !== 2) {
+            const ai = document.getElementById("ai-input");
+            if(ai && typeof app._isC1PassageEditorsVisuallyEmpty === "function" && app._isC1PassageEditorsVisuallyEmpty(ai)) {
+                try { app.syncAdminAiInputFromLesson({ force: true }); } catch(eSync) {}
+            }
+        }
         if(typeof admin.restoreC1PassageFocusModeFromSession === "function") admin.restoreC1PassageFocusModeFromSession();
         if(typeof admin.positionC1PassageRailFlyouts === "function") admin.positionC1PassageRailFlyouts();
     },
