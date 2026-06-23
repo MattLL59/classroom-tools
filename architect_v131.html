@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T47:00:00">
+<meta name="architect-build" content="2026-06-14T49:00:00">
 <meta name="architect-deploy" content="c1-passage-focus-exit-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -4716,13 +4716,80 @@ const app = {
         }
         return null;
     },
-    /** Infer Lines box text from a focus question prompt (lead “Read lines …” only). */
+    /**
+     * Parse “Read lines 8–12” / “Refer to lines …” anywhere in the question (prefers the **last** match — exam boards usually put this after the stem).
+     */
+    parseReadLinesInstructionFromQuestion: function(questionText) {
+        if(!questionText || typeof questionText !== "string") return null;
+        const s = String(questionText).trim();
+        if(!s.length) return null;
+        const tryRange = function(m) {
+            if(!m) return null;
+            let from = parseInt(m[1], 10);
+            const to = parseInt(m[2], 10);
+            if(from === 0 && to >= 1) from = 1;
+            if(from >= 1 && to >= from && to <= 999) return { from, to };
+            return null;
+        };
+        const patterns = [
+            /Read\s+the\s+lines\s*:?\s*(\d+)\s*[-–—−]\s*(\d+)/gi,
+            /Read\s+lines?\s+(\d+)\s*[-–—−]\s*(\d+)/gi,
+            /Read\s+lines?\s+(\d+)\s+to\s+(\d+)/gi,
+            /Refer\s+to\s+lines?\s+(\d+)\s*[-–—−]\s*(\d+)/gi,
+            /Refer\s+to\s+lines?\s+(\d+)\s+to\s+(\d+)/gi
+        ];
+        let last = null;
+        for(let pi = 0; pi < patterns.length; pi++) {
+            const re = patterns[pi];
+            re.lastIndex = 0;
+            let m;
+            while((m = re.exec(s))) {
+                const got = tryRange(m);
+                if(got) last = got;
+            }
+        }
+        return last;
+    },
+    /** Parse “Read lines …” from the **end** of a focus question (common after PDF extract). */
+    parseLineRangeFromQuestionTail: function(questionText, maxTailChars) {
+        if(!questionText || typeof questionText !== "string") return null;
+        const s = String(questionText).trim();
+        if(!s.length) return null;
+        const tailLen = maxTailChars != null && Number.isFinite(maxTailChars) ? Math.max(40, maxTailChars) : 220;
+        const tail = s.slice(Math.max(0, s.length - Math.min(s.length, tailLen)));
+        const tryRange = function(m) {
+            if(!m) return null;
+            let from = parseInt(m[1], 10);
+            const to = parseInt(m[2], 10);
+            if(from === 0 && to >= 1) from = 1;
+            if(from >= 1 && to >= from && to <= 999) return { from, to };
+            return null;
+        };
+        const patterns = [
+            /(?:Read\s+the\s+lines\s*:?\s*|Read\s+lines?\s+|Refer\s+to\s+lines?\s+)(\d+)\s*[-–—−]\s*(\d+)\s*\.?\s*$/i,
+            /(?:Read\s+lines?\s+)(\d+)\s+to\s+(\d+)\s*\.?\s*$/i
+        ];
+        for(let pi = 0; pi < patterns.length; pi++) {
+            const got = tryRange(tail.match(patterns[pi]));
+            if(got) return got;
+        }
+        const single = tail.match(/(?:Read\s+the\s+lines\s*:?\s*|Read\s+lines?\s+|Refer\s+to\s+lines?\s+)(\d+)\s*\.?\s*$/i);
+        if(single) {
+            const n = parseInt(single[1], 10);
+            if(n >= 1 && n <= 999) return { from: n, to: n };
+        }
+        return null;
+    },
+    /** Infer Lines box text from a focus question prompt (lead, “Read lines …” tail, or embedded instruction). */
     inferLineRefFromQuestionPrompt: function(prompt) {
         if(typeof appData !== "undefined" && appData && appData.component === 2) return null;
-        const lead = typeof app.parseLineRangeFromQuestionLead === "function"
-            ? app.parseLineRangeFromQuestionLead(prompt)
-            : null;
-        if(lead && typeof app.formatLineRefFromRange === "function") return app.formatLineRefFromRange(lead);
+        const s = typeof prompt === "string" ? prompt.trim() : "";
+        if(!s) return null;
+        let range = typeof app.parseLineRangeFromQuestionLead === "function" ? app.parseLineRangeFromQuestionLead(s) : null;
+        if(!range && typeof app.parseReadLinesInstructionFromQuestion === "function") range = app.parseReadLinesInstructionFromQuestion(s);
+        if(!range && typeof app.parseLineRangeFromQuestionTail === "function") range = app.parseLineRangeFromQuestionTail(s);
+        if(!range && typeof app.parseLineRangeFromQuestion === "function") range = app.parseLineRangeFromQuestion(s);
+        if(range && typeof app.formatLineRefFromRange === "function") return app.formatLineRefFromRange(range);
         return null;
     },
     /**
@@ -16162,6 +16229,10 @@ const app = {
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const q = questions.find(qq => qq && normQid(qq.id) === target);
         if(q && typeof q.lineRef === "string" && q.lineRef.trim()) return q.lineRef.trim();
+        if(q && q.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") {
+            const inferred = app.inferLineRefFromQuestionPrompt(q.prompt);
+            if(inferred) return inferred;
+        }
         if(opts && opts.skipDom) return "";
         if(typeof document === "undefined") return "";
         const mounts = document.querySelectorAll(".questions-list-mount");
@@ -16437,6 +16508,10 @@ const app = {
         };
         const applyLineRef = (row, tag, qidHint) => {
             let ref = row && typeof row.lineRef === "string" ? row.lineRef.trim() : "";
+            if(!ref && row && row.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") {
+                const inferred = app.inferLineRefFromQuestionPrompt(row.prompt);
+                if(inferred) ref = inferred;
+            }
             if(!ref && qidHint && typeof app.getQuestionLineRef === "function") ref = app.getQuestionLineRef(qidHint);
             if(!ref && row && row.id && typeof app.getQuestionLineRef === "function") ref = app.getQuestionLineRef(row.id);
             if(!ref) return false;
@@ -19605,6 +19680,7 @@ const ui = {
             if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
             return;
         }
+        if(typeof app.ensureAllQuestionLineRefsFromPrompts === "function") app.ensureAllQuestionLineRefsFromPrompts();
         if(userState && userState.view !== "select" && typeof ui.switchView === "function") ui.switchView("select", true);
         if(!dismissed && typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
         if(st.step === "excerpts") {
@@ -19815,6 +19891,11 @@ const ui = {
         let statusTxt = pickOn
             ? "Use <strong>Mark start</strong> and <strong>Mark end</strong> below, or drag one highlight, then <strong>Apply excerpt</strong>."
             : "Question-focused excerpt for L" + lvl;
+        const qForStatus = typeof admin !== "undefined" && admin._getQuestionForLevelBankLevel ? admin._getQuestionForLevelBankLevel(lvl) : null;
+        if(qForStatus && qForStatus.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") {
+            const infStatus = app.inferLineRefFromQuestionPrompt(qForStatus.prompt);
+            if(infStatus) statusTxt += pickOn ? " · From question: <code>" + infStatus + "</code>" : " · question says <code>" + infStatus + "</code>";
+        }
         if(win && win.lineRange) statusTxt += pickOn ? " · L" + lvl + " lines <code>" + win.lineRange.from + "–" + win.lineRange.to + "</code> saved." : " · lines <code>" + win.lineRange.from + "–" + win.lineRange.to + "</code>";
         else if(pickOn) statusTxt += " · L" + lvl + ": no lines yet.";
         if(status) status.innerHTML = statusTxt;
@@ -20257,6 +20338,11 @@ const ui = {
             }
             if(typeof ui.maybeStartTeacherPassageSetup === "function") {
                 setTimeout(function() { try { ui.maybeStartTeacherPassageSetup(); } catch(eSetup) {} }, 0);
+            }
+            if(typeof app.ensureAllQuestionLineRefsFromPrompts === "function") {
+                try {
+                    if(app.ensureAllQuestionLineRefsFromPrompts() && typeof app.save === "function") app.save({ skipRender: true, silent: true });
+                } catch(eLrInit) {}
             }
         }
     },
@@ -36676,6 +36762,16 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         } else if(savedStart && savedEnd && app.resolveLineRangeFromPassageAnchors) {
             const ar = app.resolveLineRangeFromPassageAnchors(src, savedStart, savedEnd, lvl);
             if(ar && ar.lineRange) estLines = ar.lineRange.from + "–" + ar.lineRange.to;
+        } else if(q && q.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") {
+            const inferred = app.inferLineRefFromQuestionPrompt(q.prompt);
+            const lr = inferred && typeof app.parseLineRangeFromQuestion === "function" ? app.parseLineRangeFromQuestion(inferred) : null;
+            if(lr) estLines = lr.from + (lr.to !== lr.from ? "–" + lr.to : "");
+        }
+        const inferredFromQ = (q && q.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") ? app.inferLineRefFromQuestionPrompt(q.prompt) : "";
+        if(q && inferredFromQ && !String(q.lineRef || "").trim() && typeof app.ensureQuestionLineRefFromPrompt === "function") {
+            if(app.ensureQuestionLineRefFromPrompt(q)) {
+                try { if(typeof app.save === "function") app.save({ skipRender: true, silent: true }); } catch(eSaveLr) {}
+            }
         }
         const step = !startShow ? "start" : (!endShow ? "end" : "apply");
         const qLabel = q && q.id ? ("· " + q.id) : "· pick Q in Level Bank";
@@ -36727,9 +36823,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const lnRow = wiz.querySelector(".tsa-range-lines-row");
             const lnVal = wiz.querySelector(".tsa-range-lines-val");
             if(lnRow && lnVal) {
-                if(estLines) {
+                const linesShow = estLines || inferredFromQ || "";
+                if(linesShow) {
                     lnRow.classList.remove("hidden");
-                    lnVal.textContent = estLines;
+                    lnVal.textContent = inferredFromQ && !estLines ? ("from question: " + inferredFromQ) : linesShow;
                 } else {
                     lnRow.classList.add("hidden");
                     lnVal.textContent = "";
