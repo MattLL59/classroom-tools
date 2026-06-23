@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T46:00:00">
-<meta name="architect-deploy" content="c1-fix-corrupt-js-line-f806">
+<meta name="architect-build" content="2026-06-14T47:00:00">
+<meta name="architect-deploy" content="c1-passage-focus-exit-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1231,7 +1231,11 @@
         flex: 1 1 0;
     }
     #modal-admin.tsa-c1-passage-focus .c1-passage-focus-bar {
-        display: none;
+        flex-shrink: 0;
+        z-index: 2;
+        background: var(--bg);
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
     }
     .c1-passage-focus-bar {
         display: flex;
@@ -1246,6 +1250,8 @@
         opacity: 0.78;
         line-height: 1.35;
     }
+    #modal-admin.tsa-c1-passage-focus .c1-passage-focus-hint-normal { display: none; }
+    #modal-admin.tsa-c1-passage-focus .c1-passage-focus-hint-active { display: inline !important; }
     .c1-passage-editor-row {
         display: flex;
         flex: 1 1 0;
@@ -2382,7 +2388,8 @@
                     <div id="c1-passage-editor-layout" class="c1-passage-editor-layout">
                     <div class="c1-passage-focus-bar">
                         <button type="button" class="btn btn-primary btn-small" id="btn-c1-passage-focus-toggle" title="Hide toolbars and fill the screen with the passage for editing — does not trim the student excerpt. Use Lab / Quote Select → Question-focused for that.">Full-screen editor</button>
-                        <span class="c1-passage-focus-hint">Layout only (not student excerpt) · ¶ on a row · <strong>Shift+Enter</strong> new paragraph · side rail for Sync / Reflow / width</span>
+                        <span class="c1-passage-focus-hint c1-passage-focus-hint-normal">Layout only (not student excerpt) · ¶ on a row · <strong>Shift+Enter</strong> new paragraph · side rail for Sync / Reflow / width</span>
+                        <span class="c1-passage-focus-hint c1-passage-focus-hint-active" style="display:none;">Full-screen — click <strong>Exit full-screen</strong> or press <strong>Esc</strong> · side rail <strong>✕</strong> · ↔ for booklet line / width</span>
                     </div>
                     <div class="c1-passage-editor-row" id="c1-passage-editor-row">
                     <div class="c1-passage-editor-main">
@@ -17417,6 +17424,7 @@ const app = {
                 document.addEventListener("keydown", function(ev) {
                     if(ev.key !== "Escape") return;
                     try {
+                        if(typeof admin !== "undefined" && admin.handleC1PassageFocusEscape && admin.handleC1PassageFocusEscape(ev)) return;
                         const modalIds = ["modal-admin", "modal-help", "modal-theme", "modal-wizard", "modal-manual"];
                         for(let i = 0; i < modalIds.length; i++) {
                             const mid = modalIds[i];
@@ -20904,6 +20912,11 @@ const ui = {
     _hideAdminModalNow: function() {
         const el = document.getElementById("modal-admin");
         app._adminLiteOpen = false;
+        if(typeof admin !== "undefined") {
+            if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+            else if(typeof admin.setC1PassageFocusMode === "function") admin.setC1PassageFocusMode(false);
+            if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
+        }
         if(typeof ui._clearTeacherPassagePickForSettings === "function") ui._clearTeacherPassagePickForSettings();
         if(typeof admin !== "undefined") admin._adminShellFormSynced = false;
         ui._pauseSelectionGate = false;
@@ -21128,6 +21141,13 @@ const ui = {
             alert("Settings panel not found. Hard-refresh the page (Ctrl+Shift+R).");
             return;
         }
+        try {
+            if(typeof admin !== "undefined") {
+                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+                else if(typeof admin.setC1PassageFocusMode === "function") admin.setC1PassageFocusMode(false);
+                if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
+            }
+        } catch(eFocusReset) {}
         try {
             if(typeof admin !== "undefined") {
                 if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
@@ -27474,6 +27494,7 @@ const admin = {
         document.addEventListener("keydown", function(ev) {
             if(!adminModalOpen()) return;
             if(ev.key === "Escape") {
+                if(typeof admin !== "undefined" && admin.handleC1PassageFocusEscape && admin.handleC1PassageFocusEscape(ev)) return;
                 ev.preventDefault();
                 ev.stopPropagation();
                 emergencyCloseAdmin(ev);
@@ -27500,6 +27521,9 @@ const admin = {
         if(document.body.dataset.c1PassageFocusBound === "1") return;
         document.body.dataset.c1PassageFocusBound = "1";
         const STORAGE_KEY = "tsa_c1_passage_focus";
+        const clearFocusSession = function() {
+            try { sessionStorage.removeItem(STORAGE_KEY); } catch(eClr) {}
+        };
         const flyoutSelectors = ["#c1-passage-intro-expand", "#c1-passage-intro-section", ".source-toolbar-c1-format", ".source-toolbar-c1-measure"];
         const collectFlyoutEls = function(root) {
             if(!root) return [];
@@ -27523,6 +27547,7 @@ const admin = {
         };
         admin.parkC1PassageFlyoutEls = parkC1PassageFlyoutEls;
         admin.restoreC1PassageFlyoutEls = restoreC1PassageFlyoutEls;
+        admin.clearC1PassageFocusSession = clearFocusSession;
         const syncRailBtnActive = function(panel) {
             const rail = document.getElementById("c1-passage-tool-rail");
             if(!rail) return;
@@ -27553,21 +27578,52 @@ const admin = {
                 toggle.classList.toggle("btn-primary", !active);
                 toggle.classList.toggle("btn-outline", active);
             }
+            if(active) {
+                try {
+                    const ai = document.getElementById("ai-input");
+                    const needsHydrate = ai && (
+                        (typeof app._isAiInputEditorVisuallyEmpty === "function" && app._isAiInputEditorVisuallyEmpty(ai))
+                        || (ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder"))
+                    );
+                    if(needsHydrate && !app._deferAdminPassageUntilDemand && typeof app.syncAdminAiInputFromLesson === "function") {
+                        app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+                        app._adminPassageHydrateDone = true;
+                    }
+                } catch(eHyd) {}
+            }
             if(!opts.skipSave) {
-                try { sessionStorage.setItem(STORAGE_KEY, active ? "1" : "0"); } catch(eSt) {}
+                try {
+                    if(active) sessionStorage.setItem(STORAGE_KEY, "1");
+                    else clearFocusSession();
+                } catch(eSt) {}
             }
         };
         admin.setC1PassageFocusMode = applyFocusMode;
+        admin.exitC1PassageFocusMode = function() {
+            applyFocusMode(false);
+        };
+        admin.handleC1PassageFocusEscape = function(ev) {
+            const row = document.getElementById("c1-passage-editor-row");
+            const wrap = document.getElementById("source-text-single-wrap");
+            if(!row || !wrap || !wrap.classList.contains("tsa-c1-passage-focus")) return false;
+            if(row.getAttribute("data-rail-panel")) {
+                row.removeAttribute("data-rail-panel");
+                syncRailBtnActive(null);
+            } else {
+                applyFocusMode(false);
+            }
+            if(ev) { ev.preventDefault(); ev.stopPropagation(); }
+            return true;
+        };
         admin.toggleC1PassageFocusMode = function() {
             const wrap = document.getElementById("source-text-single-wrap");
             applyFocusMode(!(wrap && wrap.classList.contains("tsa-c1-passage-focus")));
         };
         admin.restoreC1PassageFocusModeFromSession = function() {
             try {
-                if(sessionStorage.getItem(STORAGE_KEY) === "1") {
-                    applyFocusMode(true, { skipSave: true });
-                    setRailPanel("layout");
-                }
+                const adm = document.getElementById("modal-admin");
+                if(!adm || !adm.classList.contains("open")) return;
+                if(sessionStorage.getItem(STORAGE_KEY) === "1") applyFocusMode(true, { skipSave: true });
             } catch(eRs) {}
         };
         const setRailPanel = function(panel) {
@@ -27634,11 +27690,18 @@ const admin = {
         }, true);
         document.addEventListener("keydown", function(ev) {
             if(ev.key !== "Escape") return;
+            if(typeof admin !== "undefined" && admin.handleC1PassageFocusEscape && admin.handleC1PassageFocusEscape(ev)) return;
             const row = document.getElementById("c1-passage-editor-row");
             const wrap = document.getElementById("source-text-single-wrap");
-            if(!row || !wrap || !wrap.classList.contains("tsa-c1-passage-focus") || !row.getAttribute("data-rail-panel")) return;
-            row.removeAttribute("data-rail-panel");
-            syncRailBtnActive(null);
+            if(!row || !wrap || !wrap.classList.contains("tsa-c1-passage-focus")) return;
+            if(row.getAttribute("data-rail-panel")) {
+                row.removeAttribute("data-rail-panel");
+                syncRailBtnActive(null);
+                ev.preventDefault();
+                ev.stopPropagation();
+                return;
+            }
+            applyFocusMode(false);
             ev.preventDefault();
             ev.stopPropagation();
         }, true);
@@ -36248,7 +36311,6 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(typeof admin.goAdminTab === "function") admin.goAdminTab("edit");
         else if(typeof admin.activateAdminTab === "function") admin.activateAdminTab("edit");
         if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-        if(typeof admin.setC1PassageFocusMode === "function") admin.setC1PassageFocusMode(true);
         const det = document.getElementById("admin-c1-source-details");
         if(det) det.open = true;
         const wrap = document.getElementById("source-text-single-wrap");
@@ -38159,6 +38221,7 @@ try {
         document.addEventListener("keydown", function(ev) {
             if(ev.key !== "Escape") return;
             if(!window.__tsaAdminShellVisible()) return;
+            if(typeof admin !== "undefined" && admin.handleC1PassageFocusEscape && admin.handleC1PassageFocusEscape(ev)) return;
             ev.preventDefault();
             ev.stopPropagation();
             window.__tsaEmergencyCloseAdmin(ev);
