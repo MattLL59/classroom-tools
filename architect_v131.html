@@ -1855,6 +1855,7 @@
                 <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st')" style="padding:4px 10px; font-size:0.85rem;">21st C</button>
                 <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th')" style="padding:4px 10px; font-size:0.85rem;">19th C</button>
             </div>
+            <div id="teacher-passage-setup-banner" class="hidden" style="margin-bottom:10px;"></div>
             <div id="teacher-passage-pick-toolbar" class="hidden" style="margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(0,150,136,0.06); font-size:0.8rem;">
                 <span style="font-weight:700; white-space:nowrap;">Teacher — passages</span>
                 <button type="button" class="btn btn-outline btn-small" id="btn-teacher-done-pick">Done picking</button>
@@ -1864,7 +1865,7 @@
                 <span id="teacher-passage-pick-status" style="opacity:0.88; flex:1; min-width:10rem; line-height:1.35;"></span>
             </div>
             <div id="teacher-passage-pick-hint" class="hidden" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid var(--primary);background:rgba(0,150,136,0.08);font-size:0.82rem;line-height:1.45;">
-                <strong>Set the passage excerpt for each question</strong> — this is <em>teacher authoring</em>, not the student Quote Select game. Students only see the lines you save with <strong>Apply excerpt</strong>. Pick the question in Level Bank <strong>Q</strong>, keep <strong>Whole insert</strong> on while marking, then click <strong>Apply excerpt</strong> before <strong>Preview this question</strong>.
+                <strong>Set the passage excerpt for each question</strong> — highlight words in the <strong>passage below</strong>, then use <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong>. Match the level in the wizard to your focus question. Students only see what you save here.
             </div>
             <div id="teacher-passage-range-wizard" class="teacher-passage-range-wizard hidden">
                 <div style="font-weight:700;margin-bottom:6px;">Passage excerpt for <span class="tsa-range-level-label">L1</span> <span class="tsa-range-q-label" style="opacity:0.85;font-weight:600;"></span></div>
@@ -16756,7 +16757,9 @@ const app = {
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
         const everyLineMargin = !!(levelEntry.passageQuoteSelectEveryLineNumber === true || levelEntry.passageQuoteSelectEveryLineNumber === "true");
-        const fullPassageFmtOpts = everyLineMargin ? { passageQuoteSelectDenseLines: true } : {};
+        const setupSt = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
+        const teacherSetupDense = !!(setupSt && (setupSt.needsLineLayout || setupSt.needsExcerptSetup || app._teacherLinePickMode));
+        const fullPassageFmtOpts = (everyLineMargin || teacherSetupDense) ? { passageQuoteSelectDenseLines: true } : {};
         let lineRange = null;
         const lineWinResolved = app.resolveQuoteSelectLineWindow(lvl);
         if(Object.prototype.hasOwnProperty.call(opts, "lineRange") && opts.lineRange !== undefined) lineRange = opts.lineRange;
@@ -18154,6 +18157,47 @@ const app = {
         }
         return { trimmed, messages };
     },
+    /** True when stored source can render WJEC booklet line gutters in Lab / Quote Select. */
+    passageSourceHasLineGutters: function(sourceText) {
+        const st = typeof sourceText === "string" ? sourceText.trim() : "";
+        if(!st) return false;
+        if(app.isStructuredPassageSource && app.isStructuredPassageSource(st)) return true;
+        if(/source-with-line-numbers|source-line-row/i.test(st)) return true;
+        try {
+            const plain = app.repairExamMarginDigitArtifacts((app.sourceToPlainForAi && app.sourceToPlainForAi(st)) || st);
+            const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+            const v2 = app.plainNumberedLinesToStructuredV2(plain, pdfImp, { sequentialLineNumbers: true });
+            return !!(v2 && v2.lines && v2.lines.length >= 2);
+        } catch(eG) {
+            return false;
+        }
+    },
+    /** Teacher C1 setup: line layout first, then per-question excerpt anchors. */
+    getTeacherPassageSetupStatus: function() {
+        const done = { step: "done", hasSource: false, needsLineLayout: false, needsExcerptSetup: false, questionCount: 0 };
+        if(!appData || appData.isStandalone || appData.component !== 1) return done;
+        const st = typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+        const hasSource = !!st;
+        if(!hasSource) return Object.assign({}, done, { step: "import" });
+        const needsLineLayout = !app.passageSourceHasLineGutters(st);
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const focusQs = questions.filter(function(q) {
+            return q && String(q.prompt || q.text || q.question || "").trim();
+        });
+        let needsExcerptSetup = false;
+        if(!needsLineLayout && focusQs.length) {
+            needsExcerptSetup = focusQs.some(function(q) {
+                const start = q.passageStartAnchor ? String(q.passageStartAnchor).trim() : "";
+                const end = q.passageEndAnchor ? String(q.passageEndAnchor).trim() : "";
+                const lr = q.lineRef ? String(q.lineRef).trim() : "";
+                return !(start && end) && !lr;
+            });
+        }
+        let step = "done";
+        if(needsLineLayout) step = "lines";
+        else if(needsExcerptSetup) step = "excerpts";
+        return { step: step, hasSource: hasSource, needsLineLayout: needsLineLayout, needsExcerptSetup: needsExcerptSetup, questionCount: focusQs.length };
+    },
     getNoPassageNoticeHtml: function() {
         return `<div class="architect-no-passage-notice" style="padding:14px 16px;border:1px dashed var(--border);border-radius:8px;font-size:0.9rem;line-height:1.5;text-align:left;max-width:42rem;margin:0 auto;">
             <div style="font-weight:700;margin-bottom:8px;">No passage text in this lesson</div>
@@ -19509,17 +19553,81 @@ const ui = {
         if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout();
         if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
     },
+    /** Step 1 / 2 banner: line numbers then question excerpts — shown in Quote Select before student work. */
+    renderTeacherPassageSetupBanner: function(setupSt) {
+        const el = document.getElementById("teacher-passage-setup-banner");
+        if(!el) return;
+        const st = setupSt || (app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus());
+        if(!st || st.step === "done" || st.step === "import" || !appData || appData.isStandalone || appData.component !== 1) {
+            el.classList.add("hidden");
+            el.innerHTML = "";
+            return;
+        }
+        el.classList.remove("hidden");
+        const dismiss = "<button type=\"button\" class=\"btn btn-outline btn-small\" style=\"float:right;\" onclick=\"try{sessionStorage.setItem('tsa_passage_setup_dismissed','1');}catch(e){}var b=document.getElementById('teacher-passage-setup-banner');if(b){b.classList.add('hidden');b.innerHTML='';}\">Dismiss</button>";
+        if(st.step === "lines") {
+            el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid var(--primary);border-radius:8px;background:rgba(0,150,136,0.1);font-size:0.88rem;line-height:1.45;\">"
+                + dismiss
+                + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 1 — Set passage line numbers</div>"
+                + "<div style=\"opacity:0.92;margin-bottom:10px;\">Your passage needs <strong>booklet line numbers</strong> before you can assign excerpts to questions. Open the passage editor, set <strong>Booklet line 1</strong>, use <strong>¶ Paragraph</strong> where needed, then <strong>Sync passage layout</strong>.</div>"
+                + "<button type=\"button\" class=\"btn btn-primary btn-small\" onclick=\"if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()\">Open passage editor</button>"
+                + " <span style=\"font-size:0.78rem;opacity:0.8;margin-left:8px;\">Returns here automatically when you close Settings.</span>"
+                + "</div>";
+        } else if(st.step === "excerpts") {
+            el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid #5c6bc0;border-radius:8px;background:rgba(92,107,192,0.08);font-size:0.88rem;line-height:1.45;\">"
+                + dismiss
+                + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 2 — Assign each question its passage excerpt</div>"
+                + "<div style=\"opacity:0.92;\">Use the <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong> controls below. Highlight words in the <strong>numbered passage</strong>, not in Settings. Repeat for each focus question.</div>"
+                + "</div>";
+        }
+    },
+    openPassageLineEditorFromSetup: function() {
+        if(!appData || appData.isStandalone) return;
+        try { sessionStorage.setItem("tsa_passage_setup_editor_opened", "1"); } catch(eSo) {}
+        if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        const run = function() {
+            try {
+                if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+                if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+                const det = document.getElementById("admin-c1-source-details");
+                if(det) det.open = true;
+                if(typeof app.syncAdminAiInputFromLesson === "function") app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+            } catch(eEd) {}
+        };
+        setTimeout(run, 100);
+    },
+    maybeStartTeacherPassageSetup: function() {
+        if(!appData || appData.isStandalone || appData.component !== 1) return;
+        let dismissed = false;
+        try { dismissed = sessionStorage.getItem("tsa_passage_setup_dismissed") === "1"; } catch(eD) {}
+        const st = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
+        if(!st || st.step === "done" || st.step === "import") {
+            if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
+            return;
+        }
+        if(userState && userState.view !== "select" && typeof ui.switchView === "function") ui.switchView("select", true);
+        if(!dismissed && typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
+        if(st.step === "excerpts") {
+            if(!app._teacherLinePickMode && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
+            if(typeof admin !== "undefined" && admin._preparePassageForLineAssignment) {
+                admin._preparePassageForLineAssignment({ level: app.getEffectiveLevel ? app.getEffectiveLevel() : 1, previewOnly: false });
+            }
+        } else if(st.step === "lines" && !dismissed) {
+            let opened = false;
+            try { opened = sessionStorage.getItem("tsa_passage_setup_editor_opened") === "1"; } catch(eO) {}
+            if(!opened && typeof ui.openPassageLineEditorFromSetup === "function") {
+                setTimeout(function() { ui.openPassageLineEditorFromSetup(); }, 800);
+            }
+        }
+        if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
+        if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
+    },
     /** Passage excerpt pick: maximize passage, hide quote cards / level bank grid — only wizard + whole insert. */
     /** Clear passage pick focus when Teacher Settings opens so Lobby / Load & AI tabs stay usable. */
     _clearTeacherPassagePickForSettings: function() {
         if(appData && appData.isStandalone) return;
-        app._passageLinePickForceWhole = false;
-        if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
-        else {
-            app._teacherLinePickMode = false;
-            try { sessionStorage.setItem("tsa_teacher_line_pick_mode", "0"); } catch(eS) {}
-            if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
-        }
+        /** Keep pick mode in session — only hide Quote Select pick-focus chrome while Settings is open. */
+        document.body.classList.remove("tsa-passage-pick-focus");
     },
     syncTeacherPassagePickFocus: function() {
         if(appData && appData.isStandalone) return;
@@ -19691,7 +19799,8 @@ const ui = {
         }
         bar.classList.remove("hidden");
         const lvl = level || (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState && userState.level) || 1);
-        const pickOn = !!app._teacherLinePickMode;
+        const setupSt = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
+        const pickOn = !!app._teacherLinePickMode || !!(setupSt && setupSt.step === "excerpts");
         const wholeBtn = document.getElementById("btn-teacher-whole-pick");
         const prevBtn = document.getElementById("btn-teacher-preview-excerpt");
         if(wholeBtn) wholeBtn.classList.toggle("active-pick-mode", pickOn);
@@ -20145,6 +20254,9 @@ const ui = {
             if(ui._pendingAdminOpen) {
                 ui._pendingAdminOpen = false;
                 setTimeout(function() { try { ui.showTeacherSettings(); } catch(ePo) {} }, 0);
+            }
+            if(typeof ui.maybeStartTeacherPassageSetup === "function") {
+                setTimeout(function() { try { ui.maybeStartTeacherPassageSetup(); } catch(eSetup) {} }, 0);
             }
         }
     },
@@ -20938,6 +21050,8 @@ const ui = {
             const adm = document.getElementById("modal-admin");
             if(adm && adm.classList.contains("open") && !adm.classList.contains("modal-hidden")) return;
             try {
+                if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
+                if(typeof ui.maybeStartTeacherPassageSetup === "function") ui.maybeStartTeacherPassageSetup();
                 ui._deferAfterAdminClose();
                 if(typeof admin !== "undefined" && typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode();
             } catch(e) { console.warn("admin close defer:", e); }
@@ -22526,6 +22640,7 @@ const ui = {
         const useJustifyStage = !!(app.selectionUsesJustifyStage && app.selectionUsesJustifyStage(level));
         const questionTextEarly = app.getStudentFacingQuestionText ? app.getStudentFacingQuestionText(level) : (app.getQuestionForLevel(level) || (appData.selection && appData.selection.question && appData.selection.question.prompt) || appData.question || "");
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
+        if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner();
         if(typeof ui.syncTeacherDesktopPassageLayout === "function") ui.syncTeacherDesktopPassageLayout({ refresh: false });
         if(typeof ui.syncSelectQuestionCollapse === "function") ui.syncSelectQuestionCollapse();
         ui.renderQuestionBanner();
@@ -22654,7 +22769,7 @@ const ui = {
                     ${dismissHintBtn}
                     <div style="font-weight:700;margin-bottom:6px;">Line window not found — excerpt / affirm are switched on but idle</div>
                     <div style="opacity:0.94;">${isTeacher
-                        ? `Set which booklet lines this question uses: <strong>Editing Suite → Focus questions</strong> → small box <strong>Lines 1–5</strong> (or type <code style="font-size:0.82em;">Read lines 1–5</code> in the question text). Match the <strong>Level Bank</strong> question dropdown to this row, <strong>save</strong>, then open the student link / QR again so the phone picks up the change. Or use <strong>Start / End phrase</strong> anchors.`
+                        ? `Use the <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong> bar above the passage (turn on <strong>Whole insert (pick excerpt)</strong> if hidden). Or set <strong>Lines</strong> in Editing Suite → Focus questions.`
                         : `This version of the lesson has not stored which lines to use. Ask your teacher to add a line range to the question, then reload.`}
                     </div>
                     ${dismissWholeBtn}
@@ -36330,7 +36445,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
         }
         app._anchorPickInMainEditor = true;
-        admin.setPassageRangeWizardStatus("Highlight words in <strong>Component 1 — source passage</strong> above, then click <strong>Mark start</strong> or <strong>Mark end</strong>. Booklet lines fill in automatically when you <strong>Apply excerpt</strong>.", "warn");
+        admin.setPassageRangeWizardStatus("Highlight words in the <strong>numbered passage below</strong>, then click <strong>Mark start</strong> or <strong>Mark end</strong>. Booklet lines fill in when you <strong>Apply excerpt</strong>.", "warn");
     },
     _selectionInPassageEditor: function() {
         const pick = app.getPassageTextSelection && app.getPassageTextSelection();
@@ -36482,6 +36597,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(admin._syncTeacherPreviewAnchorInputs) admin._syncTeacherPreviewAnchorInputs();
         admin.refreshTeacherPassageLevelPickDisplay(level);
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
+        if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner();
         if(opts.previewAdmin !== false && admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
         if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
     },
@@ -36633,8 +36749,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         admin.renderTeacherPassageRangeWizard();
     },
     markPassageRangeStartFromSelection: function() {
-        if(!admin._selectionInPassageEditor()) admin.focusPassageEditorForAnchorPick({ skipFocus: true });
-        admin.rememberPassageRangePick();
+        if(!admin.rememberPassageRangePick()) {
+            if(typeof admin.focusPassageEditorForAnchorPick === "function") admin.focusPassageEditorForAnchorPick({ skipFocus: true });
+            admin.rememberPassageRangePick();
+        }
         const pickText = admin.getPassageRangePickText();
         if(!pickText) {
             admin.setPassageRangeWizardStatus("No highlight found. Drag across the <strong>opening words</strong> in the passage below, then click <strong>Mark start</strong> again.", "error");
@@ -36652,8 +36770,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         return true;
     },
     markPassageRangeEndFromSelection: function() {
-        if(!admin._selectionInPassageEditor()) admin.focusPassageEditorForAnchorPick({ skipFocus: true });
-        admin.rememberPassageRangePick();
+        if(!admin.rememberPassageRangePick()) {
+            if(typeof admin.focusPassageEditorForAnchorPick === "function") admin.focusPassageEditorForAnchorPick({ skipFocus: true });
+            admin.rememberPassageRangePick();
+        }
         const pickText = admin.getPassageRangePickText();
         if(!pickText) {
             admin.setPassageRangeWizardStatus("No highlight found. Drag across the <strong>closing words</strong>, then click <strong>Mark end</strong> again.", "error");
