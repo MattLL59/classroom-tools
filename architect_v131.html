@@ -18393,10 +18393,12 @@ const app = {
     _adminPassageHydrateDone: false,
     _adminPassageHydrateInFlight: false,
     _deferAdminPassageUntilDemand: false,
+    _forceAdminPassageHydrateForSetup: false,
     _adminLiteOpen: false,
     ADMIN_PASSAGE_DEFER_CHARS: 28000,
     setAdminPassageDeferredPlaceholder: function(opts) {
         opts = opts || {};
+        if(app._forceAdminPassageHydrateForSetup) return;
         const el = document.getElementById("ai-input");
         if(!el || el.getAttribute("contenteditable") !== "true") return;
         if(!opts.force && !app._isC1PassageEditorsVisuallyEmpty()) return;
@@ -18420,6 +18422,46 @@ const app = {
                 ev.stopPropagation();
                 app.loadAdminPassageOnDemand();
             });
+        }
+    },
+    /** Teacher setup Step 1: load saved passage into #ai-input with booklet gutters + layout toolbar (never the defer placeholder). */
+    hydrateAdminPassageForTeacherSetup: function() {
+        if(!appData || appData.component === 2) return false;
+        app._forceAdminPassageHydrateForSetup = true;
+        app._deferAdminPassageUntilDemand = false;
+        app._adminPassageHydrateDone = false;
+        app._adminPassageHydrateInFlight = false;
+        try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
+        try {
+            if(typeof admin !== "undefined") {
+                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+                else if(typeof admin.setC1PassageFocusMode === "function") admin.setC1PassageFocusMode(false);
+                if(typeof admin.restoreC1PassageFlyoutEls === "function") admin.restoreC1PassageFlyoutEls();
+                if(admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
+                if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+            }
+            const det = document.getElementById("admin-c1-source-details");
+            if(det) det.open = true;
+            const ai = document.getElementById("ai-input");
+            if(ai && ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder")) ai.innerHTML = "";
+            if(typeof app.syncAdminAiInputFromLesson === "function") app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+            if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
+            if(typeof app.syncPassageBookletFirstInputFromMeta === "function") app.syncPassageBookletFirstInputFromMeta();
+            const ck = document.getElementById("c1-passage-show-all-booklet-lines");
+            if(ck && !ck.checked) {
+                ck.checked = true;
+                if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox === "function") app.applyPassageShowAllBookletLinesInEditorFromCheckbox();
+            }
+            const row = document.getElementById("c1-passage-editor-row");
+            if(row) row.setAttribute("data-rail-panel", "layout");
+            if(ai) {
+                try { ai.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(eSc) {}
+            }
+            app._adminPassageHydrateDone = true;
+            return !!(ai && ai.querySelector && ai.querySelector(".source-with-line-numbers"));
+        } catch(eHyd) {
+            console.warn("hydrateAdminPassageForTeacherSetup:", eHyd);
+            return false;
         }
     },
     loadAdminPassageOnDemand: function() {
@@ -19732,27 +19774,18 @@ const ui = {
     openPassageLineEditorFromSetup: function() {
         if(!appData || appData.isStandalone) return;
         try { sessionStorage.setItem("tsa_passage_setup_editor_opened", "1"); } catch(eSo) {}
-        if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        app._forceAdminPassageHydrateForSetup = true;
+        app._deferAdminPassageUntilDemand = false;
+        const adm = document.getElementById("modal-admin");
+        const shellOpen = adm && adm.classList.contains("open") && typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible();
+        if(!shellOpen && typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
         const run = function() {
-            try {
-                if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-                if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-                const det = document.getElementById("admin-c1-source-details");
-                if(det) det.open = true;
-                if(typeof app.syncAdminAiInputFromLesson === "function") app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
-                const ck = document.getElementById("c1-passage-show-all-booklet-lines");
-                if(ck && !ck.checked) {
-                    ck.checked = true;
-                    if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox === "function") app.applyPassageShowAllBookletLinesInEditorFromCheckbox();
-                }
-                const aiIn = document.getElementById("ai-input");
-                if(aiIn) {
-                    try { aiIn.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(eSc) {}
-                }
-            } catch(eEd) {}
+            if(typeof app.hydrateAdminPassageForTeacherSetup === "function") app.hydrateAdminPassageForTeacherSetup();
         };
-        setTimeout(run, 100);
-        setTimeout(run, 500);
+        setTimeout(run, 80);
+        setTimeout(run, 400);
+        setTimeout(run, 1200);
+        setTimeout(function() { app._forceAdminPassageHydrateForSetup = false; }, 2500);
     },
     maybeStartTeacherPassageSetup: function() {
         if(!appData || appData.isStandalone || appData.component !== 1) return;
@@ -21411,7 +21444,8 @@ const ui = {
         /** Set defer flags before any tab/passage sync — showAdminModalShell used to hydrate #ai-input here and froze Data. */
         app._adminLiteOpen = true;
         /** Defer only for large inserts — small/medium lessons should show passage text immediately in Editing Suite. */
-        app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
+        if(app._forceAdminPassageHydrateForSetup) app._deferAdminPassageUntilDemand = false;
+        else app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
         app._adminPassageHydrateDone = false;
         if(typeof admin !== "undefined") {
             admin._liteEditPanelsDone = false;
@@ -21446,7 +21480,11 @@ const ui = {
                     if(saved !== "reward" && saved !== "edit" && saved !== "ai" && saved !== "export") saved = "edit";
                 } catch(eLs) {}
                 admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-                if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+                if(app._forceAdminPassageHydrateForSetup) {
+                    setTimeout(function() {
+                        try { if(typeof app.hydrateAdminPassageForTeacherSetup === "function") app.hydrateAdminPassageForTeacherSetup(); } catch(eSetupHyd) {}
+                    }, 100);
+                } else if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
                     try { app.setAdminPassageDeferredPlaceholder({ force: true }); } catch(ePh) {}
                 } else if(typeof admin !== "undefined" && admin.syncSourceEditorMode) {
                     try {
@@ -27601,7 +27639,9 @@ const admin = {
             }
             if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
             if(app._deferAdminPassageUntilDemand && appData && appData.component !== 2 && typeof app.setAdminPassageDeferredPlaceholder === "function") {
-                if(k === "edit" || k === "ai") app.setAdminPassageDeferredPlaceholder({ force: true });
+                if(!app._forceAdminPassageHydrateForSetup) {
+                    if(k === "edit" || k === "ai") app.setAdminPassageDeferredPlaceholder({ force: true });
+                }
             } else if((k === "edit" || k === "ai") && appData && appData.component !== 2 && typeof admin.syncSourceEditorMode === "function") {
                 try {
                     admin.syncSourceEditorMode({ hydratePassage: true, skipPassageHydrate: false });
