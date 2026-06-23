@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T49:00:00">
+<meta name="architect-build" content="2026-06-14T51:00:00">
 <meta name="architect-deploy" content="c1-passage-focus-exit-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -12099,6 +12099,10 @@ const app = {
                         if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay(stCanon);
                         if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
                     }
+                    if(typeof app.markPassageBookletLayoutDone === "function") app.markPassageBookletLayoutDone();
+                    if(typeof ui.maybeStartTeacherPassageSetup === "function") {
+                        setTimeout(function() { try { ui.maybeStartTeacherPassageSetup(); } catch(eSetup) {} }, 300);
+                    }
                 } catch(eRaf) {
                     if(!silent) alert("Sync passage layout failed: " + (eRaf && eRaf.message ? eRaf.message : String(eRaf)));
                 }
@@ -18232,6 +18236,43 @@ const app = {
         }
         return { trimmed, messages };
     },
+    /** Effective Lines box value: saved lineRef or inferred from “Read lines …” in the prompt. */
+    _effectiveQuestionLineRef: function(q) {
+        if(!q) return "";
+        const lr = q.lineRef ? String(q.lineRef).trim() : "";
+        if(lr) return lr;
+        if(q.prompt && typeof app.inferLineRefFromQuestionPrompt === "function") {
+            const inf = app.inferLineRefFromQuestionPrompt(q.prompt);
+            if(inf) return inf;
+        }
+        return "";
+    },
+    /** True when a focus question still needs a Lines box value (and has no phrase anchors). */
+    _questionNeedsLineRefSetup: function(q) {
+        if(!q) return false;
+        const start = q.passageStartAnchor ? String(q.passageStartAnchor).trim() : "";
+        const end = q.passageEndAnchor ? String(q.passageEndAnchor).trim() : "";
+        if(start && end) return false;
+        return !app._effectiveQuestionLineRef(q);
+    },
+    /** True until teacher runs Sync passage layout (or saved lesson already marked done). */
+    _needsBookletLineSetup: function() {
+        if(typeof appData === "undefined" || !appData || appData.component !== 1) return false;
+        const st = typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+        if(!st) return false;
+        if(appData.meta && appData.meta.passageBookletLayoutDone === true) return false;
+        try { if(sessionStorage.getItem("tsa_passage_booklet_layout_done") === "1") return false; } catch(e) {}
+        if(!app.passageSourceHasLineGutters(st)) return true;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        return questions.some(function(q) { return q && String(q.prompt || q.text || q.question || "").trim(); });
+    },
+    markPassageBookletLayoutDone: function() {
+        if(!appData) return;
+        if(!appData.meta || typeof appData.meta !== "object") appData.meta = {};
+        appData.meta.passageBookletLayoutDone = true;
+        try { sessionStorage.setItem("tsa_passage_booklet_layout_done", "1"); } catch(e) {}
+        try { if(typeof app.save === "function") app.save({ skipRender: true, silent: true }); } catch(eS) {}
+    },
     /** True when stored source can render WJEC booklet line gutters in Lab / Quote Select. */
     passageSourceHasLineGutters: function(sourceText) {
         const st = typeof sourceText === "string" ? sourceText.trim() : "";
@@ -18247,24 +18288,24 @@ const app = {
             return false;
         }
     },
-    /** Teacher C1 setup: line layout first, then per-question excerpt anchors. */
+    /** Teacher C1 setup: passage booklet lines in Editing Suite first, then excerpt anchors in Quote Select. */
     getTeacherPassageSetupStatus: function() {
         const done = { step: "done", hasSource: false, needsLineLayout: false, needsExcerptSetup: false, questionCount: 0 };
         if(!appData || appData.isStandalone || appData.component !== 1) return done;
         const st = typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
         const hasSource = !!st;
         if(!hasSource) return Object.assign({}, done, { step: "import" });
-        const needsLineLayout = !app.passageSourceHasLineGutters(st);
+        const needsLineLayout = typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup();
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const focusQs = questions.filter(function(q) {
             return q && String(q.prompt || q.text || q.question || "").trim();
         });
         let needsExcerptSetup = false;
-        if(!needsLineLayout && focusQs.length) {
+        if(focusQs.length) {
             needsExcerptSetup = focusQs.some(function(q) {
                 const start = q.passageStartAnchor ? String(q.passageStartAnchor).trim() : "";
                 const end = q.passageEndAnchor ? String(q.passageEndAnchor).trim() : "";
-                const lr = q.lineRef ? String(q.lineRef).trim() : "";
+                const lr = typeof app._effectiveQuestionLineRef === "function" ? app._effectiveQuestionLineRef(q) : (q.lineRef ? String(q.lineRef).trim() : "");
                 return !(start && end) && !lr;
             });
         }
@@ -19643,10 +19684,9 @@ const ui = {
         if(st.step === "lines") {
             el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid var(--primary);border-radius:8px;background:rgba(0,150,136,0.1);font-size:0.88rem;line-height:1.45;\">"
                 + dismiss
-                + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 1 — Set passage line numbers</div>"
-                + "<div style=\"opacity:0.92;margin-bottom:10px;\">Your passage needs <strong>booklet line numbers</strong> before you can assign excerpts to questions. Open the passage editor, set <strong>Booklet line 1</strong>, use <strong>¶ Paragraph</strong> where needed, then <strong>Sync passage layout</strong>.</div>"
+                + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 1 — Set passage line numbers &amp; paragraphs</div>"
+                + "<div style=\"opacity:0.92;margin-bottom:10px;\">In <strong>Editing Suite → Component 1 — source passage</strong>: set <strong>Booklet line 1</strong>, use <strong>¶ Paragraph</strong> where needed, then <strong>Sync passage layout</strong>. Quote Select / Lab stay empty until this is done.</div>"
                 + "<button type=\"button\" class=\"btn btn-primary btn-small\" onclick=\"if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()\">Open passage editor</button>"
-                + " <span style=\"font-size:0.78rem;opacity:0.8;margin-left:8px;\">Returns here automatically when you close Settings.</span>"
                 + "</div>";
         } else if(st.step === "excerpts") {
             el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid #5c6bc0;border-radius:8px;background:rgba(92,107,192,0.08);font-size:0.88rem;line-height:1.45;\">"
@@ -19655,6 +19695,39 @@ const ui = {
                 + "<div style=\"opacity:0.92;\">Use the <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong> controls below. Highlight words in the <strong>numbered passage</strong>, not in Settings. Repeat for each focus question.</div>"
                 + "</div>";
         }
+    },
+    openFocusQuestionLinesFromSetup: function() {
+        if(!appData || appData.isStandalone) return;
+        try { sessionStorage.setItem("tsa_passage_setup_lines_opened", "1"); } catch(eSo) {}
+        try { sessionStorage.setItem("tsa_passage_setup_lines_reviewed", "1"); } catch(eRv) {}
+        if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        const run = function() {
+            try {
+                if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("ai");
+                if(typeof admin.refreshQuestionsList === "function") admin.refreshQuestionsList();
+                const det = document.getElementById("admin-c1-source-details");
+                if(det) det.open = false;
+                let targetInp = null;
+                const mounts = document.querySelectorAll(".questions-list-mount");
+                for(let mi = 0; mi < mounts.length && !targetInp; mi++) {
+                    const inputs = mounts[mi].querySelectorAll("input.question-line-ref-input");
+                    for(let ii = 0; ii < inputs.length; ii++) {
+                        if(!String(inputs[ii].value || "").trim()) { targetInp = inputs[ii]; break; }
+                    }
+                    if(!targetInp && inputs.length) targetInp = inputs[0];
+                }
+                const listEl = document.getElementById("questions-list");
+                const scrollTarget = targetInp || listEl;
+                if(scrollTarget) {
+                    try { scrollTarget.scrollIntoView({ behavior: "smooth", block: "center" }); } catch(eSc) {}
+                }
+                if(targetInp) {
+                    try { targetInp.focus(); targetInp.select(); } catch(eF) {}
+                }
+            } catch(eEd) {}
+        };
+        setTimeout(run, 100);
+        setTimeout(run, 450);
     },
     openPassageLineEditorFromSetup: function() {
         if(!appData || appData.isStandalone) return;
@@ -19667,32 +19740,43 @@ const ui = {
                 const det = document.getElementById("admin-c1-source-details");
                 if(det) det.open = true;
                 if(typeof app.syncAdminAiInputFromLesson === "function") app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
+                const ck = document.getElementById("c1-passage-show-all-booklet-lines");
+                if(ck && !ck.checked) {
+                    ck.checked = true;
+                    if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox === "function") app.applyPassageShowAllBookletLinesInEditorFromCheckbox();
+                }
+                const aiIn = document.getElementById("ai-input");
+                if(aiIn) {
+                    try { aiIn.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(eSc) {}
+                }
             } catch(eEd) {}
         };
         setTimeout(run, 100);
+        setTimeout(run, 500);
     },
     maybeStartTeacherPassageSetup: function() {
         if(!appData || appData.isStandalone || appData.component !== 1) return;
         let dismissed = false;
         try { dismissed = sessionStorage.getItem("tsa_passage_setup_dismissed") === "1"; } catch(eD) {}
+        if(typeof app.ensureAllQuestionLineRefsFromPrompts === "function") app.ensureAllQuestionLineRefsFromPrompts();
         const st = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
         if(!st || st.step === "done" || st.step === "import") {
             if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
             return;
         }
-        if(typeof app.ensureAllQuestionLineRefsFromPrompts === "function") app.ensureAllQuestionLineRefsFromPrompts();
+        if(st.step === "lines" && !dismissed) {
+            if(typeof ui.openPassageLineEditorFromSetup === "function") {
+                setTimeout(function() { ui.openPassageLineEditorFromSetup(); }, 400);
+            }
+            if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
+            return;
+        }
         if(userState && userState.view !== "select" && typeof ui.switchView === "function") ui.switchView("select", true);
         if(!dismissed && typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
         if(st.step === "excerpts") {
             if(!app._teacherLinePickMode && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
             if(typeof admin !== "undefined" && admin._preparePassageForLineAssignment) {
                 admin._preparePassageForLineAssignment({ level: app.getEffectiveLevel ? app.getEffectiveLevel() : 1, previewOnly: false });
-            }
-        } else if(st.step === "lines" && !dismissed) {
-            let opened = false;
-            try { opened = sessionStorage.getItem("tsa_passage_setup_editor_opened") === "1"; } catch(eO) {}
-            if(!opened && typeof ui.openPassageLineEditorFromSetup === "function") {
-                setTimeout(function() { ui.openPassageLineEditorFromSetup(); }, 800);
             }
         }
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
