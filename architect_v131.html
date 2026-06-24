@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T53:00:00">
+<meta name="architect-build" content="2026-06-14T54:00:00">
 <meta name="architect-deploy" content="c1-passage-focus-exit-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -18181,6 +18181,7 @@ const app = {
     },
     /** True when building #ai-input on Data open would likely freeze the tab (large / structured insert). Lab + Quote Select still use saved JSON. */
     shouldDeferAdminPassageHydration: function() {
+        if(app._passageExtractHydratePending) return false;
         if(app._forceAdminPassageHydrateForSetup) return false;
         if(typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()) return false;
         if(!appData || appData.component === 2) return false;
@@ -18398,14 +18399,20 @@ const app = {
     _adminPassageHydrateInFlight: false,
     _deferAdminPassageUntilDemand: false,
     _forceAdminPassageHydrateForSetup: false,
+    _passageExtractHydratePending: false,
     _adminLiteOpen: false,
     ADMIN_PASSAGE_DEFER_CHARS: 28000,
     setAdminPassageDeferredPlaceholder: function(opts) {
         opts = opts || {};
-        if(app._forceAdminPassageHydrateForSetup) return;
+        if(app._passageExtractHydratePending || app._forceAdminPassageHydrateForSetup) return;
         const el = document.getElementById("ai-input");
-        if(!el || el.getAttribute("contenteditable") !== "true") return;
+        if(el && el.querySelector && el.querySelector(".source-with-line-numbers")) return;
+        if(el && !opts.force) {
+            const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+            if(t.length > 60) return;
+        }
         if(!opts.force && !app._isC1PassageEditorsVisuallyEmpty()) return;
+        if(!el || el.getAttribute("contenteditable") !== "true") return;
         let kb = 0;
         try {
             const st = (appData && typeof appData.sourceText === "string") ? appData.sourceText : "";
@@ -18470,7 +18477,7 @@ const app = {
             const ok = !!(aiAfter && aiAfter.querySelector && aiAfter.querySelector(".source-with-line-numbers"));
             if(ok) {
                 app._adminPassageHydrateDone = true;
-                app._forceAdminPassageHydrateForSetup = false;
+                if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
             }
             return ok;
         } catch(eHyd) {
@@ -18850,21 +18857,71 @@ const app = {
         opts = Object.assign({ force: true, resetDismiss: true, dismissAction: "dismiss-past-paper-extract" }, opts || {});
         app.showArchitectAdminToast(msgHtml, opts);
     },
+    /** C1 extract / re-extract: arm editor hydrate before renderAll tab sync (prevents defer placeholder race). */
+    beginPassageExtractEditorHydrate: function() {
+        if(!appData || appData.component === 2) return;
+        app._passageExtractHydratePending = true;
+        app._forceAdminPassageHydrateForSetup = true;
+        app._deferAdminPassageUntilDemand = false;
+        app._passageDisplaysDeferred = false;
+        app._adminPassageHydrateDone = false;
+        if(appData.meta && typeof appData.meta === "object") delete appData.meta.passageBookletLayoutDone;
+        try {
+            sessionStorage.removeItem("tsa_passage_booklet_layout_done");
+            sessionStorage.removeItem("tsa_passage_setup_editor_opened");
+        } catch(eRs) {}
+    },
     /** After Lobby extract / re-extract: clear defer flags and paint passage (Lab, Quote Select, editor). */
     finishPassageAfterExtract: function() {
-        app._passageDisplaysDeferred = false;
-        app._deferAdminPassageUntilDemand = false;
         app._heavyLessonOnLoad = false;
         app._studentPassagePaintScheduled = false;
-        app._adminPassageHydrateDone = false;
-        try {
-            if(appData && appData.component !== 2 && typeof app.finishC1PassageLayoutAfterLessonLoad === "function") {
-                app.finishC1PassageLayoutAfterLessonLoad();
-            } else if(typeof app.syncAdminAiInputFromLesson === "function") {
-                app.syncAdminAiInputFromLesson({ force: true });
-                app._adminPassageHydrateDone = true;
+        if(appData && appData.component !== 2) {
+            if(typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
+            else {
+                app._passageExtractHydratePending = true;
+                app._forceAdminPassageHydrateForSetup = true;
+                app._deferAdminPassageUntilDemand = false;
+                app._adminPassageHydrateDone = false;
             }
-        } catch(eLay) { console.warn("finishPassageAfterExtract layout:", eLay); }
+            const runEditorHydrate = function() {
+                try {
+                    const st = (appData && typeof appData.sourceText === "string") ? appData.sourceText.trim() : "";
+                    if(!st) return false;
+                    if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") app.finishC1PassageLayoutAfterLessonLoad();
+                    if(typeof app.hydrateAdminPassageForTeacherSetup === "function") return app.hydrateAdminPassageForTeacherSetup();
+                    if(typeof app.setAiInputValue === "function") {
+                        app.setAiInputValue(st);
+                        if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
+                    }
+                    const ai = document.getElementById("ai-input");
+                    return !!(ai && ai.querySelector && ai.querySelector(".source-with-line-numbers"));
+                } catch(eHyd) {
+                    console.warn("finishPassageAfterExtract editor:", eHyd);
+                    return false;
+                }
+            };
+            runEditorHydrate();
+            [80, 300, 800, 2000].forEach(function(ms) {
+                setTimeout(function() {
+                    if(runEditorHydrate()) {
+                        app._passageExtractHydratePending = false;
+                        app._forceAdminPassageHydrateForSetup = false;
+                        app._adminPassageHydrateDone = true;
+                    }
+                }, ms);
+            });
+            setTimeout(function() {
+                app._passageExtractHydratePending = false;
+                app._forceAdminPassageHydrateForSetup = false;
+            }, 10000);
+        } else {
+            try {
+                if(typeof app.syncAdminAiInputFromLesson === "function") {
+                    app.syncAdminAiInputFromLesson({ force: true, userDemand: true, skipFlush: true });
+                    app._adminPassageHydrateDone = true;
+                }
+            } catch(eLay) { console.warn("finishPassageAfterExtract layout:", eLay); }
+        }
         try {
             if(typeof ui !== "undefined") {
                 if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
@@ -18872,6 +18929,11 @@ const app = {
                 if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
             }
         } catch(eUi) { console.warn("finishPassageAfterExtract UI:", eUi); }
+        if(appData && appData.component !== 2 && typeof ui !== "undefined" && typeof ui.openPassageLineEditorFromSetup === "function") {
+            const adm = document.getElementById("modal-admin");
+            const settingsOpen = adm && adm.classList.contains("open") && typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible();
+            if(settingsOpen) setTimeout(function() { ui.openPassageLineEditorFromSetup(); }, 400);
+        }
     },
     /** After Lobby Extract text / questions — refresh passage + admin editors immediately (no idle defer). */
     afterPastPaperExtractUi: function(opts) {
@@ -18879,6 +18941,9 @@ const app = {
         app.prepareImportedLesson(appData);
         app._deferAdminPassageUntilDemand = false;
         app._passageDisplaysDeferred = false;
+        if(appData && appData.component !== 2 && appData.sourceText && String(appData.sourceText).trim() && typeof app.beginPassageExtractEditorHydrate === "function") {
+            app.beginPassageExtractEditorHydrate();
+        }
         app._importInProgress = true;
         app._suppressAdminInputFlushOnce = true;
         try {
@@ -18890,29 +18955,21 @@ const app = {
             }
             if(typeof admin !== "undefined") {
                 if(admin.syncPastPaperLabels) admin.syncPastPaperLabels();
-                if(!opts.includeQuestions && admin.renderAll) admin.renderAll();
             }
             if(opts.includeQuestions && typeof admin !== "undefined" && admin.afterExtractQuestionsUi) {
                 try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
                 admin.afterExtractQuestionsUi(Array.isArray(appData.questions) ? appData.questions.length : 0);
-            }
-            if(opts.loadAsComponent2) {
+            } else if(opts.loadAsComponent2) {
                 if(typeof admin.loadC2PassagesIntoEditor === "function") {
                     admin.loadC2PassagesIntoEditor({ goToEditTab: false });
                 }
-            } else if(appData && appData.sourceText && String(appData.sourceText).trim()) {
-                if(typeof app.finishC1PassageLayoutAfterLessonLoad === "function") {
-                    app.finishC1PassageLayoutAfterLessonLoad();
-                } else if(typeof app.syncAdminAiInputFromLesson === "function") {
-                    app.syncAdminAiInputFromLesson({ force: true });
-                }
+                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll();
+            } else if(typeof app.finishPassageAfterExtract === "function") {
+                app.finishPassageAfterExtract();
+                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll({ skipSourceSync: true });
+            } else if(typeof admin !== "undefined" && admin.renderAll) {
+                admin.renderAll();
             }
-            if(typeof ui !== "undefined") {
-                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
-                if(ui.renderLab) ui.renderLab(null, { skipPassage: false });
-                if(userState && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
-            }
-            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
         } catch(eF) {
             console.warn("afterPastPaperExtractUi:", eF);
         }
@@ -27141,10 +27198,11 @@ const admin = {
                 admin.autoAssignLevelsByLineRangeIfApplicable();
             }
             admin.refreshQuestionsList();
-            admin.renderAll();
+            if(!loadAsComponent2 && typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            admin.renderAll({ skipSourceSync: true });
             if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
                 admin.loadC2PassagesIntoEditor({ goToEditTab: false });
-            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
         }
         try {
             if(app._lastPdfDebug && app._lastPdfDebug.kind === "pastPaper") {
@@ -27517,13 +27575,13 @@ const admin = {
                 }
                 app.save();
             }
-            if(!isC2) app.setAiInputValue(appData.sourceText || "");
-            admin.renderAll();
+            if(!isC2 && typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
             if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
-            else {
-                if(isC2 && ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
-                if(isC2 && userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
+            else if(isC2) {
+                if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
+                if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
             }
+            admin.renderAll({ skipSourceSync: true });
             app.showPastPaperExtractNotice("<strong>Resource passage re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s). Open <strong>Quote Select</strong> or <strong>Lab</strong> to view.", { autoHideMs: 15000 });
         } catch(e) {
             app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract resource: " + (e.message || String(e)) + "</span>");
@@ -27571,6 +27629,9 @@ const admin = {
     },
     _runActivateAdminTabSync: function(k, opts) {
         opts = opts || {};
+        if(app._passageExtractHydratePending || app._forceAdminPassageHydrateForSetup) {
+            opts = Object.assign({}, opts, { skipPassageHydrate: false });
+        }
         try {
             if(typeof admin.syncSourceEditorMode === "function") admin.syncSourceEditorMode(opts);
             if(k === "edit" && appData && appData.component === 2 && !opts.skipC2Fill && typeof admin.fillC2PooledEditorFromLayout === "function") {
@@ -28142,7 +28203,10 @@ const admin = {
     renderAll: function(opts) {
         opts = opts || {};
         const deferHeavy = !!(opts.lite || opts.skipLevelBank);
-        const tabOpts = { skipPassageHydrate: !!(opts.lite || opts.skipSourceSync), skipC2Fill: !!(opts.lite || opts.skipSourceSync) };
+        const tabOpts = {
+            skipPassageHydrate: !!(opts.lite || opts.skipSourceSync) && !app._passageExtractHydratePending && !app._forceAdminPassageHydrateForSetup,
+            skipC2Fill: !!(opts.lite || opts.skipSourceSync)
+        };
         if(opts.skipTabActivate) {
             try { admin.bindTabsOnly(); } catch(eTb) {}
         } else {
@@ -28341,7 +28405,7 @@ const admin = {
         }
         if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
         if(!useC2Editors) {
-            const needsSetupHydrate = !!(app._forceAdminPassageHydrateForSetup || (typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()));
+            const needsSetupHydrate = !!(app._passageExtractHydratePending || app._forceAdminPassageHydrateForSetup || (typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()));
             const deferEditor = !needsSetupHydrate && !!(opts.skipPassageHydrate || app._deferAdminPassageUntilDemand);
             if(deferEditor && typeof app.setAdminPassageDeferredPlaceholder === "function") {
                 app.setAdminPassageDeferredPlaceholder({ force: true });
