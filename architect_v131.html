@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T57:00:00">
-<meta name="architect-deploy" content="c1-passage-focus-exit-f806">
+<meta name="architect-build" content="2026-06-14T58:00:00">
+<meta name="architect-deploy" content="fix-editor-mount-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2098,7 +2098,7 @@
                 <div class="admin-tab" data-tab="edit">
                 <details class="admin-section" id="admin-c1-source-details" open>
                     <summary class="admin-h">📄 Component 1 — source passage</summary>
-                    <p style="font-size:0.85rem; opacity:0.82; margin:0 0 10px 0;">This is the <strong>same</strong> source text and rich-text toolbar as <strong>Load &amp; AI → Source Text</strong> (one <code>#ai-input</code> — it moves here when you use the Editing Suite). <strong>Question-focused</strong> excerpt preview is in Lab / Quote Select (header radios), not this full editor. For <strong>Component 2</strong> lessons this block is hidden; use <strong>Component 2 — passages</strong> below.</p>
+                    <p style="font-size:0.85rem; opacity:0.82; margin:0 0 10px 0;">This is the <strong>same</strong> source text and rich-text toolbar as <strong>Load &amp; AI → Source Text</strong> (one <code>#ai-input</code> — always shown here for Component 1 booklet editing). <strong>Question-focused</strong> excerpt preview is in Lab / Quote Select (header radios), not this full editor. For <strong>Component 2</strong> lessons this block is hidden; use <strong>Component 2 — passages</strong> below.</p>
                     <div id="c1-source-editor-mount-edit"></div>
                 </details>
                 <details class="admin-section" id="admin-c2-passages-details" open>
@@ -7833,6 +7833,61 @@ const app = {
             if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
             if(scrollAnchor && typeof app.restorePassageEditorScrollAnchor === "function") app.restorePassageEditorScrollAnchor(scrollAnchor);
         }
+    },
+    /**
+     * Last-resort: push saved canonical into #ai-input when normal hydrate left the Editing Suite box empty.
+     * Tries setAiInputValue → storedCanonicalToEditorInnerHtml → Quote Select gutter HTML → formatSourceHtmlForEditor.
+     */
+    _forceLoadCanonIntoAiInput: function(canon) {
+        if(!canon || typeof canon !== "string") return false;
+        const trimmed = canon.trim();
+        if(!trimmed) return false;
+        const ai = document.getElementById("ai-input");
+        if(!ai || ai.getAttribute("contenteditable") !== "true") return false;
+        if(typeof admin !== "undefined" && typeof admin.placeC1SourceWrapForAdminTab === "function") {
+            admin.placeC1SourceWrapForAdminTab({ forceEditMount: true });
+        }
+        if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred"))) {
+            ai.innerHTML = "";
+        }
+        const loaded = function() {
+            const hasGutters = !!(ai.querySelector && ai.querySelector(".source-with-line-numbers"));
+            const hasText = typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(ai);
+            return hasGutters || hasText;
+        };
+        try {
+            if(typeof app.setAiInputValue === "function") app.setAiInputValue(trimmed);
+            if(loaded()) return true;
+        } catch(e1) {}
+        try {
+            const inner = app.storedCanonicalToEditorInnerHtml && app.storedCanonicalToEditorInnerHtml(trimmed);
+            if(inner && String(inner).trim()) {
+                if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(inner);
+                else ai.innerHTML = inner;
+                if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                if(loaded()) return true;
+            }
+        } catch(e2) {}
+        try {
+            const sel = document.getElementById("source-inline-select");
+            const lab = document.getElementById("source-inline");
+            const donor = (sel && sel.querySelector && sel.querySelector(".source-with-line-numbers")) ? sel
+                : ((lab && lab.querySelector && lab.querySelector(".source-with-line-numbers")) ? lab : null);
+            if(donor && donor.innerHTML && /source-with-line-numbers/i.test(donor.innerHTML)) {
+                ai.innerHTML = donor.innerHTML;
+                if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                if(loaded()) return true;
+            }
+        } catch(e3) {}
+        try {
+            const html = app.formatSourceHtmlForEditor && app.formatSourceHtmlForEditor(trimmed);
+            if(html && String(html).trim()) {
+                ai.innerHTML = html;
+                if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                if(loaded()) return true;
+            }
+        } catch(e4) {}
+        return false;
     },
     capturePassageEditorScrollAnchor: function() {
         const ai = document.getElementById("ai-input");
@@ -18505,13 +18560,29 @@ const app = {
             }
             const row = document.getElementById("c1-passage-editor-row");
             if(row) row.setAttribute("data-rail-panel", "layout");
-            const aiAfter = document.getElementById("ai-input");
+            let aiAfter = document.getElementById("ai-input");
             if(aiAfter) {
                 try { aiAfter.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(eSc) {}
             }
-            const hasGutters = !!(aiAfter && aiAfter.querySelector && aiAfter.querySelector(".source-with-line-numbers"));
-            const hasText = !!(aiAfter && typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(aiAfter));
-            const ok = hasGutters || hasText;
+            let hasGutters = !!(aiAfter && aiAfter.querySelector && aiAfter.querySelector(".source-with-line-numbers"));
+            let hasText = !!(aiAfter && typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(aiAfter));
+            let ok = hasGutters || hasText;
+            if(!ok && canon && typeof app._forceLoadCanonIntoAiInput === "function") {
+                ok = app._forceLoadCanonIntoAiInput(canon);
+                if(ok && typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
+                aiAfter = document.getElementById("ai-input");
+                hasGutters = !!(aiAfter && aiAfter.querySelector && aiAfter.querySelector(".source-with-line-numbers"));
+                hasText = !!(aiAfter && typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(aiAfter));
+                ok = hasGutters || hasText;
+            }
+            if(!ok && canon && aiAfter) {
+                aiAfter.innerHTML = `<div class="architect-admin-passage-load-error" style="padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);">
+                    <div style="font-weight:700;margin-bottom:6px;">Passage did not load in the editor</div>
+                    <div style="margin-bottom:10px;opacity:0.92;">Your lesson has saved source text, but the Editing Suite box stayed empty. Quote Select may still show the passage behind this panel — that does not mean the editor loaded.</div>
+                    <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app._forceLoadCanonIntoAiInput==='function'&&app._forceLoadCanonIntoAiInput(appData.sourceText)){if(typeof app.ensureC1EditorBookletRows==='function')app.ensureC1EditorBookletRows();if(typeof app.hydrateAdminPassageForTeacherSetup==='function')app.hydrateAdminPassageForTeacherSetup();}">Retry load</button>
+                    <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof app.loadAdminPassageOnDemand==='function')app.loadAdminPassageOnDemand();">Load passage in editor</button>
+                </div>`;
+            }
             if(ok) {
                 app._adminPassageHydrateDone = true;
                 if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
@@ -28535,8 +28606,8 @@ const admin = {
         }
     },
     /**
-     * One #source-text-single-wrap / #ai-input: park it under Editing Suite for C1 (default tab) or under Load & AI when that tab is active,
-     * so teachers are not sent away from the Editing Suite to find the passage. C2 lessons hide the C1 block entirely.
+     * One #source-text-single-wrap / #ai-input: for Component 1 always park under Editing Suite (mount-edit) so booklet line / ¶ editing
+     * is never an empty box when teachers open Settings on Export or another tab. Load & AI shows a short pointer to Editing Suite. C2 hides C1.
      */
     placeC1SourceWrapForAdminTab: function(opts) {
         opts = opts || {};
@@ -28552,12 +28623,24 @@ const admin = {
         if(useC2) {
             if(c1Block) c1Block.classList.add("hidden");
             if(moveEl.parentNode !== mountAi) mountAi.appendChild(moveEl);
+            const hintC2 = document.getElementById("c1-source-editor-mount-ai-hint");
+            if(hintC2) hintC2.classList.add("hidden");
             return;
         }
         if(c1Block) c1Block.classList.remove("hidden");
-        const tab = (typeof localStorage !== "undefined" && localStorage.getItem("tsa_admin_tab")) || "edit";
-        const target = (tab === "ai" ? mountAi : (mountEdit || mountAi));
+        const target = mountEdit || mountAi;
         if(target && moveEl.parentNode !== target) target.appendChild(moveEl);
+        if(mountAi) {
+            let hint = document.getElementById("c1-source-editor-mount-ai-hint");
+            if(!hint) {
+                hint = document.createElement("p");
+                hint.id = "c1-source-editor-mount-ai-hint";
+                hint.style.cssText = "font-size:0.85rem;opacity:0.88;margin:0 0 10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:rgba(0,150,136,0.06);";
+                hint.innerHTML = "The <strong>Source Text</strong> editor (booklet lines, ¶, PDF import) is in <strong>Editing Suite → Component 1 — source passage</strong>. Use that tab, or <strong>Edit booklet lines &amp; ¶</strong> in Quote Select.";
+                mountAi.appendChild(hint);
+            }
+            hint.classList.remove("hidden");
+        }
         const needsHyd = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
         if(typeof app.syncAdminAiInputFromLesson === "function" && appData.component !== 2 && (!app._deferAdminPassageUntilDemand || needsHyd || app._forceAdminPassageHydrateForSetup)) {
             const ai = document.getElementById("ai-input");
