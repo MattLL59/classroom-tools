@@ -1302,6 +1302,20 @@
     #modal-admin.tsa-c1-passage-focus #c1-source-editor-mount-ai #ai-input.source-editor {
         max-height: none !important;
     }
+    /** Stale focus classes on wrap/row without modal focus collapsed #ai-input to 0 height — keep editor visible. */
+    #modal-admin:not(.tsa-c1-passage-focus) #c1-passage-editor-row.tsa-c1-passage-focus,
+    #modal-admin:not(.tsa-c1-passage-focus) #source-text-single-wrap.tsa-c1-passage-focus {
+        flex: none;
+        min-height: auto;
+        display: block;
+        overflow: visible;
+    }
+    #modal-admin:not(.tsa-c1-passage-focus) #source-text-single-wrap.tsa-c1-passage-focus #ai-input.source-editor {
+        flex: none;
+        min-height: 80px !important;
+        max-height: min(62vh, 720px) !important;
+        overflow-y: auto !important;
+    }
     .c1-passage-tool-rail {
         flex: 0 0 44px;
         width: 44px;
@@ -7639,6 +7653,7 @@ const app = {
         if(opts.force && el.querySelector && el.querySelector(".architect-admin-passage-placeholder")) el.innerHTML = "";
         /** Snapshot before any lesson sync: force-sync must not rebuild from stale appData.sourceText while #ai-input still holds exam gutters (openModal / tab sync). */
         const hadGutterDom = !!(el.querySelector && el.querySelector(".source-with-line-numbers"));
+        const hadUsableGutters = hadGutterDom && typeof app._adminPassageEditorHasUsableGutters === "function" && app._adminPassageEditorHasUsableGutters(el);
         const hadPlaceholder = !!(el.querySelector && el.querySelector(".architect-admin-passage-placeholder"));
         /**
          * flushAiInputToLessonSourceIfEditable serializes the **live** editor into appData.sourceText.
@@ -7691,14 +7706,14 @@ const app = {
             html = "";
         }
         if(!html) {
-            if(hadGutterDom && opts.force) {
+            if(hadUsableGutters && opts.force) {
                 if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
                 return;
             }
             app.setAiInputValue(raw);
             return;
         }
-        if(hadGutterDom && opts.force && !/source-with-line-numbers/i.test(html)) {
+        if(hadUsableGutters && opts.force && !/source-with-line-numbers/i.test(html)) {
             if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
             return;
         }
@@ -7848,6 +7863,8 @@ const app = {
             admin.placeC1SourceWrapForAdminTab({ forceEditMount: true });
         }
         if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred"))) {
+            ai.innerHTML = "";
+        } else if(ai.querySelector && ai.querySelector(".source-with-line-numbers") && typeof app._adminPassageEditorHasUsableGutters === "function" && !app._adminPassageEditorHasUsableGutters(ai)) {
             ai.innerHTML = "";
         }
         const loaded = function() {
@@ -18243,6 +18260,24 @@ const app = {
         }
         return false;
     },
+    /** True when #ai-input has real booklet rows (not a lone gutter tick / broken stub). */
+    _adminPassageEditorHasUsableGutters: function(ai) {
+        ai = ai || document.getElementById("ai-input");
+        if(!ai || !ai.querySelector || !ai.querySelector(".source-with-line-numbers")) return false;
+        const rows = ai.querySelectorAll(".source-line-row");
+        if(!rows || !rows.length) return false;
+        if(rows.length >= 2) return true;
+        const rowText = (rows[0].textContent || "").replace(/\s+/g, " ").trim();
+        if(rowText.length > 24) return true;
+        const st = appData && typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+        if(st && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st)) {
+            try {
+                const o = app.parseStructuredPassageSource(st);
+                if(o && o.lines && o.lines.length > 1) return false;
+            } catch(eO) {}
+        }
+        return rowText.length > 0;
+    },
     /** True when saved source exists but #ai-input still shows placeholder / empty (must hydrate, never defer). */
     _adminPassageEditorNeedsHydrate: function() {
         if(!appData || appData.component === 2) return false;
@@ -18250,10 +18285,24 @@ const app = {
         if(!st) return false;
         const ai = document.getElementById("ai-input");
         if(!ai) return true;
-        if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred"))) return true;
+        if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred") || ai.querySelector(".architect-admin-passage-load-error"))) return true;
         if(typeof app._isC1PassageEditorsVisuallyEmpty === "function" && app._isC1PassageEditorsVisuallyEmpty()) return true;
-        if(!(ai.querySelector && ai.querySelector(".source-with-line-numbers")) && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st)) return true;
+        const structured = typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st);
+        if(structured) {
+            if(typeof app._adminPassageEditorHasUsableGutters === "function" && !app._adminPassageEditorHasUsableGutters(ai)) return true;
+            return false;
+        }
+        if(!(ai.querySelector && ai.querySelector(".source-with-line-numbers")) && structured) return true;
         return false;
+    },
+    /** Post-hydrate: structured lessons need booklet rows; plain text needs visible copy. */
+    _adminEditorHydrateLooksOk: function(ai, canon) {
+        ai = ai || document.getElementById("ai-input");
+        if(!ai) return false;
+        if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred") || ai.querySelector(".architect-admin-passage-load-error"))) return false;
+        const structured = canon && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(canon);
+        if(structured) return typeof app._adminPassageEditorHasUsableGutters === "function" && app._adminPassageEditorHasUsableGutters(ai);
+        return typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(ai);
     },
     /** True when building #ai-input on Data open would likely freeze the tab (large / structured insert). Lab + Quote Select still use saved JSON. */
     shouldDeferAdminPassageHydration: function() {
@@ -18529,11 +18578,12 @@ const app = {
         if(admShell) admShell.classList.add("modal-admin-passage-editing");
         try {
             if(typeof admin !== "undefined") {
+                if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
                 if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
                 else if(typeof admin.setC1PassageFocusMode === "function") admin.setC1PassageFocusMode(false);
                 if(typeof admin.restoreC1PassageFlyoutEls === "function") admin.restoreC1PassageFlyoutEls();
                 if(admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-                if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+                if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab({ skipFocusRestore: true });
             }
             const det = document.getElementById("admin-c1-source-details");
             if(det) det.open = true;
@@ -18559,21 +18609,21 @@ const app = {
                 if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox === "function") app.applyPassageShowAllBookletLinesInEditorFromCheckbox();
             }
             const row = document.getElementById("c1-passage-editor-row");
-            if(row) row.setAttribute("data-rail-panel", "layout");
+            if(row) row.removeAttribute("data-rail-panel");
             let aiAfter = document.getElementById("ai-input");
             if(aiAfter) {
                 try { aiAfter.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(eSc) {}
             }
-            let hasGutters = !!(aiAfter && aiAfter.querySelector && aiAfter.querySelector(".source-with-line-numbers"));
-            let hasText = !!(aiAfter && typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(aiAfter));
-            let ok = hasGutters || hasText;
+            let ok = typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(aiAfter, canon);
             if(!ok && canon && typeof app._forceLoadCanonIntoAiInput === "function") {
                 ok = app._forceLoadCanonIntoAiInput(canon);
                 if(ok && typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
                 aiAfter = document.getElementById("ai-input");
-                hasGutters = !!(aiAfter && aiAfter.querySelector && aiAfter.querySelector(".source-with-line-numbers"));
-                hasText = !!(aiAfter && typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(aiAfter));
-                ok = hasGutters || hasText;
+                ok = typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(aiAfter, canon);
+            }
+            if(typeof admin !== "undefined") {
+                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+                if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
             }
             if(!ok && canon && aiAfter) {
                 aiAfter.innerHTML = `<div class="architect-admin-passage-load-error" style="padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);">
@@ -19974,6 +20024,10 @@ const ui = {
         if(!appData || appData.isStandalone) return;
         try { sessionStorage.setItem("tsa_passage_setup_editor_opened", "1"); } catch(eSo) {}
         try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
+        if(typeof admin !== "undefined") {
+            if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
+            if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+        }
         app._forceAdminPassageHydrateForSetup = true;
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
@@ -28173,6 +28227,7 @@ const admin = {
                     const needsHydrate = ai && (
                         (typeof app._isAiInputEditorVisuallyEmpty === "function" && app._isAiInputEditorVisuallyEmpty(ai))
                         || (ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder"))
+                        || (typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate())
                     );
                     if(needsHydrate && !app._deferAdminPassageUntilDemand && typeof app.syncAdminAiInputFromLesson === "function") {
                         app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
@@ -28190,6 +28245,15 @@ const admin = {
         admin.setC1PassageFocusMode = applyFocusMode;
         admin.exitC1PassageFocusMode = function() {
             applyFocusMode(false);
+        };
+        admin.syncC1PassageFocusChromeConsistency = function() {
+            const modal = document.getElementById("modal-admin");
+            const row = document.getElementById("c1-passage-editor-row");
+            const wrap = document.getElementById("source-text-single-wrap");
+            if(!row || !wrap) return;
+            const modalOn = !!(modal && modal.classList.contains("tsa-c1-passage-focus"));
+            const localOn = wrap.classList.contains("tsa-c1-passage-focus");
+            if(!modalOn && localOn) applyFocusMode(false, { skipSave: true });
         };
         admin.handleC1PassageFocusEscape = function(ev) {
             const row = document.getElementById("c1-passage-editor-row");
@@ -28655,7 +28719,16 @@ const admin = {
                 } catch(eSync) {}
             }
         }
-        if(typeof admin.restoreC1PassageFocusModeFromSession === "function") admin.restoreC1PassageFocusModeFromSession();
+        if(typeof admin.restoreC1PassageFocusModeFromSession === "function") {
+            const skipFocusRestore = !!(opts.skipFocusRestore || app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending);
+            if(skipFocusRestore) {
+                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+                if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
+            } else {
+                admin.restoreC1PassageFocusModeFromSession();
+            }
+        }
+        if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
         if(typeof admin.positionC1PassageRailFlyouts === "function") admin.positionC1PassageRailFlyouts();
     },
     /** One-click: lesson was loaded as C1 but teacher wants Editing Suite C2 passages — no full re-import required. */
