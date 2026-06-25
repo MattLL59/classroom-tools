@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T59:00:00">
-<meta name="architect-deploy" content="fix-editor-focus-hydrate-f806">
+<meta name="architect-build" content="2026-06-14T60:00:00">
+<meta name="architect-deploy" content="fix-fullscreen-exit-loop-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1315,6 +1315,20 @@
         min-height: 80px !important;
         max-height: min(62vh, 720px) !important;
         overflow-y: auto !important;
+    }
+    #modal-admin.modal-admin-passage-editing.tsa-c1-passage-focus {
+        align-items: center;
+        padding: 20px 0;
+    }
+    #modal-admin.modal-admin-passage-editing.tsa-c1-passage-focus .modal-content {
+        max-height: 90vh;
+        height: auto;
+    }
+    #modal-admin.modal-admin-passage-editing .c1-passage-focus-hint-active {
+        display: none !important;
+    }
+    #modal-admin.modal-admin-passage-editing .c1-passage-focus-hint-normal {
+        display: inline !important;
     }
     .c1-passage-tool-rail {
         flex: 0 0 44px;
@@ -28199,29 +28213,36 @@ const admin = {
             });
         };
         admin.positionC1PassageRailFlyouts = function() {};
+        admin.isC1PassageFocusActive = function() {
+            const modal = document.getElementById("modal-admin");
+            const wrap = document.getElementById("source-text-single-wrap");
+            return !!(modal && modal.classList.contains("tsa-c1-passage-focus"))
+                || !!(wrap && wrap.classList.contains("tsa-c1-passage-focus"));
+        };
         const applyFocusMode = function(on, opts) {
             opts = opts || {};
             const modal = document.getElementById("modal-admin");
             const row = document.getElementById("c1-passage-editor-row");
             const wrap = document.getElementById("source-text-single-wrap");
             const toggle = document.getElementById("btn-c1-passage-focus-toggle");
-            if(!wrap || !row) return;
-            const active = !!on;
-            if(active) parkC1PassageFlyoutEls();
-            else {
+            let active = !!on;
+            if(active && modal && modal.classList.contains("modal-admin-passage-editing")) active = false;
+            if(active && (app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending)) active = false;
+            if(active && wrap && row) parkC1PassageFlyoutEls();
+            else if(row) {
                 row.removeAttribute("data-rail-panel");
                 syncRailBtnActive(null);
                 restoreC1PassageFlyoutEls();
             }
             if(modal) modal.classList.toggle("tsa-c1-passage-focus", active);
-            row.classList.toggle("tsa-c1-passage-focus", active);
-            wrap.classList.toggle("tsa-c1-passage-focus", active);
+            if(row) row.classList.toggle("tsa-c1-passage-focus", active);
+            if(wrap) wrap.classList.toggle("tsa-c1-passage-focus", active);
             if(toggle) {
                 toggle.textContent = active ? "Exit full-screen" : "Full-screen editor";
                 toggle.classList.toggle("btn-primary", !active);
                 toggle.classList.toggle("btn-outline", active);
             }
-            if(active) {
+            if(active && wrap) {
                 try {
                     const ai = document.getElementById("ai-input");
                     const needsHydrate = ai && (
@@ -28245,37 +28266,63 @@ const admin = {
         admin.setC1PassageFocusMode = applyFocusMode;
         admin.exitC1PassageFocusMode = function() {
             applyFocusMode(false);
+            clearFocusSession();
+            const modal = document.getElementById("modal-admin");
+            const row = document.getElementById("c1-passage-editor-row");
+            const wrap = document.getElementById("source-text-single-wrap");
+            const toggle = document.getElementById("btn-c1-passage-focus-toggle");
+            if(modal) modal.classList.remove("tsa-c1-passage-focus");
+            if(row) {
+                row.classList.remove("tsa-c1-passage-focus");
+                row.removeAttribute("data-rail-panel");
+            }
+            if(wrap) wrap.classList.remove("tsa-c1-passage-focus");
+            if(toggle) {
+                toggle.textContent = "Full-screen editor";
+                toggle.classList.add("btn-primary");
+                toggle.classList.remove("btn-outline");
+            }
+            syncRailBtnActive(null);
+            restoreC1PassageFlyoutEls();
         };
         admin.syncC1PassageFocusChromeConsistency = function() {
             const modal = document.getElementById("modal-admin");
             const row = document.getElementById("c1-passage-editor-row");
             const wrap = document.getElementById("source-text-single-wrap");
             if(!row || !wrap) return;
+            const bookletEditing = !!(modal && modal.classList.contains("modal-admin-passage-editing"));
+            const setupFlags = !!(app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending);
+            if(bookletEditing || setupFlags) {
+                if(admin.isC1PassageFocusActive()) admin.exitC1PassageFocusMode();
+                else clearFocusSession();
+                return;
+            }
             const modalOn = !!(modal && modal.classList.contains("tsa-c1-passage-focus"));
             const localOn = wrap.classList.contains("tsa-c1-passage-focus");
-            if(!modalOn && localOn) applyFocusMode(false, { skipSave: true });
+            if(modalOn !== localOn) admin.exitC1PassageFocusMode();
         };
         admin.handleC1PassageFocusEscape = function(ev) {
+            if(!admin.isC1PassageFocusActive()) return false;
             const row = document.getElementById("c1-passage-editor-row");
-            const wrap = document.getElementById("source-text-single-wrap");
-            if(!row || !wrap || !wrap.classList.contains("tsa-c1-passage-focus")) return false;
-            if(row.getAttribute("data-rail-panel")) {
+            if(row && row.getAttribute("data-rail-panel")) {
                 row.removeAttribute("data-rail-panel");
                 syncRailBtnActive(null);
             } else {
-                applyFocusMode(false);
+                admin.exitC1PassageFocusMode();
             }
             if(ev) { ev.preventDefault(); ev.stopPropagation(); }
             return true;
         };
         admin.toggleC1PassageFocusMode = function() {
-            const wrap = document.getElementById("source-text-single-wrap");
-            applyFocusMode(!(wrap && wrap.classList.contains("tsa-c1-passage-focus")));
+            if(admin.isC1PassageFocusActive()) admin.exitC1PassageFocusMode();
+            else applyFocusMode(true);
         };
         admin.restoreC1PassageFocusModeFromSession = function() {
             try {
                 const adm = document.getElementById("modal-admin");
                 if(!adm || !adm.classList.contains("open")) return;
+                if(adm.classList.contains("modal-admin-passage-editing")) return;
+                if(app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending) return;
                 if(sessionStorage.getItem(STORAGE_KEY) === "1") applyFocusMode(true, { skipSave: true });
             } catch(eRs) {}
         };
@@ -28326,7 +28373,7 @@ const admin = {
                     return;
                 }
                 if(action === "exit-focus") {
-                    admin.toggleC1PassageFocusMode();
+                    admin.exitC1PassageFocusMode();
                     return;
                 }
                 if(action === "format" || action === "layout" || action === "import" || action === "intro") setRailPanel(action);
@@ -28346,7 +28393,7 @@ const admin = {
             if(typeof admin !== "undefined" && admin.handleC1PassageFocusEscape && admin.handleC1PassageFocusEscape(ev)) return;
             const row = document.getElementById("c1-passage-editor-row");
             const wrap = document.getElementById("source-text-single-wrap");
-            if(!row || !wrap || !wrap.classList.contains("tsa-c1-passage-focus")) return;
+            if(!row || !wrap || !admin.isC1PassageFocusActive()) return;
             if(row.getAttribute("data-rail-panel")) {
                 row.removeAttribute("data-rail-panel");
                 syncRailBtnActive(null);
@@ -28354,11 +28401,10 @@ const admin = {
                 ev.stopPropagation();
                 return;
             }
-            applyFocusMode(false);
+            admin.exitC1PassageFocusMode();
             ev.preventDefault();
             ev.stopPropagation();
         }, true);
-        admin.restoreC1PassageFocusModeFromSession();
     },
     bindAdminModalClose: function() {
         const closeBtn = document.getElementById("btn-admin-modal-close");
@@ -28717,15 +28763,6 @@ const admin = {
                     app.syncAdminAiInputFromLesson({ force: true, userDemand: true });
                     app._adminPassageHydrateDone = true;
                 } catch(eSync) {}
-            }
-        }
-        if(typeof admin.restoreC1PassageFocusModeFromSession === "function") {
-            const skipFocusRestore = !!(opts.skipFocusRestore || app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending);
-            if(skipFocusRestore) {
-                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
-                if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
-            } else {
-                admin.restoreC1PassageFocusModeFromSession();
             }
         }
         if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
