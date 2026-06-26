@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T60:00:00">
-<meta name="architect-deploy" content="fix-fullscreen-exit-loop-f806">
+<meta name="architect-build" content="2026-06-14T61:00:00">
+<meta name="architect-deploy" content="fix-c1-black-screen-trap-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -586,9 +586,15 @@
         -webkit-backdrop-filter: none !important;
         background: rgba(15, 24, 28, 0.45);
     }
-    /* Passage layout editor: opaque backdrop so teachers are not fooled by Quote Select showing through an empty #ai-input */
+    /* Passage layout editor: highlight panel only — do not use an opaque backdrop (trapped teachers on a black void when C1 hydrate failed). */
     #modal-admin.modal.modal-admin-passage-editing {
-        background: rgba(15, 24, 28, 0.94) !important;
+        background: rgba(15, 24, 28, 0.48) !important;
+    }
+    #modal-admin.modal-admin-passage-editing .modal-content {
+        box-shadow: 0 0 0 2px var(--primary), 0 12px 48px rgba(0, 0, 0, 0.35);
+    }
+    #modal-admin.modal-admin-passage-editing .c1-passage-focus-bar {
+        display: none !important;
     }
     .modal.open {
         display: flex !important;
@@ -18589,7 +18595,7 @@ const app = {
         app._deferAdminPassageUntilDemand = false;
         try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
         const admShell = document.getElementById("modal-admin");
-        if(admShell) admShell.classList.add("modal-admin-passage-editing");
+        if(admShell) admShell.classList.remove("modal-admin-passage-editing");
         try {
             if(typeof admin !== "undefined") {
                 if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
@@ -18601,6 +18607,8 @@ const app = {
             }
             const det = document.getElementById("admin-c1-source-details");
             if(det) det.open = true;
+            const editTab = document.querySelector('#modal-admin .admin-tab[data-tab="edit"]');
+            if(editTab) editTab.classList.remove("hidden");
             const ai = document.getElementById("ai-input");
             if(ai && ai.getAttribute("contenteditable") === "true") {
                 if(ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder")) ai.innerHTML = "";
@@ -18609,6 +18617,7 @@ const app = {
                 }
             }
             const canon = (appData && typeof appData.sourceText === "string") ? appData.sourceText.trim() : "";
+            if(canon && typeof app._forceLoadCanonIntoAiInput === "function") app._forceLoadCanonIntoAiInput(canon);
             if(canon && typeof app.setAiInputValue === "function") {
                 app.setAiInputValue(canon);
             }
@@ -18640,20 +18649,24 @@ const app = {
                 if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
             }
             if(!ok && canon && aiAfter) {
+                if(admShell) admShell.classList.remove("modal-admin-passage-editing");
                 aiAfter.innerHTML = `<div class="architect-admin-passage-load-error" style="padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);">
                     <div style="font-weight:700;margin-bottom:6px;">Passage did not load in the editor</div>
-                    <div style="margin-bottom:10px;opacity:0.92;">Your lesson has saved source text, but the Editing Suite box stayed empty. Quote Select may still show the passage behind this panel — that does not mean the editor loaded.</div>
+                    <div style="margin-bottom:10px;opacity:0.92;">Your lesson has saved source text, but the Component 1 editor stayed empty. Quote Select may still show the passage behind Settings — that does not mean this editor loaded.</div>
                     <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app._forceLoadCanonIntoAiInput==='function'&&app._forceLoadCanonIntoAiInput(appData.sourceText)){if(typeof app.ensureC1EditorBookletRows==='function')app.ensureC1EditorBookletRows();if(typeof app.hydrateAdminPassageForTeacherSetup==='function')app.hydrateAdminPassageForTeacherSetup();}">Retry load</button>
                     <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof app.loadAdminPassageOnDemand==='function')app.loadAdminPassageOnDemand();">Load passage in editor</button>
+                    <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof ui.closeTeacherSettings==='function')ui.closeTeacherSettings(event);">Close Settings</button>
                 </div>`;
             }
             if(ok) {
+                if(admShell) admShell.classList.add("modal-admin-passage-editing");
                 app._adminPassageHydrateDone = true;
                 if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
             }
             return ok;
         } catch(eHyd) {
             console.warn("hydrateAdminPassageForTeacherSetup:", eHyd);
+            if(admShell) admShell.classList.remove("modal-admin-passage-editing");
             return false;
         } finally {
             app._adminPassageHydrateInFlight = false;
@@ -20041,6 +20054,7 @@ const ui = {
         if(typeof admin !== "undefined") {
             if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
             if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+            if(typeof admin.restoreC1PassageFlyoutEls === "function") admin.restoreC1PassageFlyoutEls();
         }
         app._forceAdminPassageHydrateForSetup = true;
         app._deferAdminPassageUntilDemand = false;
@@ -20048,14 +20062,23 @@ const ui = {
         if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole", { skipRefresh: false });
         const adm = document.getElementById("modal-admin");
         const shellOpen = adm && adm.classList.contains("open") && typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible();
-        if(!shellOpen && typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
-        else if(adm) adm.classList.add("modal-admin-passage-editing");
+        if(!shellOpen) {
+            if(typeof ui.openAdmin === "function") ui.openAdmin();
+            else if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        } else {
+            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
+            else if(typeof admin !== "undefined" && admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, deferSync: false });
+        }
         const run = function() {
             if(typeof app.hydrateAdminPassageForTeacherSetup === "function") {
                 const ok = app.hydrateAdminPassageForTeacherSetup();
-                if(ok && typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
+                if(ok) {
+                    if(adm) adm.classList.add("modal-admin-passage-editing");
+                    if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
+                } else if(adm) adm.classList.remove("modal-admin-passage-editing");
                 return ok;
             }
+            if(adm) adm.classList.remove("modal-admin-passage-editing");
             return false;
         };
         if(typeof requestAnimationFrame === "function") {
@@ -20064,7 +20087,10 @@ const ui = {
             setTimeout(run, 80);
         }
         [300, 900, 2200].forEach(function(ms) {
-            setTimeout(function() { if(!run() && ms === 2200 && typeof app.loadAdminPassageOnDemand === "function") app.loadAdminPassageOnDemand(); }, ms);
+            setTimeout(function() {
+                const ok = run();
+                if(!ok && ms === 2200 && typeof app.loadAdminPassageOnDemand === "function") app.loadAdminPassageOnDemand();
+            }, ms);
         });
     },
     maybeStartTeacherPassageSetup: function() {
@@ -21794,8 +21820,6 @@ const ui = {
                 admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
                 if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
                 if(app._forceAdminPassageHydrateForSetup || needsPassageHydrate) {
-                    const adm = document.getElementById("modal-admin");
-                    if(adm) adm.classList.add("modal-admin-passage-editing");
                     const runHyd = function() {
                         try { if(typeof app.hydrateAdminPassageForTeacherSetup === "function") app.hydrateAdminPassageForTeacherSetup(); } catch(eSetupHyd) {}
                     };
@@ -38915,6 +38939,12 @@ try {
     window.__tsaHideAdminShellNow = function() {
         const m = document.getElementById("modal-admin");
         if(!m || !window.__tsaAdminShellVisible()) return false;
+        m.classList.remove("modal-admin-passage-editing", "tsa-c1-passage-focus");
+        if(typeof admin !== "undefined") {
+            if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+            else if(typeof admin.setC1PassageFocusMode === "function") admin.setC1PassageFocusMode(false);
+            if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
+        }
         m.classList.remove("open");
         m.classList.add("modal-hidden");
         m.style.display = "none";
