@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T62:00:00">
-<meta name="architect-deploy" content="fix-c1-workflow-order-f806">
+<meta name="architect-build" content="2026-06-14T63:00:00">
+<meta name="architect-deploy" content="fix-c1-edit-booklet-button-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -18429,6 +18429,30 @@ const app = {
         try { sessionStorage.setItem("tsa_passage_booklet_layout_done", "1"); } catch(e) {}
         try { if(typeof app.save === "function") app.save({ skipRender: true, silent: true }); } catch(eS) {}
     },
+    /** For Step 1 banner / open editor: is passage saved, visible in Quote Select, loaded in #ai-input? */
+    getPassageEditorOpenStatus: function() {
+        const st = appData && typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+        const hasSource = !!st;
+        let passageVisibleInSelect = false;
+        const sel = document.getElementById("source-inline-select");
+        if(sel) {
+            if(sel.querySelector && sel.querySelector(".source-with-line-numbers")) passageVisibleInSelect = true;
+            else {
+                const t = (sel.textContent || "").replace(/\s+/g, " ").trim();
+                passageVisibleInSelect = t.length > 40;
+            }
+        }
+        const ai = document.getElementById("ai-input");
+        const editorLoaded = !!(typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, st));
+        return {
+            hasSource: hasSource,
+            passageVisibleInSelect: passageVisibleInSelect,
+            editorLoaded: editorLoaded,
+            needsReExtract: !hasSource,
+            needsLoadInEditor: hasSource && !editorLoaded,
+            kb: hasSource ? Math.max(1, Math.round(st.length / 1000)) : 0
+        };
+    },
     /** True when stored source can render WJEC booklet line gutters in Lab / Quote Select. */
     passageSourceHasLineGutters: function(sourceText) {
         const st = typeof sourceText === "string" ? sourceText.trim() : "";
@@ -19999,10 +20023,19 @@ const ui = {
         el.classList.remove("hidden");
         const dismiss = "<button type=\"button\" class=\"btn btn-outline btn-small\" style=\"float:right;\" onclick=\"try{sessionStorage.setItem('tsa_passage_setup_dismissed','1');}catch(e){}var b=document.getElementById('teacher-passage-setup-banner');if(b){b.classList.add('hidden');b.innerHTML='';}\">Dismiss</button>";
         if(st.step === "lines") {
+            const ps = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
+            let guide = "The <strong>numbered passage</strong> appears below in Quote Select. Click <strong>Edit booklet lines &amp; ¶</strong> to open Settings → Editing Suite with your saved passage loaded — set <strong>Booklet line 1</strong>, paragraph breaks, then <strong>Sync passage layout</strong>. You can read the passage here while you edit.";
+            if(ps && ps.needsReExtract) {
+                guide = "<strong>No passage saved yet.</strong> Open <strong>Lobby → Extract text</strong> first. When the numbered passage appears below, click <strong>Edit booklet lines &amp; ¶</strong> — you do <strong>not</strong> need to re-extract if the passage is already visible here.";
+            } else if(ps && ps.passageVisibleInSelect) {
+                guide = "Your passage is already shown below — <strong>no re-extract needed</strong>. Click <strong>Edit booklet lines &amp; ¶</strong> once; Settings opens on Editing Suite with the saved text loaded. Set <strong>Booklet line 1</strong>, paragraph breaks, then <strong>Sync passage layout</strong>.";
+            } else if(ps && ps.hasSource) {
+                guide = "This lesson has saved passage text (~" + ps.kb + "k characters). Click <strong>Edit booklet lines &amp; ¶</strong> — it loads into Editing Suite automatically (no re-extract). Set <strong>Booklet line 1</strong>, paragraph breaks, then <strong>Sync passage layout</strong>.";
+            }
             el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid var(--primary);border-radius:8px;background:rgba(0,150,136,0.1);font-size:0.88rem;line-height:1.45;\">"
                 + dismiss
                 + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 1 — Set passage line numbers &amp; paragraphs</div>"
-                + "<div style=\"opacity:0.92;margin-bottom:10px;\">The <strong>numbered passage</strong> appears below in Quote Select. Click <strong>Edit booklet lines &amp; ¶</strong> to set <strong>Booklet line 1</strong>, paragraph breaks, and <strong>Sync passage layout</strong> — you can read the passage here while you edit.</div>"
+                + "<div style=\"opacity:0.92;margin-bottom:10px;\">" + guide + "</div>"
                 + "<button type=\"button\" class=\"btn btn-primary btn-small\" onclick=\"if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()\">Edit booklet lines &amp; ¶</button>"
                 + "</div>";
         } else if(st.step === "excerpts") {
@@ -20049,8 +20082,17 @@ const ui = {
     },
     openPassageLineEditorFromSetup: function() {
         if(!appData || appData.isStandalone) return;
+        ui._adminCloseGuardUntil = 0;
         try { sessionStorage.setItem("tsa_passage_setup_editor_opened", "1"); } catch(eSo) {}
         try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
+        const ps = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
+        if(ps && ps.needsReExtract) {
+            if(typeof app.showArchitectAdminToast === "function") {
+                app.showArchitectAdminToast("No passage saved in this lesson yet. Open <strong>Lobby → Extract text</strong>, then click <strong>Edit booklet lines &amp; ¶</strong> again.", { honorUserDismiss: false, autoHideMs: 18000 });
+            }
+            if(typeof ui.switchView === "function") ui.switchView("select", true);
+            return;
+        }
         if(typeof admin !== "undefined") {
             if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
             if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
@@ -20059,17 +20101,14 @@ const ui = {
         app._forceAdminPassageHydrateForSetup = true;
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
+        app._adminPassageHydrateInFlight = false;
         if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole", { skipRefresh: false });
+        if(typeof ui.switchView === "function") ui.switchView("select", true);
+        if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        else if(typeof ui.openAdmin === "function") ui.openAdmin();
         const adm = document.getElementById("modal-admin");
-        const shellOpen = adm && adm.classList.contains("open") && typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible();
-        if(!shellOpen) {
-            if(typeof ui.openAdmin === "function") ui.openAdmin();
-            else if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
-        } else {
-            if(typeof admin !== "undefined" && admin.goAdminTab) admin.goAdminTab("edit");
-            else if(typeof admin !== "undefined" && admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, deferSync: false });
-        }
         const run = function() {
+            app._adminPassageHydrateInFlight = false;
             if(typeof app.hydrateAdminPassageForTeacherSetup === "function") {
                 const ok = app.hydrateAdminPassageForTeacherSetup();
                 if(ok) {
@@ -20089,7 +20128,12 @@ const ui = {
         [300, 900, 2200].forEach(function(ms) {
             setTimeout(function() {
                 const ok = run();
-                if(!ok && ms === 2200 && typeof app.loadAdminPassageOnDemand === "function") app.loadAdminPassageOnDemand();
+                if(!ok && ms === 2200) {
+                    if(typeof app.loadAdminPassageOnDemand === "function") app.loadAdminPassageOnDemand();
+                    else if(typeof app.showArchitectAdminToast === "function") {
+                        app.showArchitectAdminToast("Passage did not load in Editing Suite. Use <strong>Load passage in editor</strong> inside Settings, or hard-refresh and try again.", { honorUserDismiss: false, autoHideMs: 16000 });
+                    }
+                }
             }, ms);
         });
     },
@@ -20104,6 +20148,7 @@ const ui = {
             return;
         }
         if(st.step === "lines" && !dismissed) {
+            if(typeof ui.switchView === "function") ui.switchView("select", true);
             if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
             if(typeof ui.syncTeacherPassageLayoutBar === "function") ui.syncTeacherPassageLayoutBar();
             if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
@@ -20627,8 +20672,12 @@ const ui = {
             if(selectionAvailable && modules.selection) return "select";
             return modules.desk ? "desk" : "desk";
         };
-        /** Open on Quote Select when available so the passage is visible — not Writing Desk (saved view often trapped teachers away from passage / Data). */
-        if(selectionAvailable && modules.selection && startViewPref !== "desk") {
+        const needsBookletSetup = appData && appData.component === 1 && !appData.isStandalone
+            && typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup();
+        /** Open on Quote Select when booklet setup is pending or when available — not Writing Desk (saved view often trapped teachers away from passage / Data). */
+        if(needsBookletSetup && selectionAvailable && modules.selection) {
+            userState.view = "select";
+        } else if(selectionAvailable && modules.selection && startViewPref !== "desk") {
             userState.view = "select";
         } else if(!userState.view) {
             userState.view = resolveStartView();
@@ -21461,7 +21510,9 @@ const ui = {
     },
 
     openModal: (id) => {
-        if(id === "modal-admin" && ui._adminCloseGuardUntil && Date.now() < ui._adminCloseGuardUntil) return;
+        if(id === "modal-admin" && ui._adminCloseGuardUntil && Date.now() < ui._adminCloseGuardUntil) {
+            if(!(typeof app !== "undefined" && app._forceAdminPassageHydrateForSetup)) return;
+        }
         const modal = document.getElementById(id);
         if(modal) {
             modal.classList.remove("modal-hidden");
@@ -21648,7 +21699,7 @@ const ui = {
         }
     },
     showAdminModalShell: function() {
-        if(ui._adminCloseGuardActive()) return false;
+        if(ui._adminCloseGuardActive() && !(typeof app !== "undefined" && app._forceAdminPassageHydrateForSetup)) return false;
         const adm = document.getElementById("modal-admin");
         if(!adm) return false;
         try {
@@ -21687,7 +21738,7 @@ const ui = {
     showTeacherSettings: function(ev) {
         if(ev && ev.preventDefault) ev.preventDefault();
         if(ev && ev.stopPropagation) ev.stopPropagation();
-        if(ui._adminCloseGuardActive()) return;
+        if(ui._adminCloseGuardActive() && !(typeof app !== "undefined" && app._forceAdminPassageHydrateForSetup)) return;
         if(typeof ui._clearTeacherPassagePickForSettings === "function") ui._clearTeacherPassagePickForSettings();
         if(ui._initInProgress) {
             ui._pendingAdminOpen = true;
@@ -21713,10 +21764,15 @@ const ui = {
         }
         if(ui.isAdminModalVisible && ui.isAdminModalVisible()) {
             try {
+                if(app._forceAdminPassageHydrateForSetup && typeof admin !== "undefined" && admin.goAdminTab) {
+                    try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTabFo) {}
+                    admin.goAdminTab("edit");
+                }
                 if(typeof app !== "undefined" && appData && appData.component !== 2) {
                     const needsHyd = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
                     if(app._forceAdminPassageHydrateForSetup || needsHyd) {
                         app._deferAdminPassageUntilDemand = false;
+                        app._adminPassageHydrateInFlight = false;
                         if(needsHyd) app._forceAdminPassageHydrateForSetup = true;
                     } else {
                         app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
