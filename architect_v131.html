@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T65:00:00">
-<meta name="architect-deploy" content="fix-c1-mount-editor-before-hydrate-f806">
+<meta name="architect-build" content="2026-06-14T66:00:00">
+<meta name="architect-deploy" content="fix-c1-one-passage-editor-button-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1931,8 +1931,7 @@
             <div id="select-passage-scope-row" style="margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;">
                 <div id="teacher-passage-layout-bar" class="hidden" style="display:none; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; padding:8px 10px; border:1px dashed var(--primary); border-radius:6px; background:rgba(0,150,136,0.06); font-size:0.82rem; width:100%;">
                     <span style="font-weight:700;">Passage layout</span>
-                    <button type="button" class="btn btn-primary btn-small" onclick="if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()">Edit booklet lines &amp; ¶</button>
-                    <span style="opacity:0.85;">Set line numbers and paragraphs in Settings — passage preview stays here.</span>
+                    <span style="opacity:0.85;">Use the Step 1 banner above the passage → <strong>Open passage editor</strong>.</span>
                 </div>
                 <div class="tsa-passage-scope-controls" id="tsa-passage-scope-select-controls" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:0.78rem; flex-shrink:0; min-width:min-content;" title="Whole insert vs line window from Focus question / Lines box (stored per question).">
                     <span style="opacity:0.85;">Show</span>
@@ -7647,8 +7646,42 @@ const app = {
         if(!/<\/?[a-z]\b/i.test(t)) return t;
         return t.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<\/div>\s*<div[^>]*>/gi, "\n").replace(/<\/p>\s*<p[^>]*>/gi, "\n\n").replace(/<br\s*\/?>/gi, "\n").replace(/<\/span>\s*<span/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/  +/g, " ").replace(/\n /g, "\n").replace(/ \n/g, "\n").trim();
     },
+    /** True when #ai-input shows a transient shell, not real passage content. */
+    _isAiInputEditorLoadingShell: function(el) {
+        el = el || document.getElementById("ai-input");
+        if(!el) return true;
+        if(el.querySelector && el.querySelector(".architect-admin-passage-placeholder")) return true;
+        if(el.querySelector && el.querySelector(".architect-admin-passage-load-error")) return true;
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        if(/^loading passage/.test(t)) return true;
+        return false;
+    },
+    /** After Step 1 open: confirm editor has passage; show inline error if not. */
+    finishBookletEditorOpen: function() {
+        if(!app._forceAdminPassageHydrateForSetup) return;
+        const st = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
+        if(st && st.editorLoaded) {
+            if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
+            return;
+        }
+        const ai = document.getElementById("ai-input");
+        const adm = document.getElementById("modal-admin");
+        if(adm) adm.classList.add("modal-admin-passage-editing");
+        if(ai) {
+            ai.innerHTML = `<div class="architect-admin-passage-load-error" style="padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);">
+                <div style="font-weight:700;margin-bottom:6px;">Passage did not load in the editor</div>
+                <div style="margin-bottom:10px;opacity:0.92;">Settings opened on <strong>Editing Suite → Component 1 — source passage</strong>, but the text box is still empty. Try the buttons below.</div>
+                <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app.loadAdminPassageOnDemand==='function')app.loadAdminPassageOnDemand();">Load passage in editor</button>
+                <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof app.hydrateAdminPassageForTeacherSetup==='function')app.hydrateAdminPassageForTeacherSetup();">Retry</button>
+            </div>`;
+        }
+        if(typeof app.showArchitectAdminToast === "function") {
+            app.showArchitectAdminToast("Passage did not load. In Settings, scroll to <strong>Component 1 — source passage</strong> and click <strong>Load passage in editor</strong>.", { honorUserDismiss: false, force: true, autoHideMs: 20000 });
+        }
+    },
     /** True when #ai-input has no real passage (placeholder / lone &lt;br&gt; only). */
     _isAiInputEditorVisuallyEmpty: function(el) {
+        if(app._isAiInputEditorLoadingShell && app._isAiInputEditorLoadingShell(el)) return true;
         if(!el) return true;
         if(el.querySelector && el.querySelector(".architect-admin-passage-placeholder")) return true;
         const t = (el.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim();
@@ -18319,6 +18352,7 @@ const app = {
     _adminEditorHydrateLooksOk: function(ai, canon) {
         ai = ai || document.getElementById("ai-input");
         if(!ai) return false;
+        if(typeof app._isAiInputEditorLoadingShell === "function" && app._isAiInputEditorLoadingShell(ai)) return false;
         if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred") || ai.querySelector(".architect-admin-passage-load-error"))) return false;
         const structured = canon && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(canon);
         if(structured) return typeof app._adminPassageEditorHasUsableGutters === "function" && app._adminPassageEditorHasUsableGutters(ai);
@@ -18482,7 +18516,8 @@ const app = {
         }
         const hasSource = !!st || passageVisibleInSelect;
         const ai = document.getElementById("ai-input");
-        const editorLoaded = !!(typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, st));
+        const editorLoaded = !!(ai && typeof app._isAiInputEditorLoadingShell === "function" && !app._isAiInputEditorLoadingShell(ai)
+            && typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, st));
         return {
             hasSource: hasSource,
             passageVisibleInSelect: passageVisibleInSelect,
@@ -18753,6 +18788,8 @@ const app = {
         if(!appData || appData.component === 2) return;
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
+        app._forceAdminPassageHydrateForSetup = true;
+        if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
         const el = document.getElementById("ai-input");
         if(el) el.innerHTML = `<div style="padding:10px;opacity:0.75;">Loading passage…</div>`;
         const run = function() {
@@ -20044,10 +20081,9 @@ const ui = {
     syncTeacherPassageLayoutBar: function() {
         const bar = document.getElementById("teacher-passage-layout-bar");
         if(!bar) return;
-        const st = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
-        const show = !!(st && st.step === "lines" && appData && !appData.isStandalone && appData.component === 1);
-        bar.classList.toggle("hidden", !show);
-        bar.style.display = show ? "flex" : "none";
+        /** Step 1 uses the banner button only — hide duplicate layout bar to avoid three identical buttons. */
+        bar.classList.add("hidden");
+        bar.style.display = "none";
     },
     renderTeacherPassageSetupBanner: function(setupSt) {
         const el = document.getElementById("teacher-passage-setup-banner");
@@ -20063,19 +20099,19 @@ const ui = {
         const dismiss = "<button type=\"button\" class=\"btn btn-outline btn-small\" style=\"float:right;\" onclick=\"try{sessionStorage.setItem('tsa_passage_setup_dismissed','1');}catch(e){}var b=document.getElementById('teacher-passage-setup-banner');if(b){b.classList.add('hidden');b.innerHTML='';}\">Dismiss</button>";
         if(st.step === "lines") {
             const ps = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
-            let guide = "The <strong>numbered passage</strong> appears below in Quote Select. Click <strong>Edit booklet lines &amp; ¶</strong> to open Settings → Editing Suite with your saved passage loaded — set <strong>Booklet line 1</strong>, paragraph breaks, then <strong>Sync passage layout</strong>. You can read the passage here while you edit.";
+            let guide = "The numbered passage is below. Click <strong>Open passage editor</strong> once — Settings opens on Editing Suite with your text loaded. Set <strong>Booklet line 1</strong>, paragraph breaks (¶), then <strong>Sync passage layout</strong>.";
             if(ps && ps.needsReExtract) {
-                guide = "<strong>No passage saved yet.</strong> Open <strong>Lobby → Extract text</strong> first. When the numbered passage appears below, click <strong>Edit booklet lines &amp; ¶</strong> — you do <strong>not</strong> need to re-extract if the passage is already visible here.";
+                guide = "<strong>No passage saved yet.</strong> Open <strong>Lobby → Extract text</strong> first, then click <strong>Open passage editor</strong>.";
             } else if(ps && ps.passageVisibleInSelect) {
-                guide = "Your passage is already shown below — <strong>no re-extract needed</strong>. Click <strong>Edit booklet lines &amp; ¶</strong> once; Settings opens on Editing Suite with the saved text loaded. Set <strong>Booklet line 1</strong>, paragraph breaks, then <strong>Sync passage layout</strong>.";
+                guide = "Your passage is already below — <strong>no re-extract needed</strong>. Click <strong>Open passage editor</strong> once.";
             } else if(ps && ps.hasSource) {
-                guide = "This lesson has saved passage text (~" + ps.kb + "k characters). Click <strong>Edit booklet lines &amp; ¶</strong> — it loads into Editing Suite automatically (no re-extract). Set <strong>Booklet line 1</strong>, paragraph breaks, then <strong>Sync passage layout</strong>.";
+                guide = "Saved passage (~" + ps.kb + "k characters). Click <strong>Open passage editor</strong> — it loads automatically.";
             }
             el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid var(--primary);border-radius:8px;background:rgba(0,150,136,0.1);font-size:0.88rem;line-height:1.45;\">"
                 + dismiss
                 + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 1 — Set passage line numbers &amp; paragraphs</div>"
                 + "<div style=\"opacity:0.92;margin-bottom:10px;\">" + guide + "</div>"
-                + "<button type=\"button\" class=\"btn btn-primary btn-small\" onclick=\"if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()\">Edit booklet lines &amp; ¶</button>"
+                + "<button type=\"button\" class=\"btn btn-primary btn-small\" onclick=\"if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup();return false;\">Open passage editor</button>"
                 + "</div>";
         } else if(st.step === "excerpts") {
             el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid #5c6bc0;border-radius:8px;background:rgba(92,107,192,0.08);font-size:0.88rem;line-height:1.45;\">"
@@ -20119,6 +20155,7 @@ const ui = {
         setTimeout(run, 100);
         setTimeout(run, 450);
     },
+    /** Step 1: one click → Settings (Editing Suite) with passage editor mounted and loaded. */
     openPassageLineEditorFromSetup: function() {
         if(!appData || appData.isStandalone) return;
         ui._adminCloseGuardUntil = 0;
@@ -20128,7 +20165,7 @@ const ui = {
         const canon = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : "";
         if(!canon && !(ps && ps.passageVisibleInSelect)) {
             if(typeof app.showArchitectAdminToast === "function") {
-                app.showArchitectAdminToast("No passage saved in this lesson yet. Open <strong>Lobby → Extract text</strong>, then click <strong>Edit booklet lines &amp; ¶</strong> again.", { honorUserDismiss: false, autoHideMs: 18000 });
+                app.showArchitectAdminToast("No passage saved yet. Open <strong>Lobby → Extract text</strong> first.", { honorUserDismiss: false, force: true, autoHideMs: 18000 });
             }
             return;
         }
@@ -20136,70 +20173,8 @@ const ui = {
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
-        if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole", { skipRefresh: true });
-        if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
-        const shellWasOpen = !!(typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible());
-        const openShell = function() {
-            if(typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible()) return true;
-            app._adminLiteOpen = true;
-            ui._pauseSelectionGate = true;
-            if(typeof ui.showAdminModalShell !== "function" || !ui.showAdminModalShell()) return false;
-            if(typeof admin !== "undefined") {
-                if(admin.bindTabsOnly) admin.bindTabsOnly();
-                if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
-                if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
-                if(admin.bindAdminModalClose) admin.bindAdminModalClose();
-                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
-            }
-            return true;
-        };
-        if(!openShell()) {
-            if(typeof app.showArchitectAdminToast === "function") {
-                app.showArchitectAdminToast("Could not open Settings. Hard-refresh the page (Ctrl+Shift+R) and try again.", { honorUserDismiss: false, autoHideMs: 14000 });
-            }
-            return;
-        }
-        const adm = document.getElementById("modal-admin");
-        if(adm) adm.classList.add("modal-admin-passage-editing");
-        if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
-        if(!shellWasOpen && userState && userState.view !== "select" && typeof ui.switchView === "function") {
-            ui.switchView("select", true);
-        }
-        const scrollEditorIntoView = function() {
-            const modalBody = adm && adm.querySelector(".modal-body");
-            const layout = document.getElementById("c1-passage-editor-layout");
-            const det = document.getElementById("admin-c1-source-details");
-            const target = layout || det;
-            if(!modalBody || !target) return;
-            try {
-                const bodyRect = modalBody.getBoundingClientRect();
-                const elRect = target.getBoundingClientRect();
-                modalBody.scrollTop += (elRect.top - bodyRect.top) - 12;
-            } catch(eSc) {}
-        };
-        const loadPassage = function() {
-            app._adminPassageHydrateInFlight = false;
-            if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
-            let ok = false;
-            if(typeof app.hydrateAdminPassageForTeacherSetup === "function") {
-                ok = app.hydrateAdminPassageForTeacherSetup();
-            }
-            if(ok && adm) adm.classList.add("modal-admin-passage-editing");
-            scrollEditorIntoView();
-            return ok;
-        };
-        loadPassage();
-        setTimeout(function() {
-            if(!loadPassage() && typeof app.loadAdminPassageOnDemand === "function") app.loadAdminPassageOnDemand();
-        }, 500);
-        setTimeout(function() {
-            if(typeof app.getPassageEditorOpenStatus === "function") {
-                const st = app.getPassageEditorOpenStatus();
-                if(st && st.hasSource && !st.editorLoaded && typeof app.showArchitectAdminToast === "function") {
-                    app.showArchitectAdminToast("Passage still empty? Click <strong>Load passage in editor</strong> in Component 1 — source passage, or <strong>Retry load</strong> if shown.", { honorUserDismiss: false, autoHideMs: 16000 });
-                }
-            }
-        }, 1800);
+        if(typeof ui.openAdmin === "function") ui.openAdmin();
+        else if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
     },
     maybeStartTeacherPassageSetup: function() {
         if(!appData || appData.isStandalone || appData.component !== 1) return;
@@ -21952,10 +21927,18 @@ const ui = {
                     } catch(eLs) {}
                 }
                 admin.activateAdminTab(saved, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
-                if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+                if(typeof app.ensureC1PassageEditorOnEditTab === "function" && (app._forceAdminPassageHydrateForSetup || needsPassageHydrate)) {
+                    app.ensureC1PassageEditorOnEditTab();
+                } else if(typeof admin.placeC1SourceWrapForAdminTab === "function") {
+                    admin.placeC1SourceWrapForAdminTab();
+                }
                 if(app._forceAdminPassageHydrateForSetup || needsPassageHydrate) {
                     const runHyd = function() {
-                        try { if(typeof app.hydrateAdminPassageForTeacherSetup === "function") app.hydrateAdminPassageForTeacherSetup(); } catch(eSetupHyd) {}
+                        try {
+                            if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
+                            if(typeof app.hydrateAdminPassageForTeacherSetup === "function") app.hydrateAdminPassageForTeacherSetup();
+                            if(app._forceAdminPassageHydrateForSetup && typeof app.finishBookletEditorOpen === "function") app.finishBookletEditorOpen();
+                        } catch(eSetupHyd) {}
                     };
                     if(typeof requestAnimationFrame === "function") {
                         requestAnimationFrame(function() { requestAnimationFrame(runHyd); });
@@ -36784,10 +36767,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const setupStLb = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
         const needsBookletLb = !!(setupStLb && setupStLb.needsLineLayout);
         const bookletSetupBlock = showLineWindowPreview && needsBookletLb ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:2px solid var(--primary);border-radius:8px;background:rgba(0,150,136,0.08);">
-                <div style="font-weight:700;margin-bottom:6px;">Step 1 — Booklet line numbers &amp; ¶ (Settings editor)</div>
-                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 10px 0;line-height:1.45;">Set <strong>Booklet line 1</strong>, paragraph breaks (¶), and <strong>Sync passage layout</strong> in <strong>Editing Suite → Component 1 — source passage</strong> first. The numbered passage preview in Quote Select updates when you close Settings.</p>
-                <button type="button" class="btn btn-primary btn-small" onclick="if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()">Edit booklet lines &amp; ¶</button>
-                <span style="font-size:0.78rem;opacity:0.82;margin-left:8px;">After <strong>Sync passage layout</strong>, Step 2 (excerpt anchors) unlocks in Quote Select / Lab.</span>
+                <div style="font-weight:700;margin-bottom:6px;">Step 1 — Booklet line numbers &amp; ¶</div>
+                <p style="font-size:0.8rem;opacity:0.88;margin:0;line-height:1.45;">Scroll up to <strong>Component 1 — source passage</strong> (top of Editing Suite). If the box is empty, click <strong>Load passage in editor</strong> there. Or use the <strong>Open passage editor</strong> button in Quote Select.</p>
             </div>` : "";
         const anchorPreviewBlock = showLineWindowPreview && !needsBookletLb ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:1px dashed var(--border);border-radius:8px;background:rgba(92,107,192,0.06);">
                 <div style="font-weight:700;margin-bottom:6px;">Step 2 — Question excerpt anchors (Quote Select / Lab)</div>
@@ -36819,7 +36800,6 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     <label style="font-size:0.8rem;display:flex;align-items:center;gap:4px;">Starts at <input type="text" id="teacher-passage-preview-start-anchor" autocomplete="off" placeholder="e.g. Lucy was born" style="min-width:120px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;"></label>
                     <label style="font-size:0.8rem;display:flex;align-items:center;gap:4px;">Ends after <input type="text" id="teacher-passage-preview-end-anchor" autocomplete="off" placeholder="e.g. good earner" style="min-width:120px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;"></label>
                     <button type="button" class="btn btn-primary btn-small" onclick="admin.openTeacherPassagePickFullScreen()">Pick in Quote Select</button>
-                    <button type="button" class="btn btn-outline btn-small" onclick="if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup()">Edit booklet lines &amp; ¶</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.showTeacherWholePassageForPicking()">Refresh preview mirror</button>
                     <button type="button" class="btn btn-primary btn-small" onclick="admin.showTeacherPassagePreview()">Preview this question</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.openTeacherQuoteSelectPreview()">Open Quote Select</button>
