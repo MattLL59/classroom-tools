@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T66:00:00">
-<meta name="architect-deploy" content="fix-c1-one-passage-editor-button-f806">
+<meta name="architect-build" content="2026-06-14T68:00:00">
+<meta name="architect-deploy" content="fix-passage-editor-open-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -18448,7 +18448,7 @@ const app = {
     /** True until teacher runs Sync passage layout (or saved lesson already marked done). */
     _needsBookletLineSetup: function() {
         if(typeof appData === "undefined" || !appData || appData.component !== 1) return false;
-        const st = typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+        const st = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : (typeof appData.sourceText === "string" ? appData.sourceText.trim() : "");
         if(!st) return false;
         if(appData.meta && appData.meta.passageBookletLayoutDone === true) return false;
         try { if(sessionStorage.getItem("tsa_passage_booklet_layout_done") === "1") return false; } catch(e) {}
@@ -18503,6 +18503,46 @@ const app = {
         if(c1Block) c1Block.classList.remove("hidden");
         return !!(document.getElementById("ai-input"));
     },
+    /** Step 1: copy visible Quote Select passage or saved canon into #ai-input (sync, before mount move). */
+    copyLessonPassageIntoAiInputForSetup: function() {
+        const ai = document.getElementById("ai-input");
+        if(!ai || ai.getAttribute("contenteditable") !== "true") return false;
+        const sel = document.getElementById("source-inline-select");
+        let loaded = false;
+        if(sel) {
+            const donorHtml = (sel.querySelector && sel.querySelector(".source-with-line-numbers")) ? sel.innerHTML : "";
+            const plain = (sel.textContent || "").replace(/\s+/g, " ").trim();
+            if(donorHtml && donorHtml.length > 40) {
+                ai.innerHTML = donorHtml;
+                if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
+                loaded = true;
+            } else if(plain.length > 40 && typeof app.formatSourceHtmlForEditor === "function") {
+                try {
+                    ai.innerHTML = app.formatSourceHtmlForEditor(plain);
+                    if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                    loaded = true;
+                } catch(eFmt) {}
+            }
+        }
+        const canon = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : "";
+        if(!loaded && canon && typeof app._forceLoadCanonIntoAiInput === "function") {
+            loaded = app._forceLoadCanonIntoAiInput(canon);
+            if(loaded && typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
+        }
+        if(!loaded && typeof app.syncAdminAiInputFromLesson === "function") {
+            app.syncAdminAiInputFromLesson({ force: true, userDemand: true, skipFlush: true });
+            if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
+            loaded = typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, canon);
+        }
+        if(!loaded && typeof admin !== "undefined" && typeof admin.loadSavedSourceQuestion === "function") {
+            try { admin.loadSavedSourceQuestion(); loaded = true; } catch(eLs) {}
+        }
+        return !!(loaded && (
+            (typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, canon))
+            || (typeof app._isAiInputEditorVisuallyEmpty === "function" && !app._isAiInputEditorVisuallyEmpty(ai))
+        ));
+    },
     getPassageEditorOpenStatus: function() {
         const st = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : (appData && typeof appData.sourceText === "string" ? appData.sourceText.trim() : "");
         let passageVisibleInSelect = false;
@@ -18546,7 +18586,7 @@ const app = {
     getTeacherPassageSetupStatus: function() {
         const done = { step: "done", hasSource: false, needsLineLayout: false, needsExcerptSetup: false, questionCount: 0 };
         if(!appData || appData.isStandalone || appData.component !== 1) return done;
-        const st = typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+        const st = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : (typeof appData.sourceText === "string" ? appData.sourceText.trim() : "");
         const hasSource = !!st;
         if(!hasSource) return Object.assign({}, done, { step: "import" });
         const needsLineLayout = typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup();
@@ -20155,26 +20195,105 @@ const ui = {
         setTimeout(run, 100);
         setTimeout(run, 450);
     },
-    /** Step 1: one click → Settings (Editing Suite) with passage editor mounted and loaded. */
-    openPassageLineEditorFromSetup: function() {
-        if(!appData || appData.isStandalone) return;
+    /** Step 1: open Teacher Settings on Editing Suite and load passage (sync — no openAdmin defer chain). */
+    openPassageLineEditorFromSetup: function(opts) {
+        opts = opts || {};
+        if(!appData || appData.isStandalone || appData.component !== 1) {
+            if(!opts.silent) alert("Passage editor is only available for Component 1 teacher lessons.");
+            return false;
+        }
         ui._adminCloseGuardUntil = 0;
         try { sessionStorage.setItem("tsa_passage_setup_editor_opened", "1"); } catch(eSo) {}
         try { localStorage.setItem("tsa_admin_tab", "edit"); } catch(eTab) {}
-        const ps = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
-        const canon = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : "";
-        if(!canon && !(ps && ps.passageVisibleInSelect)) {
-            if(typeof app.showArchitectAdminToast === "function") {
-                app.showArchitectAdminToast("No passage saved yet. Open <strong>Lobby → Extract text</strong> first.", { honorUserDismiss: false, force: true, autoHideMs: 18000 });
-            }
-            return;
-        }
         app._forceAdminPassageHydrateForSetup = true;
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
-        if(typeof ui.openAdmin === "function") ui.openAdmin();
-        else if(typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
+        app._adminLiteOpen = true;
+        ui._pauseSelectionGate = true;
+        const openShell = function() {
+            let shellOk = false;
+            if(typeof ui.showAdminModalShell === "function") shellOk = !!ui.showAdminModalShell({ skipPassagePickFocus: true });
+            if(!shellOk && typeof ui.openModal === "function") {
+                ui.openModal("modal-admin");
+                shellOk = true;
+            }
+            if(!shellOk) {
+                const m = document.getElementById("modal-admin");
+                if(m) {
+                    m.classList.remove("modal-hidden");
+                    m.classList.add("open");
+                    m.style.display = "flex";
+                    m.style.visibility = "visible";
+                    m.style.opacity = "1";
+                    m.style.pointerEvents = "auto";
+                    m.style.zIndex = "50000";
+                    m.setAttribute("aria-hidden", "false");
+                    shellOk = true;
+                }
+            }
+            return shellOk;
+        };
+        let opened = false;
+        try {
+            if(!openShell()) {
+                alert("Could not open Teacher Settings. Hard-refresh (Ctrl+Shift+R), then try the Data button.");
+                return false;
+            }
+            opened = true;
+            const adm = document.getElementById("modal-admin");
+            if(adm) adm.classList.add("modal-admin-passage-editing");
+            const toastEl = document.getElementById("architect-extract-toast");
+            if(toastEl) {
+                toastEl.style.display = "";
+                toastEl.innerHTML = "<div class=\"card\" style=\"margin:0;padding:8px 12px;font-size:0.86rem;line-height:1.45;border-color:var(--primary);background:rgba(0,150,136,0.08);\">Opening <strong>Component 1 — source passage</strong>…</div>";
+            }
+            try {
+                if(typeof admin !== "undefined") {
+                    if(admin.bindAdminModalChromeOnce) admin.bindAdminModalChromeOnce();
+                    if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
+                    if(admin.bindAdminModalClose) admin.bindAdminModalClose();
+                    if(admin.bindTabsOnly) admin.bindTabsOnly();
+                    if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+                    if(admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
+                }
+            } catch(eBind) { console.warn("openPassageLineEditorFromSetup bind:", eBind); }
+            /** Hydrate #ai-input before moving DOM — avoids placeC1SourceWrap placeholder wiping Quote Select copy. */
+            let loaded = typeof app.copyLessonPassageIntoAiInputForSetup === "function" && app.copyLessonPassageIntoAiInputForSetup();
+            if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
+            if(!loaded && typeof app.hydrateAdminPassageForTeacherSetup === "function") {
+                loaded = !!app.hydrateAdminPassageForTeacherSetup();
+            }
+            const det = document.getElementById("admin-c1-source-details");
+            if(det) det.open = true;
+            const layout = document.getElementById("c1-passage-editor-layout");
+            const body = adm && adm.querySelector(".modal-body");
+            if(body && layout) {
+                try { body.scrollTop = Math.max(0, layout.offsetTop - 8); } catch(eSc) {}
+            }
+            const st = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
+            if(st && st.editorLoaded) {
+                app._adminPassageHydrateDone = true;
+                if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
+                if(toastEl) { toastEl.innerHTML = ""; toastEl.style.display = "none"; }
+            } else if(typeof app.finishBookletEditorOpen === "function") {
+                app.finishBookletEditorOpen();
+            }
+        } catch(eOpen) {
+            console.error("openPassageLineEditorFromSetup:", eOpen);
+            if(!opts.silent) alert("Could not open passage editor: " + (eOpen && eOpen.message ? eOpen.message : String(eOpen)));
+            opened = false;
+        }
+        const visible = typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible();
+        if(!visible && opened && !opts.retry) {
+            setTimeout(function() {
+                if(!(typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible())) {
+                    ui.openPassageLineEditorFromSetup({ retry: true, silent: true });
+                }
+            }, 220);
+        }
+        return visible || opened;
     },
     maybeStartTeacherPassageSetup: function() {
         if(!appData || appData.isStandalone || appData.component !== 1) return;
@@ -21737,7 +21856,8 @@ const ui = {
             return adm.classList.contains("open");
         }
     },
-    showAdminModalShell: function() {
+    showAdminModalShell: function(opts) {
+        opts = opts || {};
         if(ui._adminCloseGuardActive() && !(typeof app !== "undefined" && app._forceAdminPassageHydrateForSetup)) return false;
         const adm = document.getElementById("modal-admin");
         if(!adm) return false;
@@ -21770,7 +21890,7 @@ const ui = {
         const body = adm.querySelector(".modal-body");
         if(body && body.scrollTop === 0) body.scrollTop = 0;
         try { if(typeof admin !== "undefined" && admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate(); } catch(eWire) {}
-        if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
+        if(!opts.skipPassagePickFocus && !(typeof app !== "undefined" && app._forceAdminPassageHydrateForSetup) && typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
         return true;
     },
     /** Data button — always opens Teacher Settings (close with ✕ or Esc only). */
@@ -28893,7 +29013,7 @@ const admin = {
             hint.classList.remove("hidden");
         }
         const needsHyd = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
-        if(typeof app.syncAdminAiInputFromLesson === "function" && appData.component !== 2 && (!app._deferAdminPassageUntilDemand || needsHyd || app._forceAdminPassageHydrateForSetup)) {
+        if(typeof app.syncAdminAiInputFromLesson === "function" && appData.component !== 2 && (!app._deferAdminPassageUntilDemand || needsHyd || app._forceAdminPassageHydrateForSetup) && !opts.skipAutoSync && !app._forceAdminPassageHydrateForSetup) {
             const ai = document.getElementById("ai-input");
             const needsSync = ai && (
                 app._isAiInputEditorVisuallyEmpty(ai)
