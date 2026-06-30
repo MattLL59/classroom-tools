@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T72:00:00">
-<meta name="architect-deploy" content="sync-meta-build-72-f806">
+<meta name="architect-build" content="2026-06-14T73:00:00">
+<meta name="architect-deploy" content="fix-passage-editor-hydrate-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -18379,18 +18379,19 @@ const app = {
             const donor = donors[di];
             if(!donor) continue;
             const gutter = donor.querySelector && donor.querySelector(".source-with-line-numbers");
-            const donorHtml = gutter ? donor.innerHTML : "";
+            const donorHtml = gutter ? donor.innerHTML : (donor.innerHTML || "");
             const plain = (donor.textContent || "").replace(/\s+/g, " ").trim();
-            if(donorHtml && donorHtml.length > 40) {
+            if(donorHtml && (gutter || /source-with-line-numbers|source-line-row/i.test(donorHtml)) && donorHtml.length > 40) {
                 ai.innerHTML = donorHtml;
                 if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
                 if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
                 return true;
             }
-            if(plain.length > 40 && typeof app.formatSourceHtmlForEditor === "function") {
+            if(plain.length > 24 && typeof app.formatSourceHtmlForEditor === "function") {
                 try {
                     ai.innerHTML = app.formatSourceHtmlForEditor(plain);
                     if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                    if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
                     return true;
                 } catch(eFmt) {}
             }
@@ -18604,7 +18605,8 @@ const app = {
         const hasSource = !!st || passageVisibleInSelect;
         const ai = document.getElementById("ai-input");
         const editorLoaded = !!(ai && typeof app._isAiInputEditorLoadingShell === "function" && !app._isAiInputEditorLoadingShell(ai)
-            && typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, st));
+            && ((typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(ai))
+                || (typeof app._adminEditorHydrateLooksOk === "function" && app._adminEditorHydrateLooksOk(ai, st))));
         return {
             hasSource: hasSource,
             passageVisibleInSelect: passageVisibleInSelect,
@@ -18742,6 +18744,7 @@ const app = {
         opts = opts || {};
         if(app._passageExtractHydratePending || app._forceAdminPassageHydrateForSetup) return;
         const el = document.getElementById("ai-input");
+        if(el && typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(el)) return;
         if(el && el.querySelector && el.querySelector(".source-with-line-numbers")) return;
         if(el && typeof app._isC1PassageEditorsVisuallyEmpty === "function" && !app._isC1PassageEditorsVisuallyEmpty()) return;
         if(el) {
@@ -18789,7 +18792,15 @@ const app = {
                 if(admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
                 if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab({ forceEditMount: true, skipFocusRestore: true, skipAutoSync: true });
             }
-            const ai = document.getElementById("ai-input");
+            let ai = document.getElementById("ai-input");
+            if(ai && typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(ai)) {
+                if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                app._adminPassageHydrateDone = true;
+                if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
+                return true;
+            }
+            if(typeof app._copyPassageDonorHtmlIntoAiInput === "function") app._copyPassageDonorHtmlIntoAiInput();
+            ai = document.getElementById("ai-input");
             if(ai && ai.getAttribute("contenteditable") === "true") {
                 if(ai.querySelector && ai.querySelector(".architect-admin-passage-placeholder")) ai.innerHTML = "";
                 else if(typeof app._aiInputHasVisiblePassage === "function" && !app._aiInputHasVisiblePassage(ai)
@@ -18797,24 +18808,20 @@ const app = {
                     ai.innerHTML = '<div style="padding:12px 14px;opacity:0.75;">Loading passage…</div>';
                 }
             }
-            if(typeof app._copyPassageDonorHtmlIntoAiInput === "function") app._copyPassageDonorHtmlIntoAiInput();
             const canon = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : ((appData && typeof appData.sourceText === "string") ? appData.sourceText.trim() : "");
             if(typeof app._aiInputHasVisiblePassage === "function" && !app._aiInputHasVisiblePassage(ai) && canon && typeof app._forceLoadCanonIntoAiInput === "function") {
                 app._forceLoadCanonIntoAiInput(canon);
             }
+            ai = document.getElementById("ai-input");
             if(typeof app._aiInputHasVisiblePassage === "function" && !app._aiInputHasVisiblePassage(ai) && canon && typeof app.setAiInputValue === "function") {
                 app.setAiInputValue(canon);
             }
+            ai = document.getElementById("ai-input");
             if(typeof app._aiInputHasVisiblePassage === "function" && !app._aiInputHasVisiblePassage(ai) && typeof app.syncAdminAiInputFromLesson === "function") {
                 app.syncAdminAiInputFromLesson({ force: true, userDemand: true, skipFlush: true });
             }
             if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
             if(typeof app.syncPassageBookletFirstInputFromMeta === "function") app.syncPassageBookletFirstInputFromMeta();
-            const ck = document.getElementById("c1-passage-show-all-booklet-lines");
-            if(ck && !ck.checked) {
-                ck.checked = true;
-                if(typeof app.applyPassageShowAllBookletLinesInEditorFromCheckbox === "function") app.applyPassageShowAllBookletLinesInEditorFromCheckbox();
-            }
             const row = document.getElementById("c1-passage-editor-row");
             if(row) row.removeAttribute("data-rail-panel");
             let aiAfter = document.getElementById("ai-input");
@@ -18836,20 +18843,26 @@ const app = {
                 if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
                 if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
             }
-            if(!ok && aiAfter) {
+            if(ok) {
+                const ck = document.getElementById("c1-passage-show-all-booklet-lines");
+                if(ck && !ck.checked) {
+                    ck.checked = true;
+                    if(appData && appData.meta) appData.meta.passageShowAllBookletLinesInEditor = true;
+                    if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+                }
+                if(admShell) admShell.classList.add("modal-admin-passage-editing");
+                app._adminPassageHydrateDone = true;
+                if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
+                if(typeof ui !== "undefined" && typeof ui.scrollC1PassageEditorIntoView === "function") ui.scrollC1PassageEditorIntoView();
+            } else if(aiAfter) {
                 if(admShell) admShell.classList.remove("modal-admin-passage-editing");
                 aiAfter.innerHTML = `<div class="architect-admin-passage-load-error" style="padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);">
                     <div style="font-weight:700;margin-bottom:6px;">Passage did not load in the editor</div>
-                    <div style="margin-bottom:10px;opacity:0.92;">Your lesson has saved source text, but the Component 1 editor stayed empty. Quote Select may still show the passage behind Settings — that does not mean this editor loaded.</div>
+                    <div style="margin-bottom:10px;opacity:0.92;">Your lesson has saved source text, but the Component 1 editor stayed empty. Quote Select / Lab may still show the passage behind Settings — that does not mean this editor loaded.</div>
                     <button type="button" class="btn btn-primary btn-small" onclick="if(typeof app._forceLoadCanonIntoAiInput==='function'&&app._forceLoadCanonIntoAiInput(appData.sourceText)){if(typeof app.ensureC1EditorBookletRows==='function')app.ensureC1EditorBookletRows();if(typeof app.hydrateAdminPassageForTeacherSetup==='function')app.hydrateAdminPassageForTeacherSetup();}">Retry load</button>
                     <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof app.loadAdminPassageOnDemand==='function')app.loadAdminPassageOnDemand();">Load passage in editor</button>
                     <button type="button" class="btn btn-outline btn-small" style="margin-left:6px;" onclick="if(typeof ui.closeTeacherSettings==='function')ui.closeTeacherSettings(event);">Close Settings</button>
                 </div>`;
-            }
-            if(ok) {
-                if(admShell) admShell.classList.add("modal-admin-passage-editing");
-                app._adminPassageHydrateDone = true;
-                if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
             }
             return ok;
         } catch(eHyd) {
@@ -20213,6 +20226,30 @@ const ui = {
         }
         if(typeof ui.syncTeacherPassageLayoutBar === "function") ui.syncTeacherPassageLayoutBar();
     },
+    /** Scroll Editing Suite to Component 1 — source passage (Step 1 editor). */
+    scrollC1PassageEditorIntoView: function() {
+        const det = document.getElementById("admin-c1-source-details");
+        const layout = document.getElementById("c1-passage-editor-layout");
+        const ai = document.getElementById("ai-input");
+        const body = document.querySelector("#modal-admin .modal-body");
+        if(det) det.open = true;
+        const scrollTo = function() {
+            if(body && layout) {
+                try { body.scrollTop = Math.max(0, layout.offsetTop - 12); } catch(eSc) {}
+            }
+            if(layout) {
+                try { layout.scrollIntoView({ block: "start", behavior: "smooth" }); } catch(eSv) {}
+            } else if(det) {
+                try { det.scrollIntoView({ block: "start", behavior: "smooth" }); } catch(eDet) {}
+            }
+            if(ai) {
+                try { ai.focus(); } catch(eF) {}
+            }
+        };
+        scrollTo();
+        setTimeout(scrollTo, 80);
+        setTimeout(scrollTo, 320);
+    },
     openFocusQuestionLinesFromSetup: function() {
         if(!appData || appData.isStandalone) return;
         try { sessionStorage.setItem("tsa_passage_setup_lines_opened", "1"); } catch(eSo) {}
@@ -20260,6 +20297,8 @@ const ui = {
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
+        if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
+        if(typeof app.copyLessonPassageIntoAiInputForSetup === "function") app.copyLessonPassageIntoAiInputForSetup();
         if(typeof ui.dismissBlockingOverlays === "function") ui.dismissBlockingOverlays();
         app._adminLiteOpen = true;
         ui._pauseSelectionGate = true;
@@ -20331,9 +20370,10 @@ const ui = {
             let loaded = runHydrate();
             const det = document.getElementById("admin-c1-source-details");
             if(det) det.open = true;
+            if(typeof ui.scrollC1PassageEditorIntoView === "function") ui.scrollC1PassageEditorIntoView();
             const layout = document.getElementById("c1-passage-editor-layout");
             const body = adm && adm.querySelector(".modal-body");
-            if(body && layout) {
+            if(body && layout && !(typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage())) {
                 try { body.scrollTop = Math.max(0, layout.offsetTop - 8); } catch(eSc) {}
             }
             const st = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
@@ -20343,6 +20383,7 @@ const ui = {
                 app._adminPassageHydrateDone = true;
                 if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
                 if(toastEl) { toastEl.innerHTML = ""; toastEl.style.display = "none"; }
+                if(typeof ui.scrollC1PassageEditorIntoView === "function") ui.scrollC1PassageEditorIntoView();
             } else if(typeof app.finishBookletEditorOpen === "function") {
                 app.finishBookletEditorOpen();
             }
@@ -36965,7 +37006,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const needsBookletLb = !!(setupStLb && setupStLb.needsLineLayout);
         const bookletSetupBlock = showLineWindowPreview && needsBookletLb ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:2px solid var(--primary);border-radius:8px;background:rgba(0,150,136,0.08);">
                 <div style="font-weight:700;margin-bottom:6px;">Step 1 — Booklet line numbers &amp; ¶</div>
-                <p style="font-size:0.8rem;opacity:0.88;margin:0;line-height:1.45;">Scroll up to <strong>Component 1 — source passage</strong> (top of Editing Suite). If the box is empty, click <strong>Load passage in editor</strong> there. Or use the <strong>Open passage editor</strong> button in Quote Select.</p>
+                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 8px 0;line-height:1.45;">The passage editor is at the <strong>top</strong> of Editing Suite — <strong>Component 1 — source passage</strong>. Set <strong>Booklet line 1</strong>, paragraph breaks (¶), then <strong>Sync passage layout</strong>.</p>
+                <button type="button" class="btn btn-primary btn-small" onclick="if(typeof ui.scrollC1PassageEditorIntoView==='function')ui.scrollC1PassageEditorIntoView();else if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup();">Go to passage editor</button>
             </div>` : "";
         const anchorPreviewBlock = showLineWindowPreview && !needsBookletLb ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:1px dashed var(--border);border-radius:8px;background:rgba(92,107,192,0.06);">
                 <div style="font-weight:700;margin-bottom:6px;">Step 2 — Question excerpt anchors (Quote Select / Lab)</div>
