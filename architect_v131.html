@@ -7662,10 +7662,15 @@ const app = {
     /** After Step 1 open: confirm editor has passage; show inline error if not. */
     finishBookletEditorOpen: function() {
         if(!app._forceAdminPassageHydrateForSetup) return;
+        if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         const st = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
         const aiEarly = document.getElementById("ai-input");
         if((st && st.editorLoaded) || (typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(aiEarly))) {
             if(!app._passageExtractHydratePending) app._forceAdminPassageHydrateForSetup = false;
+            return;
+        }
+        if(st && st.needsReExtract && typeof app._showNoPassageInC1Editor === "function") {
+            app._showNoPassageInC1Editor();
             return;
         }
         const ai = document.getElementById("ai-input");
@@ -7680,8 +7685,8 @@ const app = {
             </div>`;
         if(ai) {
             ai.innerHTML = errHtml;
-        } else if(mountEdit && !mountEdit.querySelector("#c1-passage-editor-layout")) {
-            mountEdit.innerHTML = errHtml;
+        } else if(mountEdit && typeof app._showC1PassageMountMessage === "function") {
+            app._showC1PassageMountMessage(errHtml);
         }
         if(typeof app.showArchitectAdminToast === "function") {
             app.showArchitectAdminToast("Passage did not load. In Settings, scroll to <strong>Component 1 — source passage</strong> and click <strong>Load passage in editor</strong>.", { honorUserDismiss: false, force: true, autoHideMs: 20000 });
@@ -18544,8 +18549,64 @@ const app = {
         }
         return st;
     },
+    _c1PassageEditorLayoutTemplate: "",
+    _cacheC1PassageEditorLayoutTemplate: function() {
+        if(app._c1PassageEditorLayoutTemplate) return;
+        const layout = document.getElementById("c1-passage-editor-layout");
+        if(layout && layout.outerHTML) app._c1PassageEditorLayoutTemplate = layout.outerHTML;
+    },
+    /** Re-insert #c1-passage-editor-layout if a prior error path wiped mount-edit innerHTML. */
+    restoreC1PassageEditorLayoutIfMissing: function() {
+        if(document.getElementById("c1-passage-editor-layout")) {
+            app._cacheC1PassageEditorLayoutTemplate();
+            return true;
+        }
+        app._cacheC1PassageEditorLayoutTemplate();
+        const tpl = app._c1PassageEditorLayoutTemplate;
+        const mountEdit = document.getElementById("c1-source-editor-mount-edit");
+        if(!tpl || !mountEdit) return false;
+        mountEdit.querySelectorAll(".architect-admin-passage-load-error, #c1-passage-editor-setup-msg").forEach(function(n) { n.remove(); });
+        const host = document.createElement("div");
+        host.innerHTML = tpl;
+        const layout = host.firstElementChild;
+        if(!layout || layout.id !== "c1-passage-editor-layout") return false;
+        mountEdit.appendChild(layout);
+        try {
+            if(typeof admin !== "undefined") {
+                if(typeof admin.bindC1PassageFocusModeOnce === "function") admin.bindC1PassageFocusModeOnce();
+                if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
+            }
+        } catch(eRe) {}
+        return true;
+    },
+    _clearC1PassageMountMessage: function() {
+        const msg = document.getElementById("c1-passage-editor-setup-msg");
+        if(msg) msg.remove();
+    },
+    _showC1PassageMountMessage: function(html) {
+        const mountEdit = document.getElementById("c1-source-editor-mount-edit");
+        if(!mountEdit) return;
+        let msg = document.getElementById("c1-passage-editor-setup-msg");
+        if(!msg) {
+            msg = document.createElement("div");
+            msg.id = "c1-passage-editor-setup-msg";
+            mountEdit.insertBefore(msg, mountEdit.firstChild);
+        }
+        msg.style.cssText = "padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);margin-bottom:10px;";
+        msg.innerHTML = html;
+    },
+    _showNoPassageInC1Editor: function() {
+        const ai = document.getElementById("ai-input");
+        if(!ai || ai.getAttribute("contenteditable") !== "true") return;
+        if(typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(ai)) return;
+        ai.innerHTML = `<div class="architect-admin-passage-placeholder" style="padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:0.88rem;line-height:1.45;">
+            <div style="font-weight:700;margin-bottom:6px;">No passage in this lesson yet</div>
+            <div style="opacity:0.92;">Use <strong>Lobby → Extract text</strong> to import the insert, then click <strong>Open passage editor</strong> again — or paste text directly in this box.</div>
+        </div>`;
+    },
     /** Step 1 button: park #c1-passage-editor-layout under Editing Suite mount-edit and expand the section (sync — before hydrate). */
     ensureC1PassageEditorOnEditTab: function() {
+        if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         if(typeof admin !== "undefined") {
             if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
             if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
@@ -18556,11 +18617,17 @@ const app = {
             }
         }
         const mountEdit = document.getElementById("c1-source-editor-mount-edit");
-        const layout = document.getElementById("c1-passage-editor-layout");
+        let layout = document.getElementById("c1-passage-editor-layout");
         if(mountEdit && layout && layout.parentNode !== mountEdit) {
             mountEdit.appendChild(layout);
         }
-        const mounted = !!(mountEdit && layout && mountEdit.contains(layout));
+        let mounted = !!(mountEdit && layout && mountEdit.contains(layout));
+        if(!mounted && typeof app.restoreC1PassageEditorLayoutIfMissing === "function") {
+            app.restoreC1PassageEditorLayoutIfMissing();
+            layout = document.getElementById("c1-passage-editor-layout");
+            if(mountEdit && layout && layout.parentNode !== mountEdit) mountEdit.appendChild(layout);
+            mounted = !!(mountEdit && layout && mountEdit.contains(layout));
+        }
         const det = document.getElementById("admin-c1-source-details");
         if(det) det.open = true;
         const editTab = document.querySelector("#modal-admin .admin-tab[data-tab=\"edit\"]");
@@ -18570,12 +18637,12 @@ const app = {
         if(mountEdit && layout) {
             layout.style.display = "flex";
             mountEdit.style.minHeight = "120px";
+            if(typeof app._clearC1PassageMountMessage === "function") app._clearC1PassageMountMessage();
+            mountEdit.querySelectorAll(".architect-admin-passage-load-error").forEach(function(n) { n.remove(); });
         }
-        if(!mounted && mountEdit && !mountEdit.querySelector(".architect-admin-passage-load-error")) {
-            mountEdit.innerHTML = `<div class="architect-admin-passage-load-error" style="padding:12px 14px;border:1px solid var(--error,#c62828);border-radius:8px;font-size:0.88rem;line-height:1.45;background:rgba(198,40,40,0.08);">
-                <div style="font-weight:700;margin-bottom:6px;">Passage editor did not mount</div>
-                <div style="margin-bottom:10px;opacity:0.92;">Hard-refresh (Ctrl+Shift+R), then click <strong>Open passage editor</strong> again.</div>
-            </div>`;
+        if(!mounted && mountEdit) {
+            app._showC1PassageMountMessage(`<div style="font-weight:700;margin-bottom:6px;">Passage editor did not mount</div>
+                <div style="margin-bottom:10px;opacity:0.92;">Hard-refresh (Ctrl+Shift+R), then click <strong>Open passage editor</strong> again.</div>`);
         }
         return mounted && !!(document.getElementById("ai-input"));
     },
@@ -18594,6 +18661,7 @@ const app = {
     },
     /** Step 1 open: mirror visible passage → loadSavedSourceQuestion → canon fill. */
     _loadPassageIntoC1EditorForSetup: function() {
+        if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         if(typeof app._primePassageDonorsForSetup === "function") app._primePassageDonorsForSetup();
         const ai = document.getElementById("ai-input");
         if(!ai || ai.getAttribute("contenteditable") !== "true") return false;
@@ -18858,6 +18926,7 @@ const app = {
     /** Teacher setup Step 1: load saved passage into #ai-input with booklet gutters + layout toolbar (never the defer placeholder). */
     hydrateAdminPassageForTeacherSetup: function() {
         if(!appData || appData.component === 2) return false;
+        if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         if(app._adminPassageHydrateInFlight) {
             const aiWait = document.getElementById("ai-input");
             return !!(aiWait && typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(aiWait));
@@ -18936,6 +19005,7 @@ const app = {
         app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         app._forceAdminPassageHydrateForSetup = true;
+        if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
         const el = document.getElementById("ai-input");
         if(el) el.innerHTML = `<div style="padding:10px;opacity:0.75;">Loading passage…</div>`;
@@ -20401,9 +20471,13 @@ const ui = {
             if(det) det.open = true;
             const aiCheck = document.getElementById("ai-input");
             const hasPassage = loaded || (typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(aiCheck));
+            const psOpen = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
             if(hasPassage) {
                 app._adminPassageHydrateDone = true;
                 if(toastEl) { toastEl.innerHTML = ""; toastEl.style.display = "none"; }
+                if(typeof app._clearC1PassageMountMessage === "function") app._clearC1PassageMountMessage();
+            } else if(psOpen && psOpen.needsReExtract && typeof app._showNoPassageInC1Editor === "function") {
+                app._showNoPassageInC1Editor();
             } else if(typeof app.finishBookletEditorOpen === "function") {
                 app.finishBookletEditorOpen();
             }
@@ -20414,8 +20488,13 @@ const ui = {
                     if(runHydrate() && typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage()) {
                         app._adminPassageHydrateDone = true;
                         if(toastEl) { toastEl.innerHTML = ""; toastEl.style.display = "none"; }
-                    } else if(typeof app.finishBookletEditorOpen === "function") {
-                        app.finishBookletEditorOpen();
+                    } else {
+                        const psRetry = typeof app.getPassageEditorOpenStatus === "function" ? app.getPassageEditorOpenStatus() : null;
+                        if(psRetry && psRetry.needsReExtract && typeof app._showNoPassageInC1Editor === "function") {
+                            app._showNoPassageInC1Editor();
+                        } else if(typeof app.finishBookletEditorOpen === "function") {
+                            app.finishBookletEditorOpen();
+                        }
                     }
                 }, 250);
             }
@@ -29125,6 +29204,7 @@ const admin = {
     placeC1SourceWrapForAdminTab: function(opts) {
         opts = opts || {};
         if(!appData) return;
+        if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         const layout = document.getElementById("c1-passage-editor-layout");
         const singleWrap = document.getElementById("source-text-single-wrap");
         const moveEl = layout || singleWrap;
@@ -39390,6 +39470,9 @@ try {
                 if(admin.bindAdminModalClose) admin.bindAdminModalClose();
                 if(typeof admin.placeC1SourceWrapForAdminTab === "function") {
                     admin.placeC1SourceWrapForAdminTab({ forceEditMount: true, skipAutoSync: true });
+                }
+                if(typeof app !== "undefined" && typeof app._cacheC1PassageEditorLayoutTemplate === "function") {
+                    app._cacheC1PassageEditorLayoutTemplate();
                 }
             }
         } catch(e) {}
