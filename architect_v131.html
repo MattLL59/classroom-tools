@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T79:00:00">
-<meta name="architect-deploy" content="fix-insert-width-cap-f806">
+<meta name="architect-build" content="2026-06-14T80:00:00">
+<meta name="architect-deploy" content="c1-reflow-intro-ux-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1008,8 +1008,7 @@
     #modal-admin #ai-input.source-editor .source-with-line-numbers .source-line-text u { text-decoration: underline !important; }
     /* Optional intro box above booklet rows: same column feel as insert; no gutters. */
     #c1-passage-intro-section { margin-bottom: 10px; }
-    /** Empty optional intro editors still had min-height — pushed the booklet rows down so WJEC ticks looked “late” vs Lab (no head). Collapse until teacher expands or head has text. */
-    #c1-passage-intro-expand { margin-bottom: 6px; }
+    #c1-passage-intro-expand { display: none !important; margin-bottom: 6px; }
     /* Two-line intro: isolated rich-text runs so Chrome cannot wrap one <b> around both sentences; pre-wrap fixes long PDF lines that refused to wrap. */
     #c1-passage-intro-lines .intro-head-line.source-editor {
         min-height: 2.75em; max-height: 18vh; overflow: auto; width: 100%; border: 1px solid #ccc; padding: 8px;
@@ -2260,7 +2259,7 @@
                                 <label><input type="radio" name="tsa-passage-scope-admin" class="tsa-passage-scope-radio" value="focused"> Question-focused</label>
                             </div>
                         </div>
-                        <button type="button" id="c1-passage-intro-expand" class="btn btn-outline btn-small c1-passage-chrome-collapsed" style="display:none;" title="Show optional title/directions lines above the exam passage. Hidden when empty so line 1 of the insert lines up with Lab (no invisible spacer).">Optional intro / header (two lines)…</button>
+                        <button type="button" id="c1-passage-intro-expand" class="btn btn-outline btn-small c1-passage-chrome-collapsed" style="display:none;" hidden aria-hidden="true" title="Legacy control — intro lines are always shown (same as Component 2).">Optional intro / header (two lines)…</button>
                         <div id="c1-passage-intro-section" class="c1-passage-chrome-collapsed">
                             <div style="font-size:0.72rem; opacity:0.88; margin:0 0 6px 0; line-height:1.35;" title="Stored as passage head — no WJEC margin ticks. Use line 1 and line 2 for different formatting (each box is its own sentence). ¶ inserts a soft line break inside the focused box. PDF pastes may omit spaces between words.">Intro / resource header <span style="opacity:0.75;">(optional — two lines)</span></div>
                             <div id="c1-passage-intro-lines" style="display:flex; flex-direction:column; gap:10px;">
@@ -7476,18 +7475,25 @@ const app = {
         return aiEmpty && introEmpty;
     },
     /**
-     * Optional C1 intro boxes (#c1-passage-intro-line1/2) reserve min-height even when empty — teachers counted “line 8” for the first WJEC tick while Lab had no head. Collapse the block when both are empty; offer a button to expand.
+     * C1 intro header lines — always visible (same affordance as Component 2). Teachers edit title/directions without hunting for a collapsed expand control.
      */
     syncC1PassageIntroSectionVisibility: function() {
         const sec = document.getElementById("c1-passage-intro-section");
         const btn = document.getElementById("c1-passage-intro-expand");
-        const line1 = document.getElementById("c1-passage-intro-line1");
-        const line2 = document.getElementById("c1-passage-intro-line2");
-        if(!sec || !line1 || !line2) return;
-        const hasIntroText = !app._isAiInputEditorVisuallyEmpty(line1) || !app._isAiInputEditorVisuallyEmpty(line2);
-        const showSection = hasIntroText || !!app._c1IntroSectionUserOpened;
-        sec.style.display = showSection ? "" : "none";
-        if(btn) btn.style.display = showSection ? "none" : "";
+        if(sec) sec.style.display = "";
+        if(btn) btn.style.display = "none";
+    },
+    /** Bind optional intro expand (legacy) after layout restore; no-op when section stays open. */
+    wireC1PassageIntroExpandOnce: function() {
+        const introExpand = document.getElementById("c1-passage-intro-expand");
+        if(!introExpand || introExpand._archIntroExpandBound) return;
+        introExpand._archIntroExpandBound = true;
+        introExpand.addEventListener("click", function() {
+            app._c1IntroSectionUserOpened = true;
+            if(typeof app.syncC1PassageIntroSectionVisibility === "function") app.syncC1PassageIntroSectionVisibility();
+            const l1 = document.getElementById("c1-passage-intro-line1");
+            if(l1 && l1.focus) try { l1.focus(); } catch(eF) {}
+        });
     },
     clearC1IntroLineEditors: function() {
         app._c1IntroSectionUserOpened = false;
@@ -7508,7 +7514,6 @@ const app = {
         if(!raw) {
             line1.innerHTML = "";
             line2.innerHTML = "";
-            app._c1IntroSectionUserOpened = false;
             if(typeof app.syncC1PassageIntroSectionVisibility === "function") app.syncC1PassageIntroSectionVisibility();
             return;
         }
@@ -9631,6 +9636,12 @@ const app = {
             if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
             if(typeof ui !== "undefined" && ui.refreshSourceDisplay && typeof appData.sourceText === "string") ui.refreshSourceDisplay(appData.sourceText);
         } catch(eSt) {}
+    },
+    /** True only when the checkbox is checked or meta stores boolean true (ignores legacy truthy strings). */
+    passageMergeOrphanHangEnabled: function() {
+        const cb = document.getElementById("c1-passage-merge-orphan-hang");
+        if(cb) return cb.checked === true;
+        return !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
     },
     /** Restore **Merge orphan hang lines** checkbox from {@link appData.meta.passageMergeOrphanHangSegments} after Load JSON. */
     syncPassageMergeOrphanHangCheckboxFromMeta: function() {
@@ -11890,7 +11901,9 @@ const app = {
         if(!structured || !Array.isArray(structured.lines) || !structured.lines.length) return null;
         if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         const mergeOrphans = !!(reflowOpts.mergeOrphanHangSegments === true)
-            || !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
+            || (typeof app.passageMergeOrphanHangEnabled === "function"
+                ? app.passageMergeOrphanHangEnabled()
+                : !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true));
         const srcLines = structured.lines.map(function(L, idx) {
             const Lc = Object.assign({}, L);
             if(idx > 0 && (L.paragraphStart || (typeof app._storedLineLooksParagraphIndented === "function" && app._storedLineLooksParagraphIndented(L))))
@@ -12066,7 +12079,9 @@ const app = {
         if(!structured || !Array.isArray(structured.lines) || !structured.lines.length) return null;
         if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         const mergeOrphans = !!(reflowOpts.mergeOrphanHangSegments === true)
-            || !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
+            || (typeof app.passageMergeOrphanHangEnabled === "function"
+                ? app.passageMergeOrphanHangEnabled()
+                : !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true));
         let anyStoredParagraphBreak = false;
         for(let pi = 1; pi < structured.lines.length; pi++) {
             if(structured.lines[pi] && structured.lines[pi].paragraphStart === true) {
@@ -12269,9 +12284,15 @@ const app = {
     },
     /** Confirm before full-pack reflow — easy to destroy ¶ boundaries or merge paragraphs when orphan merge is on. */
     confirmReflowC1PassageBodyFullPack: function() {
-        const mergeOn = !!(appData && appData.meta && appData.meta.passageMergeOrphanHangSegments);
-        let msg = "Reflow (full pack) repacks words across your existing stored line rows. It does NOT create new paragraph (¶) breaks.\n\n";
+        const now = Date.now();
+        if(app._c1FullPackConfirmLock && now - app._c1FullPackConfirmLock < 900) return;
+        app._c1FullPackConfirmLock = now;
+        const mergeOn = typeof app.passageMergeOrphanHangEnabled === "function"
+            ? app.passageMergeOrphanHangEnabled()
+            : !!(appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
+        let msg = "Reflow (full pack) repacks words across your existing stored line rows. Row count stays the same.\n\n";
         msg += "• Mark paragraphs with ¶ Paragraph or Shift+Enter before reflowing.\n";
+        msg += "• To reset line count to natural wrap at Insert width, use Sync passage layout or Reflow body (natural wrap) instead.\n";
         msg += "• Prefer Sync passage layout when you only changed Insert width.\n";
         msg += "• Strips bold/italic from the body.\n\n";
         if(mergeOn) {
@@ -12571,7 +12592,9 @@ const app = {
                         : rows;
                 };
             /** Match Sync/reflow: unless meta.passageMergeOrphanHangSegments, skip gutter orphan merge so displayed rows = canvas segments. */
-            var mergeHangSeg = !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
+            var mergeHangSeg = typeof app.passageMergeOrphanHangEnabled === "function"
+                ? app.passageMergeOrphanHangEnabled()
+                : !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
             var gutterOptsEd = { skipOrphanSegmentMerge: !mergeHangSeg };
             if(opts.displayTrustStoredRows) return finishEd(expanded);
             return finishEd(app.splitLongRowsForBookletLineGutter(expanded, undefined, gutterOptsEd));
@@ -18745,6 +18768,8 @@ const app = {
                 if(typeof admin.bindC1PassageFocusModeOnce === "function") admin.bindC1PassageFocusModeOnce();
                 if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
             }
+            if(typeof app.wireC1PassageIntroExpandOnce === "function") app.wireC1PassageIntroExpandOnce();
+            if(typeof app.syncC1PassageIntroSectionVisibility === "function") app.syncC1PassageIntroSectionVisibility();
             if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
         } catch(eRe) {}
         return true;
@@ -33820,16 +33845,7 @@ const admin = {
                 if(typeof app.applyPassageBookletFirstLineFromInput === "function") app.applyPassageBookletFirstLineFromInput({ force: true });
             });
         }
-        const introExpand = document.getElementById("c1-passage-intro-expand");
-        if(introExpand && !introExpand._archIntroExpandBound) {
-            introExpand._archIntroExpandBound = true;
-            introExpand.addEventListener("click", function() {
-                app._c1IntroSectionUserOpened = true;
-                if(typeof app.syncC1PassageIntroSectionVisibility === "function") app.syncC1PassageIntroSectionVisibility();
-                const l1 = document.getElementById("c1-passage-intro-line1");
-                if(l1 && l1.focus) try { l1.focus(); } catch(eF) {}
-            });
-        }
+        if(typeof app.wireC1PassageIntroExpandOnce === "function") app.wireC1PassageIntroExpandOnce();
         if(typeof app.syncC1PassageIntroSectionVisibility === "function") app.syncC1PassageIntroSectionVisibility();
         const sourceEditor = document.getElementById("ai-input");
         if(sourceEditor && sourceEditor.getAttribute("contenteditable") === "true") {
