@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T76:00:00">
-<meta name="architect-deploy" content="fix-c1-editor-mount-restore-f806">
+<meta name="architect-build" content="2026-06-14T77:00:00">
+<meta name="architect-deploy" content="fix-c1-editor-visible-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -595,6 +595,42 @@
     }
     #modal-admin.modal-admin-passage-editing .c1-passage-focus-bar {
         display: none !important;
+    }
+    /* Step 1 booklet editing: flex children with min-height:0 collapsed to empty space — keep full editor chrome visible. */
+    #modal-admin.modal-admin-passage-editing #c1-source-editor-mount-edit {
+        display: block;
+        min-height: 200px;
+    }
+    #modal-admin.modal-admin-passage-editing #c1-passage-editor-layout {
+        display: flex !important;
+        flex: none;
+        min-height: auto;
+    }
+    #modal-admin.modal-admin-passage-editing .c1-passage-editor-row,
+    #modal-admin.modal-admin-passage-editing .c1-passage-editor-main,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap {
+        flex: none;
+        min-height: auto;
+        overflow: visible;
+        display: block;
+    }
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus .source-toolbar,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus .source-toolbar-c1-measure,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus .c1-passage-chrome-collapsed,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-section,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-expand {
+        display: flex !important;
+        flex-wrap: wrap;
+    }
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-section,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-expand {
+        display: block !important;
+    }
+    #modal-admin.modal-admin-passage-editing #ai-input.source-editor {
+        min-height: 80px !important;
+        max-height: min(62vh, 720px) !important;
+        display: block !important;
+        visibility: visible !important;
     }
     .modal.open {
         display: flex !important;
@@ -2223,6 +2259,7 @@
                     </div>
                     </div>
                     </div>
+                    <script>try{var _le=document.getElementById("c1-passage-editor-layout");if(_le&&!window.__tsaC1EditorLayoutTpl)window.__tsaC1EditorLayoutTpl=_le.outerHTML;}catch(_e){}</script>
                 </details>
                 <details class="admin-section" id="admin-c2-passages-details">
                     <summary class="admin-h">📑 Component 2 — passages (21st / 19th)</summary>
@@ -18552,8 +18589,52 @@ const app = {
     _c1PassageEditorLayoutTemplate: "",
     _cacheC1PassageEditorLayoutTemplate: function() {
         if(app._c1PassageEditorLayoutTemplate) return;
+        if(typeof window !== "undefined" && window.__tsaC1EditorLayoutTpl) {
+            app._c1PassageEditorLayoutTemplate = window.__tsaC1EditorLayoutTpl;
+            return;
+        }
         const layout = document.getElementById("c1-passage-editor-layout");
         if(layout && layout.outerHTML) app._c1PassageEditorLayoutTemplate = layout.outerHTML;
+    },
+    /** Strip stale focus-mode classes, restore toolbars from rail dock, undo flex collapse. */
+    forceC1PassageEditorChromeVisible: function() {
+        if(typeof admin !== "undefined" && typeof admin.bindC1PassageFocusModeOnce === "function") {
+            admin.bindC1PassageFocusModeOnce();
+        }
+        const modal = document.getElementById("modal-admin");
+        const row = document.getElementById("c1-passage-editor-row");
+        const wrap = document.getElementById("source-text-single-wrap");
+        const layout = document.getElementById("c1-passage-editor-layout");
+        const mountEdit = document.getElementById("c1-source-editor-mount-edit");
+        if(typeof admin !== "undefined") {
+            if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+            else {
+                if(modal) modal.classList.remove("tsa-c1-passage-focus");
+                if(row) { row.classList.remove("tsa-c1-passage-focus"); row.removeAttribute("data-rail-panel"); }
+                if(wrap) wrap.classList.remove("tsa-c1-passage-focus");
+            }
+            if(typeof admin.restoreC1PassageFlyoutEls === "function") admin.restoreC1PassageFlyoutEls();
+        }
+        if(wrap) {
+            wrap.classList.remove("hidden");
+            wrap.style.minHeight = "";
+            wrap.style.overflow = "";
+        }
+        if(layout) {
+            layout.style.display = "flex";
+            layout.style.flex = "";
+            layout.style.minHeight = "";
+        }
+        if(row) { row.style.minHeight = ""; row.style.overflow = ""; }
+        const main = document.getElementById("c1-passage-editor-main");
+        if(main) { main.style.minHeight = ""; main.style.overflow = ""; }
+        const ai = document.getElementById("ai-input");
+        if(ai) {
+            ai.style.minHeight = "80px";
+            ai.style.display = "";
+            ai.style.visibility = "visible";
+        }
+        if(mountEdit) mountEdit.style.minHeight = "200px";
     },
     /** Re-insert #c1-passage-editor-layout if a prior error path wiped mount-edit innerHTML. */
     restoreC1PassageEditorLayoutIfMissing: function() {
@@ -18562,7 +18643,10 @@ const app = {
             return true;
         }
         app._cacheC1PassageEditorLayoutTemplate();
-        const tpl = app._c1PassageEditorLayoutTemplate;
+        const tpl = app._c1PassageEditorLayoutTemplate
+            || (typeof window !== "undefined" && window.__tsaC1EditorLayoutTpl)
+            || "";
+        if(tpl) app._c1PassageEditorLayoutTemplate = tpl;
         const mountEdit = document.getElementById("c1-source-editor-mount-edit");
         if(!tpl || !mountEdit) return false;
         mountEdit.querySelectorAll(".architect-admin-passage-load-error, #c1-passage-editor-setup-msg").forEach(function(n) { n.remove(); });
@@ -18576,6 +18660,7 @@ const app = {
                 if(typeof admin.bindC1PassageFocusModeOnce === "function") admin.bindC1PassageFocusModeOnce();
                 if(typeof admin.syncC1PassageFocusChromeConsistency === "function") admin.syncC1PassageFocusChromeConsistency();
             }
+            if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
         } catch(eRe) {}
         return true;
     },
@@ -18607,6 +18692,7 @@ const app = {
     /** Step 1 button: park #c1-passage-editor-layout under Editing Suite mount-edit and expand the section (sync — before hydrate). */
     ensureC1PassageEditorOnEditTab: function() {
         if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
+        if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
         if(typeof admin !== "undefined") {
             if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
             if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
@@ -18636,9 +18722,10 @@ const app = {
         if(c1Block) c1Block.classList.remove("hidden");
         if(mountEdit && layout) {
             layout.style.display = "flex";
-            mountEdit.style.minHeight = "120px";
+            mountEdit.style.minHeight = "200px";
             if(typeof app._clearC1PassageMountMessage === "function") app._clearC1PassageMountMessage();
             mountEdit.querySelectorAll(".architect-admin-passage-load-error").forEach(function(n) { n.remove(); });
+            if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
         }
         if(!mounted && mountEdit) {
             app._showC1PassageMountMessage(`<div style="font-weight:700;margin-bottom:6px;">Passage editor did not mount</div>
@@ -20449,11 +20536,13 @@ const ui = {
                     if(admin.bindAdminPanelClickDelegate) admin.bindAdminPanelClickDelegate();
                     if(admin.bindAdminModalClose) admin.bindAdminModalClose();
                     if(admin.bindTabsOnly) admin.bindTabsOnly();
+                    if(typeof admin.bindC1PassageFocusModeOnce === "function") admin.bindC1PassageFocusModeOnce();
                     if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
                     if(admin.activateAdminTab) admin.activateAdminTab("edit", { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
                 }
             } catch(eBind) { console.warn("openPassageLineEditorFromSetup bind:", eBind); }
             if(typeof app.ensureC1PassageEditorOnEditTab === "function") app.ensureC1PassageEditorOnEditTab();
+            if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
             const c2det = document.getElementById("admin-c2-passages-details");
             if(c2det && appData.component === 1) c2det.open = false;
             const runHydrate = function() {
@@ -29212,8 +29301,10 @@ const admin = {
         const mountEdit = document.getElementById("c1-source-editor-mount-edit");
         const c1Block = document.getElementById("admin-c1-source-details");
         const useC2 = appData.component === 2 && appData.component2Layout && typeof appData.component2Layout === "object";
-        if(!moveEl || !mountAi) return;
+        if(!moveEl) return;
+        if(!mountAi && !mountEdit) return;
         if(useC2) {
+            if(!mountAi) return;
             if(c1Block) c1Block.classList.add("hidden");
             if(moveEl.parentNode !== mountAi) mountAi.appendChild(moveEl);
             const hintC2 = document.getElementById("c1-source-editor-mount-ai-hint");
@@ -29221,7 +29312,8 @@ const admin = {
             return;
         }
         if(c1Block) c1Block.classList.remove("hidden");
-        const target = (opts.forceEditMount && mountEdit) ? mountEdit : (mountEdit || mountAi);
+        const setupOpen = !!(app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending);
+        const target = (opts.forceEditMount || setupOpen) && mountEdit ? mountEdit : (mountEdit || mountAi);
         if(target && moveEl.parentNode !== target) target.appendChild(moveEl);
         if(mountAi) {
             let hint = document.getElementById("c1-source-editor-mount-ai-hint");
