@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T82:00:00">
-<meta name="architect-deploy" content="fix-selectview-crash-f806">
+<meta name="architect-build" content="2026-06-14T83:00:00">
+<meta name="architect-deploy" content="fix-green-pick-overlay-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -20329,6 +20329,8 @@ const ui = {
             if(typeof ui.positionReaderWindow === "function") ui.positionReaderWindow();
             if(app._teacherLinePickMode && typeof admin !== "undefined" && admin.refreshTeacherPassageLevelPickDisplay) {
                 admin.refreshTeacherPassageLevelPickDisplay();
+            } else if(typeof admin !== "undefined" && admin.clearTeacherPassageLevelPickHighlights) {
+                admin.clearTeacherPassageLevelPickHighlights();
             }
         };
         if(typeof requestAnimationFrame === "function") requestAnimationFrame(repaint);
@@ -20407,8 +20409,12 @@ const ui = {
         if(s === "focused") {
             app._passageLinePickForceWhole = false;
             if(appData && !appData.isStandalone) {
-                app._teacherLinePickMode = false;
-                try { sessionStorage.setItem("tsa_teacher_line_pick_mode", "0"); } catch(eTp) {}
+                if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
+                else {
+                    app._teacherLinePickMode = false;
+                    try { sessionStorage.setItem("tsa_teacher_line_pick_mode", "0"); } catch(eTp) {}
+                    if(typeof admin !== "undefined" && admin.clearTeacherPassageLevelPickHighlights) admin.clearTeacherPassageLevelPickHighlights();
+                }
             }
         }
         try {
@@ -20789,7 +20795,16 @@ const ui = {
         opts = opts || {};
         if(appData && appData.isStandalone) return;
         app._teacherLinePickMode = !!on;
-        if(on) app._passageLinePickForceWhole = true;
+        if(on) {
+            app._passageLinePickForceWhole = true;
+        } else {
+            app._passageLinePickForceWhole = false;
+            if(typeof admin !== "undefined" && admin.clearTeacherPassageLevelPickHighlights) admin.clearTeacherPassageLevelPickHighlights();
+            ["reader-window-select", "reader-window-lab"].forEach(function(id) {
+                const w = document.getElementById(id);
+                if(w) w.classList.add("hidden");
+            });
+        }
         try { sessionStorage.setItem("tsa_teacher_line_pick_mode", on ? "1" : "0"); } catch(eS) {}
         if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
@@ -20895,6 +20910,14 @@ const ui = {
                 if(!inPassage) return;
                 if(typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick();
                 scheduleRangePreview();
+            }, true);
+            document.addEventListener("keydown", function(ev) {
+                if(ev.key !== "Escape") return;
+                if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
+                if(typeof admin !== "undefined" && admin.handleC1PassageFocusEscape && admin.handleC1PassageFocusEscape(ev)) return;
+                ev.preventDefault();
+                ev.stopPropagation();
+                if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false);
             }, true);
         }
         if(!document.body.dataset.passageRangeWizardBound) {
@@ -21026,6 +21049,8 @@ const ui = {
         if(labWrap && src && typeof src === "object" && src.resourcePaper != null) labWrap.classList.remove("architect-passage-excerpt-shell");
         if(app._teacherLinePickMode && typeof admin !== "undefined" && admin.refreshTeacherPassageLevelPickDisplay) {
             admin.refreshTeacherPassageLevelPickDisplay(levRefresh);
+        } else if(typeof admin !== "undefined" && admin.clearTeacherPassageLevelPickHighlights) {
+            admin.clearTeacherPassageLevelPickHighlights();
         }
     },
     /** Multi-question: show "Question N of M" on its own line so it does not wrap into the middle of the prompt. */
@@ -37901,7 +37926,6 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
         if(admin._syncTeacherPreviewAnchorInputs) admin._syncTeacherPreviewAnchorInputs();
         admin.refreshTeacherPassageLevelPickDisplay(level);
-        if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar(level);
         if(typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner();
         if(opts.previewAdmin !== false && admin.showTeacherPassagePreview) admin.showTeacherPassagePreview();
         if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
@@ -38132,6 +38156,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(admin._syncTeacherPreviewLineWindowInput) admin._syncTeacherPreviewLineWindowInput();
         const span = ar && ar.lineRange ? (ar.lineRange.from === ar.lineRange.to ? ("line " + ar.lineRange.from) : ("lines " + ar.lineRange.from + "–" + ar.lineRange.to)) : "phrase anchors";
         admin._finishTeacherPassageExcerptApply(level);
+        if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
         admin.setPassageRangeWizardStatus("<strong>Saved</strong> · " + span + " · excerpt shown below. Start: “" + q.passageStartAnchor + "” · End: “" + q.passageEndAnchor + "”", "ok");
         return true;
     },
@@ -38181,7 +38206,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(action === "apply") return admin.applyPassageRangeDraftForLevel(lvl);
         if(action === "clear") {
             admin.clearPassageRangeDraft();
-            admin._showPassagePickNotice("Cleared draft start/end marks. Saved excerpt on the question is unchanged.", { autoHideMs: 5000 });
+            if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: true });
+            admin._showPassagePickNotice("Cleared draft marks and turned off excerpt picking. Saved excerpt on the question is unchanged.", { autoHideMs: 6000 });
             return;
         }
         if(action === "preview") {
@@ -38211,6 +38237,20 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         return questions.find(qq => qq && normQid(qq.id) === normQid(qid)) || null;
     },
+    clearTeacherPassageLevelPickHighlights: function() {
+        const roots = [
+            document.getElementById("teacher-passage-preview-output"),
+            document.getElementById("source-inline-select"),
+            document.getElementById("source-inline")
+        ].filter(Boolean);
+        roots.forEach(function(el) {
+            el.classList.remove("architect-passage-level-pick-wrap");
+            el.querySelectorAll(".source-line-row").forEach(function(row) {
+                row.classList.remove("architect-level-window-active", "architect-level-window-assigned");
+                row.removeAttribute("data-level-window");
+            });
+        });
+    },
     applyTeacherPassageLevelHighlights: function(containerEl, activeLevel) {
         if(!containerEl) return;
         containerEl.classList.add("architect-passage-level-pick-wrap");
@@ -38236,6 +38276,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         });
     },
     refreshTeacherPassageLevelPickDisplay: function(activeLevel) {
+        if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) {
+            if(typeof admin.clearTeacherPassageLevelPickHighlights === "function") admin.clearTeacherPassageLevelPickHighlights();
+            return;
+        }
         const lvl = activeLevel != null ? activeLevel : (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState && userState.level) || 1);
         const roots = [
             document.getElementById("teacher-passage-preview-output"),
