@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T80:00:00">
-<meta name="architect-deploy" content="c1-reflow-intro-ux-f806">
+<meta name="architect-build" content="2026-06-14T81:00:00">
+<meta name="architect-deploy" content="fix-tap-text-lab-questions-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2151,8 +2151,8 @@
         <button class="nav-item active" onclick="ui.switchView('select', true)" id="nav-select">
             <span class="nav-icon">🎯</span><span class="nav-label">Quote Select</span>
         </button>
-        <button class="nav-item tsa-lab-hidden" onclick="ui.switchView('lab', true)" id="nav-lab" style="display:none;">
-            <span class="nav-icon">🧪</span><span class="nav-label">Evidence Lab</span>
+        <button class="nav-item tsa-lab-hidden" onclick="ui.switchView('select', true)" id="nav-lab" style="display:none;" title="Passage view — same as Quote Select (tap text, teacher excerpt picking)">
+            <span class="nav-icon">🧪</span><span class="nav-label">Passage</span>
         </button>
         <button class="nav-item" onclick="ui.switchView('desk', true)" id="nav-desk">
             <span class="nav-icon">✍️</span><span class="nav-label">Writing Desk</span>
@@ -12277,6 +12277,8 @@ const app = {
         }
         const stored = app.serializeStructuredPassageV2(w);
         app.syncLessonSourceCanonical(stored);
+        if(appData.meta) appData.meta.passageLayoutSyncedAt = new Date().toISOString();
+        if(typeof app.markPassageBookletLayoutDone === "function") app.markPassageBookletLayoutDone();
         if(typeof app.setAiInputValue === "function") app.setAiInputValue(stored);
         if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) ui.refreshAllPassageDisplays(stored);
         else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
@@ -12339,6 +12341,7 @@ const app = {
             appData.meta.passageLayoutSyncedAt = new Date().toISOString();
             if(w.lines && w.lines.length) appData.meta.passageStoredLineCount = w.lines.length;
         }
+        if(typeof app.markPassageBookletLayoutDone === "function") app.markPassageBookletLayoutDone();
         if(typeof app.setAiInputValue === "function") app.setAiInputValue(stored);
         if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) ui.refreshAllPassageDisplays(stored);
         else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
@@ -18664,6 +18667,8 @@ const app = {
         if(!st) return false;
         if(appData.meta && appData.meta.passageBookletLayoutDone === true) return false;
         try { if(sessionStorage.getItem("tsa_passage_booklet_layout_done") === "1") return false; } catch(e) {}
+        /** Natural / Sync reflow sets passageLayoutSyncedAt — allow question excerpt picking without re-blocking Step 1. */
+        if(appData.meta && appData.meta.passageLayoutSyncedAt) return false;
         if(!app.passageSourceHasLineGutters(st)) return true;
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         return questions.some(function(q) { return q && String(q.prompt || q.text || q.question || "").trim(); });
@@ -21335,7 +21340,13 @@ const ui = {
         }
         const navLab = document.getElementById("nav-lab");
         const navDesk = document.getElementById("nav-desk");
-        if(navLab) navLab.classList.add("tsa-lab-hidden");
+        /** Evidence Lab nav → Quote Select passage (tap text / excerpt picking live there; view-lab is legacy). */
+        if(navLab) {
+            const showLabNav = !!(modules.selection && selectionAvailable);
+            navLab.classList.toggle("tsa-lab-hidden", !showLabNav);
+            navLab.style.display = showLabNav ? "" : "none";
+            navLab.title = showLabNav ? "Open passage in Quote Select (tap text, excerpt picking)" : "";
+        }
         if(navDesk) navDesk.classList.toggle("hidden", !modules.desk);
         if(ui.wireDeskAnswerInsertionAid) ui.wireDeskAnswerInsertionAid();
         try {
@@ -21552,8 +21563,7 @@ const ui = {
                     const modules = app.getModulesActive();
                     const selectionModuleOn = modules.selection !== false;
                     if(!sel || !selectionModuleOn || !sel.enabled) return;
-                    const selectView = document.getElementById("view-select");
-                    if(!selectView || !selectView.classList.contains("active")) return;
+                    if(typeof ui.isPassageQuoteTapHostActive === "function" && !ui.isPassageQuoteTapHostActive()) return;
                     const teacherTapOn = !appData.isStandalone && appData.settings && appData.settings.teacherTapToAddQuotes;
                     const teacherRecordOn = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
                     const adminModal = document.getElementById("modal-admin");
@@ -21976,8 +21986,20 @@ const ui = {
         document.querySelectorAll(".filter-btn").forEach(b => b.classList.toggle("active", b.dataset.filter === userState.filter));
     },
 
+    /** True when passage tap-to-select / teacher excerpt picking should accept mouse/touch highlights. */
+    isPassageQuoteTapHostActive: function() {
+        const selectView = document.getElementById("view-select");
+        const labView = document.getElementById("view-lab");
+        if(selectView && selectView.classList.contains("active")) return true;
+        if(labView && labView.classList.contains("active")) return true;
+        if(appData && !appData.isStandalone && app._teacherLinePickMode) return true;
+        const ms = document.getElementById("modal-source");
+        if(ms && ms.classList.contains("open")) return true;
+        return false;
+    },
     switchView: function(v, force) {
-        if(v === "lab") v = "desk";
+        /** Legacy Evidence Lab → Quote Select (passage + tap text); not Writing Desk. */
+        if(v === "lab") v = "select";
         let redirectedToDesk = false;
         if(v === "select" && ui._initInProgress && !force) {
             const deskLenCheck = Array.isArray(userState.deskQueue) ? userState.deskQueue.length : 0;
