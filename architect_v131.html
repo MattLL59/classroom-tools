@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-06-14T83:00:00">
-<meta name="architect-deploy" content="fix-green-pick-overlay-f806">
+<meta name="architect-build" content="2026-07-05T12:00:00">
+<meta name="architect-deploy" content="fix-excerpt-pick-scroll-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -20899,10 +20899,6 @@ const ui = {
                     if(typeof admin.refreshPassageRangeWizardFromSelection === "function") admin.refreshPassageRangeWizardFromSelection();
                 }, 30);
             };
-            document.addEventListener("selectionchange", function() {
-                if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
-                scheduleRangePreview();
-            });
             document.addEventListener("mouseup", function(ev) {
                 if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
                 if(ev.target && ev.target.closest && ev.target.closest("button, input, select, textarea, summary, label, [data-tsa-notice-action], .modal-header, #admin-tabs")) return;
@@ -20925,7 +20921,9 @@ const ui = {
             document.addEventListener("pointerdown", function(ev) {
                 const btn = ev.target && ev.target.closest && ev.target.closest("[data-passage-range-action]");
                 if(!btn) return;
-                if(typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick();
+                const cap = ui._lastCapturedSelection;
+                if(cap && cap.text && typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick({ text: cap.text });
+                else if(typeof admin.rememberPassageRangePick === "function") admin.rememberPassageRangePick();
             }, true);
             document.addEventListener("click", function(ev) {
                 const btn = ev.target && ev.target.closest && ev.target.closest("[data-passage-range-action]");
@@ -21569,10 +21567,13 @@ const ui = {
                     const inlineEl = document.getElementById("source-inline-select");
                     const inlineScroll = document.getElementById("source-inline-select-scroll");
                     const labEl = document.getElementById("source-inline");
+                    const previewEl = document.getElementById("teacher-passage-preview-output");
                     const inPassageHost = (host) => host && ancEl && focEl && (host.contains(ancEl) || host.contains(focEl));
                     if(inPassageHost(inlineEl) || inPassageHost(inlineScroll)) {
                         ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
                     } else if(inPassageHost(labEl)) {
+                        ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
+                    } else if(inPassageHost(previewEl)) {
                         ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
                     } else {
                         ui._lastCapturedSelection = null;
@@ -21581,6 +21582,7 @@ const ui = {
                 document.addEventListener("selectionchange", captureSelection, true);
                 const docSelectHandler = (e) => {
                     if(ui._freeSelectProcessLock) return;
+                    if(app._teacherLinePickMode) return;
                     const sel = appData.selection;
                     const levelBank = app.getLevelBank();
                     const level = app.getEffectiveLevel();
@@ -37978,6 +37980,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             app._passageRangeLastPick = text;
             return true;
         }
+        if(typeof ui !== "undefined" && ui._lastCapturedSelection && ui._lastCapturedSelection.text) {
+            text = String(ui._lastCapturedSelection.text).replace(/\s+/g, " ").trim();
+            if(text.length >= 2) {
+                app._passageRangeLastPick = text;
+                return true;
+            }
+        }
         return false;
     },
     getPassageRangePickText: function() {
@@ -38086,8 +38095,16 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     refreshPassageRangeWizardFromSelection: function() {
         if(!app._teacherLinePickMode || !appData || appData.isStandalone || appData.component !== 1) return;
+        const scrollRoots = [
+            document.getElementById("source-inline-select-scroll"),
+            document.getElementById("teacher-passage-preview-output")
+        ].filter(Boolean);
+        const scrollTops = scrollRoots.map(function(el) { return { el: el, top: el.scrollTop }; });
         admin.rememberPassageRangePick();
         admin.renderTeacherPassageRangeWizard();
+        scrollTops.forEach(function(entry) {
+            if(entry.el && entry.top != null) entry.el.scrollTop = entry.top;
+        });
     },
     markPassageRangeStartFromSelection: function() {
         if(!admin.rememberPassageRangePick()) {
