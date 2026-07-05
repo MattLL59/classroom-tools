@@ -17138,10 +17138,14 @@ const app = {
         const teacherSetupDense = !!(setupSt && (setupSt.needsLineLayout || setupSt.needsExcerptSetup || app._teacherLinePickMode));
         const fullPassageFmtOpts = (everyLineMargin || teacherSetupDense) ? { passageQuoteSelectDenseLines: true } : {};
         let lineRange = null;
-        const lineWinResolved = app.resolveQuoteSelectLineWindow(lvl);
+        let lineWinResolved = app.resolveQuoteSelectLineWindow(lvl);
+        if((!lineWinResolved || !lineWinResolved.lineRange) && typeof admin !== "undefined" && admin.getPassageWindowForPreview) {
+            const previewWin = admin.getPassageWindowForPreview(lvl);
+            if(previewWin && previewWin.lineRange) lineWinResolved = previewWin;
+        }
         if(Object.prototype.hasOwnProperty.call(opts, "lineRange") && opts.lineRange !== undefined) lineRange = opts.lineRange;
-        else lineRange = lineWinResolved.lineRange;
-        const labelRange = (Object.prototype.hasOwnProperty.call(opts, "displayLineRange") && opts.displayLineRange !== undefined ? opts.displayLineRange : null) || lineWinResolved.displayLineRange || lineRange;
+        else lineRange = lineWinResolved && lineWinResolved.lineRange;
+        const labelRange = (Object.prototype.hasOwnProperty.call(opts, "displayLineRange") && opts.displayLineRange !== undefined ? opts.displayLineRange : null) || (lineWinResolved && lineWinResolved.displayLineRange) || lineRange;
         let excerptSliceFailed = false;
         let useExcerpt = false;
         let selPassageHtml = warnHtml;
@@ -17153,10 +17157,12 @@ const app = {
             selPassageHtml += noWin;
         } else if(scope === "focused" && lineRange) {
             const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
+            const anchorStart = lineWinResolved && lineWinResolved.anchorStart ? lineWinResolved.anchorStart : "";
+            const anchorEnd = lineWinResolved && lineWinResolved.anchorEnd ? lineWinResolved.anchorEnd : "";
             let ex = "";
             let excerptBody = "";
-            if(anchorWin && (lineWinResolved.anchorStart || lineWinResolved.anchorEnd)) {
-                const sliced = app.slicePassageRowsFromAnchors(sourceText, lineWinResolved.anchorStart, lineWinResolved.anchorEnd, lvl);
+            if(anchorWin && (anchorStart || anchorEnd)) {
+                const sliced = app.slicePassageRowsFromAnchors(sourceText, anchorStart, anchorEnd, lvl);
                 ex = sliced && sliced.plain ? sliced.plain : "";
                 if(sliced && sliced.rows && sliced.rows.length)
                     excerptBody = app.formatSourceHtmlFromSliceRows(sliced.rows, lvl);
@@ -20357,19 +20363,21 @@ const ui = {
      */
     getEffectivePassageDisplayScopeForLevel: function(level) {
         if(appData && !appData.isStandalone && app._teacherLinePickMode) return "whole";
-        if(typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()) return "whole";
         if(app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending) return "whole";
+        const lvl = parseInt(level, 10) || 1;
         const global = ui.getPassageDisplayScope();
         if(global === "focused") return "focused";
-        if(app._passageLinePickForceWhole) return "whole";
-        const lvl = parseInt(level, 10) || 1;
         const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
         const excerptOn = !!(levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true");
-        if(!excerptOn) return "whole";
-        const win = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null;
-        if(win && win.lineRange) return "focused";
-        if(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0) return "focused";
+        const win = (typeof admin !== "undefined" && admin.getPassageWindowForPreview)
+            ? admin.getPassageWindowForPreview(lvl)
+            : (typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null);
+        const hasLineWindow = !!(win && win.lineRange);
+        const hasAnchorWindow = !!(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0);
+        if(excerptOn && (hasLineWindow || hasAnchorWindow)) return "focused";
+        if(app._passageLinePickForceWhole) return "whole";
+        if(typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()) return "whole";
         return "whole";
     },
     _passageHintDismissKey: function(level) {
@@ -21014,7 +21022,9 @@ const ui = {
         } else {
             const strSrc = (typeof src === "string" ? src : "") || "";
             const warnOnly = app._sourceWarn ? `<div style="margin-bottom:8px; padding:6px 8px; border:1px solid var(--error); background:rgba(244,67,54,0.08); border-radius:6px; font-size:0.85rem;">Full source text missing please re-load.</div>` : "";
-            const lineWinRf = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levRefresh) : null;
+            const lineWinRf = (typeof admin !== "undefined" && admin.getPassageWindowForPreview)
+                ? admin.getPassageWindowForPreview(levRefresh)
+                : (typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levRefresh) : null);
             const paneOptsRf = { warnHtml: warnOnly, scope: scopeRefresh };
             if(lineWinRf) {
                 paneOptsRf.lineRange = lineWinRf.lineRange;
@@ -21222,7 +21232,9 @@ const ui = {
         } else {
             dispPassageHtml = app.formatSourceHtml(sourceForDisplay);
             if(typeof sourceForDisplay === "string" && typeof app.buildPassagePaneHtmlForLevel === "function") {
-                const lineWinInit = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levInitDisp) : null;
+                const lineWinInit = (typeof admin !== "undefined" && admin.getPassageWindowForPreview)
+                    ? admin.getPassageWindowForPreview(levInitDisp)
+                    : (typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levInitDisp) : null);
                 const paneOptsInit = { warnHtml: "", scope: scopeInitDisp };
                 if(lineWinInit) {
                     paneOptsInit.lineRange = lineWinInit.lineRange;
@@ -21882,7 +21894,9 @@ const ui = {
             const levLab = app.getEffectiveLevel ? app.getEffectiveLevel() : (userState.level || 1);
             const scopeLab = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" ? ui.getEffectivePassageDisplayScopeForLevel(levLab) : (typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole");
             const strSrc = typeof src === "string" ? src : "";
-            const lineWinLab = typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levLab) : null;
+            const lineWinLab = (typeof admin !== "undefined" && admin.getPassageWindowForPreview)
+                ? admin.getPassageWindowForPreview(levLab)
+                : (typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(levLab) : null);
             const paneOptsLab = { warnHtml: warn, scope: scopeLab };
             if(lineWinLab) {
                 paneOptsLab.lineRange = lineWinLab.lineRange;
@@ -23953,7 +23967,9 @@ const ui = {
         const hasMultipleQuestions = !!(ids && ids.length > 1);
         const normQid = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
         const findQById = (id) => questions.find(qq => qq && (qq.id === id || normQid(qq.id) === normQid(id)));
-        const lineWinEarly = app.resolveQuoteSelectLineWindow(level);
+        const lineWinEarly = (typeof admin !== "undefined" && admin.getPassageWindowForPreview)
+            ? admin.getPassageWindowForPreview(level)
+            : app.resolveQuoteSelectLineWindow(level);
         let currentQId = lineWinEarly.currentQId;
         let lineRange = lineWinEarly.lineRange;
         const displayLineRange = lineWinEarly.displayLineRange || lineRange;
