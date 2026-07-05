@@ -6,6 +6,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const versionPath = path.join(root, "architect-version.json");
@@ -56,3 +57,9 @@ if(fs.existsSync(indexPath)) {
 }
 
 console.log(`Synced ${version.build} · ${version.gitCommit} → architect_v131.html meta tags`);
+
+const verify = path.join(root, "scripts", "verify-architect-build-sync.mjs");
+if(fs.existsSync(verify)) {
+    const r = spawnSync(process.execPath, [verify], { stdio: "inherit" });
+    if(r.status !== 0) process.exit(r.status ?? 1);
+}

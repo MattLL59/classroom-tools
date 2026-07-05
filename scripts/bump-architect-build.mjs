@@ -34,4 +34,11 @@ fs.writeFileSync(versionPath, JSON.stringify(version, null, 2) + "\n");
 
 const sync = path.join(root, "scripts", "sync-architect-build.mjs");
 const r = spawnSync(process.execPath, [sync], { stdio: "inherit" });
-process.exit(r.status ?? 1);
+if(r.status !== 0) process.exit(r.status ?? 1);
+
+const verify = path.join(root, "scripts", "verify-architect-build-sync.mjs");
+if(fs.existsSync(verify)) {
+    const rv = spawnSync(process.execPath, [verify], { stdio: "inherit" });
+    if(rv.status !== 0) process.exit(rv.status ?? 1);
+}
+process.exit(0);
