@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-06T21:00:00">
-<meta name="architect-deploy" content="fix-l3-editor-leak-f806">
+<meta name="architect-build" content="2026-07-06T22:00:00">
+<meta name="architect-deploy" content="fix-lobby-export-visible-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2731,7 +2731,73 @@
                 </div>
 
                 <div class="admin-tab hidden" data-tab="export">
+                <details class="admin-section" id="admin-lobby-export-details" open>
+                    <summary class="admin-h">📦 Export</summary>
+                    <details class="lobby-help-details">
+                        <summary title="Worksheet and export help">?</summary>
+                        <div class="lobby-help-body">
+                            <p>Worksheet content comes from <strong>Quote bank → Include on worksheet</strong> (off by default). Focus question text is taken from the quotes’ linked questions in <strong>Load &amp; AI → Focus questions</strong>. <strong>Wrong quotations</strong> and <strong>Wrong explanations</strong> on those rows feed the in-app practice game and worksheet rubric chips. Near-duplicate quotes merge on export. For <strong>Component 1 Q1</strong>, optional <strong>model short answer</strong> fields on the first focus row still add a <strong>Short answer practice</strong> block when filled.</p>
+                            <details style="margin-top:10px; font-size:0.8rem; opacity:0.95;">
+                                <summary style="cursor:pointer; font-weight:600;">What the AI JSON supplies (worksheet + I&apos;m stuck)</summary>
+                                <ul style="margin:8px 0 0 1.1em; padding:0; line-height:1.45;">
+                                    <li><strong>Per item:</strong> <code>original</code> (quote), <code>translation</code> (short gloss) + <code>translationDistractors</code>, <code>type</code> (<code>language</code> / <code>tone</code> / <code>structure</code>), <code>effect</code> + <code>effectDistractors</code> (brief hints), <code>modelAnswer</code> as <strong>short</strong> slot strings (MARKER / STARTER / METHOD / POINT / LINK…), optional per-slot fields; <code>distractors</code> = alternate <em>quotations</em> for quote MC (quotes only — use <code>distractorPoints</code> for wrong explanations). <code>distractorPoints</code> = flawed analysis lines for the same quote (worksheet / justify).</li>
+                                    <li><strong>Lesson:</strong> <code>sentenceConfig</code> per level (which rubric rows appear), optional top-level <code>banks</code>, <code>questions</code> array, <code>sourceText</code> (not printed on the compact worksheet).</li>
+                                    <li><strong>I&apos;m stuck</strong> reads only <strong>lesson quote rows</strong> (good quotes in the bank for this level/question): checkbox <em>Meanings</em> → each row&apos;s <code>translation</code>; <em>Language/tone/structure</em> → <code>type</code>; <em>Short sentence hints</em> → parsed <code>modelAnswer</code> slots. It does <strong>not</strong> use the Writing Desk essay, <code>questionEssays</code>, or Quote Select drafts — those are stored separately in browser state.</li>
+                                    <li><strong>Sentence bank</strong> chips come from <strong>Analysis Banks</strong> (Markers, Starters, Methods, Analysis, Link). <strong>Merge from quotes again</strong> copies phrases out of each item&apos;s <code>modelAnswer</code> string, optional <code>marker</code>/<code>starter</code>/<code>method</code>/<code>link</code>, and <code>effect</code> (into Analysis). <code>translation</code> is for meanings / worksheet match — it is <strong>not</strong> merged into those chips. If the model left <code>modelAnswer</code> empty, banks stay at defaults until you edit banks or rebuild model lines. In <strong>standalone</strong> student mode, draggable chips appear on the Writing Desk only when the student turns on <strong>I&apos;m stuck → Show sentence-bank chips on Writing Desk</strong>; teachers always see chips while authoring.</li>
+                                </ul>
+                            </details>
+                        </div>
+                    </details>
+                    <div class="btn-group">
+                        <button class="btn btn-doc" onclick="admin.exportWorksheet()">📄 Worksheet (Word)</button>
+                        <button class="btn btn-primary" style="background:#37474f;" onclick="admin.exportStandalone()">📦 Student App</button>
+                        <label class="btn btn-outline" style="cursor:pointer;">📂 Load JSON<input type="file" id="file-up" class="hidden" onchange="admin.loadFile(this)"></label>
+                        <button class="btn btn-outline" onclick="admin.saveConfig()">💾 Save JSON</button>
+                    </div>
+                    <div style="margin-top:10px; font-size:0.85rem; opacity:0.8;">
+                        Match game (meanings):
+                        <select id="worksheet-match-mode" onchange="admin.setWorksheetMatchMode(this.value)" style="padding:4px; margin-left:6px;">
+                            <option value="jumbled">Jumbled interpretations (draw lines)</option>
+                            <option value="aligned">Aligned interpretations (copy lines)</option>
+                            <option value="list">Simple list (original)</option>
+                        </select>
+                    </div>
+                    <div style="margin-top:8px; font-size:0.85rem; opacity:0.85;">
+                        Rubric (sentence elements):
+                        <select id="worksheet-scaffold-mode" onchange="admin.setWorksheetScaffoldMode(this.value)" style="padding:4px; margin-left:6px;">
+                            <option value="guided">Scaffolded (AI sentence starts + word banks)</option>
+                            <option value="blank">Blank grid only</option>
+                        </select>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; cursor:pointer;">
+                        <input type="checkbox" id="worksheet-include-answer-key" onchange="admin.setWorksheetIncludeAnswerKey(this.checked)">
+                        Append teacher answer key at the end (only if there is real content; off by default — student sheets stay clean)
+                    </label>
+                    <div style="margin-top:10px; font-size:0.85rem; opacity:0.88;">
+                        Max <strong>unique</strong> quotes on worksheet:
+                        <input type="number" id="worksheet-max-quotes" min="1" max="50" step="1" style="width:52px; padding:4px; margin-left:6px; vertical-align:middle;" onchange="admin.setWorksheetMaxQuotes(this.value)" title="Rows with the same quote text are merged into one. Lower this to keep the Word file short (default 8 ≈ up to 4 sides A4 with scaffolded rubric).">
+                        <span style="font-size:0.78rem; opacity:0.82; margin-left:6px;">Duplicates merged by text; cap limits sheet length.</span>
+                    </div>
+                </details>
                 <details class="admin-section" open>
+                    <summary class="admin-h">📌 Template</summary>
+                    <details class="lobby-help-details">
+                        <summary title="About templates">?</summary>
+                        <div class="lobby-help-body">
+                            <p>Save your current configuration (sentence builder, level bank, device types, etc.) under a name, or import a template file to apply its settings. Only one template is active; importing replaces current settings and shows the template name.</p>
+                        </div>
+                    </details>
+                    <div class="input-group">
+                        <label>Template name</label>
+                        <input type="text" id="template-name" placeholder="e.g. Persuasive Writing L2">
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-outline" onclick="admin.saveTemplate()">Save template</button>
+                        <label class="btn btn-outline" style="cursor:pointer;">Import template<input type="file" id="templates-up" class="hidden" accept=".json" onchange="admin.importTemplate(this)"></label>
+                    </div>
+                    <p id="template-current" style="margin:8px 0 0 0; font-size:0.9rem; font-weight:500;"></p>
+                </details>
+                <details class="admin-section">
                     <summary class="admin-h">📄 Import past paper</summary>
                     <details class="lobby-help-details">
                         <summary title="How past-paper import works">?</summary>
@@ -2789,72 +2855,6 @@
                     <div id="past-paper-extract-notice" style="display:none;margin-top:10px;"></div>
                     <button type="button" class="btn btn-outline btn-small" style="margin-top:6px;" onclick="admin.clearPastPaperPdfCacheConfirm()">Clear saved PDFs from this browser</button>
                 </details>
-                <details class="admin-section" open>
-                    <summary class="admin-h">📌 Template</summary>
-                    <details class="lobby-help-details">
-                        <summary title="About templates">?</summary>
-                        <div class="lobby-help-body">
-                            <p>Save your current configuration (sentence builder, level bank, device types, etc.) under a name, or import a template file to apply its settings. Only one template is active; importing replaces current settings and shows the template name.</p>
-                        </div>
-                    </details>
-                    <div class="input-group">
-                        <label>Template name</label>
-                        <input type="text" id="template-name" placeholder="e.g. Persuasive Writing L2">
-                    </div>
-                    <div class="btn-group">
-                        <button class="btn btn-outline" onclick="admin.saveTemplate()">Save template</button>
-                        <label class="btn btn-outline" style="cursor:pointer;">Import template<input type="file" id="templates-up" class="hidden" accept=".json" onchange="admin.importTemplate(this)"></label>
-                    </div>
-                    <p id="template-current" style="margin:8px 0 0 0; font-size:0.9rem; font-weight:500;"></p>
-                </details>
-                <div class="admin-section">
-                    <h3 class="admin-h">📦 Export</h3>
-                    <details class="lobby-help-details">
-                        <summary title="Worksheet and export help">?</summary>
-                        <div class="lobby-help-body">
-                            <p>Worksheet content comes from <strong>Quote bank → Include on worksheet</strong> (off by default). Focus question text is taken from the quotes’ linked questions in <strong>Load &amp; AI → Focus questions</strong>. <strong>Wrong quotations</strong> and <strong>Wrong explanations</strong> on those rows feed the in-app practice game and worksheet rubric chips. Near-duplicate quotes merge on export. For <strong>Component 1 Q1</strong>, optional <strong>model short answer</strong> fields on the first focus row still add a <strong>Short answer practice</strong> block when filled.</p>
-                            <details style="margin-top:10px; font-size:0.8rem; opacity:0.95;">
-                                <summary style="cursor:pointer; font-weight:600;">What the AI JSON supplies (worksheet + I&apos;m stuck)</summary>
-                                <ul style="margin:8px 0 0 1.1em; padding:0; line-height:1.45;">
-                                    <li><strong>Per item:</strong> <code>original</code> (quote), <code>translation</code> (short gloss) + <code>translationDistractors</code>, <code>type</code> (<code>language</code> / <code>tone</code> / <code>structure</code>), <code>effect</code> + <code>effectDistractors</code> (brief hints), <code>modelAnswer</code> as <strong>short</strong> slot strings (MARKER / STARTER / METHOD / POINT / LINK…), optional per-slot fields; <code>distractors</code> = alternate <em>quotations</em> for quote MC (quotes only — use <code>distractorPoints</code> for wrong explanations). <code>distractorPoints</code> = flawed analysis lines for the same quote (worksheet / justify).</li>
-                                    <li><strong>Lesson:</strong> <code>sentenceConfig</code> per level (which rubric rows appear), optional top-level <code>banks</code>, <code>questions</code> array, <code>sourceText</code> (not printed on the compact worksheet).</li>
-                                    <li><strong>I&apos;m stuck</strong> reads only <strong>lesson quote rows</strong> (good quotes in the bank for this level/question): checkbox <em>Meanings</em> → each row&apos;s <code>translation</code>; <em>Language/tone/structure</em> → <code>type</code>; <em>Short sentence hints</em> → parsed <code>modelAnswer</code> slots. It does <strong>not</strong> use the Writing Desk essay, <code>questionEssays</code>, or Quote Select drafts — those are stored separately in browser state.</li>
-                                    <li><strong>Sentence bank</strong> chips come from <strong>Analysis Banks</strong> (Markers, Starters, Methods, Analysis, Link). <strong>Merge from quotes again</strong> copies phrases out of each item&apos;s <code>modelAnswer</code> string, optional <code>marker</code>/<code>starter</code>/<code>method</code>/<code>link</code>, and <code>effect</code> (into Analysis). <code>translation</code> is for meanings / worksheet match — it is <strong>not</strong> merged into those chips. If the model left <code>modelAnswer</code> empty, banks stay at defaults until you edit banks or rebuild model lines. In <strong>standalone</strong> student mode, draggable chips appear on the Writing Desk only when the student turns on <strong>I&apos;m stuck → Show sentence-bank chips on Writing Desk</strong>; teachers always see chips while authoring.</li>
-                                </ul>
-                            </details>
-                        </div>
-                    </details>
-                    <div class="btn-group">
-                        <button class="btn btn-doc" onclick="admin.exportWorksheet()">📄 Worksheet (Word)</button>
-                        <button class="btn btn-primary" style="background:#37474f;" onclick="admin.exportStandalone()">📦 Student App</button>
-                        <label class="btn btn-outline" style="cursor:pointer;">📂 Load JSON<input type="file" id="file-up" class="hidden" onchange="admin.loadFile(this)"></label>
-                        <button class="btn btn-outline" onclick="admin.saveConfig()">💾 Save JSON</button>
-                    </div>
-                    <div style="margin-top:10px; font-size:0.85rem; opacity:0.8;">
-                        Match game (meanings):
-                        <select id="worksheet-match-mode" onchange="admin.setWorksheetMatchMode(this.value)" style="padding:4px; margin-left:6px;">
-                            <option value="jumbled">Jumbled interpretations (draw lines)</option>
-                            <option value="aligned">Aligned interpretations (copy lines)</option>
-                            <option value="list">Simple list (original)</option>
-                        </select>
-                    </div>
-                    <div style="margin-top:8px; font-size:0.85rem; opacity:0.85;">
-                        Rubric (sentence elements):
-                        <select id="worksheet-scaffold-mode" onchange="admin.setWorksheetScaffoldMode(this.value)" style="padding:4px; margin-left:6px;">
-                            <option value="guided">Scaffolded (AI sentence starts + word banks)</option>
-                            <option value="blank">Blank grid only</option>
-                        </select>
-                    </div>
-                    <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; cursor:pointer;">
-                        <input type="checkbox" id="worksheet-include-answer-key" onchange="admin.setWorksheetIncludeAnswerKey(this.checked)">
-                        Append teacher answer key at the end (only if there is real content; off by default — student sheets stay clean)
-                    </label>
-                    <div style="margin-top:10px; font-size:0.85rem; opacity:0.88;">
-                        Max <strong>unique</strong> quotes on worksheet:
-                        <input type="number" id="worksheet-max-quotes" min="1" max="50" step="1" style="width:52px; padding:4px; margin-left:6px; vertical-align:middle;" onchange="admin.setWorksheetMaxQuotes(this.value)" title="Rows with the same quote text are merged into one. Lower this to keep the Word file short (default 8 ≈ up to 4 sides A4 with scaffolded rubric).">
-                        <span style="font-size:0.78rem; opacity:0.82; margin-left:6px;">Duplicates merged by text; cap limits sheet length.</span>
-                    </div>
-                </div>
 
                 <button class="btn btn-danger" onclick="app.factoryReset()">⚠️ Factory Reset</button>
                 </div>
@@ -28691,6 +28691,14 @@ const admin = {
         if(!admin.tabsBound && admin.bindTabsOnly) admin.bindTabsOnly();
         const k = (key === "reward" || key === "edit" || key === "ai" || key === "export") ? key : "edit";
         admin.activateAdminTab(k, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
+        if(k === "export") {
+            const modal = document.getElementById("modal-admin");
+            const body = modal && modal.querySelector(".modal-body");
+            if(body) {
+                body.scrollTop = 0;
+                try { body.scrollTo({ top: 0, behavior: "instant" }); } catch(eScroll) { try { body.scrollTo(0, 0); } catch(eScroll2) {} }
+            }
+        }
         if((k === "edit" || k === "ai") && typeof admin.placeC1SourceWrapForAdminTab === "function") {
             admin.placeC1SourceWrapForAdminTab();
         }
