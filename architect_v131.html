@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-05T18:00:00">
-<meta name="architect-deploy" content="fix-question-focused-excerpt-f806">
+<meta name="architect-build" content="2026-07-06T21:00:00">
+<meta name="architect-deploy" content="fix-l3-editor-leak-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2332,7 +2332,6 @@
                     </div>
                     </div>
                     </div>
-                    <script>try{var _le=document.getElementById("c1-passage-editor-layout");if(_le&&!window.__tsaC1EditorLayoutTpl)window.__tsaC1EditorLayoutTpl=_le.outerHTML;}catch(_e){}</script>
                 </details>
                 <details class="admin-section" id="admin-c2-passages-details">
                     <summary class="admin-h">📑 Component 2 — passages (21st / 19th)</summary>
@@ -17153,8 +17152,8 @@ const app = {
             selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         } else if(scope === "focused" && !lineRange) {
             const dismissBtn = app.noticeActionBtn("dismiss-passage-window-hint", { level: lvl, style: "float:right;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Dismiss this notice" });
-            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);">${dismissBtn}<strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank. ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
-            selPassageHtml += noWin;
+            const noWin = `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid #78909c;background:rgba(120,144,156,0.12);">${dismissBtn}<strong>Question-focused</strong> needs a <strong>line window</strong> or <strong>phrase anchors</strong>. Set Focus questions → <strong>Lines</strong> (e.g. <code>11-20</code>), or <strong>Start / End phrase</strong> boxes (exact words from the passage), or type <code>Read lines 1–8</code> in the question.</div><div style="font-size:0.84rem;opacity:0.88;padding:8px 0 10px 0;">Also turn on <strong>Question-focused</strong> (Lab / Quote Select) or tick <strong>excerpt</strong> for this level in Level Bank. ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
+            selPassageHtml += noWin + app.formatSourceHtml(sourceText, fullPassageFmtOpts);
         } else if(scope === "focused" && lineRange) {
             const anchorWin = lineWinResolved && String(lineWinResolved.windowSource || "").indexOf("anchors:") === 0;
             const anchorStart = lineWinResolved && lineWinResolved.anchorStart ? lineWinResolved.anchorStart : "";
@@ -17195,6 +17194,7 @@ const app = {
                 const errDetail = anchorErrLab || `If you meant <strong>lines 1–15</strong>, use <code>1-15</code> (with a dash), not <code>115</code>. Or set <strong>Start / End phrase</strong> anchors with exact words from the passage.`;
                 const dismissBtn = app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, style: "float:right;background:#fff;border:1px solid #ffcdd2;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:0.76rem;margin-left:8px;", title: "Dismiss and show whole passage" });
                 selPassageHtml += `<div class="architect-passage-excerpt-banner" style="font-size:0.82rem;line-height:1.38;margin-bottom:10px;padding:8px 10px;border-radius:6px;border-left:4px solid var(--error);background:rgba(244,67,54,0.08);">${dismissBtn}Could not build excerpt for <strong>${spanLab}</strong>. ${errDetail} ${app.noticeActionBtn("dismiss-passage-excerpt-error", { level: lvl, label: "Show whole passage instead", className: "btn btn-outline btn-small", style: "margin-left:6px;" })}</div>`;
+                selPassageHtml += app.formatSourceHtml(sourceText, fullPassageFmtOpts);
             }
         }
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
@@ -18703,14 +18703,37 @@ const app = {
         return st;
     },
     _c1PassageEditorLayoutTemplate: "",
+    _sanitizeC1PassageLayoutTemplate: function(html) {
+        return String(html || "").replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+    },
+    _scrubC1PassageEditorMount: function(mountEdit) {
+        if(!mountEdit) return;
+        mountEdit.querySelectorAll("script").forEach(function(s) { s.remove(); });
+        Array.from(mountEdit.childNodes).forEach(function(n) {
+            if(n.nodeType === 3 && /__tsaC1EditorLayoutTpl|getElementById\s*\(\s*["']c1-passage-editor-layout/.test(String(n.textContent || ""))) n.remove();
+        });
+    },
+    _dedupeC1PassageEditorLayouts: function() {
+        const all = Array.from(document.querySelectorAll("#c1-passage-editor-layout"));
+        if(all.length <= 1) return;
+        const mountEdit = document.getElementById("c1-source-editor-mount-edit");
+        let keep = all.find(function(el) { return mountEdit && mountEdit.contains(el); }) || all[0];
+        all.forEach(function(el) {
+            if(el !== keep) el.remove();
+        });
+        if(mountEdit && keep && !mountEdit.contains(keep)) mountEdit.appendChild(keep);
+    },
     _cacheC1PassageEditorLayoutTemplate: function() {
         if(app._c1PassageEditorLayoutTemplate) return;
         if(typeof window !== "undefined" && window.__tsaC1EditorLayoutTpl) {
-            app._c1PassageEditorLayoutTemplate = window.__tsaC1EditorLayoutTpl;
+            app._c1PassageEditorLayoutTemplate = app._sanitizeC1PassageLayoutTemplate(window.__tsaC1EditorLayoutTpl);
             return;
         }
         const layout = document.getElementById("c1-passage-editor-layout");
-        if(layout && layout.outerHTML) app._c1PassageEditorLayoutTemplate = layout.outerHTML;
+        if(layout && layout.outerHTML) {
+            app._c1PassageEditorLayoutTemplate = app._sanitizeC1PassageLayoutTemplate(layout.outerHTML);
+            if(typeof window !== "undefined") window.__tsaC1EditorLayoutTpl = app._c1PassageEditorLayoutTemplate;
+        }
     },
     /** Strip stale focus-mode classes, restore toolbars from rail dock, undo flex collapse. */
     forceC1PassageEditorChromeVisible: function() {
@@ -18757,16 +18780,22 @@ const app = {
     },
     /** Re-insert #c1-passage-editor-layout if a prior error path wiped mount-edit innerHTML. */
     restoreC1PassageEditorLayoutIfMissing: function() {
-        if(document.getElementById("c1-passage-editor-layout")) {
+        const mountEdit = document.getElementById("c1-source-editor-mount-edit");
+        if(mountEdit) app._scrubC1PassageEditorMount(mountEdit);
+        app._dedupeC1PassageEditorLayouts();
+        let layout = document.getElementById("c1-passage-editor-layout");
+        if(layout) {
+            if(mountEdit && !mountEdit.contains(layout)) mountEdit.appendChild(layout);
             app._cacheC1PassageEditorLayoutTemplate();
             return true;
         }
         app._cacheC1PassageEditorLayoutTemplate();
-        const tpl = app._c1PassageEditorLayoutTemplate
+        const tpl = app._sanitizeC1PassageLayoutTemplate(
+            app._c1PassageEditorLayoutTemplate
             || (typeof window !== "undefined" && window.__tsaC1EditorLayoutTpl)
-            || "";
+            || ""
+        );
         if(tpl) app._c1PassageEditorLayoutTemplate = tpl;
-        const mountEdit = document.getElementById("c1-source-editor-mount-edit");
         if(!tpl || !mountEdit) return false;
         mountEdit.querySelectorAll(".architect-admin-passage-load-error, #c1-passage-editor-setup-msg").forEach(function(n) { n.remove(); });
         const host = document.createElement("div");
@@ -19918,6 +19947,7 @@ const app = {
         const levels = app.getActiveLevels();
         userState.level = levels.includes(target) ? target : levels[0];
         userState.showDone = false;
+        if(typeof admin !== "undefined" && typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
         if(appData.selection && appData.selection.enabled) {
             userState.selectionCompleted = false;
             userState.selectionStage = 1;
@@ -20365,17 +20395,18 @@ const ui = {
         if(appData && !appData.isStandalone && app._teacherLinePickMode) return "whole";
         if(app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending) return "whole";
         const lvl = parseInt(level, 10) || 1;
-        const global = ui.getPassageDisplayScope();
-        if(global === "focused") return "focused";
-        const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
-        const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
-        const excerptOn = !!(levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true");
         const win = (typeof admin !== "undefined" && admin.getPassageWindowForPreview)
             ? admin.getPassageWindowForPreview(lvl)
             : (typeof app.resolveQuoteSelectLineWindow === "function" ? app.resolveQuoteSelectLineWindow(lvl) : null);
         const hasLineWindow = !!(win && win.lineRange);
         const hasAnchorWindow = !!(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0);
-        if(excerptOn && (hasLineWindow || hasAnchorWindow)) return "focused";
+        const hasResolvableWindow = hasLineWindow || hasAnchorWindow;
+        const global = ui.getPassageDisplayScope();
+        if(global === "focused" && hasResolvableWindow) return "focused";
+        const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
+        const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
+        const excerptOn = !!(levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true");
+        if(excerptOn && hasResolvableWindow) return "focused";
         if(app._passageLinePickForceWhole) return "whole";
         if(typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()) return "whole";
         return "whole";
@@ -28917,6 +28948,9 @@ const admin = {
             }
         }, true);
         if(typeof admin.bindC1PassageFocusModeOnce === "function") admin.bindC1PassageFocusModeOnce();
+        if(typeof app._cacheC1PassageEditorLayoutTemplate === "function") app._cacheC1PassageEditorLayoutTemplate();
+        const mountEditBoot = document.getElementById("c1-source-editor-mount-edit");
+        if(mountEditBoot && typeof app._scrubC1PassageEditorMount === "function") app._scrubC1PassageEditorMount(mountEditBoot);
     },
     /** Full-height passage editor: hide stacked toolbars, summon panels from Photoshop-style side rail; preserve scroll on reflow. */
     bindC1PassageFocusModeOnce: function() {
@@ -29469,6 +29503,8 @@ const admin = {
     placeC1SourceWrapForAdminTab: function(opts) {
         opts = opts || {};
         if(!appData) return;
+        const mountEditEarly = document.getElementById("c1-source-editor-mount-edit");
+        if(mountEditEarly && typeof app._scrubC1PassageEditorMount === "function") app._scrubC1PassageEditorMount(mountEditEarly);
         if(typeof app.restoreC1PassageEditorLayoutIfMissing === "function") app.restoreC1PassageEditorLayoutIfMissing();
         const layout = document.getElementById("c1-passage-editor-layout");
         const singleWrap = document.getElementById("source-text-single-wrap");
