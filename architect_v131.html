@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-08T02:00:00">
+<meta name="architect-build" content="2026-07-08T03:00:00">
 <meta name="architect-deploy" content="fix-ai-json-parse-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
@@ -7163,6 +7163,46 @@ const app = {
         s = s.replace(/\\U/g, "\\\\U"); // fix \U (invalid; e.g. C:\Users)
         s = s.replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u"); // fix \u not followed by 4 hex (invalid unicode escape)
         s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n"); // normalize line endings
+        /** AI often closes array strings with \", then literal \n and mixed quotes on the next element. */
+        const repairAiArrayStringBoundaries = (str) => str
+            .replace(/\\",\s*\\n\s*"/g, '",\n"')
+            .replace(/\\",\s*\\n\s*\\"/g, '",\n"')
+            .replace(/\\"\s*\\n\s*\]/g, '"\n]')
+            .replace(/\[\s*\\n\s*\\"/g, '[\n"');
+        s = repairAiArrayStringBoundaries(s);
+        /** Outside JSON string values, turn structural \" and literal \n into real quotes/newlines. */
+        const repairStructuralBackslashEscapes = (str) => {
+            let out = "";
+            let i = 0;
+            let inString = false;
+            let escaped = false;
+            while (i < str.length) {
+                const c = str[i];
+                if (inString) {
+                    if (escaped) { out += c; escaped = false; i++; continue; }
+                    if (c === "\\") { out += c; escaped = true; i++; continue; }
+                    if (c === '"') { out += c; inString = false; i++; continue; }
+                    out += c;
+                    i++;
+                    continue;
+                }
+                if (c === "\\") {
+                    const next = str[i + 1];
+                    if (next === '"') { out += '"'; i += 2; continue; }
+                    if (next === "n") { out += "\n"; i += 2; continue; }
+                    if (next === "t") { out += "\t"; i += 2; continue; }
+                    if (next === "r") { out += "\r"; i += 2; continue; }
+                    out += c;
+                    i++;
+                    continue;
+                }
+                if (c === '"') { inString = true; out += c; i++; continue; }
+                out += c;
+                i++;
+            }
+            return out;
+        };
+        s = repairStructuralBackslashEscapes(s);
         /** AI often emits invalid escapes before dialogue (e.g. Brixton,\\ "she) — backslash+space is not valid JSON. */
         const repairInvalidJsonEscapesInStrings = (str) => {
             let out = "";
@@ -7303,7 +7343,7 @@ const app = {
             return indices;
         };
         let result = attemptParse(s);
-        const unescapedPatterns = [/Expected\s+','\s+or\s+'}'/i, /Expected\s+','\s+or\s+'\]'/i, /Unexpected\s+(token|character)/i, /Expected\s+.*property\s+name/i, /Expected\s+.*'\s*:'\s*'/i];
+        const unescapedPatterns = [/Expected\s+','\s+or\s+'}'/i, /Expected\s+','\s+or\s+'\]'/i, /Unexpected\s+(token|character)/i, /Expected\s+.*property\s+name/i, /Expected\s+':'\s+after\s+property\s+name/i, /Expected\s+.*'\s*:'\s*'/i];
         for (let fixAttempt = 0; !result.ok && fixAttempt < 50; fixAttempt++) {
             const msg = result.err && result.err.message ? String(result.err.message) : "";
             const posMatch = msg.match(/position\s+(\d+)/i);
@@ -7339,6 +7379,10 @@ const app = {
         if (!result.ok) {
             const repaired = repairInvalidJsonEscapesInStrings(escapeControlCharsInStrings(result.str));
             if (repaired !== result.str) result = attemptParse(repaired);
+        }
+        if (!result.ok) {
+            const structural = repairStructuralBackslashEscapes(repairAiArrayStringBoundaries(result.str));
+            if (structural !== result.str) result = attemptParse(structural);
         }
         if (result.ok) return { parsed: result.parsed };
         const e = result.err;
@@ -7386,7 +7430,7 @@ const app = {
                 const frag = result.str.slice(start, end);
                 context = "\n\nContext (±" + win + " chars):\n" + frag.replace(/\t/g, " ").replace(/\r/g, "");
             }
-        const hint = "Check for: unescaped double quote (\") inside a value (escape as \\\"), invalid backslash before a space (e.g. ,\\\\ \"she — use \\\"she or omit the backslash), literal newlines/tabs in a string (use \\n and \\t), trailing comma before } or ], smart/curly quotes, \"settings\" as an array (it must be an object {}), or \"lesson\": [ ... ] — lesson must be ONE object {\"lesson\":{...}}, not an array. Fix the JSON in a text editor and try again. (US spellings inside quote text, e.g. weaponizing, are fine — they do not break JSON.)";
+        const hint = "Check for: unescaped double quote (\") inside a value (escape as \\\"), mixed \\\" and \" on array strings (e.g. translationDistractors — every element must use plain \"...\" or consistent \\\"...\\\"), invalid backslash before a space (e.g. ,\\\\ \"she — use \\\"she or omit the backslash), literal \\n between keys (use a real line break or remove), trailing comma before } or ], smart/curly quotes, \"settings\" as an array (it must be an object {}), or \"lesson\": [ ... ] — lesson must be ONE object {\"lesson\":{...}}, not an array. Fix the JSON in a text editor and try again. (US spellings inside quote text, e.g. weaponizing, are fine — they do not break JSON.)";
         return { parsed: undefined, error: "Invalid JSON" + lineHint + ": " + errMsg + snippet + context + "\n\n" + hint };
     },
     convertPastPaperToLesson: function(pp) {
@@ -34918,7 +34962,7 @@ COMPONENT 1 — Q1 WORKSHEET SHORT-ANSWER (optional on lesson.questions[0] only)
 
 settings must be a JSON object (curly braces {}), e.g. {"worksheetMatchMode":"jumbled","activeLevels":[1,2,3]}. Never use an array [] for settings. Each item.modelAnswer = "MARKER:...|STARTER:...|METHOD:...|POINT:...|LINK:..." (ANALYSIS/EFFECT ok): keep each segment SHORT (phrase/clause scaffolds, not paragraphs). MARKER = discourse linker / sentence signpost only (e.g. Furthermore, However, In addition) — never a single theme label or abstract noun (not "Violence", "Distance", "Cruelty"). POINT = brief analytical comment (writer/reader, effect, method) — never a quotation or chunk copied from the passage. translation and effect fields must also stay brief and non-quotation. On load the app fills slot fields and merges those phrases into lesson banks. Every double-quote inside a string value must be escaped as \\".
 
-activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questions to lesson.questions by id. Line numbers in each prompt = content from those lines only. levelBank.questionIds same order as questions. UK English spelling throughout (humanises, organises, colour — not US -ize forms). 5–15 items per level. JSON: no literal newlines (use \\n), escape every inner " as \\" only (never backslash+space, e.g. invalid: ,\\ "she — valid: ,\\"she), sourceText one string with \\n, one numbered line per physical line: "1 first line\\n2 second line\\n3 third…" (every line must carry its number prefix for matching; margin-style 5/10/15 is applied in the app, not by skipping numbers in JSON).
+activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questions to lesson.questions by id. Line numbers in each prompt = content from those lines only. levelBank.questionIds same order as questions. UK English spelling throughout (humanises, organises, colour — not US -ize forms). 5–15 items per level. JSON: no literal newlines (use \\n), escape every inner " as \\" only (never backslash+space, e.g. invalid: ,\\ "she — valid: ,\\"she), array strings (translationDistractors, effectDistractors, distractors) each as plain "text" with normal commas — never mix \\", and literal \\n between elements; sourceText one string with \\n, one numbered line per physical line: "1 first line\\n2 second line\\n3 third…" (every line must carry its number prefix for matching; margin-style 5/10/15 is applied in the app, not by skipping numbers in JSON).
 
 Reply with raw JSON only. First character {, last character }. No lesson plan, no explanation.`;
         const out = document.getElementById("unified-prompt-out");
