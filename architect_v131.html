@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-08T00:00:00">
-<meta name="architect-deploy" content="fix-passage-scroll-flex-f806">
+<meta name="architect-build" content="2026-07-08T02:00:00">
+<meta name="architect-deploy" content="fix-ai-json-parse-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2709,6 +2709,14 @@
                     <textarea id="unified-prompt-out" style="height:80px; width:100%; margin-bottom:6px;" readonly placeholder="Prompt will appear here..."></textarea>
                     <div style="font-size:0.72rem; opacity:0.78; margin:-2px 0 8px 0;">Unified = typically your <strong>longest</strong> prompt block (whole-lesson schema + passage excerpt). Easiest path with fewer surprises if your AI subscription allows <strong>long inputs and long answers</strong>.</div>
                     <textarea id="unified-json-in" style="height:90px; width:100%;" placeholder="Paste JSON response here..."></textarea>
+                    <div id="unified-json-error" class="hidden" style="margin-top:8px; padding:10px 12px; border:1px solid var(--error); border-radius:6px; background:rgba(244,67,54,0.08);">
+                        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px;">
+                            <strong style="font-size:0.86rem; color:var(--error);">JSON could not be loaded</strong>
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.copyUnifiedJsonError()">Copy full error</button>
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.dismissUnifiedJsonError()">Dismiss</button>
+                        </div>
+                        <textarea id="unified-json-error-text" readonly style="height:140px; width:100%; font-family:ui-monospace,Consolas,monospace; font-size:0.74rem; line-height:1.35; resize:vertical;" aria-label="JSON parse error details"></textarea>
+                    </div>
                     <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="If the model returns fewer paragraph breaks than your current passage, keeps your stored text. Also keeps insert width when JSON omits it."><input type="checkbox" id="ai-json-preserve-passage" checked onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> Keep my passage layout (¶ / blank lines) and insert width when the JSON does not carry them (recommended for AI round-trips)</label>
                     <details style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
                         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">Compact AI — enrich existing quotes only</summary>
@@ -7155,6 +7163,44 @@ const app = {
         s = s.replace(/\\U/g, "\\\\U"); // fix \U (invalid; e.g. C:\Users)
         s = s.replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u"); // fix \u not followed by 4 hex (invalid unicode escape)
         s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n"); // normalize line endings
+        /** AI often emits invalid escapes before dialogue (e.g. Brixton,\\ "she) — backslash+space is not valid JSON. */
+        const repairInvalidJsonEscapesInStrings = (str) => {
+            let out = "";
+            let i = 0;
+            let inString = false;
+            while (i < str.length) {
+                const c = str[i];
+                if (!inString) {
+                    if (c === '"') inString = true;
+                    out += c;
+                    i++;
+                    continue;
+                }
+                if (c === "\\") {
+                    const next = str[i + 1];
+                    if (next === undefined) { i++; continue; }
+                    const simple = '"\\/bfnrt';
+                    if (simple.indexOf(next) >= 0) {
+                        out += c + next;
+                        i += 2;
+                        continue;
+                    }
+                    if (next === "u" && /^[0-9a-fA-F]{4}/.test(str.slice(i + 2, i + 6))) {
+                        out += str.slice(i, i + 6);
+                        i += 6;
+                        continue;
+                    }
+                    out += next;
+                    i += 2;
+                    continue;
+                }
+                if (c === '"') { inString = false; out += c; i++; continue; }
+                out += c;
+                i++;
+            }
+            return out;
+        };
+        s = repairInvalidJsonEscapesInStrings(s);
         /* Fix "Bad control character" errors: escape literal newlines/tabs/control chars inside JSON string values */
         const escapeControlCharsInStrings = (str) => {
             let out = "";
@@ -7290,10 +7336,15 @@ const app = {
             const unwrapped = tryUnwrapLessonArrayWrapper(result.str);
             if (unwrapped !== result.str) result = attemptParse(unwrapped);
         }
+        if (!result.ok) {
+            const repaired = repairInvalidJsonEscapesInStrings(escapeControlCharsInStrings(result.str));
+            if (repaired !== result.str) result = attemptParse(repaired);
+        }
         if (result.ok) return { parsed: result.parsed };
         const e = result.err;
         if (/Bad control character|control character in string/i.test(e && e.message ? e.message : "")) {
-            const fixed = escapeControlCharsInStrings(result.str);
+            let fixed = escapeControlCharsInStrings(result.str);
+            fixed = repairInvalidJsonEscapesInStrings(fixed);
             if (fixed !== result.str) {
                 const retry = attemptParse(fixed);
                 if (retry.ok) return { parsed: retry.parsed };
@@ -7335,7 +7386,7 @@ const app = {
                 const frag = result.str.slice(start, end);
                 context = "\n\nContext (±" + win + " chars):\n" + frag.replace(/\t/g, " ").replace(/\r/g, "");
             }
-        const hint = "Check for: unescaped double quote (\") inside a value (escape as \\\"), literal newlines/tabs in a string (use \\n and \\t), trailing comma before } or ], smart/curly quotes, \"settings\" as an array (it must be an object {}), or \"lesson\": [ ... ] — lesson must be ONE object {\"lesson\":{...}}, not an array. Fix the JSON in a text editor and try again.";
+        const hint = "Check for: unescaped double quote (\") inside a value (escape as \\\"), invalid backslash before a space (e.g. ,\\\\ \"she — use \\\"she or omit the backslash), literal newlines/tabs in a string (use \\n and \\t), trailing comma before } or ], smart/curly quotes, \"settings\" as an array (it must be an object {}), or \"lesson\": [ ... ] — lesson must be ONE object {\"lesson\":{...}}, not an array. Fix the JSON in a text editor and try again. (US spellings inside quote text, e.g. weaponizing, are fine — they do not break JSON.)";
         return { parsed: undefined, error: "Invalid JSON" + lineHint + ": " + errMsg + snippet + context + "\n\n" + hint };
     },
     convertPastPaperToLesson: function(pp) {
@@ -34867,7 +34918,7 @@ COMPONENT 1 — Q1 WORKSHEET SHORT-ANSWER (optional on lesson.questions[0] only)
 
 settings must be a JSON object (curly braces {}), e.g. {"worksheetMatchMode":"jumbled","activeLevels":[1,2,3]}. Never use an array [] for settings. Each item.modelAnswer = "MARKER:...|STARTER:...|METHOD:...|POINT:...|LINK:..." (ANALYSIS/EFFECT ok): keep each segment SHORT (phrase/clause scaffolds, not paragraphs). MARKER = discourse linker / sentence signpost only (e.g. Furthermore, However, In addition) — never a single theme label or abstract noun (not "Violence", "Distance", "Cruelty"). POINT = brief analytical comment (writer/reader, effect, method) — never a quotation or chunk copied from the passage. translation and effect fields must also stay brief and non-quotation. On load the app fills slot fields and merges those phrases into lesson banks. Every double-quote inside a string value must be escaped as \\".
 
-activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questions to lesson.questions by id. Line numbers in each prompt = content from those lines only. levelBank.questionIds same order as questions. UK English. 5–15 items per level. JSON: no literal newlines (use \\n), escape ", sourceText one string with \\n, one numbered line per physical line: "1 first line\\n2 second line\\n3 third…" (every line must carry its number prefix for matching; margin-style 5/10/15 is applied in the app, not by skipping numbers in JSON).
+activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questions to lesson.questions by id. Line numbers in each prompt = content from those lines only. levelBank.questionIds same order as questions. UK English spelling throughout (humanises, organises, colour — not US -ize forms). 5–15 items per level. JSON: no literal newlines (use \\n), escape every inner " as \\" only (never backslash+space, e.g. invalid: ,\\ "she — valid: ,\\"she), sourceText one string with \\n, one numbered line per physical line: "1 first line\\n2 second line\\n3 third…" (every line must carry its number prefix for matching; margin-style 5/10/15 is applied in the app, not by skipping numbers in JSON).
 
 Reply with raw JSON only. First character {, last character }. No lesson plan, no explanation.`;
         const out = document.getElementById("unified-prompt-out");
@@ -34909,9 +34960,38 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             if(!txt || !txt.trim()) return alert("Clipboard is empty.");
             const box = document.getElementById("unified-json-in");
             if(box) box.value = txt.trim();
+            admin.dismissUnifiedJsonError();
         } catch(e) {
             alert("Paste failed. Use Ctrl/Cmd+V in the JSON box.");
         }
+    },
+    showJsonParseError: function(msg) {
+        const msgText = String(msg || "Invalid JSON.");
+        const panel = document.getElementById("unified-json-error");
+        const ta = document.getElementById("unified-json-error-text");
+        if(ta) ta.value = msgText;
+        if(panel) {
+            panel.classList.remove("hidden");
+            try { panel.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch(eSc) {}
+            return;
+        }
+        alert(msgText);
+    },
+    copyUnifiedJsonError: async function() {
+        const ta = document.getElementById("unified-json-error-text");
+        const text = ta && ta.value ? ta.value : "";
+        if(!text.trim()) return alert("No error text to copy.");
+        try {
+            await navigator.clipboard.writeText(text);
+            alert("Error details copied — paste into a text editor or back to the AI to fix.");
+        } catch(e) {
+            if(ta) { ta.focus(); ta.select(); }
+            alert("Copy failed. The error box is selected — press Ctrl/Cmd+C.");
+        }
+    },
+    dismissUnifiedJsonError: function() {
+        const panel = document.getElementById("unified-json-error");
+        if(panel) panel.classList.add("hidden");
     },
     /** True if lesson JSON included real bank strings (not only {}, null, or empty arrays). Empty object is truthy in JS — used to avoid carrying old paper banks. */
     lessonBanksPayloadHasContent: function(b) {
@@ -35045,9 +35125,10 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
         try {
             const raw = document.getElementById("unified-json-in").value;
             if(!raw || !raw.trim()) return alert("Paste JSON.");
+            admin.dismissUnifiedJsonError();
             const result = app.tryParseJson(raw);
             if (result.error) {
-                alert(result.error);
+                admin.showJsonParseError(result.error);
                 return;
             }
             const j = result.parsed;
@@ -35642,7 +35723,7 @@ ${structureBlock}
 12. Include settings: { worksheetMatchMode:"jumbled", levelBank: ${levelBankJson} }.
 13. Questions order: Output "questions": [ {id:"q01",prompt:...}, ... ] in chronological order (q01 through q10 as needed). The first question must always be first. In levelBank.questionIds, list question IDs in the same chronological order.
 14. Line numbers: If a question specifies line numbers (e.g. "lines 1-5", "lines 6-10" via lineRef or in the prompt), ALL quotes and answers for that question MUST come from those lines only. Use the source text's line numbers as the reference. Do not use text from outside the specified line range.
-15. CRITICAL — JSON string formatting (avoids parse errors): (a) NEVER use literal newlines or tabs in strings—use \\n and \\t. (b) Escape " as \\". (c) sourceText: ONE string with \\n between lines, e.g. "1 Line one\\n2 Line two". No raw newlines. (d) Only valid escapes: \\", \\\\, \\n, \\t, \\uXXXX. No Windows paths.
+15. CRITICAL — JSON string formatting (avoids parse errors): (a) NEVER use literal newlines or tabs in strings—use \\n and \\t. (b) Escape " as \\". (c) Never write backslash+space before dialogue (invalid: ,\\ "she — use ,\\"she). (d) sourceText: ONE string with \\n between lines, e.g. "1 Line one\\n2 Line two". No raw newlines. (e) Only valid escapes: \\", \\\\, \\n, \\t, \\uXXXX. No Windows paths.
 16. For sourceText: output as ONE string. Use \\n between lines. Prefix every physical line with its line number: "1 " or "1. " then that line's text (all lines numbered for matching — the app shows 5/10/15… in the margin only). No HTML. No literal line breaks.
 
 CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explanation, or commentary. No markdown code blocks. Output valid JSON: use \\n for line breaks (never literal newlines), escape " as \\".`;
@@ -35835,7 +35916,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             if(exportAfter) admin.exportStandalone();
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON or corrupted file.";
-            alert("Invalid JSON: " + msg);
+            admin.showJsonParseError("Invalid JSON: " + msg);
         }
     },
     loadSelectionJson: () => {
@@ -39705,7 +39786,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const text = String(raw || "");
             const result = app.tryParseJson(text);
             if (result.error) {
-                alert(result.error);
+                admin.showJsonParseError(result.error);
                 input.value = "";
                 return;
             }
