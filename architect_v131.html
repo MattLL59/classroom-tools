@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-09T03:00:00">
-<meta name="architect-deploy" content="fix-json-passage-preserve-f806">
+<meta name="architect-build" content="2026-07-09T22:00:00">
+<meta name="architect-deploy" content="fix-passage-width-ui-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -651,17 +651,33 @@
         overflow: visible;
         display: block;
     }
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus .source-toolbar,
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus .source-toolbar-c1-measure,
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus .c1-passage-chrome-collapsed,
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-section,
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-expand {
+    /* Step 1 / Open passage editor: always show Insert width + format toolbars (even if flyouts were parked in the rail dock). */
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap .source-toolbar,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap .source-toolbar-c1-measure,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap .c1-passage-chrome-collapsed,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap #c1-passage-intro-section,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap #c1-passage-intro-expand,
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock > .source-toolbar,
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock > .source-toolbar-c1-measure,
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock > #c1-passage-intro-section,
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock > #c1-passage-intro-expand {
         display: flex !important;
         flex-wrap: wrap;
     }
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-section,
-    #modal-admin.modal-admin-passage-editing #source-text-single-wrap.tsa-c1-passage-focus #c1-passage-intro-expand {
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap #c1-passage-intro-section,
+    #modal-admin.modal-admin-passage-editing #source-text-single-wrap #c1-passage-intro-expand,
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock > #c1-passage-intro-section,
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock > #c1-passage-intro-expand {
         display: block !important;
+    }
+    #modal-admin.modal-admin-passage-editing .c1-passage-rail-flyout-dock {
+        display: block !important;
+        position: static !important;
+        width: 100%;
+        border: none;
+        background: transparent;
+        padding: 0;
+        margin: 0 0 6px 0;
     }
     /* Long inserts (80+ booklet rows): do not cap #ai-input at 720px — flex rows were shrinking to fit. Scroll the modal body instead. */
     #modal-admin.modal-admin-passage-editing #c1-source-editor-mount-edit #ai-input.source-editor {
@@ -9808,6 +9824,42 @@ const app = {
     /**
      * After Load JSON / unified paste: sync Insert width controls + `--exam-passage-max-width` from {@link appData.meta}, then rebuild C1 booklet HTML from canonical so row splits match saved **pdfInsertWidthCh** (avoids dashed line at Nch while rows were wrapped tighter, and makes slider changes affect layout again via {@link resyncC1PassageEditorWithInsertWidth}).
      */
+    /** True when stored v2 rows look width-baked (many short lines) — common after Save JSON at a narrow Insert width. */
+    passageLooksWidthBakedInStorage: function(src) {
+        if(!src || typeof src !== "string" || !src.trim().startsWith("{")) return false;
+        try {
+            const o = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(src.trim()) : null;
+            if(!o || !Array.isArray(o.lines) || o.lines.length < 48) return false;
+            if(typeof app._passageV2LooksLikeBakedWidthFragments === "function" && app._passageV2LooksLikeBakedWidthFragments(o)) return true;
+            const avg = typeof admin !== "undefined" && admin.getPassageAvgStoredLineChars
+                ? admin.getPassageAvgStoredLineChars(src)
+                : 0;
+            return avg > 0 && avg < 42 && o.lines.length >= 72;
+        } catch(e) {
+            return false;
+        }
+    },
+    healWidthBakedPassageAfterLessonLoad: function() {
+        if(typeof appData === "undefined" || !appData || appData.component === 2) return false;
+        const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
+        if(!st.trim() || !app.passageLooksWidthBakedInStorage(st)) return false;
+        let repaired = false;
+        if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage()) repaired = true;
+        if(!repaired && typeof app.normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns === "function") {
+            try {
+                const o = app.parseStructuredPassageSource(st.trim());
+                if(o && Array.isArray(o.lines) && o.lines.length >= 48) {
+                    const w = app.normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns(o, { force: true, lessonExportSnapshot: true });
+                    const canon = typeof app.serializeStructuredPassageV2 === "function" ? app.serializeStructuredPassageV2(w) : "";
+                    if(canon && canon !== st.trim() && typeof app.syncLessonSourceCanonical === "function") {
+                        app.syncLessonSourceCanonical(canon);
+                        repaired = true;
+                    }
+                }
+            } catch(eHeal) {}
+        }
+        return repaired;
+    },
     finishC1PassageLayoutAfterLessonLoad: function() {
         if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
         if(typeof app.syncPassageMergeOrphanHangCheckboxFromMeta === "function") app.syncPassageMergeOrphanHangCheckboxFromMeta();
@@ -9819,19 +9871,25 @@ const app = {
             if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st);
             return;
         }
-        if(st.trim() && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st)) {
+        const widthBaked = typeof app.passageLooksWidthBakedInStorage === "function" && app.passageLooksWidthBakedInStorage(st);
+        if(widthBaked && typeof app.healWidthBakedPassageAfterLessonLoad === "function") app.healWidthBakedPassageAfterLessonLoad();
+        const stAfter = typeof appData.sourceText === "string" ? appData.sourceText : st;
+        if(stAfter.trim() && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(stAfter)) {
             try {
-                const parsed = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(st.trim()) : null;
+                const parsed = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(stAfter.trim()) : null;
                 if(parsed && typeof app.serializeStructuredPassageV2 === "function") {
                     const canon = app.serializeStructuredPassageV2(parsed);
-                    if(canon && canon !== st.trim() && typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(canon);
+                    if(canon && canon !== stAfter.trim() && typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(canon);
                 }
             } catch(eCanon) {}
             if(typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
-        } else if(st.trim() && typeof app.setAiInputValue === "function") {
-            app.setAiInputValue(st);
+        } else if(stAfter.trim() && typeof app.setAiInputValue === "function") {
+            app.setAiInputValue(stAfter);
         }
         if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
+        if(widthBaked) {
+            appData._passageWidthBakeHealNotice = true;
+        }
     },
     /**
      * Debounced: flush #ai-input → canonical, {@link repairBakedPassageInLessonStorage}, {@link setAiInputValue}, {@link ui.refreshSourceDisplay} so Insert width drags re-split booklet rows in **both** editor and Lab (same path as blur {@link applyPassageInsertWidthChFromInput}).
@@ -19346,6 +19404,7 @@ const app = {
             let ok = typeof app._loadPassageIntoC1EditorForSetup === "function" && app._loadPassageIntoC1EditorForSetup();
             if(!ok) ok = typeof app._fillAiInputFromLessonPassage === "function" && app._fillAiInputFromLessonPassage({ force: true });
             if(typeof app.syncPassageBookletFirstInputFromMeta === "function") app.syncPassageBookletFirstInputFromMeta();
+            if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
             const row = document.getElementById("c1-passage-editor-row");
             if(row) row.removeAttribute("data-rail-panel");
             const aiAfter = document.getElementById("ai-input");
@@ -19560,6 +19619,12 @@ const app = {
                 setTimeout(function() {
                     alert("Settings loaded from config.json (" + itemN + " quotes). Level bank and lesson settings are restored. Open Data → Editing Suite to edit the passage.");
                 }, 60);
+            }
+            if(appData && appData._passageWidthBakeHealNotice) {
+                delete appData._passageWidthBakeHealNotice;
+                setTimeout(function() {
+                    alert("This JSON had many short passage rows (narrow Insert width baked into the file). Rows were merged back toward paragraph length. Open passage editor → check Insert width (ch) → click Sync passage layout if lines still look wrong.");
+                }, 100);
             }
         };
         finish();
@@ -29246,6 +29311,7 @@ const admin = {
             const bookletEditing = !!(modal && modal.classList.contains("modal-admin-passage-editing"));
             const setupFlags = !!(app._forceAdminPassageHydrateForSetup || app._passageExtractHydratePending);
             if(bookletEditing || setupFlags) {
+                if(typeof admin.restoreC1PassageFlyoutEls === "function") admin.restoreC1PassageFlyoutEls();
                 if(admin.isC1PassageFocusActive()) admin.exitC1PassageFocusMode();
                 else clearFocusSession();
                 return;
@@ -29715,6 +29781,7 @@ const admin = {
         const needsHyd = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
         const admWrap = document.getElementById("modal-admin");
         const passageSetupOpen = !!(admWrap && admWrap.classList.contains("modal-admin-passage-editing"));
+        if(passageSetupOpen && typeof admin.restoreC1PassageFlyoutEls === "function") admin.restoreC1PassageFlyoutEls();
         if(!passageSetupOpen && typeof app.syncAdminAiInputFromLesson === "function" && appData.component !== 2 && (!app._deferAdminPassageUntilDemand || needsHyd || app._forceAdminPassageHydrateForSetup) && !opts.skipAutoSync && !app._forceAdminPassageHydrateForSetup) {
             const ai = document.getElementById("ai-input");
             const needsSync = ai && (
@@ -39982,8 +40049,17 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 const isConfig = app.looksLikeSavedConfigExport(parsed);
                 const fileHeavy = text.length > 700000 || app.isHeavyLesson(parsed);
                 const prevFileSnapshot = fileHeavy ? app.shallowLessonSnapshotForImport(appData) : (appData ? JSON.parse(JSON.stringify(appData)) : null);
-                appData = app.repair(parsed);
-                app.normalizeLessonQuestionsAfterRepair(appData, prevFileSnapshot);
+                const repaired = app.repair(parsed);
+                app.prepareImportedLesson(repaired);
+                app.normalizeLessonQuestionsAfterRepair(repaired, prevFileSnapshot);
+                appData = repaired;
+                if(prevFileSnapshot && typeof admin.mergeLessonConfig === "function") admin.mergeLessonConfig(parsed, prevFileSnapshot, appData);
+                if(prevFileSnapshot && typeof admin.finalizeLessonAfterAiJsonImport === "function") admin.finalizeLessonAfterAiJsonImport(parsed, prevFileSnapshot);
+                if(appData._passageRestoredFromTeacher) {
+                    delete appData._passageRestoredFromTeacher;
+                    appData._passageRestoreNotice = true;
+                }
+                app.normalizeLessonQuestionsAfterRepair(appData, null);
                 userState = { score: 0, level: 1, view: "", essay: "", questionEssays: {}, completed: [], completedLevels: [], filter: "all", showDone: false, selectionCompleted: false, selectionStage: 1, selectionKey: "", selectionProgress: {}, selectionJustification: {}, selectionEliminated: [], labCompleted: false, currentQuestionIndexByLevel: {}, deskCommitByLevel: {}, teacherMarksByLevel: {} };
                 if(typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
                 app.afterLessonImportUi({
@@ -39992,6 +40068,12 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     skipPassageRelayout: isConfig,
                     silentHeavyMsg: false
                 });
+                if(appData._passageRestoreNotice) {
+                    delete appData._passageRestoreNotice;
+                    setTimeout(function() {
+                        alert("Kept your passage layout and insert width. The loaded JSON would have narrowed lines or changed ¶ breaks — only quotes, questions, and banks were taken from the file.");
+                    }, 80);
+                }
                 input.value = "";
             } catch(err) {
                 const cleaned = app.cleanSourceText(text);
