@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-09T01:00:00">
-<meta name="architect-deploy" content="compact-unified-json-f806">
+<meta name="architect-build" content="2026-07-09T02:00:00">
+<meta name="architect-deploy" content="fix-json-passage-preserve-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2719,7 +2719,7 @@
                         </div>
                         <textarea id="unified-json-error-text" readonly style="height:140px; width:100%; font-family:ui-monospace,Consolas,monospace; font-size:0.74rem; line-height:1.35; resize:vertical;" aria-label="JSON parse error details"></textarea>
                     </div>
-                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="If the model returns fewer paragraph breaks than your current passage, keeps your stored text. Also keeps insert width when JSON omits it."><input type="checkbox" id="ai-json-preserve-passage" checked onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> Keep my passage layout (¶ / blank lines) and insert width when the JSON does not carry them (recommended for AI round-trips)</label>
+                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="Keeps your stored passage when AI narrows lines, adds extra short rows, or drops ¶ breaks. Also keeps insert width when JSON omits or overrides it."><input type="checkbox" id="ai-json-preserve-passage" checked onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> Keep my passage layout (¶ / line length / insert width) when JSON would change them (recommended)</label>
                     <details style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
                         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">Compact AI — enrich existing quotes only</summary>
                         <p style="font-size:0.76rem; margin:8px 0 6px 0; padding:8px 10px; border-radius:6px; background:rgba(76,175,80,0.1); border:1px solid rgba(76,175,80,0.35);"><strong>Smallest prompt</strong> of the three passage-based workflows — good when you already have quotes and only need meanings, slots, or distractors. Still check the AI’s reply length; malformed JSON happens more when the model rushes.</p>
@@ -19484,7 +19484,12 @@ const app = {
             sourceTextLen: typeof data.sourceText === "string" ? data.sourceText.length : 0,
             questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef, passageStartAnchor: q.passageStartAnchor, passageEndAnchor: q.passageEndAnchor }) : [],
             question: typeof data.question === "string" ? data.question : "",
-            meta: data.meta && typeof data.meta === "object" ? { title: data.meta.title } : {}
+            meta: data.meta && typeof data.meta === "object" ? {
+                title: data.meta.title,
+                pdfInsertWidthCh: data.meta.pdfInsertWidthCh,
+                passageWJECStartAnchor: data.meta.passageWJECStartAnchor,
+                passageWJECEndAnchor: data.meta.passageWJECEndAnchor
+            } : {}
         };
         if(data.component2Layout && typeof data.component2Layout === "object") {
             snap.component2Layout = {
@@ -30099,6 +30104,26 @@ const admin = {
         if(admin.countPlainParagraphBlocks(s) >= 2) return true;
         return false;
     },
+    /** Mean plain-text length per stored v2 row (0 if not structured). */
+    getPassageAvgStoredLineChars: function(src) {
+        if(src == null || src === "") return 0;
+        if(typeof app.parseStructuredPassageSource !== "function") return 0;
+        try {
+            const o = app.parseStructuredPassageSource(String(src));
+            if(!o || !Array.isArray(o.lines) || !o.lines.length) return 0;
+            let total = 0, n = 0;
+            for(let i = 0; i < o.lines.length; i++) {
+                const L = o.lines[i];
+                if(!L || typeof L !== "object") continue;
+                let html = typeof L.html === "string" ? L.html : (L.text != null ? String(L.text) : "");
+                const plain = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                if(plain) { total += plain.length; n++; }
+            }
+            return n ? total / n : 0;
+        } catch(e) {
+            return 0;
+        }
+    },
     /** Rough layout richness: v2 line count or booklet gutter rows (for detecting AI-merged rows). */
     getPassageLayoutLineRichness: function(src) {
         if(src == null || src === "") return 0;
@@ -30123,6 +30148,10 @@ const admin = {
         const rp = admin.getPassageLayoutLineRichness(prev);
         const ri = admin.getPassageLayoutLineRichness(inc);
         if(rp >= 3 && ri < rp) return true;
+        if(rp >= 3 && ri > rp * 1.12) return true;
+        const avgPrev = admin.getPassageAvgStoredLineChars(prev);
+        const avgInc = admin.getPassageAvgStoredLineChars(inc);
+        if(avgPrev >= 28 && avgInc > 0 && avgInc < avgPrev * 0.72) return true;
         const np = admin.countStructuredParagraphStarts(prev);
         const ni = admin.countStructuredParagraphStarts(inc);
         if(np >= 1 && ni < np) return true;
@@ -30149,7 +30178,7 @@ const admin = {
         const incLayout = incoming.component2Layout && typeof incoming.component2Layout === "object" ? incoming.component2Layout : {};
         const incomingHasPassages = !!(String(incLayout.resourcePaperText || "").trim() || String(incLayout.questionPaperPage3Text || "").trim());
         /* C1: Keep teacher passage when AI flattens rows/¶, merges lines, or sends non-v2 text — not only when prev was strict JSON. */
-        let preservePassage = true;
+        let preservePassage = typeof admin.isAiJsonPreservePassageEnabled === "function" ? admin.isAiJsonPreservePassageEnabled() : true;
         try {
             const elPres = document.getElementById("ai-json-preserve-passage");
             if(elPres) preservePassage = !!elPres.checked;
@@ -30158,6 +30187,7 @@ const admin = {
                 preservePassage = !(vs === "0" || vs === "false");
             }
         } catch(ePres) {}
+        let restoredTeacherPassage = false;
         if(preservePassage && prev && appData && appData.component !== 2 && prev.component !== 2) {
             const prevSrc = typeof prev.sourceText === "string" ? prev.sourceText : "";
             if(admin.passageWorthPreservingFromPrev(prev)) {
@@ -30165,9 +30195,11 @@ const admin = {
                 if(admin.incomingPassageLosesC1Layout(prevSrc, incStr)) {
                     appData.sourceText = prevSrc;
                     if(appData.selection && appData.selection.text) appData.selection.text.source = appData.sourceText;
+                    restoredTeacherPassage = true;
                 }
             }
         }
+        if(restoredTeacherPassage) appData._passageRestoredFromTeacher = true;
         const rawIncoming = typeof incoming.sourceText === "string" ? incoming.sourceText : "";
         const rawHasDelim = /\n\n——\s*Text\s*——\s*\n\n/.test(rawIncoming) || /\n\n——\n\n/.test(rawIncoming) || /\n\n---\n\n/.test(rawIncoming);
         const st = String(appData.sourceText || "").trim();
@@ -32302,7 +32334,16 @@ const admin = {
         app.save();
     },
     /** Prompt + import caps for smaller unified JSON (see settings.aiUnifiedCompact / aiEduqasLowScaffold). */
-    buildAiUnifiedLimitsBlock: function() {
+    isAiJsonPreservePassageEnabled: function() {
+        try {
+            const elPres = document.getElementById("ai-json-preserve-passage");
+            if(elPres) return !!elPres.checked;
+            const vs = localStorage.getItem("architect.preservePassageOnAiJsonImport");
+            return !(vs === "0" || vs === "false");
+        } catch(e) {
+            return true;
+        }
+    },
         const compact = !!(appData.settings && appData.settings.aiUnifiedCompact);
         const eduqasLow = !!(appData.settings && appData.settings.aiEduqasLowScaffold);
         if(!compact && !eduqasLow) return "";
@@ -34983,7 +35024,7 @@ The array for quote rows is lesson.items (inside that object). Never wrap the wh
 
 Role: Expert English Teacher. Task: Output ONE JSON object with key "lesson" whose value is ONE nested object (curly braces) containing meta, sourceText, question, questions, settings, banks, sentenceConfig, globalStructure, items, etc. Students tap text to select quotes—do NOT generate selection.items.
 
-CRITICAL: lesson.sourceText must be the COMPLETE verbatim passage with line numbers — not a synopsis, overview, or shortened version. Each lesson.items[].original must be an exact substring of that passage (real quotes only).
+CRITICAL: lesson.sourceText must be the COMPLETE verbatim passage with line numbers — not a synopsis, overview, or shortened version. Each lesson.items[].original must be an exact substring of that passage (real quotes only). Do NOT re-wrap, re-line-break, or narrow-wrap sourceText: keep one stored row per exam line at the teacher's insert width; never explode the passage into many short lines.
 
 Source:
 """${text}"""
@@ -35205,7 +35246,14 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
         /* When imported JSON omits meta.pdfInsertWidthCh, keep the teacher’s insert width (AI prompts rarely echo local layout). */
         const rawMeta = raw && raw.meta && typeof raw.meta === "object" ? raw.meta : {};
         const pm = prev.meta && typeof prev.meta === "object" ? prev.meta : {};
-        if(rawMeta.pdfInsertWidthCh == null || rawMeta.pdfInsertWidthCh === "") {
+        const preserveLayout = typeof admin.isAiJsonPreservePassageEnabled === "function" && admin.isAiJsonPreservePassageEnabled();
+        if(preserveLayout && pm.pdfInsertWidthCh != null && Number.isFinite(Number(pm.pdfInsertWidthCh))) {
+            target.meta = target.meta || {};
+            const cPrev = typeof app.clampPassageInsertWidthCh === "function"
+                ? app.clampPassageInsertWidthCh(pm.pdfInsertWidthCh)
+                : Number(pm.pdfInsertWidthCh);
+            if(cPrev != null) target.meta.pdfInsertWidthCh = cPrev;
+        } else if(rawMeta.pdfInsertWidthCh == null || rawMeta.pdfInsertWidthCh === "") {
             if(pm.pdfInsertWidthCh != null && Number.isFinite(Number(pm.pdfInsertWidthCh))) {
                 target.meta = target.meta || {};
                 const cPrev = typeof app.clampPassageInsertWidthCh === "function"
@@ -35309,6 +35357,10 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 admin.mergeLessonConfig(lesson, prev, appData);
                 app.normalizeLessonQuestionsAfterRepair(appData, null);
                 admin.finalizeLessonAfterAiJsonImport(lesson, prev);
+                if(appData._passageRestoredFromTeacher) {
+                    delete appData._passageRestoredFromTeacher;
+                    appData._passageRestoreNotice = true;
+                }
                 userState.selectionKey = "";
                 userState.currentQuestionIndexByLevel = {};
                 userState.selectionAnsweredForQuestion = [];
@@ -35417,6 +35469,12 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 : [1];
             userState.level = activeLevels[0];
             if(lesson && typeof admin.clearPastPaperPdfCache === "function") void admin.clearPastPaperPdfCache();
+            if(appData._passageRestoreNotice) {
+                delete appData._passageRestoreNotice;
+                setTimeout(function() {
+                    alert("Kept your passage layout and insert width. The AI JSON would have narrowed lines or changed ¶ breaks — only quotes, questions, and banks were taken from the model.");
+                }, 80);
+            }
             app.afterLessonImportUi({ applyPassageScope: true });
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON.";
