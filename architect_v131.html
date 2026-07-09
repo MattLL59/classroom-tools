@@ -2688,12 +2688,14 @@
                         <div style="font-size:0.75rem; opacity:0.7;">Controls both AI prompts and student app exports.</div>
                     </div>
                     <label style="display:block; font-size:0.85rem; margin-bottom:8px;"><input type="checkbox" id="ai-all-levels" onchange="admin.setAiAllLevels(this.checked)"> Include all 10 levels in prompt</label>
+                    <label style="display:block; font-size:0.85rem; margin-bottom:8px;" title="Smaller unified JSON: one good quote per exam question per level, up to three wrong quotation distractors."><input type="checkbox" id="ai-unified-compact" onchange="admin.setAiUnifiedCompact(this.checked)"> Compact unified JSON (1 good quote per question per level, max 3 distractor quotes)</label>
+                    <label style="display:block; font-size:0.85rem; margin-bottom:8px;" title="Eduqas-style low levels: sentence scaffold is starter + quote + point only — no marker, method, or link slots in modelAnswer."><input type="checkbox" id="ai-eduqas-low-scaffold" onchange="admin.setAiEduqasLowScaffold(this.checked)"> Eduqas low-level sentences (starter + quote + point only)</label>
                 <div class="input-group" style="margin-top:10px;">
                     <label>Prompt (lesson + quote selection)</label>
                     <div style="font-size:0.76rem; line-height:1.45; margin:0 0 10px 0; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:rgba(255,152,0,0.07);">
                         <strong style="display:block; margin-bottom:6px;">Three ways to use AI (prompt size matters)</strong>
                         <ul style="margin:0; padding-left:1.25rem;">
-                            <li style="margin-bottom:6px;"><strong>Unified (below)</strong> — Recommended. One prompt for the <em>whole lesson JSON</em>. Typical size: <strong>large</strong> (includes passage excerpt + schema + Editing Suite targets). Uses the most AI “tokens”; slowest / most likely to hit model limits. For reliable full JSON back, a <strong>paid or higher-limit</strong> plan on your AI platform (Plus / Pro tier, etc.) is often worthwhile.</li>
+                            <li style="margin-bottom:6px;"><strong>Unified (below)</strong> — Recommended. One prompt for the <em>whole lesson JSON</em>. Typical size: <strong>large</strong> (includes passage excerpt + schema + Editing Suite targets). Turn on <strong>Compact unified JSON</strong> below to cap quotes (1 good + 3 distractors per question per level) and shrink the reply. Uses the most AI “tokens”; slowest / most likely to hit model limits. For reliable full JSON back, a <strong>paid or higher-limit</strong> plan on your AI platform (Plus / Pro tier, etc.) is often worthwhile.</li>
                             <li style="margin-bottom:6px;"><strong>Compact enrich</strong> (section below this box) — For quotes you <em>already</em> added. Typical size: <strong>small</strong> (no full passage; questions + bullets + up to ~16 quoted lines).</li>
                             <li><strong>Advanced</strong> — Optional <strong>legacy</strong> prompt formats (expand the section at the bottom). Usually need a <strong>pro-tier or paid</strong> AI account to succeed: longest prompts &amp; replies, easiest to truncate on free limits. Older shapes: <strong>full-lesson-alone</strong> (usually <strong>very large</strong>); <strong>selection-only quote bank</strong> (<strong>medium–large</strong>, excerpt + mark scheme).</li>
                         </ul>
@@ -2989,6 +2991,10 @@ const defaultData = {
         studentJustificationFeedsBanks: false,
         activeLevels: [1,2,3],
         aiPromptAllLevels: false,
+        /** Smaller unified JSON: cap items in AI prompt (1 good quote per question per level, max 3 distractor quotes). */
+        aiUnifiedCompact: false,
+        /** Eduqas low-level: sentenceConfig starter+quote+point; modelAnswer STARTER|POINT only. */
+        aiEduqasLowScaffold: false,
         aiIncludeTone: false,
         aiIncludeStructure: false,
         exportIncludeTone: false,
@@ -18201,6 +18207,8 @@ const app = {
             : [1,2,3];
         if(!safe.settings.activeLevels.length) safe.settings.activeLevels = [1,2,3];
         if(typeof safe.settings.aiPromptAllLevels !== 'boolean') safe.settings.aiPromptAllLevels = false;
+        if(typeof safe.settings.aiUnifiedCompact !== 'boolean') safe.settings.aiUnifiedCompact = false;
+        if(typeof safe.settings.aiEduqasLowScaffold !== 'boolean') safe.settings.aiEduqasLowScaffold = false;
         if(typeof safe.settings.aiIncludeTone !== 'boolean') safe.settings.aiIncludeTone = false;
         if(typeof safe.settings.aiIncludeStructure !== 'boolean') safe.settings.aiIncludeStructure = false;
         if(typeof safe.settings.exportIncludeTone !== 'boolean') safe.settings.exportIncludeTone = false;
@@ -18458,6 +18466,13 @@ const app = {
             return false;
         };
         safe.items = safe.items.filter(it => !isPlaceholderQuoteText(it && it.original));
+
+        if(typeof admin.clampLessonItemsForAiLimits === "function") {
+            admin.clampLessonItemsForAiLimits(safe.items, safe.settings);
+        }
+        if(safe.settings && safe.settings.aiEduqasLowScaffold && safe.sentenceConfig && typeof safe.sentenceConfig === "object") {
+            for(let l = 1; l <= 3; l++) safe.sentenceConfig[l] = ["starter", "quote", "point"];
+        }
 
         if(safe.settings && safe.settings.levelBank) {
             app.applyLevelRules(safe.items, safe.settings.levelBank);
@@ -28872,6 +28887,8 @@ const admin = {
         setChk("setting-teacher-record-flow", !!s.teacherRecordStudentFlow);
         setChk("setting-student-justification-feeds-banks", !!s.studentJustificationFeedsBanks);
         setChk("ai-all-levels", !!s.aiPromptAllLevels);
+        setChk("ai-unified-compact", !!s.aiUnifiedCompact);
+        setChk("ai-eduqas-low-scaffold", !!s.aiEduqasLowScaffold);
         setVal("reward-url", s.rewardUrl || "");
         setVal("reward-minutes", String(s.rewardMinutes || 0));
         setVal("reward-every-levels", String(s.rewardEveryLevels || 0));
@@ -32274,6 +32291,61 @@ const admin = {
         appData.settings.aiPromptAllLevels = c;
         app.save();
     },
+    setAiUnifiedCompact: (c) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.aiUnifiedCompact = !!c;
+        app.save();
+    },
+    setAiEduqasLowScaffold: (c) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.aiEduqasLowScaffold = !!c;
+        app.save();
+    },
+    /** Prompt + import caps for smaller unified JSON (see settings.aiUnifiedCompact / aiEduqasLowScaffold). */
+    buildAiUnifiedLimitsBlock: function() {
+        const compact = !!(appData.settings && appData.settings.aiUnifiedCompact);
+        const eduqasLow = !!(appData.settings && appData.settings.aiEduqasLowScaffold);
+        if(!compact && !eduqasLow) return "";
+        let s = "\nAI SIZE LIMITS (mandatory — keep JSON small):\n";
+        if(compact) {
+            s += "- Items: at most ONE good quote row in lesson.items[] per exam question assigned to each level (see levelBank.questionIds) — NOT 5–15 items per level.\n";
+            s += "- Per good quote: at most 3 wrong quotations in distractors[]; translationDistractors max 2; effectDistractors max 2.\n";
+            s += "- Prefer fewer, stronger rows over padding the bank.\n";
+        }
+        if(eduqasLow) {
+            s += "- Eduqas low-level (languageTier low / L1–L3): lesson.sentenceConfig for those levels = [\"starter\",\"quote\",\"point\"] only.\n";
+            s += "- modelAnswer for those items: \"STARTER: … | POINT: …\" ONLY (≤12 words per segment). Put the evidence quotation in original only — do not repeat it in modelAnswer. Omit MARKER, METHOD, LINK, ANALYSIS, and EFFECT labels.\n";
+            s += "- POINT = brief evidence-based comment (point + evidence), not a full language analysis paragraph.\n";
+        }
+        return s;
+    },
+    clampLessonItemsForAiLimits: function(items, settings) {
+        if(!Array.isArray(items) || !settings) return items;
+        const compact = !!settings.aiUnifiedCompact;
+        const eduqasLow = !!settings.aiEduqasLowScaffold;
+        items.forEach(item => {
+            if(!item || typeof item !== "object") return;
+            if(compact) {
+                if(Array.isArray(item.distractors)) item.distractors = item.distractors.slice(0, 3);
+                if(Array.isArray(item.translationDistractors)) item.translationDistractors = item.translationDistractors.slice(0, 2);
+                if(Array.isArray(item.effectDistractors)) item.effectDistractors = item.effectDistractors.slice(0, 2);
+            }
+            if(eduqasLow) {
+                const lvls = Array.isArray(item.levels) ? item.levels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 10) : [];
+                const lowOnly = lvls.length && lvls.every(l => l <= 3);
+                if(lowOnly && item.modelAnswer && String(item.modelAnswer).includes("|")) {
+                    const m = admin.parseModelAnswer(item.modelAnswer);
+                    const starter = m.starter || m.manual_starter || "";
+                    const point = m.point || m.analysis || m.effect || m.manual_point || m.manual_analysis || "";
+                    const parts = [];
+                    if(starter) parts.push("STARTER: " + starter);
+                    if(point) parts.push("POINT: " + point);
+                    if(parts.length) item.modelAnswer = parts.join(" | ");
+                }
+            }
+        });
+        return items;
+    },
     setAiDevice: (device, enabled) => {
         if(!appData.settings) appData.settings = {};
         if(device === "tone") appData.settings.aiIncludeTone = !!enabled;
@@ -34866,6 +34938,8 @@ const admin = {
         const activeLevels = (appData.settings && appData.settings.aiPromptAllLevels)
             ? Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => i + 1)
             : app.getActiveLevels();
+        const aiUnifiedCompact = !!(appData.settings && appData.settings.aiUnifiedCompact);
+        const aiEduqasLowScaffold = !!(appData.settings && appData.settings.aiEduqasLowScaffold);
         const levelBank = app.getLevelBank();
         const aiDevices = app.getAiDevices();
         const deviceLabels = { language: "Language", tone: "Tone", structure: "Structure" };
@@ -34875,8 +34949,8 @@ const admin = {
             const ids = (e.questionIds && e.questionIds.length) ? e.questionIds.join(", ") : "q1";
             const tapText = e.freeSelectFromText === true ? "tap-from-text" : "pre-made quote bank (MC)";
             const complexity = e.complexity || (e.languageTier === "low" ? "simple" : e.languageTier === "advanced" ? "advanced" : "medium");
-            const qT = e.quoteTarget != null ? e.quoteTarget : 4;
-            const dC = e.distractorCount != null ? e.distractorCount : 4;
+            const qT = aiUnifiedCompact ? 1 : (e.quoteTarget != null ? e.quoteTarget : 4);
+            const dC = aiUnifiedCompact ? 3 : (e.distractorCount != null ? e.distractorCount : 4);
             return "L" + n + ": " + complexity + "; questions [" + ids + "]; " + tapText + "; quoteTarget " + qT + ", distractor quotes " + dC;
         }).join("\n");
         const unifiedAppSettingsBlock = `
@@ -34963,12 +35037,13 @@ ${(function(){
     }
     return s + "\n";
 })()}
+${admin.buildAiUnifiedLimitsBlock()}
 ${c2Dual ? "" : `
 COMPONENT 1 — Q1 WORKSHEET SHORT-ANSWER (optional on lesson.questions[0] only): Add "worksheetInferenceModel": ONE simple sentence (≤20 words), correct factual point in own words — not a quotation from the passage. Add "worksheetInferenceDistractors": 2–4 strings; EACH must be ONE simple sentence only (≤18 words), plain wrong plausible fact — no semicolon chains, no stacked which/whereas clauses, no literary-critical density, no wording copied from the passage. Omit both keys if not applicable. These feed the Word worksheet “Short answer practice” section.`}
 
-settings must be a JSON object (curly braces {}), e.g. {"worksheetMatchMode":"jumbled","activeLevels":[1,2,3]}. Never use an array [] for settings. Each item.modelAnswer = "MARKER:...|STARTER:...|METHOD:...|POINT:...|LINK:..." (ANALYSIS/EFFECT ok): keep each segment SHORT (phrase/clause scaffolds, not paragraphs). MARKER = discourse linker / sentence signpost only (e.g. Furthermore, However, In addition) — never a single theme label or abstract noun (not "Violence", "Distance", "Cruelty"). POINT = brief analytical comment (writer/reader, effect, method) — never a quotation or chunk copied from the passage. translation and effect fields must also stay brief and non-quotation. On load the app fills slot fields and merges those phrases into lesson banks. Every double-quote inside a string value must be escaped as \\".
+settings must be a JSON object (curly braces {}), e.g. {"worksheetMatchMode":"jumbled","activeLevels":[1,2,3]}. Never use an array [] for settings. Each item.modelAnswer = ${aiEduqasLowScaffold ? '"STARTER:...|POINT:..." for low levels (see AI SIZE LIMITS); otherwise "MARKER:...|STARTER:...|METHOD:...|POINT:...|LINK:..."' : '"MARKER:...|STARTER:...|METHOD:...|POINT:...|LINK:..."'} (ANALYSIS/EFFECT ok): keep each segment SHORT (phrase/clause scaffolds, not paragraphs). MARKER = discourse linker / sentence signpost only (e.g. Furthermore, However, In addition) — never a single theme label or abstract noun (not "Violence", "Distance", "Cruelty"). POINT = brief analytical comment (writer/reader, effect, method) — never a quotation or chunk copied from the passage. translation and effect fields must also stay brief and non-quotation. On load the app fills slot fields and merges those phrases into lesson banks. Every double-quote inside a string value must be escaped as \\".
 
-activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questions to lesson.questions by id. Line numbers in each prompt = content from those lines only. levelBank.questionIds same order as questions. UK English spelling throughout (humanises, organises, colour — not US -ize forms). 5–15 items per level. JSON: no literal newlines (use \\n), escape every inner " as \\" only (never backslash+space, e.g. invalid: ,\\ "she — valid: ,\\"she), each item ends with closed fields before the next { — modelAnswer must not swallow the next item (invalid: …family.\\"\\n},\\n{\\n\\"id":), array strings (translationDistractors, effectDistractors) each as plain "text" with normal commas — never mix \\", and literal \\n between elements; sourceText one string with \\n, one numbered line per physical line: "1 first line\\n2 second line\\n3 third…" (every line must carry its number prefix for matching; margin-style 5/10/15 is applied in the app, not by skipping numbers in JSON).
+activeLevels=[${activeLevels.join(",")}]. Only these levels. Match Focus questions to lesson.questions by id. Line numbers in each prompt = content from those lines only. levelBank.questionIds same order as questions. UK English spelling throughout (humanises, organises, colour — not US -ize forms). ${aiUnifiedCompact ? "Item count: at most one good quote per question per level (see AI SIZE LIMITS) — do NOT generate 5–15 items per level." : "5–15 items per level."} JSON: no literal newlines (use \\n), escape every inner " as \\" only (never backslash+space, e.g. invalid: ,\\ "she — valid: ,\\"she), each item ends with closed fields before the next { — modelAnswer must not swallow the next item (invalid: …family.\\"\\n},\\n{\\n\\"id":), array strings (translationDistractors, effectDistractors) each as plain "text" with normal commas — never mix \\", and literal \\n between elements; sourceText one string with \\n, one numbered line per physical line: "1 first line\\n2 second line\\n3 third…" (every line must carry its number prefix for matching; margin-style 5/10/15 is applied in the app, not by skipping numbers in JSON).
 
 Reply with raw JSON only. First character {, last character }. No lesson plan, no explanation.`;
         const out = document.getElementById("unified-prompt-out");

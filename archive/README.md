@@ -13,3 +13,11 @@ Historical files kept for reference and rollback. **Not linked from the lobby** 
 To open an archived build locally: `archive/architect-versions/architect_v127.html` (paths relative to repo root).
 
 Do not edit archived files for new features — change `architect_v131.html` only.
+
+## Student lesson HTML (legacy exports)
+
+| Location | Purpose |
+|----------|---------|
+| **`archive/student-lessons/`** | `lessona.html`–`lessond.html` — old standalone student copies |
+
+Export new student lessons from Answer Architect v131 instead.
