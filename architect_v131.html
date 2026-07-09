@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-09T22:00:00">
-<meta name="architect-deploy" content="fix-passage-width-ui-f806">
+<meta name="architect-build" content="2026-07-09T23:00:00">
+<meta name="architect-deploy" content="fix-passage-scope-reset-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1264,10 +1264,15 @@
     body.tsa-passage-pick-focus #selection-student-help-wrap,
     body.tsa-passage-pick-focus #selection-reader-controls,
     body.tsa-passage-pick-focus #teacher-passage-pick-hint,
-    body.tsa-passage-pick-focus #select-passage-scope-row,
     body.tsa-passage-pick-focus #selection-passage-window-hint,
     body.tsa-passage-pick-focus #btn-selection-reader {
         display: none !important;
+    }
+    /* Keep Whole / Question-focused visible while picking excerpts — teachers were trapped in question-focused with no escape. */
+    body.tsa-passage-pick-focus #select-passage-scope-row {
+        display: flex !important;
+        flex-wrap: wrap;
+        flex-shrink: 0;
     }
     body.tsa-passage-pick-focus #view-select.tsa-passage-maximized #view-select-body,
     body.tsa-passage-pick-focus #view-select-body {
@@ -2098,6 +2103,7 @@
                     <span style="opacity:0.85;">Show</span>
                     <label><input type="radio" name="tsa-passage-scope-select" class="tsa-passage-scope-radio" value="whole"> Whole passage</label>
                     <label><input type="radio" name="tsa-passage-scope-select" class="tsa-passage-scope-radio" value="focused"> Question-focused</label>
+                    <button type="button" class="btn btn-outline btn-small" id="btn-force-whole-passage" title="Show the full numbered insert (not the question excerpt). Use this if you only see a short slice of the passage.">Whole passage now</button>
                 </div>
             </div>
             <div id="source-inline-select-wrap" style="flex:1; min-height:0; position:relative; display:flex; flex-direction:column; border:1px solid var(--border); border-radius:6px; background:var(--bg); margin-bottom:12px; -webkit-user-select:text; user-select:text;">
@@ -9827,6 +9833,7 @@ const app = {
     /** True when stored v2 rows look width-baked (many short lines) — common after Save JSON at a narrow Insert width. */
     passageLooksWidthBakedInStorage: function(src) {
         if(!src || typeof src !== "string" || !src.trim().startsWith("{")) return false;
+        if(appData && appData.meta && (appData.meta.passageBookletLayoutDone === true || appData.meta.passageLayoutSyncedAt)) return false;
         try {
             const o = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(src.trim()) : null;
             if(!o || !Array.isArray(o.lines) || o.lines.length < 48) return false;
@@ -19569,6 +19576,11 @@ const app = {
         app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
+        if(safe && !safe.isStandalone) {
+            try {
+                sessionStorage.setItem("tsa_teacher_line_pick_mode", "0");
+            } catch(eSess) {}
+        }
     },
     looksLikeSavedConfigExport: function(o) {
         return !!(o && typeof o === "object" && o.settings && typeof o.settings === "object"
@@ -19583,7 +19595,11 @@ const app = {
         } catch(eSave) {}
         app._suppressAdminInputFlushOnce = true;
         try {
-            if(opts.applyPassageScope && typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
+            if(appData && !appData.isStandalone && typeof ui.resetTeacherPassageViewAfterImport === "function") {
+                ui.resetTeacherPassageViewAfterImport({ skipRefresh: true });
+            } else if(opts.applyPassageScope && typeof ui !== "undefined" && ui.applyPassageScopeFromLessonMeta) {
+                ui.applyPassageScopeFromLessonMeta({ skipRefresh: true });
+            }
             if(typeof ui !== "undefined" && ui.init) ui.init();
         } finally {
             app._suppressAdminInputFlushOnce = false;
@@ -19614,6 +19630,9 @@ const app = {
                 }
                 if(typeof ui !== "undefined" && ui.refreshSourceDisplay) ui.refreshSourceDisplay();
                 if(typeof ui !== "undefined" && ui.renderLab) ui.renderLab();
+            }
+            if(appData && !appData.isStandalone && typeof ui.resetTeacherPassageViewAfterImport === "function") {
+                ui.resetTeacherPassageViewAfterImport();
             }
             if(!opts.silentHeavyMsg && opts.isConfigFile) {
                 setTimeout(function() {
@@ -20715,9 +20734,23 @@ const ui = {
     /** Lesson JSON / Student App embed {@link appData.meta.passageDisplayScope} so "Question-focused" survives export (otherwise only localStorage had it → standalone always showed whole passage). */
     applyPassageScopeFromLessonMeta: function(opts) {
         const o = opts || {};
+        if(appData && !appData.isStandalone) return;
         const ps = appData && appData.meta && appData.meta.passageDisplayScope;
         if(ps !== "focused" && ps !== "whole") return;
         ui.setPassageDisplayScope(ps, { skipRefresh: !!o.skipRefresh });
+    },
+    /** After Load JSON / file: teacher sees the full insert — not question-focused excerpt or pick mode left from last session. */
+    resetTeacherPassageViewAfterImport: function(opts) {
+        opts = opts || {};
+        if(!appData || appData.isStandalone) return;
+        app._passageLinePickForceWhole = false;
+        app._teacherLinePickMode = false;
+        try { sessionStorage.setItem("tsa_teacher_line_pick_mode", "0"); } catch(eTp) {}
+        if(typeof admin !== "undefined" && admin.clearTeacherPassageLevelPickHighlights) admin.clearTeacherPassageLevelPickHighlights();
+        if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
+        if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
+        try { localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, "whole"); } catch(eLs) {}
+        if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole", { skipRefresh: !!opts.skipRefresh });
     },
     /**
      * After {@link userState} is loaded from localStorage: standalone lessons restore passage scope from saved student choice,
@@ -20758,6 +20791,15 @@ const ui = {
                 if(!t || t.tagName !== "INPUT" || t.type !== "radio" || !t.classList || !t.classList.contains("tsa-passage-scope-radio")) return;
                 if(!t.checked) return;
                 if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope(t.value);
+            });
+        }
+        const wholeNowBtn = document.getElementById("btn-force-whole-passage");
+        if(wholeNowBtn && !wholeNowBtn.dataset.bound) {
+            wholeNowBtn.dataset.bound = "1";
+            wholeNowBtn.addEventListener("click", function(ev) {
+                ev.preventDefault();
+                if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
+                if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole");
             });
         }
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
@@ -21011,10 +21053,8 @@ const ui = {
         if(userState && userState.view !== "select" && typeof ui.switchView === "function") ui.switchView("select", true);
         if(!dismissed && typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
         if(st.step === "excerpts") {
-            if(!app._teacherLinePickMode && typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(true, { refresh: false });
-            if(typeof admin !== "undefined" && admin._preparePassageForLineAssignment) {
-                admin._preparePassageForLineAssignment({ level: app.getEffectiveLevel ? app.getEffectiveLevel() : 1, previewOnly: false });
-            }
+            /* Do not auto-enter excerpt pick mode on load — it hid Whole/Question-focused and trapped teachers in a slice. Use the banner / toolbar when ready. */
+            if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
         }
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
         if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
@@ -21635,12 +21675,10 @@ const ui = {
         }
         const navLab = document.getElementById("nav-lab");
         const navDesk = document.getElementById("nav-desk");
-        /** Evidence Lab nav → Quote Select passage (tap text / excerpt picking live there; view-lab is legacy). */
+        /** Legacy Evidence Lab nav — passage lives in Quote Select; extra tab confused teachers. */
         if(navLab) {
-            const showLabNav = !!(modules.selection && selectionAvailable);
-            navLab.classList.toggle("tsa-lab-hidden", !showLabNav);
-            navLab.style.display = showLabNav ? "" : "none";
-            navLab.title = showLabNav ? "Open passage in Quote Select (tap text, excerpt picking)" : "";
+            navLab.classList.add("tsa-lab-hidden");
+            navLab.style.display = "none";
         }
         if(navDesk) navDesk.classList.toggle("hidden", !modules.desk);
         if(ui.wireDeskAnswerInsertionAid) ui.wireDeskAnswerInsertionAid();
