@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-10T10:30:00">
-<meta name="architect-deploy" content="fix-reset-purge-lesson-f806">
+<meta name="architect-build" content="2026-07-10T12:00:00">
+<meta name="architect-deploy" content="fix-editor-stale-demo-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2773,7 +2773,7 @@
                         </div>
                         <textarea id="unified-json-error-text" readonly style="height:140px; width:100%; font-family:ui-monospace,Consolas,monospace; font-size:0.74rem; line-height:1.35; resize:vertical;" aria-label="JSON parse error details"></textarea>
                     </div>
-                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="Keeps your stored passage when AI narrows lines, adds extra short rows, or drops ¶ breaks. Also keeps insert width when JSON omits or overrides it."><input type="checkbox" id="ai-json-preserve-passage" checked onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> Keep my passage layout (¶ / line length / insert width) when JSON would change them (recommended)</label>
+                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="Optional: when pasting AI-generated lesson JSON, keep your current passage layout instead of replacing it with the model output. File Load JSON always uses the file passage."><input type="checkbox" id="ai-json-preserve-passage" onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> When pasting AI JSON only: keep my current passage layout (not used for Load JSON files)</label>
                     <details style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
                         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">Compact AI — enrich existing quotes only</summary>
                         <p style="font-size:0.76rem; margin:8px 0 6px 0; padding:8px 10px; border-radius:6px; background:rgba(76,175,80,0.1); border:1px solid rgba(76,175,80,0.35);"><strong>Smallest prompt</strong> of the three passage-based workflows — good when you already have quotes and only need meanings, slots, or distractors. Still check the AI’s reply length; malformed JSON happens more when the model rushes.</p>
@@ -8028,7 +8028,11 @@ const app = {
         if(app._deferAdminPassageUntilDemand && !opts.force && !opts.userDemand) return;
         const el = document.getElementById("ai-input");
         if(!el || el.getAttribute("contenteditable") !== "true") return;
+        const mustReplace = !!(opts.force || opts.userDemand || opts.replaceStale)
+            || (typeof app._editorPassageMatchesLesson === "function" && !app._editorPassageMatchesLesson(el));
+        if(!mustReplace && !opts.force && !app._isC1PassageEditorsVisuallyEmpty()) return;
         if(opts.force && el.querySelector && el.querySelector(".architect-admin-passage-placeholder")) el.innerHTML = "";
+        if(mustReplace && el.querySelector && (el.querySelector(".architect-admin-passage-placeholder") || el.querySelector(".architect-admin-passage-load-error"))) el.innerHTML = "";
         /** Snapshot before any lesson sync: force-sync must not rebuild from stale appData.sourceText while #ai-input still holds exam gutters (openModal / tab sync). */
         const hadGutterDom = !!(el.querySelector && el.querySelector(".source-with-line-numbers"));
         const hadUsableGutters = hadGutterDom && typeof app._adminPassageEditorHasUsableGutters === "function" && app._adminPassageEditorHasUsableGutters(el);
@@ -8038,7 +8042,7 @@ const app = {
          * After Lobby / JSON import, appData already holds the new lesson but #ai-input still shows the previous default — flushing would **overwrite the import** with stale DOM. Import paths set app._suppressAdminInputFlushOnce around ui.init().
          * Never flush placeholder / empty editor during setup hydrate — would corrupt saved passage.
          */
-        if(opts.force && !opts.skipFlush && !app._suppressAdminInputFlushOnce && !hadPlaceholder && typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
+        if(opts.force && !opts.skipFlush && !app._suppressAdminInputFlushOnce && !hadPlaceholder && !mustReplace && typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
         if(app.syncPassageBookletFirstInputFromMeta) app.syncPassageBookletFirstInputFromMeta();
         /**
          * JSON / template import sets {@link appData.meta.pdfInsertWidthCh} before #ai-input exists or while slider still shows the **previous** lesson.
@@ -8072,7 +8076,8 @@ const app = {
             if(hadGutterDom && typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
             return;
         }
-        if(!opts.force && !app._isC1PassageEditorsVisuallyEmpty()) return;
+        if(!mustReplace && !opts.force && !app._isC1PassageEditorsVisuallyEmpty()) return;
+        if(mustReplace) el.innerHTML = "";
         let html = "";
         try {
             if(app.isStructuredPassageSource(raw)) {
@@ -8173,16 +8178,22 @@ const app = {
         if(typeof app.updateInsertWidthGuideLabel === "function") app.updateInsertWidthGuideLabel();
         if(typeof app.scheduleSyncEditorWJECAnchorRangePreview === "function") app.scheduleSyncEditorWJECAnchorRangePreview();
     },
-    setAiInputValue: function(html) {
+    setAiInputValue: function(html, opts) {
+        opts = opts || {};
         const el = document.getElementById("ai-input");
         if(!el) return;
+        const forceReplace = !!(opts.forceReplace || app._forcePassageEditorReplace);
+        if(forceReplace) {
+            el.innerHTML = "";
+            if(typeof app.clearC1IntroLineEditors === "function") app.clearC1IntroLineEditors();
+        }
         const scrollAnchor = typeof app.capturePassageEditorScrollAnchor === "function" ? app.capturePassageEditorScrollAnchor() : null;
         try {
         const s = html == null ? "" : String(html);
         if(app.isStructuredPassageSource(s)) {
             const o = app.parseStructuredPassageSource(s);
             if(!o) {
-                if(typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(el)) return;
+                if(!forceReplace && typeof app._aiInputHasVisiblePassage === "function" && app._aiInputHasVisiblePassage(el)) return;
                 el.innerHTML = "";
                 if(typeof app.clearC1IntroLineEditors === "function") app.clearC1IntroLineEditors();
                 return;
@@ -9873,7 +9884,9 @@ const app = {
             if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st);
             return;
         }
-        if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st);
+        if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st, { forceReplace: true });
+        app._deferAdminPassageUntilDemand = false;
+        app._adminPassageHydrateDone = false;
         if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
     },
     /**
@@ -18661,7 +18674,7 @@ const app = {
         if(opts.rawBytes != null && opts.rawBytes >= app.DEFER_PASSAGE_STORAGE_BYTES) return true;
         const st = typeof d.sourceText === "string" ? d.sourceText : "";
         if(st.length >= app.DEFER_PASSAGE_SOURCE_CHARS) return true;
-        if(st.length > 4000 && app.isStructuredPassageSource && app.isStructuredPassageSource(st)) return true;
+        /** Structured v2 under ~8k is normal C1 lessons — do not treat as heavy (was deferring editor and leaving demo text). */
         const c2 = d.component2Layout;
         if(c2 && typeof c2 === "object") {
             const c2Text = [c2.resourcePaperText, c2.questionPaperPage3Text, c2.questionPaperPage2Text, c2.markSchemeText].filter(Boolean).join("");
@@ -18692,6 +18705,41 @@ const app = {
         }
         return false;
     },
+    /** First ~48 plain chars from passage DOM — detect stale demo text vs loaded lesson. */
+    _passagePlainSnippet: function(textOrEl) {
+        let plain = "";
+        if(textOrEl && textOrEl.nodeType === 1) {
+            plain = (textOrEl.textContent || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+        } else {
+            const raw = String(textOrEl || "").trim();
+            if(!raw) return "";
+            if(typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(raw) && typeof app.parseStructuredPassageSource === "function" && typeof app.structuredPassageToPlain === "function") {
+                try {
+                    const o = app.parseStructuredPassageSource(raw);
+                    if(o) plain = String(app.structuredPassageToPlain(o) || "").replace(/\s+/g, " ").trim();
+                } catch(eSp) {}
+            }
+            if(!plain) plain = (typeof app.sourceToPlainForAi === "function" ? app.sourceToPlainForAi(raw) : raw).replace(/\s+/g, " ").trim();
+        }
+        return plain.slice(0, 48);
+    },
+    _lessonPassagePlainSnippet: function() {
+        const canon = typeof app.resolveLessonSourceCanon === "function" ? app.resolveLessonSourceCanon() : (appData && typeof appData.sourceText === "string" ? appData.sourceText : "");
+        return app._passagePlainSnippet(canon);
+    },
+    /** True when #ai-input already shows the saved lesson passage (not demo / stale DOM). */
+    _editorPassageMatchesLesson: function(el) {
+        el = el || document.getElementById("ai-input");
+        const want = app._lessonPassagePlainSnippet();
+        if(!want || want.length < 12) return true;
+        if(!el) return false;
+        if(el.querySelector && (el.querySelector(".architect-admin-passage-placeholder") || el.querySelector(".architect-passage-deferred") || el.querySelector(".architect-admin-passage-load-error"))) return false;
+        const have = app._passagePlainSnippet(el);
+        if(!have || have.length < 12) return false;
+        if(have === want) return true;
+        if(have.indexOf(want.slice(0, 24)) === 0 || want.indexOf(have.slice(0, 24)) === 0) return true;
+        return false;
+    },
     /** True when #ai-input has real booklet rows (not a lone gutter tick / broken stub). */
     _adminPassageEditorHasUsableGutters: function(ai) {
         ai = ai || document.getElementById("ai-input");
@@ -18720,6 +18768,7 @@ const app = {
         if(ai.querySelector && (ai.querySelector(".architect-admin-passage-placeholder") || ai.querySelector(".architect-passage-deferred") || ai.querySelector(".architect-admin-passage-load-error"))) return true;
         if(typeof app._isC1PassageEditorsVisuallyEmpty === "function" && app._isC1PassageEditorsVisuallyEmpty()) return true;
         const structured = typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(st);
+        if(structured && typeof app._editorPassageMatchesLesson === "function" && !app._editorPassageMatchesLesson(ai)) return true;
         if(structured) {
             if(typeof app._adminPassageEditorHasUsableGutters === "function" && !app._adminPassageEditorHasUsableGutters(ai)) return true;
             return false;
@@ -19561,6 +19610,8 @@ const app = {
         app._heavyLessonOnLoad = false;
         app._passageDisplaysDeferred = false;
         app._deferAdminPassageUntilDemand = typeof app.shouldDeferAdminPassageHydration === "function" && app.shouldDeferAdminPassageHydration();
+        const stLen = safe && typeof safe.sourceText === "string" ? safe.sourceText.length : 0;
+        if(stLen > 0 && stLen < app.ADMIN_PASSAGE_DEFER_CHARS) app._deferAdminPassageUntilDemand = false;
         app._adminPassageHydrateDone = false;
         app._adminPassageHydrateInFlight = false;
         if(safe && !safe.isStandalone) {
@@ -35608,6 +35659,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 const v = localStorage.getItem("architect.preservePassageOnAiJsonImport");
                 if(v === "0" || v === "false") pc.checked = false;
                 else if(v === "1" || v === "true") pc.checked = true;
+                else pc.checked = false;
             } catch(e) {}
         }
     },
