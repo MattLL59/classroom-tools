@@ -30267,7 +30267,8 @@ const admin = {
      * After Load JSON / unified load: keep teacher-edited C2 passages when the model returns a flat sourceText only;
      * when sourceText uses —— Text —— / --- delimiters, split into 21st + 19th layout (fixes wrong pooled order).
      */
-    finalizeLessonAfterAiJsonImport: function(incoming, prev) {
+    finalizeLessonAfterAiJsonImport: function(incoming, prev, opts) {
+        opts = opts || {};
         if(!appData || !incoming || typeof incoming !== "object") return;
         /* AI Lesson Generator default: worksheet export off until teacher ticks WS / Include (explicit true only). */
         if(Array.isArray(appData.questions)) {
@@ -30294,7 +30295,7 @@ const admin = {
             }
         } catch(ePres) {}
         let restoredTeacherPassage = false;
-        if(preservePassage && prev && appData && appData.component !== 2 && prev.component !== 2) {
+        if(!opts.replacePassageFromImport && preservePassage && prev && appData && appData.component !== 2 && prev.component !== 2) {
             const prevSrc = typeof prev.sourceText === "string" ? prev.sourceText : "";
             if(admin.passageWorthPreservingFromPrev(prev)) {
                 const incStr = admin.incomingLessonSourceTextForCompare(incoming);
@@ -36095,7 +36096,8 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             const aiText = (app.getAiInputValue() || "").trim();
             admin.syncQuestionsFromList();
             const aiQuestion = (appData.questions && appData.questions[0]) ? appData.questions[0].prompt : (appData.question || "");
-            if(aiText) {
+            const payloadHasSource = !!(payload && typeof payload.sourceText === "string" && payload.sourceText.trim());
+            if(aiText && !payloadHasSource) {
                 safe.sourceText = aiText;
                 if(safe.selection && safe.selection.text) safe.selection.text.source = aiText;
             }
@@ -40093,7 +40095,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 app.normalizeLessonQuestionsAfterRepair(repaired, prevFileSnapshot);
                 appData = repaired;
                 if(prevFileSnapshot && typeof admin.mergeLessonConfig === "function") admin.mergeLessonConfig(parsed, prevFileSnapshot, appData);
-                if(prevFileSnapshot && typeof admin.finalizeLessonAfterAiJsonImport === "function") admin.finalizeLessonAfterAiJsonImport(parsed, prevFileSnapshot);
+                if(prevFileSnapshot && typeof admin.finalizeLessonAfterAiJsonImport === "function") admin.finalizeLessonAfterAiJsonImport(parsed, prevFileSnapshot, { replacePassageFromImport: true });
                 if(appData._passageRestoredFromTeacher) {
                     delete appData._passageRestoredFromTeacher;
                     appData._passageRestoreNotice = true;
@@ -40104,7 +40106,6 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 app.afterLessonImportUi({
                     postImportAdmin: true,
                     isConfigFile: isConfig,
-                    skipPassageRelayout: isConfig,
                     silentHeavyMsg: false
                 });
                 if(appData._passageRestoreNotice) {
