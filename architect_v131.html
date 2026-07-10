@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-10T09:00:00">
-<meta name="architect-deploy" content="fix-passage-preserve-load-f806">
+<meta name="architect-build" content="2026-07-10T10:30:00">
+<meta name="architect-deploy" content="fix-reset-purge-lesson-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -1661,27 +1661,59 @@
     </div>
     <script>
     (function() {
-        function reloadFresh() {
+        function reloadFresh(opts) {
+            opts = opts || {};
             try {
                 var u = new URL(location.href);
                 u.searchParams.set("b", String(Date.now()));
-                u.searchParams.delete("recovery");
+                if(opts.recovery) u.searchParams.set("recovery", "1");
+                else u.searchParams.delete("recovery");
                 location.replace(u.toString());
             } catch(eU) {
                 location.reload();
             }
         }
-        window.__tsaResetLessonOnly = function() {
+        /** Remove lesson + passage UI state without touching theme colours. Blocks beforeunload re-save. */
+        window.__tsaPurgeLessonStorage = function(opts) {
+            opts = opts || {};
+            window.__tsaSkipSaveOnUnload = true;
+            var lsKeys = [];
             try {
-                localStorage.removeItem("tsa_v5_1_data");
-                localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
-                localStorage.removeItem("tsa_v5_1_questions_backup");
+                for(var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    if(!k) continue;
+                    if(k === "tsa_v5_1_data" || k === "tsa_v5_1_lesson_extract_cache" || k === "tsa_v5_1_questions_backup"
+                        || k.indexOf("tsa_v5_1_state_") === 0
+                        || k.indexOf("tsa_standalone_mutable_") === 0
+                        || k === "tsa_passage_display_scope"
+                        || k.indexOf("answerArchitect_pdfInsertWidthCh") === 0
+                        || k === "architect.preservePassageOnAiJsonImport"
+                        || k === "tsa_templates_v1") {
+                        lsKeys.push(k);
+                    }
+                }
+                lsKeys.forEach(function(k) { localStorage.removeItem(k); });
             } catch(e) {}
-            reloadFresh();
+            var sessKeys = [
+                "tsa_teacher_line_pick_mode", "tsa_c1_passage_focus", "tsa_passage_booklet_layout_done",
+                "tsa_passage_setup_editor_opened", "tsa_passage_setup_lines_opened", "tsa_passage_setup_lines_reviewed",
+                "tsa_passage_setup_dismissed", "tsa_passage_panel_max", "tsa_passage_panel_restored"
+            ];
+            try { sessKeys.forEach(function(k) { sessionStorage.removeItem(k); }); } catch(e2) {}
+            if(opts.clearPastPaperIdb !== false) {
+                try { indexedDB.deleteDatabase("tsa_architect_pastpaper_v1"); } catch(e3) {}
+            }
+        };
+        window.__tsaResetLessonOnly = function() {
+            window.__tsaPurgeLessonStorage({ clearPastPaperIdb: true });
+            reloadFresh({ recovery: true });
         };
         window.__tsaEmergencyResetAll = function() {
+            window.__tsaSkipSaveOnUnload = true;
             try { localStorage.clear(); } catch(e) {}
-            reloadFresh();
+            try { sessionStorage.clear(); } catch(e2) {}
+            try { indexedDB.deleteDatabase("tsa_architect_pastpaper_v1"); } catch(e3) {}
+            reloadFresh({ recovery: true });
         };
         window.__tsaDismissCrashPanel = function() {
             try {
@@ -18007,13 +18039,14 @@ const app = {
                 });
             }
             window.addEventListener("beforeunload", function() {
+                if(window.__tsaSkipSaveOnUnload) return;
                 try {
                     if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
                     if(typeof app.save === "function") app.save();
                 } catch(eUnload) {}
             });
             document.addEventListener("visibilitychange", function() {
-                if(document.visibilityState !== "hidden") return;
+                if(document.visibilityState !== "hidden" || window.__tsaSkipSaveOnUnload) return;
                 try {
                     if(app.persistLessonBeforeSave) app.persistLessonBeforeSave();
                     if(typeof app.save === "function") app.save();
@@ -19924,13 +19957,14 @@ const app = {
     },
     clearLessonStorageOnly: function() {
         if(typeof window.__tsaResetLessonOnly === "function") window.__tsaResetLessonOnly();
-        else {
+        else if(typeof window.__tsaPurgeLessonStorage === "function") {
+            window.__tsaPurgeLessonStorage({ clearPastPaperIdb: true });
             try {
-                localStorage.removeItem("tsa_v5_1_data");
-                localStorage.removeItem("tsa_v5_1_lesson_extract_cache");
-                localStorage.removeItem("tsa_v5_1_questions_backup");
-            } catch(e) {}
-            location.reload();
+                var u = new URL(location.href);
+                u.searchParams.set("recovery", "1");
+                u.searchParams.set("b", String(Date.now()));
+                location.replace(u.toString());
+            } catch(e) { location.reload(); }
         }
     },
     /** Fingerprint so cached extract data restores only for the same exam/passage in this browser. */
@@ -20134,7 +20168,19 @@ const app = {
     },
 
     factoryReset: function() {
-        if(confirm("Delete ALL data?")) { localStorage.clear(); location.reload(); }
+        if(!confirm("Delete ALL data?")) return;
+        window.__tsaSkipSaveOnUnload = true;
+        try { localStorage.clear(); } catch(e) {}
+        try { sessionStorage.clear(); } catch(e2) {}
+        try { indexedDB.deleteDatabase("tsa_architect_pastpaper_v1"); } catch(e3) {}
+        try {
+            var u = new URL(location.href);
+            u.searchParams.set("recovery", "1");
+            u.searchParams.set("b", String(Date.now()));
+            location.replace(u.toString());
+        } catch(eU) {
+            location.reload();
+        }
     },
 
     setLevel: function(l) {
