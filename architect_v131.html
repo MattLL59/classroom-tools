@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-09T23:00:00">
-<meta name="architect-deploy" content="fix-passage-scope-reset-f806">
+<meta name="architect-build" content="2026-07-10T09:00:00">
+<meta name="architect-deploy" content="fix-passage-preserve-load-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -9828,45 +9828,8 @@ const app = {
         } catch(eM) {}
     },
     /**
-     * After Load JSON / unified paste: sync Insert width controls + `--exam-passage-max-width` from {@link appData.meta}, then rebuild C1 booklet HTML from canonical so row splits match saved **pdfInsertWidthCh** (avoids dashed line at Nch while rows were wrapped tighter, and makes slider changes affect layout again via {@link resyncC1PassageEditorWithInsertWidth}).
+     * After Load JSON / unified paste: sync Insert width from meta only — **do not** heal, repair, or resync rows (that re-split stored lines and destroyed good saves).
      */
-    /** True when stored v2 rows look width-baked (many short lines) — common after Save JSON at a narrow Insert width. */
-    passageLooksWidthBakedInStorage: function(src) {
-        if(!src || typeof src !== "string" || !src.trim().startsWith("{")) return false;
-        if(appData && appData.meta && (appData.meta.passageBookletLayoutDone === true || appData.meta.passageLayoutSyncedAt)) return false;
-        try {
-            const o = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(src.trim()) : null;
-            if(!o || !Array.isArray(o.lines) || o.lines.length < 48) return false;
-            if(typeof app._passageV2LooksLikeBakedWidthFragments === "function" && app._passageV2LooksLikeBakedWidthFragments(o)) return true;
-            const avg = typeof admin !== "undefined" && admin.getPassageAvgStoredLineChars
-                ? admin.getPassageAvgStoredLineChars(src)
-                : 0;
-            return avg > 0 && avg < 42 && o.lines.length >= 72;
-        } catch(e) {
-            return false;
-        }
-    },
-    healWidthBakedPassageAfterLessonLoad: function() {
-        if(typeof appData === "undefined" || !appData || appData.component === 2) return false;
-        const st = typeof appData.sourceText === "string" ? appData.sourceText : "";
-        if(!st.trim() || !app.passageLooksWidthBakedInStorage(st)) return false;
-        let repaired = false;
-        if(typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage()) repaired = true;
-        if(!repaired && typeof app.normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns === "function") {
-            try {
-                const o = app.parseStructuredPassageSource(st.trim());
-                if(o && Array.isArray(o.lines) && o.lines.length >= 48) {
-                    const w = app.normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns(o, { force: true, lessonExportSnapshot: true });
-                    const canon = typeof app.serializeStructuredPassageV2 === "function" ? app.serializeStructuredPassageV2(w) : "";
-                    if(canon && canon !== st.trim() && typeof app.syncLessonSourceCanonical === "function") {
-                        app.syncLessonSourceCanonical(canon);
-                        repaired = true;
-                    }
-                }
-            } catch(eHeal) {}
-        }
-        return repaired;
-    },
     finishC1PassageLayoutAfterLessonLoad: function() {
         if(typeof app.syncPassageInsertWidthInputFromMeta === "function") app.syncPassageInsertWidthInputFromMeta();
         if(typeof app.syncPassageMergeOrphanHangCheckboxFromMeta === "function") app.syncPassageMergeOrphanHangCheckboxFromMeta();
@@ -9878,25 +9841,8 @@ const app = {
             if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st);
             return;
         }
-        const widthBaked = typeof app.passageLooksWidthBakedInStorage === "function" && app.passageLooksWidthBakedInStorage(st);
-        if(widthBaked && typeof app.healWidthBakedPassageAfterLessonLoad === "function") app.healWidthBakedPassageAfterLessonLoad();
-        const stAfter = typeof appData.sourceText === "string" ? appData.sourceText : st;
-        if(stAfter.trim() && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(stAfter)) {
-            try {
-                const parsed = typeof app.parseStructuredPassageSource === "function" ? app.parseStructuredPassageSource(stAfter.trim()) : null;
-                if(parsed && typeof app.serializeStructuredPassageV2 === "function") {
-                    const canon = app.serializeStructuredPassageV2(parsed);
-                    if(canon && canon !== stAfter.trim() && typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(canon);
-                }
-            } catch(eCanon) {}
-            if(typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
-        } else if(stAfter.trim() && typeof app.setAiInputValue === "function") {
-            app.setAiInputValue(stAfter);
-        }
+        if(st.trim() && typeof app.setAiInputValue === "function") app.setAiInputValue(st);
         if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
-        if(widthBaked) {
-            appData._passageWidthBakeHealNotice = true;
-        }
     },
     /**
      * Debounced: flush #ai-input → canonical, {@link repairBakedPassageInLessonStorage}, {@link setAiInputValue}, {@link ui.refreshSourceDisplay} so Insert width drags re-split booklet rows in **both** editor and Lab (same path as blur {@link applyPassageInsertWidthChFromInput}).
@@ -9976,7 +9922,7 @@ const app = {
         if(typeof app.persistPdfInsertWidthChToLocalStorage === "function") app.persistPdfInsertWidthChToLocalStorage(v);
         app.applyExamPassageInsertWidthCh();
         try {
-            if(typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
+            if(opts.skipFlush !== true && typeof app.flushAiInputToLessonSourceIfEditable === "function") app.flushAiInputToLessonSourceIfEditable();
             if(opts.skipEditorRebuild) {
                 const widthChanged = prevMetaCh == null || Math.round(prevMetaCh) !== Math.round(v);
                 const forceRelayout = opts.forceRelayout === true;
@@ -12519,14 +12465,23 @@ const app = {
             if(!opts.silent) alert("Use this in Component 1 (single passage).");
             return;
         }
-        const merge = typeof app.mergeC1IntroHeaderAndAiInputHtml === "function" ? app.mergeC1IntroHeaderAndAiInputHtml() : "";
-        if(!merge || !String(merge).trim()) {
-            if(!opts.silent) alert("Nothing to reflow.");
-            return;
-        }
-        const canon0 = app.editorPassageToStoredCanonical(merge);
+        let canon0 = opts.sourceCanon && String(opts.sourceCanon).trim()
+            ? String(opts.sourceCanon).trim()
+            : "";
         if(!canon0) {
-            if(!opts.silent) alert("Could not read passage (try a PDF import with booklet layout).");
+            const merge = typeof app.mergeC1IntroHeaderAndAiInputHtml === "function" ? app.mergeC1IntroHeaderAndAiInputHtml() : "";
+            if(merge && String(merge).trim()) {
+                canon0 = app.editorPassageToStoredCanonical(merge);
+            }
+        }
+        if(!canon0 || !String(canon0).trim()) {
+            const stSaved = typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+            if(stSaved && typeof app.isStructuredPassageSource === "function" && app.isStructuredPassageSource(stSaved)) {
+                canon0 = stSaved;
+            }
+        }
+        if(!canon0 || !String(canon0).trim()) {
+            if(!opts.silent) alert("Nothing to reflow — open passage editor or load saved source text first.");
             return;
         }
         const o = app.parseStructuredPassageSource(canon0);
@@ -12568,6 +12523,9 @@ const app = {
             if(!silent) alert("Use this in Component 1 (single passage).");
             return;
         }
+        if(!silent && typeof app.showArchitectAdminToast === "function") {
+            app.showArchitectAdminToast("Syncing passage layout…", { honorUserDismiss: false, autoHideMs: 4000 });
+        }
         try {
             if(app._passageInsertRelayoutTimer) {
                 clearTimeout(app._passageInsertRelayoutTimer);
@@ -12578,7 +12536,7 @@ const app = {
         try {
             app._suppressAdminInputFlushOnce = false;
             if(typeof app.applyPassageInsertWidthChFromInput === "function") {
-                app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true, forceRelayout: true, skipResync: true });
+                app.applyPassageInsertWidthChFromInput({ skipEditorRebuild: true, forceRelayout: true, skipResync: true, skipFlush: true });
             } else {
                 if(typeof app.syncPdfInsertWidthChFromDomInput === "function") app.syncPdfInsertWidthChFromDomInput();
                 if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh();
@@ -12590,7 +12548,8 @@ const app = {
                         void(document.documentElement && document.documentElement.offsetHeight);
                     } catch(eLayout) {}
                     if(typeof app.reflowC1PassageBodyToNaturalInsertWidthCh === "function") {
-                        app.reflowC1PassageBodyToNaturalInsertWidthCh({ silent: silent });
+                        const stReflow = appData && typeof appData.sourceText === "string" ? appData.sourceText.trim() : "";
+                        app.reflowC1PassageBodyToNaturalInsertWidthCh({ silent: silent, sourceCanon: stReflow || undefined });
                     } else if(!silent) {
                         alert("Reflow is not available — reload the page (hard refresh) so architect_v131 includes the latest script.");
                     }
@@ -12806,13 +12765,8 @@ const app = {
                 : !!(typeof appData !== "undefined" && appData && appData.meta && appData.meta.passageMergeOrphanHangSegments === true);
             var gutterOptsEd = { skipOrphanSegmentMerge: !mergeHangSeg };
             if(opts.displayTrustStoredRows) {
-                var mcTrust = typeof app.getPassageColumnWidthChForLayout === "function" ? app.getPassageColumnWidthChForLayout() : 96;
-                var splitMcTrust = typeof app.getPassageSplitPlainMaxChars === "function" ? app.getPassageSplitPlainMaxChars(mcTrust) : Math.max(28, Math.round(mcTrust * 0.92) - 3);
-                var needsWidthSplit = expanded.some(function(row) {
-                    var t = String(row.text == null ? "" : row.text).replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
-                    return t.length > splitMcTrust;
-                });
-                if(!needsWidthSplit) return finishEd(expanded);
+                /** Saved / synced JSON: one layout row per v2 line — never re-split at display (double-split caused 8-word + 2-word stub rows). Use Sync passage layout after an intentional width change. */
+                return finishEd(expanded);
             }
             return finishEd(app.splitLongRowsForBookletLineGutter(expanded, undefined, gutterOptsEd));
         }
@@ -19639,12 +19593,6 @@ const app = {
                     alert("Settings loaded from config.json (" + itemN + " quotes). Level bank and lesson settings are restored. Open Data → Editing Suite to edit the passage.");
                 }, 60);
             }
-            if(appData && appData._passageWidthBakeHealNotice) {
-                delete appData._passageWidthBakeHealNotice;
-                setTimeout(function() {
-                    alert("This JSON had many short passage rows (narrow Insert width baked into the file). Rows were merged back toward paragraph length. Open passage editor → check Insert width (ch) → click Sync passage layout if lines still look wrong.");
-                }, 100);
-            }
         };
         finish();
     },
@@ -20650,6 +20598,7 @@ const ui = {
         const hasAnchorWindow = !!(win && (win.anchorStart || win.anchorEnd) && win.windowSource && String(win.windowSource).indexOf("anchors:") === 0);
         const hasResolvableWindow = hasLineWindow || hasAnchorWindow;
         const global = ui.getPassageDisplayScope();
+        if(global === "whole") return "whole";
         if(global === "focused" && hasResolvableWindow) return "focused";
         const levelBank = typeof app.getLevelBank === "function" ? app.getLevelBank() : {};
         const levelEntry = levelBank && levelBank[lvl] ? levelBank[lvl] : {};
@@ -20750,6 +20699,7 @@ const ui = {
         if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
         if(typeof ui.syncTeacherPassagePickFocus === "function") ui.syncTeacherPassagePickFocus();
         try { localStorage.setItem(ui.PASSAGE_SCOPE_STORAGE_KEY, "whole"); } catch(eLs) {}
+        if(appData.meta) appData.meta.passageDisplayScope = "whole";
         if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole", { skipRefresh: !!opts.skipRefresh });
     },
     /**
@@ -20799,7 +20749,9 @@ const ui = {
             wholeNowBtn.addEventListener("click", function(ev) {
                 ev.preventDefault();
                 if(typeof ui.setTeacherLinePickMode === "function") ui.setTeacherLinePickMode(false, { refresh: false });
+                if(appData && appData.meta) appData.meta.passageDisplayScope = "whole";
                 if(typeof ui.setPassageDisplayScope === "function") ui.setPassageDisplayScope("whole");
+                if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
             });
         }
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
@@ -21682,16 +21634,7 @@ const ui = {
         }
         if(navDesk) navDesk.classList.toggle("hidden", !modules.desk);
         if(ui.wireDeskAnswerInsertionAid) ui.wireDeskAnswerInsertionAid();
-        try {
-            if(!app._deferAdminPassageUntilDemand && !app._heavyLessonOnLoad && !app._passageDisplaysDeferred && typeof app.repairBakedPassageInLessonStorage === "function" && app.repairBakedPassageInLessonStorage()) {
-                const stFix = appData && appData.sourceText;
-                const aiFix = document.getElementById("ai-input");
-                if(stFix && aiFix && aiFix.getAttribute("contenteditable") === "true" && typeof app.setAiInputValue === "function") {
-                    app.setAiInputValue(String(stFix));
-                }
-                app._initSaveNeeded = true;
-            }
-        } catch(eBake) {}
+        /** Do not auto-repair passage rows on init — {@link repairBakedPassageInLessonStorage} merges/splits stored JSON and destroyed good saves on reload. */
         } catch(eUiInit) {
             console.error("UI init error:", eUiInit);
             if(typeof window.__tsaShowCrash === "function") {
@@ -22679,6 +22622,11 @@ const ui = {
         if(ev && ev.stopPropagation) ev.stopPropagation();
         if(ui._adminCloseGuardActive() && !(typeof app !== "undefined" && app._forceAdminPassageHydrateForSetup)) return;
         if(typeof ui._clearTeacherPassagePickForSettings === "function") ui._clearTeacherPassagePickForSettings();
+        if(typeof admin !== "undefined") {
+            if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
+            if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+        }
+        if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
         if(ui._initInProgress) {
             ui._pendingAdminOpen = true;
             try {
@@ -28957,6 +28905,13 @@ const admin = {
     goAdminTab: function(key) {
         if(!admin.tabsBound && admin.bindTabsOnly) admin.bindTabsOnly();
         const k = (key === "reward" || key === "edit" || key === "ai" || key === "export") ? key : "edit";
+        if(k === "edit" || k === "ai") {
+            if(typeof admin !== "undefined") {
+                if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
+                if(typeof admin.exitC1PassageFocusMode === "function") admin.exitC1PassageFocusMode();
+            }
+            if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
+        }
         admin.activateAdminTab(k, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
         if(k === "export") {
             const modal = document.getElementById("modal-admin");
