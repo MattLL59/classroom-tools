@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-10T13:00:00">
-<meta name="architect-deploy" content="fix-passage-warning-paragraph-f806">
+<meta name="architect-build" content="2026-07-19T19:00:00">
+<meta name="architect-deploy" content="fix-ai-tab-bounce-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -29054,6 +29054,19 @@ const admin = {
     goAdminTab: function(key) {
         if(!admin.tabsBound && admin.bindTabsOnly) admin.bindTabsOnly();
         const k = (key === "reward" || key === "edit" || key === "ai" || key === "export") ? key : "edit";
+        /**
+         * Leaving Editing Suite must cancel passage-setup force mode. Otherwise a deferred
+         * hydrateAdminPassageForTeacherSetup (requestIdleCallback — often fires on mouse move)
+         * calls ensureC1PassageEditorOnEditTab and yanks the user back off Load & AI / Lobby.
+         */
+        if(k !== "edit" && typeof app !== "undefined") {
+            app._forceAdminPassageHydrateForSetup = false;
+            app._passageExtractHydratePending = false;
+            try {
+                const admLeave = document.getElementById("modal-admin");
+                if(admLeave) admLeave.classList.remove("modal-admin-passage-editing");
+            } catch(eLeave) {}
+        }
         if(k === "edit" || k === "ai") {
             if(typeof admin !== "undefined") {
                 if(typeof admin.clearC1PassageFocusSession === "function") admin.clearC1PassageFocusSession();
@@ -29071,10 +29084,15 @@ const admin = {
             }
         }
         if((k === "edit" || k === "ai") && typeof admin.placeC1SourceWrapForAdminTab === "function") {
-            admin.placeC1SourceWrapForAdminTab();
+            admin.placeC1SourceWrapForAdminTab({ skipAutoSync: k === "ai" });
         }
         const runHyd = function() {
-            try { admin.hydrateAdminTabPanel(k); } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
+            try {
+                let still = "edit";
+                try { still = localStorage.getItem("tsa_admin_tab") || k; } catch(eStill) { still = k; }
+                if(still !== k) return;
+                admin.hydrateAdminTabPanel(k);
+            } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
         };
         if(typeof requestIdleCallback === "function") requestIdleCallback(runHyd, { timeout: 4000 });
         else if(typeof requestAnimationFrame === "function") requestAnimationFrame(runHyd);
@@ -29122,20 +29140,27 @@ const admin = {
                 try { if(admin.ensureAiStepVisible) admin.ensureAiStepVisible(); } catch(eStep) {}
                 admin._adminShellFormSynced = true;
             }
-            if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
-            const needsHyd = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
-            if((app._forceAdminPassageHydrateForSetup || needsHyd) && (k === "edit" || k === "ai") && appData && appData.component !== 2 && typeof app.hydrateAdminPassageForTeacherSetup === "function") {
-                if(needsHyd) app._forceAdminPassageHydrateForSetup = true;
-                try { app.hydrateAdminPassageForTeacherSetup(); } catch(eSetupTab) {}
-            } else if(app._deferAdminPassageUntilDemand && appData && appData.component !== 2 && typeof app.setAdminPassageDeferredPlaceholder === "function") {
-                if(!app._forceAdminPassageHydrateForSetup) {
-                    if(k === "edit" || k === "ai") app.setAdminPassageDeferredPlaceholder({ force: true });
+            if(typeof admin.placeC1SourceWrapForAdminTab === "function") {
+                admin.placeC1SourceWrapForAdminTab({ skipAutoSync: k !== "edit" });
+            }
+            /** Passage setup hydrate always switches to Editing Suite — never run it while on Load & AI / Lobby / Reward. */
+            if(k === "edit" && appData && appData.component !== 2) {
+                const needsHyd = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
+                if((app._forceAdminPassageHydrateForSetup || needsHyd) && typeof app.hydrateAdminPassageForTeacherSetup === "function") {
+                    if(needsHyd) app._forceAdminPassageHydrateForSetup = true;
+                    try { app.hydrateAdminPassageForTeacherSetup(); } catch(eSetupTab) {}
+                } else if(app._deferAdminPassageUntilDemand && typeof app.setAdminPassageDeferredPlaceholder === "function") {
+                    if(!app._forceAdminPassageHydrateForSetup) app.setAdminPassageDeferredPlaceholder({ force: true });
+                } else if(typeof admin.syncSourceEditorMode === "function") {
+                    try {
+                        admin.syncSourceEditorMode({ hydratePassage: true, skipPassageHydrate: false });
+                        app._adminPassageHydrateDone = true;
+                    } catch(eEd) {}
                 }
-            } else if((k === "edit" || k === "ai") && appData && appData.component !== 2 && typeof admin.syncSourceEditorMode === "function") {
+            } else if(k === "ai" && appData && appData.component !== 2 && typeof admin.syncSourceEditorMode === "function") {
                 try {
-                    admin.syncSourceEditorMode({ hydratePassage: true, skipPassageHydrate: false });
-                    app._adminPassageHydrateDone = true;
-                } catch(eEd) {}
+                    admin.syncSourceEditorMode({ hydratePassage: false, skipPassageHydrate: true, skipC2Fill: true });
+                } catch(eAiSync) {}
             }
             if(k === "edit") {
                 if(!app._adminLiteOpen && admin.scheduleLiteEditPanels) admin.scheduleLiteEditPanels();
@@ -29854,8 +29879,16 @@ const admin = {
             singleWrap.classList.remove("hidden");
             if(c2AiHint) c2AiHint.classList.add("hidden");
         }
-        if(typeof admin.placeC1SourceWrapForAdminTab === "function") admin.placeC1SourceWrapForAdminTab();
+        if(typeof admin.placeC1SourceWrapForAdminTab === "function") {
+            admin.placeC1SourceWrapForAdminTab({ skipAutoSync: !!opts.skipPassageHydrate });
+        }
         if(!useC2Editors) {
+            let activeTab = "edit";
+            try { activeTab = localStorage.getItem("tsa_admin_tab") || "edit"; } catch(eTab) {}
+            /** Never force Editing Suite from Load & AI / Lobby / Reward — that bounces the tab on idle/mouse move. */
+            if(activeTab !== "edit" || opts.skipPassageHydrate) {
+                return;
+            }
             const needsEditorHydrate = typeof app._adminPassageEditorNeedsHydrate === "function" && app._adminPassageEditorNeedsHydrate();
             const needsSetupHydrate = !!(app._passageExtractHydratePending || app._forceAdminPassageHydrateForSetup || needsEditorHydrate || (typeof app._needsBookletLineSetup === "function" && app._needsBookletLineSetup()));
             const admSync = document.getElementById("modal-admin");
