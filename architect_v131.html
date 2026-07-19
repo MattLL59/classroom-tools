@@ -7,8 +7,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-19T19:00:00">
-<meta name="architect-deploy" content="fix-ai-tab-bounce-f806">
+<meta name="architect-build" content="2026-07-19T22:40:00">
+<meta name="architect-deploy" content="fix-ai-passage-verbatim-f806">
 <meta name="architect-rev" content="c1-passage-wrap-fix-f806">
 <title>Answer Architect (v131)</title>
 <style>
@@ -30377,11 +30377,45 @@ const admin = {
         const m = t.match(/source-line-row/gi);
         return m ? m.length : 0;
     },
+    /** Plain passage for compare (strips v2 / HTML noise). */
+    _passagePlainForCompare: function(src) {
+        const t = String(src || "").trim();
+        if(!t) return "";
+        try {
+            if(typeof app.sourceToPlainForAi === "function") {
+                const p = String(app.sourceToPlainForAi(t) || "").replace(/\s+/g, " ").trim();
+                if(p.length > 20) return p;
+            }
+        } catch(eP) {}
+        return t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    },
+    /** True when AI JSON rewrote the story (starts similar, then paraphrases / invents a different ending). */
+    incomingPassageRewritesTeacherText: function(prevSrc, incStr) {
+        const plainPrev = admin._passagePlainForCompare(prevSrc);
+        const plainInc = admin._passagePlainForCompare(incStr);
+        if(plainPrev.length < 180 || plainInc.length < 80) return false;
+        const headPrev = plainPrev.slice(0, 48);
+        const headInc = plainInc.slice(0, 48);
+        const startsAlike = headPrev.slice(0, 28) === headInc.slice(0, 28)
+            || plainInc.indexOf(headPrev.slice(0, 32)) === 0
+            || plainPrev.indexOf(headInc.slice(0, 32)) === 0;
+        if(!startsAlike) {
+            /** Completely different opening vs teacher passage — treat as rewrite when teacher had a real insert. */
+            return plainPrev.length >= 400;
+        }
+        const midAt = Math.min(Math.floor(plainPrev.length * 0.45), Math.max(0, plainPrev.length - 80));
+        const midPrev = plainPrev.slice(midAt, midAt + 56);
+        if(midPrev.length >= 24 && plainInc.indexOf(midPrev.slice(0, 28)) < 0) return true;
+        const tailPrev = plainPrev.slice(-72);
+        if(tailPrev.length >= 24 && plainInc.indexOf(tailPrev.slice(0, 28)) < 0 && plainPrev.length > plainInc.length * 1.08) return true;
+        return false;
+    },
     /** Incoming AI passage dropped soft rows / ¶ vs teacher snapshot (both structured, or incoming not structured). */
     incomingPassageLosesC1Layout: function(prevSrc, incStr) {
         const inc = String(incStr || "").trim();
         const prev = String(prevSrc || "").trim();
         if(!prev) return false;
+        if(typeof admin.incomingPassageRewritesTeacherText === "function" && admin.incomingPassageRewritesTeacherText(prev, inc)) return true;
         const pbPrev = admin.countPlainParagraphBlocks(prev);
         const pbInc = admin.countPlainParagraphBlocks(inc);
         if(pbPrev >= 2 && pbInc < pbPrev) return true;
@@ -35189,24 +35223,42 @@ const admin = {
     generateUnifiedPrompt: () => {
         if(typeof admin.syncQuestionsFromList === "function") admin.syncQuestionsFromList();
         const fullText = (() => {
-            const fromAi = (app.getAiInputValue() || "").trim();
-            if(fromAi) return fromAi;
-            const st = (appData.sourceText || "").trim();
-            if(st) return st;
-            if(appData && admin.isComponent2SourceEditing && admin.isComponent2SourceEditing()) {
-                const r = (appData.component2Layout.resourcePaperText || "").trim();
-                const n = (appData.component2Layout.questionPaperPage3Text || "").trim();
-                if(r || n) {
-                    const parts = [];
-                    if(r) parts.push("21st C (resource material):\n" + r);
-                    if(n) parts.push("19th C (question paper passage):\n" + n);
-                    return parts.join("\n\n——\n\n");
+            const raw = (() => {
+                const fromAi = (app.getAiInputValue() || "").trim();
+                if(fromAi) return fromAi;
+                const st = (appData.sourceText || "").trim();
+                if(st) return st;
+                if(appData && admin.isComponent2SourceEditing && admin.isComponent2SourceEditing()) {
+                    const r = (appData.component2Layout.resourcePaperText || "").trim();
+                    const n = (appData.component2Layout.questionPaperPage3Text || "").trim();
+                    if(r || n) {
+                        const parts = [];
+                        if(r) parts.push("21st C (resource material):\n" + r);
+                        if(n) parts.push("19th C (question paper passage):\n" + n);
+                        return parts.join("\n\n——\n\n");
+                    }
                 }
-            }
-            return "";
+                return "";
+            })();
+            if(!raw) return "";
+            /** Prefer plain numbered lines in the prompt — v2 JSON burns the budget on tags/escapes and truncates mid-story. */
+            try {
+                if(typeof app.sourceToPlainForAi === "function") {
+                    const plain = String(app.sourceToPlainForAi(raw) || "").trim();
+                    if(plain.length > 40) return plain;
+                }
+            } catch(ePlain) {}
+            return raw;
         })();
-        const MAX_SOURCE_CHARS = 4000;
-        const text = fullText.length > MAX_SOURCE_CHARS ? fullText.substring(0, MAX_SOURCE_CHARS) + "\n\n[... text truncated for prompt length; generate from this excerpt and output full sourceText in your JSON if you have it ...]" : fullText;
+        /** Large enough for typical C1 inserts; still cap runaway pastes. Never invite the model to invent the missing tail. */
+        const MAX_SOURCE_CHARS = 24000;
+        let text = fullText;
+        let sourceTruncated = false;
+        if(fullText.length > MAX_SOURCE_CHARS) {
+            sourceTruncated = true;
+            text = fullText.substring(0, MAX_SOURCE_CHARS)
+                + "\n\n[SOURCE TRUNCATED HERE FOR PROMPT SIZE — STOP. Copy ONLY the Source text above into lesson.sourceText, character-for-character. FORBIDDEN: inventing, paraphrasing, summarising, or continuing the story past this cut. Do not invent missing lines.]";
+        }
         const rawQ = (appData.questions && appData.questions.length) ? appData.questions.slice() : [{ id: "q1", prompt: appData.question || "How does the writer use language?" }];
         const sortQid = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
         const sortedQ = rawQ.slice().sort((a, b) => sortQid(a.id) - sortQid(b.id));
@@ -35220,6 +35272,9 @@ const admin = {
         };
         const q = prompts.length > 1 ? "Questions (q01→q05): " + prompts.map((p, i) => qWithLineRef(p, i)).join(" | ") : (prompts[0] || "How does the writer use language?");
         if(!fullText.trim()) return alert("Paste source text first.");
+        if(sourceTruncated) {
+            alert("Passage is very long (~" + Math.round(fullText.length / 1000) + "k characters). The AI prompt includes only the first part.\n\nImportant: the model must NOT invent or paraphrase the rest. Prefer Keep my passage layout when you Load JSON, or paste the full passage into chat before asking for JSON.");
+        }
         const activeLevels = (appData.settings && appData.settings.aiPromptAllLevels)
             ? Array.from({ length: ARCHITECT_MAX_LEVEL }, (_, i) => i + 1)
             : app.getActiveLevels();
@@ -35268,9 +35323,9 @@ The array for quote rows is lesson.items (inside that object). Never wrap the wh
 
 Role: Expert English Teacher. Task: Output ONE JSON object with key "lesson" whose value is ONE nested object (curly braces) containing meta, sourceText, question, questions, settings, banks, sentenceConfig, globalStructure, items, etc. Students tap text to select quotes—do NOT generate selection.items.
 
-CRITICAL: lesson.sourceText must be the COMPLETE verbatim passage with line numbers — not a synopsis, overview, or shortened version. Each lesson.items[].original must be an exact substring of that passage (real quotes only). Do NOT re-wrap, re-line-break, or narrow-wrap sourceText: keep one stored row per exam line at the teacher's insert width; never explode the passage into many short lines.
+CRITICAL — PASSAGE COPY (non-negotiable): lesson.sourceText must be a CHARACTER-FOR-CHARACTER copy of the Source block below (with line numbers). FORBIDDEN: paraphrasing, rewriting, summarising, “improving” wording, inventing dialogue/events, or continuing a truncated story. If the Source ends with a TRUNCATED marker, copy only what appears above that marker — never invent the missing remainder. Each lesson.items[].original must be an exact substring of that passage (real quotes only). Do NOT re-wrap, re-line-break, or narrow-wrap sourceText: keep one stored row per exam line at the teacher's insert width; never explode the passage into many short lines.
 
-Source:
+Source (copy verbatim into lesson.sourceText — do not rewrite):
 """${text}"""
 Focus: "${q}"
 ${c2OrderBlock}
