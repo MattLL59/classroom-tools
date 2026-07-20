@@ -103,9 +103,12 @@
     }
     /* Line-numbered passages: .reader-window left/width is set in JS from the first .source-line-row (gutter + insert text) so the band runs under WJEC margin ticks; ticks stay above (z-index:3 on .source-line-num). */
     /* Class toggled in JS when passage uses line gutters — avoids relying on :has() and beats inline white-space:pre-wrap on the host. */
-    #source-inline-select-wrap.architect-passage-line-mode,
-    #source-text-single-wrap.architect-passage-line-mode {
+    #source-inline-select-wrap.architect-passage-line-mode {
         overflow-x: hidden !important;
+        overflow-y: hidden !important;
+    }
+    #source-text-single-wrap.architect-passage-line-mode {
+        overflow-x: auto !important;
         overflow-y: hidden !important;
     }
     #source-lab-wrap.architect-passage-line-mode {
@@ -123,9 +126,7 @@
     #source-text-single-wrap.architect-passage-line-mode #ai-input .source-with-line-numbers {
         min-width: calc(2.5em + var(--exam-passage-max-width) + 6px);
     }
-    #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor {
-        overflow-x: hidden;
-    }
+    #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor { overflow-x: auto; }
     /* Insert column guides (solid / hatched / dashed): **Editing Suite #ai-input only** — not Lab or Quote Select. */
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers {
         position: relative;
@@ -191,12 +192,18 @@
     }
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers {
         min-width: calc(2.5em + var(--exam-passage-max-width) + 6px);
-        width: auto !important;
-        max-width: 100% !important;
+        width: calc(2.5em + var(--exam-passage-max-width) + 6px) !important;
+        max-width: none !important;
     }
     #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-line-row {
-        width: 100% !important;
-        max-width: 100% !important;
+        width: calc(2.5em + var(--exam-passage-max-width) + 6px) !important;
+        max-width: none !important;
+    }
+    #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers .source-line-text {
+        flex: 0 0 auto !important;
+        width: var(--exam-passage-text-max-width) !important;
+        min-width: var(--exam-passage-text-max-width) !important;
+        max-width: var(--exam-passage-text-max-width) !important;
     }
     /** Settings editor: honour full Insert width (ch) — global max-width:100% capped lines ~56ch inside the modal. */
     #modal-admin #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers {
@@ -369,9 +376,12 @@
     /**
      * Lab / Quote Select / Editing Suite #ai-input: readable wrapped passage (not per-line horizontal scroll strips).
      */
-    #source-inline-select-wrap.architect-passage-line-mode,
-    #source-text-single-wrap.architect-passage-line-mode {
+    #source-inline-select-wrap.architect-passage-line-mode {
         overflow-x: hidden !important;
+        overflow-y: hidden !important;
+    }
+    #source-text-single-wrap.architect-passage-line-mode {
+        overflow-x: auto !important;
         overflow-y: hidden !important;
     }
     #source-lab-wrap.architect-passage-line-mode {
@@ -387,8 +397,7 @@
     #source-inline-select-wrap.architect-passage-line-mode .source-with-line-numbers .source-line-text,
     #source-lab-wrap.architect-passage-line-mode .source-with-line-numbers .source-line-text,
     #source-inline-select-wrap.architect-passage-excerpt-shell.architect-passage-line-mode #source-inline-select .source-with-line-numbers .source-line-text,
-    #source-lab-wrap.architect-passage-excerpt-shell.architect-passage-line-mode #source-inline .source-with-line-numbers .source-line-text,
-    #source-text-single-wrap.architect-passage-line-mode #ai-input.source-editor .source-with-line-numbers .source-line-text {
+    #source-lab-wrap.architect-passage-excerpt-shell.architect-passage-line-mode #source-inline .source-with-line-numbers .source-line-text {
         flex: 1 1 auto !important;
         width: auto !important;
         min-width: 0 !important;
@@ -9186,16 +9195,16 @@ const app = {
     },
     /** 1 = split at nearly full insert `ch` so simulated rows fill the column beside the dashed edge (was 0.92 — caused shortened lines after row ~5). */
     EXAM_SPLIT_VS_INSERT_CH_FRAC: 1,
-    /** Characters subtracted after `frac * ch`. A small pad pulls simulated wrap left of the dashed edge so proportional Aptos does not spill past the guide after Sync/reflow. */
-    EXAM_SPLIT_COLUMN_PAD_CHARS: 2,
+    /** No hidden char shave: keep wrap target equal to configured insert width. */
+    EXAM_SPLIT_COLUMN_PAD_CHARS: 0,
     /**
      * Shrink measured inner px vs CSS `Nch`. Split/reflow targets one simulated printed line per **stored** segment; the editor cell
      * may still soft-wrap for readability — spills vs the dashed insert still inform split tuning (see {@link splitPlainIntoVisualLinesByCh}).
      * Too tight = gap before the dashed edge; too loose → overhang even after Sync / natural reflow.
      */
-    EXAM_CANVAS_WRAP_INNER_PX_FRAC: 0.92,
+    EXAM_CANVAS_WRAP_INNER_PX_FRAC: 1,
     /** Caps “keep whole overweight word” slack — &lt;1 pulls slightly inside {@link _bookletInnerMaxPxForInsertCh} so Aptos rarely spills past the dashed guide (“overhangers”). Ignored when {@link passageUsesStrictInsertEdge}. */
-    EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE: 0.97,
+    EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE: 1,
     /** When true, wrap/sync use the full insert column (dashed guide = word limit; no hatched safety band). */
     passageUsesStrictInsertEdge: function() {
         try {
@@ -9205,14 +9214,10 @@ const app = {
         }
     },
     getPassageWrapInnerPxFrac: function() {
-        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return 1;
-        const f = typeof app.EXAM_CANVAS_WRAP_INNER_PX_FRAC === "number" ? app.EXAM_CANVAS_WRAP_INNER_PX_FRAC : 0.92;
-        return Math.min(1, Math.max(0.78, f));
+        return 1;
     },
     getPassageWrapWordTolerance: function() {
-        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return 1;
-        const t = typeof app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE === "number" ? app.EXAM_CANVAS_WORD_OVERFLOW_TOLERANCE : 0.97;
-        return Math.min(1, Math.max(0.88, t));
+        return 1;
     },
     getPassageSplitColumnPadCharsEffective: function() {
         if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return 0;
@@ -9226,12 +9231,8 @@ const app = {
     computePassageTextWrapWidthCh: function(layoutCh) {
         const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
         const ch = Math.max(28, Math.min(wCap, Math.round(Number(layoutCh) || 96)));
-        if(typeof app.passageUsesStrictInsertEdge === "function" && app.passageUsesStrictInsertEdge()) return ch;
-        const splitFrac = typeof app.EXAM_SPLIT_VS_INSERT_CH_FRAC === "number" ? app.EXAM_SPLIT_VS_INSERT_CH_FRAC : 1;
-        const frac = typeof app.getPassageWrapInnerPxFrac === "function" ? app.getPassageWrapInnerPxFrac() : 0.92;
-        const tol = typeof app.getPassageWrapWordTolerance === "function" ? app.getPassageWrapWordTolerance() : 0.97;
-        const pad = typeof app.getPassageSplitColumnPadCharsEffective === "function" ? app.getPassageSplitColumnPadCharsEffective() : 2;
-        return Math.max(28, Math.min(wCap, Math.round(ch * splitFrac * frac * tol) - pad));
+        /** No implicit safety margin: text wrap width matches the configured insert width. */
+        return ch;
     },
     /** Sets `--exam-passage-max-width` (dashed) and `--exam-passage-text-max-width` (solid) + margin-band visibility on `html`. */
     applyPassageInsertWidthCssVariables: function(layoutCh) {
