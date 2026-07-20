@@ -2725,7 +2725,8 @@
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
                         <button class="btn btn-outline btn-small" onclick="admin.loadSavedSourceQuestion()">Use saved text + question</button>
-                        <div style="font-size:0.8rem; opacity:0.7; align-self:center;">Component 1: <strong>Use saved text + question</strong> loads the passage here. Component 2: <strong>Lobby → Extract text</strong> saves passages in the lesson; open <strong>Editing Suite → Component 2 — passages</strong> and click <strong>Load from lesson</strong> if the editor looks empty.</div>
+                        <button class="btn btn-outline btn-small" onclick="admin.restoreOriginalPassageFromPastPaperCache()">Restore original passage (cached PDF)</button>
+                        <div style="font-size:0.8rem; opacity:0.7; align-self:center;">Component 1: <strong>Use saved text + question</strong> loads the current lesson passage. If refresh shows an AI version, use <strong>Restore original passage (cached PDF)</strong> to rebuild from saved past-paper files without hunting in Lobby. Component 2: <strong>Lobby → Extract text</strong> saves passages in the lesson; open <strong>Editing Suite → Component 2 — passages</strong> and click <strong>Load from lesson</strong> if the editor looks empty.</div>
                     </div>
                     <div style="display:flex; gap:10px; margin-bottom:6px;">
                         <div style="flex:1"><label style="font-size:0.8rem">Mode</label><select id="ai-mode" style="width:100%; padding:5px;"><option value="replace">Replace All</option><option value="append">Append</option></select></div>
@@ -26843,6 +26844,46 @@ const admin = {
         const anyPdf = !!(f.questions || f.resource || f.markscheme);
         if(ex) ex.disabled = !anyPdf;
         if(qu) qu.disabled = !f.questions;
+    },
+    /** Rebuild saved passage text from cached past-paper PDFs (works after reload even if Lobby isn't open). */
+    restoreOriginalPassageFromPastPaperCache: async function() {
+        if(!appData || appData.isStandalone) {
+            app.showArchitectAlert("Restore from past-paper cache is available in teacher mode only.", { error: true });
+            return;
+        }
+        if(app._pastPaperExtractInFlight || admin._reExtractQuestionsInFlight) return;
+        try {
+            if(typeof app.ensurePdfJsLoaded === "function") await app.ensurePdfJsLoaded();
+        } catch(ePdf) {
+            app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not load PDF tools. Open Lobby → Import past paper and try again.</span>", { autoHideMs: 18000 });
+            return;
+        }
+        const mode = (appData && Number(appData.component) === 2) ? 2 : 1;
+        const loadModeSel = document.getElementById("past-paper-load-mode");
+        if(loadModeSel && Number(loadModeSel.value) !== mode) {
+            loadModeSel.value = String(mode);
+            if(typeof admin.setPastPaperLoadMode === "function") admin.setPastPaperLoadMode(mode);
+        }
+        if(typeof admin.restorePastPaperFilesFromIdb === "function") {
+            try { await admin.restorePastPaperFilesFromIdb(); } catch(eIdb) {}
+        }
+        const files = admin.pastPaperFiles || {};
+        if(mode === 2) {
+            if(!files.resource && !files.questions) {
+                app.showArchitectAdminToast("No cached Resource/Questions PDFs found for this lesson. Open <strong>Lobby → Import past paper</strong>, choose files, then click <strong>Extract text</strong>.", { honorUserDismiss: false, autoHideMs: 20000 });
+                if(typeof admin.goAdminTab === "function") admin.goAdminTab("export");
+                return;
+            }
+            if(files.resource && typeof admin.reExtractResourceFromPages === "function") await admin.reExtractResourceFromPages();
+            if(files.questions && typeof admin.reExtract19thFromPages === "function") await admin.reExtract19thFromPages();
+            return;
+        }
+        if(files.resource && typeof admin.reExtractResourceFromPages === "function") {
+            await admin.reExtractResourceFromPages();
+            return;
+        }
+        app.showArchitectAdminToast("No cached <strong>Resource PDF</strong> found for this lesson. Open <strong>Lobby → Import past paper</strong>, choose the resource file, then click <strong>Extract text</strong>.", { honorUserDismiss: false, autoHideMs: 20000 });
+        if(typeof admin.goAdminTab === "function") admin.goAdminTab("export");
     },
     clearPastPaperPdfCache: async function() {
         /** Clear lesson meta + UI first (sync) so the next app.save() after Load JSON does not persist stale PDF filenames; IndexedDB deletes follow. */
