@@ -11733,6 +11733,40 @@ const app = {
         return val;
     },
     /**
+     * Wrap metrics for the current editing context.
+     * When the teacher is actively editing in Data modal, use that editor cell directly so
+     * insert-width growth is not capped by another narrower surface elsewhere in the app.
+     */
+    _contextBookletWrapMetricsAndInnerPx: function(maxChRounded) {
+        const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
+        const max = Math.max(12, Math.min(wCap, Math.round(Number(maxChRounded))));
+        try {
+            const adm = (typeof document !== "undefined") ? document.getElementById("modal-admin") : null;
+            const adminOpen = !!(adm && adm.classList.contains("open"));
+            if(adminOpen && typeof document !== "undefined") {
+                const cell = document.querySelector("#modal-admin #ai-input.source-editor .source-line-text");
+                if(cell && (!app._isBookletCellLaidOut || app._isBookletCellLaidOut(cell)) && cell.ownerDocument && cell.ownerDocument.defaultView) {
+                    const st = cell.ownerDocument.defaultView.getComputedStyle(cell);
+                    const chPx = typeof app.measurePassageChPxFromElement === "function" ? app.measurePassageChPxFromElement(cell) : 8;
+                    const m = {
+                        cell: cell,
+                        chPx: chPx,
+                        font: st.font || ((st.fontStyle || "normal") + " " + (st.fontWeight || "400") + " " + st.fontSize + " " + (st.fontFamily || "sans-serif")),
+                        pl: parseFloat(st.paddingLeft) || 0,
+                        pr: parseFloat(st.paddingRight) || 0,
+                        bl: parseFloat(st.borderLeftWidth) || 0,
+                        br: parseFloat(st.borderRightWidth) || 0
+                    };
+                    const innerPx = typeof app._bookletInnerMaxPxForInsertCh === "function" ? app._bookletInnerMaxPxForInsertCh(max, m) : null;
+                    if(innerPx != null && Number.isFinite(innerPx)) return { metrics: m, innerPx: innerPx };
+                }
+            }
+        } catch(eCtx) {}
+        return typeof app._narrowestBookletWrapMetricsAndInnerPx === "function"
+            ? app._narrowestBookletWrapMetricsAndInnerPx(max)
+            : null;
+    },
+    /**
      * Split plain text into simulated **printed** lines matching browser wrap at `maxCh` **CSS ch** (glyph widths via canvas), not raw character counts — Latin prose often fits ~3–8% more letters per line than `maxCh` characters, which looked like “text stops short of the dashed edge.”
      * Falls back to character-count wrap when no editor cell / canvas.
      * One `.source-line-row` per segment so WJEC margin ticks (5, 10, 15…) align with **visual** lines, not merged PDF passage rows.
@@ -11760,8 +11794,11 @@ const app = {
             const colCh = typeof app.getPassageColumnWidthChForLayout === "function" ? app.getPassageColumnWidthChForLayout() : null;
             if(colCh != null && Number.isFinite(Number(colCh))) layoutChForPx = Math.max(max, Math.round(Number(colCh)));
         } catch(eLc) {}
-        const narrow = typeof app._narrowestBookletWrapMetricsAndInnerPx === "function"
-            ? app._narrowestBookletWrapMetricsAndInnerPx(layoutChForPx) : null;
+        const narrow = typeof app._contextBookletWrapMetricsAndInnerPx === "function"
+            ? app._contextBookletWrapMetricsAndInnerPx(layoutChForPx)
+            : (typeof app._narrowestBookletWrapMetricsAndInnerPx === "function"
+                ? app._narrowestBookletWrapMetricsAndInnerPx(layoutChForPx)
+                : null);
         const metrics = narrow && narrow.metrics
             ? narrow.metrics
             : (typeof app._getBookletSourceLineTextMetricsForWrap === "function" ? app._getBookletSourceLineTextMetricsForWrap() : null);
