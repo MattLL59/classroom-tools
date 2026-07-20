@@ -9988,6 +9988,9 @@ const app = {
             if(opts.skipEditorRebuild) {
                 const widthChanged = prevMetaCh == null || Math.round(prevMetaCh) !== Math.round(v);
                 const forceRelayout = opts.forceRelayout === true;
+                if(opts.skipResync !== true && widthChanged && typeof app.repairLegacyImportWidthCapForWidening === "function") {
+                    app.repairLegacyImportWidthCapForWidening(prevMetaCh, v);
+                }
                 if(opts.skipResync !== true && (widthChanged || forceRelayout) && typeof app.resyncC1PassageEditorWithInsertWidth === "function") app.resyncC1PassageEditorWithInsertWidth({ skipRepair: true });
                 if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
                 if(typeof ui !== "undefined" && ui.refreshSourceDisplay && typeof appData.sourceText === "string") ui.refreshSourceDisplay(appData.sourceText);
@@ -10706,6 +10709,60 @@ const app = {
         /** Some “long” glitch rows (~half a printed line) mix with one-word rows; median + ratio still indicate baked gutters. */
         if(o.lines.length >= 22 && median <= 26 && ratioShort >= 0.62 && maxLen <= Math.round(maxCh * 1.15)) return true;
         return false;
+    },
+    /**
+     * Detect older import fallback where stored rows were pre-wrapped around ~78 chars.
+     * Those rows can shrink when width narrows, but widening appears to "stop" near that cap
+     * because display splitting never joins adjacent stored rows.
+     */
+    _passageV2LooksLikeLegacyImportWidthCap: function(o, cap) {
+        if(!o || !Array.isArray(o.lines) || o.lines.length < 18) return false;
+        const hardCap = Math.max(48, Math.round(Number(cap) || 78));
+        const lens = [];
+        let paraTagged = 0;
+        for(let i = 0; i < o.lines.length; i++) {
+            const L = o.lines[i] || {};
+            if(L.paragraphStart === true) paraTagged++;
+            const n = app.htmlFragmentToPlainText(L.html || "").replace(/\s+/g, " ").trim().length;
+            if(n > 0) lens.push(n);
+        }
+        if(lens.length < 18) return false;
+        const sorted = lens.slice().sort(function(a, b) { return a - b; });
+        const median = sorted[Math.floor(sorted.length / 2)];
+        const p95 = sorted[Math.floor(sorted.length * 0.95)];
+        const maxLen = sorted[sorted.length - 1];
+        const nearCap = lens.filter(function(n) { return n >= hardCap - 6 && n <= hardCap + 2; }).length;
+        const nearCapRatio = nearCap / lens.length;
+        const paraRatio = paraTagged / Math.max(1, o.lines.length);
+        if(maxLen > hardCap + 6) return false;
+        if(median < Math.max(28, hardCap * 0.54)) return false;
+        if(p95 < hardCap - 10) return false;
+        if(nearCapRatio < 0.22) return false;
+        if(paraRatio > 0.35) return false;
+        return true;
+    },
+    /**
+     * When widening insert width on legacy-capped imports (~78), collapse row fragments within
+     * paragraph runs once so the wider width can actually lengthen visible lines again.
+     */
+    repairLegacyImportWidthCapForWidening: function(prevCh, nextCh) {
+        if(!appData || typeof appData.sourceText !== "string" || !appData.sourceText.trim().startsWith("{")) return false;
+        const was = Number(prevCh);
+        const now = Number(nextCh);
+        if(!Number.isFinite(was) || !Number.isFinite(now) || now <= was) return false;
+        const pdfImp = !!(appData && appData.meta && appData.meta.sourceLineBasis === "pdfImport");
+        if(!pdfImp) return false;
+        let parsed;
+        try { parsed = JSON.parse(appData.sourceText); } catch(e) { return false; }
+        if(!parsed || !Array.isArray(parsed.lines) || parsed.lines.length < 18) return false;
+        if(!(typeof app._passageV2LooksLikeLegacyImportWidthCap === "function" && app._passageV2LooksLikeLegacyImportWidthCap(parsed, 78))) return false;
+        if(typeof app.normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns !== "function") return false;
+        let merged = app.normalizeStructuredPassageV2CollapseWidthBakeWithinParagraphRuns(parsed, { force: true });
+        merged = app.normalizeStructuredPassageV2Sequential(merged);
+        const canon = app.serializeStructuredPassageV2(merged);
+        if(!canon || canon === appData.sourceText.trim()) return false;
+        app.syncLessonSourceCanonical(canon);
+        return true;
     },
     /**
      * Should we merge v2 rows into one logical line for storage? Non-PDF: yes unless clearly safe.
@@ -12704,11 +12761,13 @@ const app = {
         if(!rows || !rows.length) return rows || [];
         if(typeof app.bumpBookletWrapDomMetricsEpoch === "function") app.bumpBookletWrapDomMetricsEpoch();
         gutterOpts = gutterOpts || {};
+        const wCap = (typeof app.PASSAGE_INSERT_WIDTH_CH_MAX === "number" && app.PASSAGE_INSERT_WIDTH_CH_MAX > 28) ? app.PASSAGE_INSERT_WIDTH_CH_MAX : 150;
         let mc = maxChars;
         if(mc == null || !Number.isFinite(mc)) {
             mc = typeof app.getPassageColumnWidthChForLayout === "function" ? app.getPassageColumnWidthChForLayout() : 96;
         }
-        mc = Math.max(28, Math.min(120, Math.round(mc)));
+        /** Respect global insert-width max instead of hard-capping at 120. */
+        mc = Math.max(28, Math.min(wCap, Math.round(mc)));
         const splitMc = typeof app.getPassageSplitPlainMaxChars === "function" ? app.getPassageSplitPlainMaxChars(mc) : Math.max(28, Math.round(mc * 0.92) - 3);
         /** Layout indices only — booklet display offset applied in {@link applyPassageBookletDisplayOffsetToRows}; using meta here tied insert splits to “Booklet line 1”. */
         const base = 1;
@@ -14272,7 +14331,8 @@ const app = {
                 ? app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC
                 : 0.46;
             var colW = pw * frac;
-            maxLen = Math.max(32, Math.min(78, Math.floor(colW * 0.168)));
+            /** Fallback must scale with global insert-width max (no hidden ~78-char ceiling). */
+            maxLen = Math.max(32, Math.min(wHiRe, Math.floor(colW * 0.168)));
         }
         var out = [];
         function splitOne(s) {
@@ -14314,7 +14374,8 @@ const app = {
                 ? app.PDF_INSERT_BODY_COLUMN_WIDTH_FRAC
                 : 0.46;
             var colW = pw * frac;
-            maxLen = Math.max(32, Math.min(78, Math.floor(colW * 0.168)));
+            /** Keep paragraph-flag reflow aligned with non-flag fallback (no 78-char clamp). */
+            maxLen = Math.max(32, Math.min(wHiRe2, Math.floor(colW * 0.168)));
         }
         var outLines = [];
         var outPara = [];
