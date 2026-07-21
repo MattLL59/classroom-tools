@@ -2783,7 +2783,7 @@
                         </div>
                         <textarea id="unified-json-error-text" readonly style="height:140px; width:100%; font-family:ui-monospace,Consolas,monospace; font-size:0.74rem; line-height:1.35; resize:vertical;" aria-label="JSON parse error details"></textarea>
                     </div>
-                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="Optional: when pasting AI-generated lesson JSON, keep your current passage layout instead of replacing it with the model output. File Load JSON always uses the file passage."><input type="checkbox" id="ai-json-preserve-passage" onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> When pasting AI JSON only: keep my current passage layout (not used for Load JSON files)</label>
+                    <label style="display:block; font-size:0.78rem; margin-top:8px; line-height:1.4;" title="Default ON: when pasting AI-generated lesson JSON, keep your current passage text/layout instead of replacing it with the model output. You can untick if you intentionally want the model passage. File Load JSON always uses the file passage."><input type="checkbox" id="ai-json-preserve-passage" checked onchange="try{localStorage.setItem('architect.preservePassageOnAiJsonImport',this.checked?'1':'0');}catch(e){}"> When pasting AI JSON only: keep my current passage text/layout (recommended)</label>
                     <details style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
                         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">Compact AI — enrich existing quotes only</summary>
                         <p style="font-size:0.76rem; margin:8px 0 6px 0; padding:8px 10px; border-radius:6px; background:rgba(76,175,80,0.1); border:1px solid rgba(76,175,80,0.35);"><strong>Smallest prompt</strong> of the three passage-based workflows — good when you already have quotes and only need meanings, slots, or distractors. Still check the AI’s reply length; malformed JSON happens more when the model rushes.</p>
@@ -30608,8 +30608,11 @@ const admin = {
         if(!opts.replacePassageFromImport && preservePassage && prev && appData && appData.component !== 2 && prev.component !== 2) {
             const prevSrc = typeof prev.sourceText === "string" ? prev.sourceText : "";
             if(admin.passageWorthPreservingFromPrev(prev)) {
-                const incStr = admin.incomingLessonSourceTextForCompare(incoming);
-                if(admin.incomingPassageLosesC1Layout(prevSrc, incStr)) {
+                /**
+                 * Preserve mode means keep the teacher's current passage text/layout as source-of-truth.
+                 * This blocks legacy/AI drifts where the model invents or rewrites the story.
+                 */
+                if(prevSrc.trim()) {
                     appData.sourceText = prevSrc;
                     if(appData.selection && appData.selection.text) appData.selection.text.source = appData.sourceText;
                     restoredTeacherPassage = true;
@@ -35911,7 +35914,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             if(appData._passageRestoreNotice) {
                 delete appData._passageRestoreNotice;
                 setTimeout(function() {
-                    alert("Kept your passage layout and insert width. The AI JSON would have narrowed lines or changed ¶ breaks — only quotes, questions, and banks were taken from the model.");
+                    alert("Kept your current passage text/layout. Imported JSON updated quotes, questions, and banks only.");
                 }, 80);
             }
             app.afterLessonImportUi({ applyPassageScope: true });
@@ -35939,7 +35942,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                 const v = localStorage.getItem("architect.preservePassageOnAiJsonImport");
                 if(v === "0" || v === "false") pc.checked = false;
                 else if(v === "1" || v === "true") pc.checked = true;
-                else pc.checked = false;
+                else pc.checked = true; /* Default ON to prevent accidental AI passage replacement. */
             } catch(e) {}
         }
     },
@@ -36299,13 +36302,15 @@ Q1 WORKSHEET — SHORT ANSWER IN OWN WORDS (Component 1 only; optional on lesson
   • "worksheetInferenceDistractors": array of 2–4 strings. EACH entry must be ONE simple sentence only (≤18 words), same plain register as a mark-scheme indicative “wrong idea”; wrong plausible fact or misconception. FORBIDDEN in distractors: semicolon chains; two clauses joined by which/whereas/although; stacked analytical phrasing; any verbatim or near-verbatim chunk from sourceText. Omit both keys if not applicable.
 These fields power the Word worksheet “Short answer practice” block (separate from quote match tasks).`;
 
-        const srcExcerpt = txt.length > 1000 ? txt.substring(0, 1000) + "…" : txt;
+        const srcLockedJson = JSON.stringify(String(txt || ""));
+        const srcPreview = txt.length > 220 ? txt.substring(0, 220) + "…" : txt;
         aiPromptOut.value = `Role: Expert English Teacher. 
 Task: Create a JSON lesson for students.
-Source Text (excerpt for prompt size — you MUST still output the COMPLETE passage in lesson.sourceText, not a summary): "${srcExcerpt}"
+Source Text (VERBATIM lock — copy this EXACT string into lesson.sourceText with no rewrites, no summary, no invented continuation): ${srcLockedJson}
+Source preview: "${srcPreview}"
 ${focusQuestionsText}${msForLessonPrompt}${lessonWorksheetBlock}${q1WorksheetInferencePrompt}
 
-CRITICAL — sourceText and quotes: (a) sourceText must be the FULL verbatim reading passage: one string with \\n between lines, each line prefixed with its line number and space (e.g. "1 ...\\n2 ...\\n3 ...") so line ranges and quotes match — never a synopsis, blurb, or paraphrase. (The app displays margin labels only every 5 lines like the exam paper.) (b) Every item.original must be an exact contiguous substring copied from that passage — never invented placeholder lines.
+CRITICAL — sourceText and quotes: (a) lesson.sourceText must be EXACTLY the same text as Source Text above (verbatim lock): no rewrites, no summary, no simplification, no new story text, no extra lines. Keep line numbers exactly as given. (b) Every item.original must be an exact contiguous substring copied from that passage — never invented placeholder lines.
 
 Requirements:
 1. Create ${c} items. Each item object must have: { id, original (quote from text), translation (meaning), translationDistractors (2 wrong meanings), type (${typeLabel}), effect (analysis sentence), effectDistractors (2 wrong analysis sentences), levels:[1..10], includeInWorksheet (boolean), modelAnswer }. Default includeInWorksheet false on every row; if WORKSHEET EXPORT FLAGS appear above, set true only for the listed question ids and matching item originals.
@@ -36496,6 +36501,10 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                 admin.mergeLessonConfig(payload, prev, appData);
                 app.normalizeLessonQuestionsAfterRepair(appData, null);
                 admin.finalizeLessonAfterAiJsonImport(payload, prev);
+                if(appData._passageRestoredFromTeacher) {
+                    delete appData._passageRestoredFromTeacher;
+                    appData._passageRestoreNotice = true;
+                }
                 admin.derivePointsFromQuestions();
                 if(appData && appData.settings && appData.settings.levelBank) {
                     let maxQt = 0;
@@ -36537,6 +36546,12 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             admin.applyModelAnswersFromItems({ overwrite: true, generate: false });
             admin.populateAnalysisBanksFromLessonItems({ silent: true });
             app.afterLessonImportUi();
+            if(appData && appData._passageRestoreNotice) {
+                delete appData._passageRestoreNotice;
+                setTimeout(function() {
+                    alert("Kept your current passage text/layout. Imported JSON updated quotes, questions, and banks only.");
+                }, 80);
+            }
             if(exportAfter) admin.exportStandalone();
         } catch(e) {
             const msg = e && e.message ? e.message : "Invalid JSON or corrupted file.";
@@ -36686,11 +36701,13 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             });
             if(parts.length) markSchemeBlock = "\\n\\nMark scheme indicative content (use as the authority for what counts as credit-worthy):\\n" + parts.join("\\n\\n") + "\\n\\nGood vs bad - use the mark scheme above as the authority:\\n- Good quote: a short extract that directly supports or illustrates at least one mark scheme point. Only treat as correct (good) if it backs up one of those points.\\n- Bad quote: from the right line range but does not support any mark scheme point. Use as wrong options; use a short dismiss phrase (e.g. Does this answer the question?).\\n- Good point (reason): for each good quote, the reason must restate or reflect the mark scheme point the quote supports.\\n- Distractor point: a reason that sounds plausible but does not match the mark scheme. Include 1-2 per good quote.\\n";
         }
-        const selExcerpt = text.length > 1000 ? text.substring(0, 1000) + "…" : text;
+        const selSourceLockJson = JSON.stringify(String(text || ""));
+        const selSourcePreview = text.length > 220 ? text.substring(0, 220) + "…" : text;
         const prompt = `Role: Expert English Teacher
 Task: Create a JSON template for quote-selection practice.
 
-Source Text (excerpt — output the FULL verbatim passage in JSON sourceText with line numbers, not a summary): "${selExcerpt}"
+Source Text (VERBATIM lock — copy exactly into JSON text.source, no rewrites): ${selSourceLockJson}
+Source preview: "${selSourcePreview}"
 
 Per-level questions (use these to create relevant quotes):
 ${targetSummary}
@@ -36727,7 +36744,7 @@ Requirements:
 14. Total target = ${totalTarget} quotes. If the text cannot supply that many real quotes, include as many as possible and mark each as correct:true/false accordingly.
 15. Make incorrect quotes plausible (near-miss): choose lines that are thematically related but do not answer the question as well as the correct quotes. Avoid obvious random lines.
 16. In all JSON string values, do NOT include backslashes or Windows paths (e.g. C:\\Users). Use forward slashes for paths. Use only valid JSON escapes: \\", \\\\, \\n, \\t, \\uXXXX. This prevents "Bad Unicode escape" parse errors.
-17. For sourceText: output PLAIN TEXT only. No HTML, no CSS. Prefix each physical line with its line number: "1 " or "1. " then the line text (every line — needed for "lines 12–15" and quote matching). Do NOT embed numbers mid-sentence. (The app displays margin labels only at 5, 10, 15… like the printed paper.)
+17. For text.source: output PLAIN TEXT only and keep it EXACTLY the same as Source Text above (verbatim lock). No HTML, no CSS, no rewrites, no invented continuation.
 18. Each level has one question (Q1→L1, Q2→L2). Assign each item questionIds:[q01] or questionIds:[q02] etc. Generate quotes per question from marks [5], [10].
 
 CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explanation, or commentary before or after. No markdown code blocks (no \`\`\`json or \`\`\`). No phrases like "Here is the JSON" or "I hope this helps." The first character must be { and the last character must be }. Output ONLY valid JSON—nothing else.`;
