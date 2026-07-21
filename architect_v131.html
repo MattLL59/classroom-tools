@@ -2735,6 +2735,8 @@
                     <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
                         <button class="btn btn-outline btn-small" onclick="admin.loadSavedSourceQuestion()">Use saved text + question</button>
                         <button class="btn btn-outline btn-small" onclick="admin.restoreOriginalPassageFromPastPaperCache()">Restore original passage (cached PDF)</button>
+                        <button class="btn btn-outline btn-small" onclick="admin.openLobbyPastPaperTools()">Open Lobby PDF import/re-extract tools</button>
+                        <button class="btn btn-outline btn-small" onclick="admin.openC1SourcePassageTools()">Open passage/PDF editor tools</button>
                         <div style="font-size:0.8rem; opacity:0.7; align-self:center;">Component 1: <strong>Use saved text + question</strong> loads the current lesson passage. If refresh shows an AI version, use <strong>Restore original passage (cached PDF)</strong> to rebuild from saved past-paper files without hunting in Lobby. Component 2: <strong>Lobby → Extract text</strong> saves passages in the lesson; open <strong>Editing Suite → Component 2 — passages</strong> and click <strong>Load from lesson</strong> if the editor looks empty.</div>
                     </div>
                     <div style="display:flex; gap:10px; margin-bottom:6px;">
@@ -2907,7 +2909,7 @@
                     </div>
                     <p id="template-current" style="margin:8px 0 0 0; font-size:0.9rem; font-weight:500;"></p>
                 </details>
-                <details class="admin-section">
+                <details class="admin-section" id="admin-import-past-paper-details" open>
                     <summary class="admin-h">📄 Import past paper</summary>
                     <details class="lobby-help-details">
                         <summary title="How past-paper import works">?</summary>
@@ -26936,6 +26938,89 @@ const admin = {
             app.save();
         }
     },
+    ensurePastPaperToolsVisible: function(opts) {
+        opts = opts || {};
+        const forceOpen = opts.forceOpen === true;
+        const sections = [
+            document.getElementById("admin-lobby-export-details"),
+            document.getElementById("admin-import-past-paper-details")
+        ];
+        sections.forEach(function(det) {
+            if(!det) return;
+            det.classList.remove("hidden");
+            if(det.style && det.style.display === "none") det.style.display = "";
+            if(forceOpen) det.open = true;
+        });
+        [
+            "past-paper-load-mode",
+            "past-paper-questions",
+            "past-paper-resource",
+            "past-paper-markscheme",
+            "past-paper-extract-btn",
+            "past-paper-reextract-btn",
+            "past-paper-reextract-resource-btn",
+            "past-paper-reextract-markscheme-btn"
+        ].forEach(function(id) {
+            const el = document.getElementById(id);
+            if(!el) return;
+            el.classList.remove("hidden");
+            if(el.style && el.style.display === "none") el.style.display = "";
+        });
+        if(typeof admin.syncPastPaperLabels === "function") admin.syncPastPaperLabels();
+        if(typeof admin.syncPastPaperExtractButtons === "function") admin.syncPastPaperExtractButtons();
+    },
+    openLobbyPastPaperTools: function() {
+        if(!appData || appData.isStandalone) {
+            app.showArchitectAlert("Past-paper PDF tools are available in teacher mode only.", { error: true });
+            return;
+        }
+        if(typeof ui !== "undefined" && typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        if(typeof admin.goAdminTab === "function") admin.goAdminTab("export");
+        const reveal = function() {
+            if(typeof admin.ensurePastPaperToolsVisible === "function") admin.ensurePastPaperToolsVisible({ forceOpen: true });
+            const det = document.getElementById("admin-import-past-paper-details") || document.getElementById("admin-lobby-export-details");
+            if(det && typeof det.scrollIntoView === "function") {
+                try { det.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e) {}
+            }
+        };
+        if(typeof requestAnimationFrame === "function") requestAnimationFrame(reveal);
+        else setTimeout(reveal, 0);
+    },
+    openC1SourcePassageTools: function() {
+        if(!appData || appData.isStandalone) {
+            app.showArchitectAlert("Passage/PDF editor tools are available in teacher mode only.", { error: true });
+            return;
+        }
+        if(typeof ui !== "undefined" && typeof ui.showTeacherSettings === "function") ui.showTeacherSettings();
+        if(appData.component === 2) {
+            if(typeof admin.goAdminTab === "function") admin.goAdminTab("edit");
+            const c2Det = document.getElementById("admin-c2-passages-details");
+            if(c2Det) {
+                c2Det.classList.remove("hidden");
+                c2Det.open = true;
+                try { c2Det.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e) {}
+            }
+            app.showArchitectAdminToast("This lesson is <strong>Component 2</strong>. Use <strong>Editing Suite → Component 2 — passages</strong> for text, and <strong>Lobby → Import past paper</strong> for PDF re-extract.", { honorUserDismiss: false, autoHideMs: 12000 });
+            return;
+        }
+        if(typeof admin.goAdminTab === "function") admin.goAdminTab("edit");
+        if(typeof admin.placeC1SourceWrapForAdminTab === "function") {
+            try { admin.placeC1SourceWrapForAdminTab({ forceEditMount: true }); } catch(e) {}
+        }
+        const det = document.getElementById("admin-c1-source-details");
+        if(det) {
+            det.classList.remove("hidden");
+            if(det.style && det.style.display === "none") det.style.display = "";
+            det.open = true;
+        }
+        if(typeof ui !== "undefined" && typeof ui.scrollC1PassageEditorIntoView === "function") ui.scrollC1PassageEditorIntoView({ force: true });
+        else {
+            const layout = document.getElementById("c1-passage-editor-layout") || document.getElementById("source-text-single-wrap");
+            if(layout && typeof layout.scrollIntoView === "function") {
+                try { layout.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e) {}
+            }
+        }
+    },
     syncPastPaperExtractButtons: function() {
         const ex = document.getElementById("past-paper-extract-btn");
         const qu = document.getElementById("past-paper-reextract-btn");
@@ -29309,6 +29394,7 @@ const admin = {
                 if(typeof requestIdleCallback === "function") requestIdleCallback(fillQ, { timeout: 2500 });
                 else setTimeout(fillQ, 0);
             } else if(k === "export") {
+                try { if(admin.ensurePastPaperToolsVisible) admin.ensurePastPaperToolsVisible({ forceOpen: false }); } catch(eVis) {}
                 try { admin.syncPastPaperLabels(); } catch(eLbl) {}
                 try { admin.syncPastPaperExtractButtons(); } catch(eBtn) {}
                 if(!appData.isStandalone && admin.restorePastPaperFilesFromIdb) {
