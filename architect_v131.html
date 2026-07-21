@@ -2802,7 +2802,7 @@
                     <details style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
                         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">Advanced — optional legacy prompts (paid AI tier strongly recommended)</summary>
                         <p style="font-size:0.76rem; line-height:1.45; margin:8px 0 12px 0;"><strong>Account note:</strong> These flows are fiddly on <strong>free</strong> chat limits — you usually want a <strong>pro / Plus / Teams / higher-limit</strong> plan on whichever AI you paste into (ChatGPT, Copilot, Claude, Gemini, etc.), so the model accepts the whole prompt and can return a <strong>full-length JSON</strong> without cutting off mid-file.</p>
-                        <p style="font-size:0.76rem; line-height:1.45; margin:8px 0 12px 0;">Use only if you <strong>know</strong> you want the older prompt shapes or have notes that reference them. Prefer <strong>Unified</strong> above for one JSON load into this app. Sizes: <strong>full-lesson legacy</strong> ≈ similar rule weight to unified but different wording (passage <em>excerpt</em> in the prompt; model must still output the complete passage inside JSON); <strong>selection-only</strong> = quote-bank JSON — usually shorter than unified but <strong>bigger than compact enrich</strong> (excerpt + targets + often long mark scheme text).</p>
+                            <p style="font-size:0.76rem; line-height:1.45; margin:8px 0 12px 0;">Use only if you <strong>know</strong> you want the older prompt shapes or have notes that reference them. Prefer <strong>Unified</strong> above for one JSON load into this app. Sizes: <strong>full-lesson legacy</strong> ≈ similar rule weight to unified but different wording (includes a verbatim source lock); <strong>selection-only</strong> = quote-bank JSON — usually shorter than unified but <strong>bigger than compact enrich</strong> (source lock + targets + often long mark scheme text).</p>
 
                         <div style="margin-bottom:16px; padding-bottom:14px; border-bottom:1px dashed var(--border);">
                             <div style="font-weight:700; font-size:0.85rem; margin-bottom:6px;">1) Legacy “full lesson” prompt → JSON</div>
@@ -36273,7 +36273,14 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             return sum + (entry.quoteTarget || 4) + (entry.distractorCount || 4);
         }, 0);
         const c = aiCountEl ? aiCountEl.value : String(autoTarget);
-        const txt = (app.getAiInputValue() || "").trim() || (appData.sourceText || "");
+        const rawTxt = (app.getAiInputValue() || "").trim() || (appData.sourceText || "");
+        let txt = rawTxt;
+        try {
+            if(typeof app.sourceToPlainForAi === "function") {
+                const plain = String(app.sourceToPlainForAi(rawTxt) || "").trim();
+                if(plain) txt = plain;
+            }
+        } catch(eSrcPlain) {}
         admin.syncQuestionsFromList();
         const rawQuestions = (appData.questions && appData.questions.length) ? appData.questions.slice() : [{ id: "q1", prompt: appData.question || "How does the writer use language?" }];
         const sortQuestionId = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
@@ -36389,11 +36396,9 @@ Q1 WORKSHEET — SHORT ANSWER IN OWN WORDS (Component 1 only; optional on lesson
 These fields power the Word worksheet “Short answer practice” block (separate from quote match tasks).`;
 
         const srcLockedJson = JSON.stringify(String(txt || ""));
-        const srcPreview = txt.length > 220 ? txt.substring(0, 220) + "…" : txt;
         aiPromptOut.value = `Role: Expert English Teacher. 
 Task: Create a JSON lesson for students.
-Source Text (VERBATIM lock — copy this EXACT string into lesson.sourceText with no rewrites, no summary, no invented continuation): ${srcLockedJson}
-Source preview: "${srcPreview}"
+Source Text JSON string (VERBATIM lock — decode this JSON string and copy the exact text into lesson.sourceText with no rewrites, no summary, no invented continuation): ${srcLockedJson}
 ${focusQuestionsText}${msForLessonPrompt}${lessonWorksheetBlock}${q1WorksheetInferencePrompt}
 
 CRITICAL — sourceText and quotes: (a) lesson.sourceText must be EXACTLY the same text as Source Text above (verbatim lock): no rewrites, no summary, no simplification, no new story text, no extra lines. Keep line numbers exactly as given. (b) Every item.original must be an exact contiguous substring copied from that passage — never invented placeholder lines.
@@ -36721,7 +36726,14 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
     generateSelectionPrompt: () => {
         if(!document.getElementById("selection-prompt-out")) return;
         admin.syncQuestionsFromList();
-        const text = (app.getAiInputValue() || "").trim() || (appData.sourceText || "");
+        const rawText = (app.getAiInputValue() || "").trim() || (appData.sourceText || "");
+        let text = rawText;
+        try {
+            if(typeof app.sourceToPlainForAi === "function") {
+                const plain = String(app.sourceToPlainForAi(rawText) || "").trim();
+                if(plain) text = plain;
+            }
+        } catch(eSelPlain) {}
         const rawQ = Array.isArray(appData.questions) ? appData.questions : [{ id: "q1", prompt: appData.question || "How does the writer use language?" }];
         const sortQid = (id) => { const m = String(id || "").match(/q0?(\d+)/i); return m ? parseInt(m[1], 10) : 99; };
         const questions = rawQ.slice().sort((a, b) => sortQid(a.id) - sortQid(b.id));
@@ -36788,12 +36800,10 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
             if(parts.length) markSchemeBlock = "\\n\\nMark scheme indicative content (use as the authority for what counts as credit-worthy):\\n" + parts.join("\\n\\n") + "\\n\\nGood vs bad - use the mark scheme above as the authority:\\n- Good quote: a short extract that directly supports or illustrates at least one mark scheme point. Only treat as correct (good) if it backs up one of those points.\\n- Bad quote: from the right line range but does not support any mark scheme point. Use as wrong options; use a short dismiss phrase (e.g. Does this answer the question?).\\n- Good point (reason): for each good quote, the reason must restate or reflect the mark scheme point the quote supports.\\n- Distractor point: a reason that sounds plausible but does not match the mark scheme. Include 1-2 per good quote.\\n";
         }
         const selSourceLockJson = JSON.stringify(String(text || ""));
-        const selSourcePreview = text.length > 220 ? text.substring(0, 220) + "…" : text;
         const prompt = `Role: Expert English Teacher
 Task: Create a JSON template for quote-selection practice.
 
-Source Text (VERBATIM lock — copy exactly into JSON text.source, no rewrites): ${selSourceLockJson}
-Source preview: "${selSourcePreview}"
+Source Text JSON string (VERBATIM lock — decode and copy exactly into JSON text.source, no rewrites): ${selSourceLockJson}
 
 Per-level questions (use these to create relevant quotes):
 ${targetSummary}
