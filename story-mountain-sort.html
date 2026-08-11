@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Story Mountain Sort</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700;9..144,800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink: #161C2C;
+    --slate-1: #232C46;
+    --slate-2: #34406A;
+    --paper: #EEE6D3;
+    --paper-shadow: #C9BE9F;
+    --ink-text: #241F14;
+    --amber: #E8A33D;
+    --amber-soft: rgba(232,163,61,0.35);
+    --coral: #E8624F;
+    --moss: #7FA85C;
+    --mist: #AEB6D6;
+    --radius: 14px;
+  }
+
+  *{ box-sizing: border-box; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+
+  body{
+    margin:0;
+    min-height:100vh;
+    background:
+      radial-gradient(ellipse at 50% -10%, #2A3559 0%, transparent 55%),
+      var(--ink);
+    color: var(--mist);
+    font-family: 'Inter', system-ui, sans-serif;
+    padding: 20px 14px 60px;
+  }
+
+  .app-shell{ max-width: 900px; margin: 0 auto; }
+
+  /* ---------- Header ---------- */
+  header{
+    display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+    gap:16px; margin-bottom:18px;
+  }
+  .title-block h1{
+    font-family:'Fraunces', serif; font-weight:700; font-optical-sizing:auto;
+    font-size: clamp(1.5rem, 4.2vw, 2.35rem);
+    color:#F6F2E7; margin:0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .title-block p{ margin:0; color:var(--mist); font-size:0.92rem; }
+  .title-block .eyebrow{
+    font-family:'IBM Plex Mono', monospace; font-size:0.7rem; letter-spacing:0.14em;
+    text-transform:uppercase; color: var(--amber); margin-bottom:6px; display:block;
+  }
+
+  .header-right{ display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+  .progress{ display:flex; gap:8px; }
+  .dot{
+    width:11px; height:11px; border-radius:50%;
+    border:2px solid var(--slate-2); background:transparent;
+    transition: all .3s ease;
+  }
+  .dot.current{ border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-soft); }
+  .dot.done{ background: var(--amber); border-color: var(--amber); }
+
+  .team-field{ display:flex; align-items:center; gap:6px; }
+  .team-field label{ font-size:0.72rem; color:var(--mist); font-family:'IBM Plex Mono', monospace; }
+  .team-field input{
+    background: transparent; border:none; border-bottom:1px solid var(--slate-2);
+    color:#F6F2E7; font-family:'Inter'; font-size:0.85rem; padding:2px 4px; width:130px;
+    outline:none;
+  }
+  .team-field input:focus{ border-color: var(--amber); }
+
+  /* ---------- Mountain panel ---------- */
+  .mountain-panel{
+    background: linear-gradient(180deg, var(--slate-1), var(--ink));
+    border:1px solid var(--slate-2);
+    border-radius: var(--radius);
+    padding: 18px 14px 6px;
+    margin-bottom: 20px;
+    position:relative;
+    overflow:hidden;
+  }
+  .mountain-panel .set-heading{
+    display:flex; align-items:baseline; gap:10px; margin: 0 4px 8px;
+    flex-wrap:wrap;
+  }
+  .mountain-panel .set-heading .icon{ font-size:1.3rem; }
+  .mountain-panel .set-heading h2{
+    font-family:'Fraunces', serif; font-weight:600; font-size:1.15rem; color:#F6F2E7; margin:0;
+  }
+  .mountain-panel .set-heading span.count{
+    font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color: var(--amber); letter-spacing:0.08em;
+  }
+
+  svg#mountain{ width:100%; height:auto; display:block; }
+  .node-circle{ fill: var(--slate-2); stroke: var(--ink); stroke-width:3; transition: fill .35s ease, filter .35s ease; }
+  .node-circle.correct{ fill: var(--amber); filter: drop-shadow(0 0 6px var(--amber-soft)); }
+  .node-num{ font-family:'IBM Plex Mono', monospace; font-weight:600; font-size:13px; fill:#1B2030; }
+  .node-circle.correct + .node-num{ fill: #241703; }
+  .node-label{ font-family:'IBM Plex Mono', monospace; font-size:9.5px; letter-spacing:0.06em; fill: var(--mist); text-transform:uppercase; }
+  .trail-line{ fill:none; stroke: var(--slate-2); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  .mountain-fill{ opacity:0.55; }
+
+  @keyframes nodePulse{
+    0%{ transform: scale(1); }
+    40%{ transform: scale(1.35); }
+    100%{ transform: scale(1); }
+  }
+  .node-circle.pulse{ animation: nodePulse .5s ease; transform-origin: center; transform-box: fill-box; }
+
+  .flag{ opacity:0; transform: translateY(6px) scale(0.6); transform-origin: bottom center; transform-box: fill-box; transition: all .45s cubic-bezier(.34,1.56,.64,1); }
+  .flag.show{ opacity:1; transform: translateY(0) scale(1); }
+
+  /* ---------- Game grid ---------- */
+  .game-grid{
+    display:grid; grid-template-columns: 1fr 1.1fr; gap:16px;
+    margin-bottom:16px;
+  }
+  @media (max-width: 700px){ .game-grid{ grid-template-columns: 1fr; } }
+
+  .panel{
+    background: var(--slate-1); border:1px solid var(--slate-2); border-radius: var(--radius);
+    padding: 14px;
+  }
+  .panel h3{
+    margin:0 0 10px; font-family:'IBM Plex Mono', monospace; font-size:0.72rem;
+    text-transform:uppercase; letter-spacing:0.1em; color: var(--mist); font-weight:600;
+  }
+
+  /* Strip cards (pool) */
+  #pool-list{ display:flex; flex-direction:column; gap:10px; min-height: 60px; }
+  .strip-card{
+    all:unset; cursor:pointer; display:block;
+    background: var(--paper); color: var(--ink-text);
+    border-radius: 6px; padding: 10px 12px;
+    font-size: 0.86rem; line-height:1.4;
+    box-shadow: 0 3px 0 var(--paper-shadow), 0 3px 8px rgba(0,0,0,0.35);
+    border: 1px dashed rgba(36,31,20,0.25);
+    transition: transform .18s ease, box-shadow .18s ease, rotate .18s ease;
+  }
+  .strip-card:focus-visible{ outline: 2px solid var(--amber); outline-offset:2px; }
+  .strip-card:hover{ transform: translateY(-2px) rotate(0deg) !important; }
+  .strip-card.selected{
+    rotate: 0deg !important; transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 0 0 2px var(--amber), 0 6px 14px rgba(0,0,0,0.4);
+  }
+  .pool-empty{ font-size:0.82rem; color: var(--mist); font-style:italic; padding:8px 2px; }
+
+  /* Slots */
+  #slots-list{ display:flex; flex-direction:column; gap:8px; }
+  .slot-row{ display:flex; align-items:stretch; gap:10px; }
+  .slot-marker{
+    flex: 0 0 auto; width:42px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-family:'IBM Plex Mono', monospace;
+  }
+  .slot-marker .num{ font-size:1.05rem; font-weight:600; color: var(--amber); }
+  .slot-marker .name{ font-size:0.58rem; text-align:center; color:var(--mist); text-transform:uppercase; letter-spacing:0.04em; line-height:1.15; margin-top:2px; }
+
+  .slot-drop{
+    all:unset; cursor:pointer; flex:1; min-height:52px;
+    display:flex; align-items:center;
+    border-radius:6px; border:2px dashed var(--slate-2);
+    padding:8px 12px; font-size:0.84rem; color: var(--mist); font-style:italic;
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .slot-drop:focus-visible{ outline: 2px solid var(--amber); outline-offset:2px; }
+  .slot-drop.filled{
+    background: var(--paper); color: var(--ink-text); border-style:solid; border-color: transparent;
+    font-style:normal; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+  .slot-drop.correct{ border: 2px solid var(--moss); }
+  .slot-drop.incorrect{ border: 2px solid var(--coral); }
+  .slot-drop.incorrect.shake{ animation: shake .4s ease; }
+  @keyframes shake{
+    0%,100%{ transform: translateX(0); }
+    20%{ transform: translateX(-4px); } 40%{ transform: translateX(4px); }
+    60%{ transform: translateX(-3px); } 80%{ transform: translateX(3px); }
+  }
+
+  /* ---------- Controls ---------- */
+  .controls{ display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  button.btn{
+    font-family:'Inter'; font-weight:600; font-size:0.85rem; cursor:pointer;
+    border-radius: 999px; padding: 10px 20px; border:1px solid transparent;
+  }
+  .btn-primary{ background: var(--amber); color:#241703; }
+  .btn-primary:hover{ filter: brightness(1.08); }
+  .btn-primary:disabled{ background: var(--slate-2); color: var(--mist); cursor:not-allowed; }
+  .btn-ghost{ background:transparent; border-color: var(--slate-2); color: var(--mist); }
+  .btn-ghost:hover{ border-color: var(--amber); color: var(--amber); }
+  button.btn:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+
+  #message{ font-size:0.86rem; color: var(--mist); flex:1 1 100%; min-height:1.2em; }
+  #message.win{ color: var(--amber); font-weight:600; }
+
+  /* ---------- Completion overlay ---------- */
+  .overlay{
+    position:fixed; inset:0; background: rgba(11,14,24,0.85);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+    opacity:0; pointer-events:none; transition: opacity .3s ease; z-index:10;
+  }
+  .overlay.show{ opacity:1; pointer-events:auto; }
+  .overlay-card{
+    background: linear-gradient(180deg, var(--slate-1), var(--ink));
+    border:1px solid var(--amber); border-radius: 18px; padding: 32px 28px;
+    max-width: 400px; text-align:center;
+  }
+  .overlay-card .peak{ font-size:2.4rem; margin-bottom:8px; }
+  .overlay-card h2{ font-family:'Fraunces', serif; color:#F6F2E7; margin:0 0 8px; font-size:1.5rem; }
+  .overlay-card p{ font-size:0.9rem; color:var(--mist); margin:0 0 20px; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <header>
+    <div class="title-block">
+      <span class="eyebrow">Narrative Workshop</span>
+      <h1>Story Mountain Sort</h1>
+      <p id="set-subtitle">Tap a strip, then tap the stage it belongs to.</p>
+    </div>
+    <div class="header-right">
+      <div class="progress" id="progress" aria-label="Progress through 3 stories"></div>
+      <div class="team-field">
+        <label for="team-input">Team</label>
+        <input id="team-input" type="text" placeholder="name your team" maxlength="24" />
+      </div>
+    </div>
+  </header>
+
+  <section class="mountain-panel">
+    <div class="set-heading">
+      <span class="icon" id="set-icon">🚗</span>
+      <h2 id="set-title">The Driving Lesson Disaster</h2>
+      <span class="count" id="set-count">SET 1 OF 3</span>
+    </div>
+    <svg id="mountain" viewBox="0 0 600 190" xmlns="http://www.w3.org/2000/svg">
+      <polygon class="mountain-fill" fill="url(#mgrad)" points="0,190 60,152 180,104 300,34 420,104 540,144 600,180 600,190 0,190"/>
+      <defs>
+        <linearGradient id="mgrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3E4A73"/>
+          <stop offset="100%" stop-color="#161C2C"/>
+        </linearGradient>
+      </defs>
+      <polyline class="trail-line" points="20,172 60,152 180,104 300,34 420,104 540,144 580,168"/>
+      <!-- nodes injected by JS -->
+      <g id="nodes"></g>
+      <g id="flag" class="flag"></g>
+    </svg>
+  </section>
+
+  <div class="game-grid">
+    <div class="panel">
+      <h3>Story strips</h3>
+      <div id="pool-list"></div>
+    </div>
+    <div class="panel">
+      <h3>Story mountain stages</h3>
+      <div id="slots-list"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="check-btn">Check order</button>
+    <button class="btn btn-ghost" id="reset-btn">Shuffle again</button>
+    <button class="btn btn-ghost" id="next-btn" disabled>Next set →</button>
+    <div id="message" aria-live="polite"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="overlay-card">
+    <div class="peak">🏔️🚩</div>
+    <h2 id="overlay-title">You've climbed all three mountains!</h2>
+    <p id="overlay-text">Every story sorted, beginning to end. Nice teamwork.</p>
+    <button class="btn btn-primary" id="play-again-btn">Play again</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const STAGE_NAMES = ["Beginning","Build-up","Climax","Resolution","Ending"];
+  const NODE_XY = [[60,152],[180,104],[300,34],[420,104],[540,144]];
+
+  const STORIES = [
+    {
+      icon: "🚗",
+      title: "The Driving Lesson Disaster",
+      strips: [
+        "I was finally taking my best friend out for her very first driving lesson in my pride and joy car.",
+        "She was doing brilliant until we hit the sharp, steep bend at the top of the hill.",
+        "Suddenly, she panicked, took the corner way too tight, and drove straight up a massive grass bank, flipping the car onto its side.",
+        "Two strong blokes from a nearby recovery truck ran over to help and lifted both of us out through the passenger door.",
+        "We were completely unhurt, but I knew right then that I would never let her behind the wheel of my car ever again."
+      ]
+    },
+    {
+      icon: "🔧",
+      title: "The Workshop Explosion",
+      strips: [
+        "It was a quiet Tuesday afternoon, and we were finishing up our practical assessments in the college workshop.",
+        "My mate was clearing away his tools near the main workbench, completely forgetting that a can of highly flammable spray paint was sitting right next to the hot welding torch.",
+        "There was a massive, deafening BANG as the can exploded into a ball of orange fire, sending everyone diving flat onto the concrete floor.",
+        "The lecturer sprinted across the room, grabbed the heavy foam fire extinguisher, and blasted the flames out in three seconds flat.",
+        "The alarm finally stopped ringing, and we spent the rest of the day cleaning up black soot, glad that nobody lost their eyebrows."
+      ]
+    },
+    {
+      icon: "📱",
+      title: "The Broken Screen Nightmare",
+      strips: [
+        "I was sitting on the top deck of the morning bus to college, listening to music on my brand-new phone.",
+        "The bus hit a massive pothole in the road, sending my backpack flying off my lap and into the aisle.",
+        "As I scrambled to grab it, a heavy boot stepped straight down onto my phone, making a horrific, loud cracking sound.",
+        "The passenger quickly apologized and lifted their shoe, revealing a completely shattered, dead black screen.",
+        "I sat back in my seat in total shock, wondering how on earth I was going to explain this absolute mess to my parents."
+      ]
+    }
+  ];
+
+  let currentSet = 0;
+  let completed = [false, false, false];
+  let pool = [];
+  let slots = [null, null, null, null, null];
+  let slotStatus = [null, null, null, null, null];
+  let selectedUid = null;
+
+  const el = {
+    progress: document.getElementById('progress'),
+    setIcon: document.getElementById('set-icon'),
+    setTitle: document.getElementById('set-title'),
+    setCount: document.getElementById('set-count'),
+    setSubtitle: document.getElementById('set-subtitle'),
+    poolList: document.getElementById('pool-list'),
+    slotsList: document.getElementById('slots-list'),
+    checkBtn: document.getElementById('check-btn'),
+    resetBtn: document.getElementById('reset-btn'),
+    nextBtn: document.getElementById('next-btn'),
+    message: document.getElementById('message'),
+    nodes: document.getElementById('nodes'),
+    flag: document.getElementById('flag'),
+    overlay: document.getElementById('overlay'),
+    playAgainBtn: document.getElementById('play-again-btn'),
+    teamInput: document.getElementById('team-input'),
+  };
+
+  function shuffle(arr){
+    const a = arr.slice();
+    for(let i=a.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+
+  function buildNodes(){
+    el.nodes.innerHTML = '';
+    NODE_XY.forEach(([x,y], i)=>{
+      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+      g.innerHTML = `
+        <circle class="node-circle" data-i="${i}" cx="${x}" cy="${y}" r="15"></circle>
+        <text class="node-num" x="${x}" y="${y+4}" text-anchor="middle">${i+1}</text>
+        <text class="node-label" x="${x}" y="${y + (i===2 ? -24 : 30)}" text-anchor="middle">${STAGE_NAMES[i]}</text>
+      `;
+      el.nodes.appendChild(g);
+    });
+    const [fx, fy] = NODE_XY[4];
+    el.flag.innerHTML = `
+      <line x1="${fx}" y1="${fy-16}" x2="${fx}" y2="${fy-34}" stroke="#F6F2E7" stroke-width="2"/>
+      <path d="M ${fx} ${fy-34} L ${fx+16} ${fy-29} L ${fx} ${fy-24} Z" fill="#E8624F"/>
+    `;
+    el.flag.classList.remove('show');
+  }
+
+  function loadSet(index){
+    currentSet = index;
+    const story = STORIES[index];
+    pool = shuffle(story.strips.map((text, i) => ({ uid: index+'-'+i, stage: i+1, text })));
+    slots = [null,null,null,null,null];
+    slotStatus = [null,null,null,null,null];
+    selectedUid = null;
+
+    el.setIcon.textContent = story.icon;
+    el.setTitle.textContent = story.title;
+    el.setCount.textContent = `SET ${index+1} OF 3`;
+    el.setSubtitle.textContent = "Tap a strip, then tap the stage it belongs to.";
+    el.nextBtn.textContent = index === 2 ? 'Finish →' : 'Next set →';
+    el.nextBtn.disabled = true;
+    el.message.textContent = '';
+    el.message.classList.remove('win');
+
+    buildNodes();
+    render();
+  }
+
+  function render(){
+    renderProgress();
+    renderPool();
+    renderSlots();
+    renderMountain();
+  }
+
+  function renderProgress(){
+    el.progress.innerHTML = '';
+    for(let i=0;i<3;i++){
+      const d = document.createElement('span');
+      d.className = 'dot' + (completed[i] ? ' done' : '') + (i===currentSet ? ' current' : '');
+      el.progress.appendChild(d);
+    }
+  }
+
+  function renderPool(){
+    el.poolList.innerHTML = '';
+    if(pool.length === 0){
+      const p = document.createElement('div');
+      p.className = 'pool-empty';
+      p.textContent = 'All strips placed. Check your order below!';
+      el.poolList.appendChild(p);
+      return;
+    }
+    pool.forEach((strip, idx) => {
+      const b = document.createElement('button');
+      b.className = 'strip-card' + (strip.uid === selectedUid ? ' selected' : '');
+      b.style.rotate = (idx % 2 === 0 ? '-1.1deg' : '1.4deg');
+      b.textContent = strip.text;
+      b.setAttribute('aria-pressed', strip.uid === selectedUid ? 'true' : 'false');
+      b.addEventListener('click', () => onPoolClick(strip.uid));
+      el.poolList.appendChild(b);
+    });
+  }
+
+  function renderSlots(){
+    el.slotsList.innerHTML = '';
+    for(let i=0;i<5;i++){
+      const row = document.createElement('div');
+      row.className = 'slot-row';
+
+      const marker = document.createElement('div');
+      marker.className = 'slot-marker';
+      marker.innerHTML = `<span class="num">${String(i+1).padStart(2,'0')}</span><span class="name">${STAGE_NAMES[i]}</span>`;
+
+      const drop = document.createElement('button');
+      const filled = slots[i] !== null;
+      let cls = 'slot-drop' + (filled ? ' filled' : '');
+      if(slotStatus[i] === 'correct') cls += ' correct';
+      if(slotStatus[i] === 'incorrect') cls += ' incorrect';
+      drop.className = cls;
+      drop.textContent = filled ? slots[i].text : '— tap a strip, then tap here —';
+      drop.addEventListener('click', () => onSlotClick(i));
+
+      row.appendChild(marker);
+      row.appendChild(drop);
+      el.slotsList.appendChild(row);
+    }
+  }
+
+  function renderMountain(){
+    const circles = el.nodes.querySelectorAll('.node-circle');
+    circles.forEach((c, i) => {
+      c.classList.toggle('correct', slotStatus[i] === 'correct');
+    });
+  }
+
+  function onPoolClick(uid){
+    selectedUid = (selectedUid === uid) ? null : uid;
+    renderPool();
+  }
+
+  function onSlotClick(i){
+    if(selectedUid !== null){
+      const stripIdx = pool.findIndex(s => s.uid === selectedUid);
+      if(stripIdx === -1) return;
+      const strip = pool[stripIdx];
+      pool.splice(stripIdx, 1);
+      const existing = slots[i];
+      slots[i] = strip;
+      slotStatus[i] = null;
+      if(existing){ pool.push(existing); }
+      selectedUid = null;
+    } else if(slots[i] !== null){
+      pool.push(slots[i]);
+      slots[i] = null;
+      slotStatus[i] = null;
+    }
+    render();
+  }
+
+  function checkOrder(){
+    if(slots.some(s => s === null)){
+      el.message.textContent = 'Fill all 5 stages before checking.';
+      el.message.classList.remove('win');
+      return;
+    }
+    let correctCount = 0;
+    const newlyCorrectIdx = [];
+    slots.forEach((s, i) => {
+      const isCorrect = s.stage === i+1;
+      if(isCorrect && slotStatus[i] !== 'correct') newlyCorrectIdx.push(i);
+      slotStatus[i] = isCorrect ? 'correct' : 'incorrect';
+      if(isCorrect) correctCount++;
+    });
+    render();
+
+    // shake incorrect ones
+    document.querySelectorAll('.slot-drop.incorrect').forEach(node => {
+      node.classList.add('shake');
+      node.addEventListener('animationend', () => node.classList.remove('shake'), { once:true });
+    });
+    // pulse newly-correct nodes
+    newlyCorrectIdx.forEach(i => {
+      const c = el.nodes.querySelector(`.node-circle[data-i="${i}"]`);
+      if(c){ c.classList.add('pulse'); c.addEventListener('animationend', () => c.classList.remove('pulse'), { once:true }); }
+    });
+
+    if(correctCount === 5){
+      completed[currentSet] = true;
+      el.message.textContent = 'All 5 in the right place! You reached the summit. 🏔️';
+      el.message.classList.add('win');
+      el.nextBtn.disabled = false;
+      el.flag.classList.add('show');
+      renderProgress();
+    } else {
+      el.message.textContent = `${correctCount} of 5 in the right place — keep going!`;
+      el.message.classList.remove('win');
+    }
+  }
+
+  function nextSet(){
+    if(currentSet < 2){
+      loadSet(currentSet + 1);
+    } else {
+      showCompletion();
+    }
+  }
+
+  function showCompletion(){
+    const team = el.teamInput.value.trim();
+    document.getElementById('overlay-title').textContent = team
+      ? `Nice work, ${team}!`
+      : `You've climbed all three mountains!`;
+    el.overlay.classList.add('show');
+  }
+
+  function playAgain(){
+    completed = [false, false, false];
+    el.overlay.classList.remove('show');
+    loadSet(0);
+  }
+
+  el.checkBtn.addEventListener('click', checkOrder);
+  el.resetBtn.addEventListener('click', () => loadSet(currentSet));
+  el.nextBtn.addEventListener('click', nextSet);
+  el.playAgainBtn.addEventListener('click', playAgain);
+
+  loadSet(0);
+})();
+</script>
+</body>
+</html>
