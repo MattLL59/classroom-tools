@@ -37,7 +37,7 @@
 
   /* Builder */
   .setup-intro { font-size: 14px; color: var(--ink-soft); margin: 0 0 20px; line-height: 1.5; }
-  .toolbar { display: flex; gap: 10px; margin-bottom: 22px; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
   .btn { font-family: var(--font-sans); font-size: 13px; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
   .btn:hover { border-color: var(--accent); }
   .btn-danger { color: var(--bad); border-color: var(--bad-border); background: var(--bad-bg); font-size: 12px; padding: 6px 10px; }
@@ -58,6 +58,13 @@
   .empty-state { text-align: center; padding: 24px 12px; color: var(--ink-soft); font-size: 14px; margin-bottom: 16px; border: 1px dashed var(--line); border-radius: 12px; }
   .error-text { color: var(--bad); font-size: 13px; margin: 0 0 14px; }
   .file-input { display: none; }
+
+  /* Share link panel */
+  .share-panel { border: 1px solid var(--good-border); background: var(--good-bg); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  .share-label { font-size: 13px; color: var(--good); margin: 0 0 10px; font-weight: 500; }
+  .share-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .share-input { flex: 1; min-width: 180px; font-family: var(--font-sans); font-size: 13px; padding: 9px 12px; border: 1px solid var(--good-border); border-radius: 8px; background: #fff; color: var(--ink); }
+  .share-hint { font-size: 11px; color: var(--ink-soft); margin: 8px 0 0; }
 
   /* Shared quiz UI */
   .edit-link { display: inline-block; font-size: 13px; color: var(--ink-soft); text-decoration: underline; cursor: pointer; margin-bottom: 18px; background: none; border: none; padding: 0; font-family: var(--font-sans); }
@@ -91,9 +98,9 @@
 <body>
 <div class="page">
   <header>
-    <p class="eyebrow">Vocabulary quiz builder</p>
-    <h1>Build your own vocabulary check</h1>
-    <p class="subtitle">Add words, correct definitions and wrong answers, then play</p>
+    <p class="eyebrow" id="page-eyebrow">Vocabulary quiz builder</p>
+    <h1 id="page-title">Build your own vocabulary check</h1>
+    <p class="subtitle" id="page-subtitle">Add words, correct definitions and wrong answers, then play</p>
   </header>
   <div class="card">
     <div class="frame-top"></div>
@@ -107,15 +114,58 @@
   var root = document.getElementById('app-root');
   var fileInput = document.getElementById('file-input');
 
+  // ---------- base64url helpers (unicode-safe) ----------
+  function toBase64Url(str) {
+    var utf8 = unescape(encodeURIComponent(str));
+    var b64 = btoa(utf8);
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function fromBase64Url(b64url) {
+    var b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var utf8 = atob(b64);
+    return decodeURIComponent(escape(utf8));
+  }
+
+  function parseSharedData() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var d = params.get('d');
+      if (!d) return null;
+      var json = fromBase64Url(d);
+      var data = JSON.parse(json);
+      if (!data.e || !Array.isArray(data.e) || data.e.length === 0) return null;
+      return data.e.map(function (en) {
+        return {
+          word: en.w || '', prompt: en.p || '', correct: en.c || '',
+          d1: en.d1 || '', d2: en.d2 || '', d3: en.d3 || '', note: en.n || ''
+        };
+      });
+    } catch (err) {
+      return null;
+    }
+  }
+
+  var sharedEntries = parseSharedData();
+  var isSharedMode = !!sharedEntries;
+
   var idCounter = 0;
   var entries = [];
   var mode = 'setup'; // 'setup' | 'quiz' | 'results'
   var formError = '';
+  var shareUrl = '';
 
   var quizQuestions = [];
   var current = 0;
   var score = 0;
   var answered = false;
+
+  if (isSharedMode) {
+    document.getElementById('page-eyebrow').textContent = 'Vocabulary check';
+    document.getElementById('page-title').textContent = 'Test your vocabulary';
+    document.getElementById('page-subtitle').textContent = '';
+    document.title = 'Vocabulary Check';
+  }
 
   function newEntry() {
     idCounter++;
@@ -124,14 +174,18 @@
 
   function addEntry() {
     entries.push(newEntry());
+    shareUrl = '';
   }
 
   function removeEntry(id) {
     entries = entries.filter(function (e) { return e.id !== id; });
+    shareUrl = '';
   }
 
-  // start with three blank cards so it's obvious what to do
-  addEntry(); addEntry(); addEntry();
+  if (!isSharedMode) {
+    // start with three blank cards so it's obvious what to do
+    addEntry(); addEntry(); addEntry();
+  }
 
   function shuffle(arr) {
     for (var i = arr.length - 1; i > 0; i--) {
@@ -165,7 +219,7 @@
 
     var intro = document.createElement('p');
     intro.className = 'setup-intro';
-    intro.textContent = 'Add each word, its correct definition, and at least one wrong answer. Load a saved list to reuse it, or save this one to use again next time.';
+    intro.textContent = 'Add each word, its correct definition, and at least one wrong answer. Load a saved list to reuse it, save this one for next time, or get a link that sends students straight to the quiz.';
     root.appendChild(intro);
 
     var toolbar = document.createElement('div');
@@ -176,9 +230,40 @@
     var saveBtn = document.createElement('button');
     saveBtn.type = 'button'; saveBtn.className = 'btn'; saveBtn.textContent = 'Save this list';
     saveBtn.onclick = saveToFile;
+    var linkBtn = document.createElement('button');
+    linkBtn.type = 'button'; linkBtn.className = 'btn'; linkBtn.textContent = 'Get student link';
+    linkBtn.onclick = handleGetLink;
     toolbar.appendChild(loadBtn);
     toolbar.appendChild(saveBtn);
+    toolbar.appendChild(linkBtn);
     root.appendChild(toolbar);
+
+    if (shareUrl) {
+      var sharePanel = document.createElement('div');
+      sharePanel.className = 'share-panel';
+      var shareLabel = document.createElement('p');
+      shareLabel.className = 'share-label';
+      shareLabel.textContent = 'Share this link with students \u2014 it opens straight to the quiz:';
+      var shareRow = document.createElement('div');
+      shareRow.className = 'share-row';
+      var shareInput = document.createElement('input');
+      shareInput.type = 'text'; shareInput.readOnly = true; shareInput.value = shareUrl; shareInput.className = 'share-input';
+      shareInput.onclick = function () { shareInput.select(); };
+      var copyBtn = document.createElement('button');
+      copyBtn.type = 'button'; copyBtn.className = 'btn'; copyBtn.textContent = 'Copy link';
+      copyBtn.onclick = function () { copyToClipboard(shareUrl, copyBtn); };
+      shareRow.appendChild(shareInput);
+      shareRow.appendChild(copyBtn);
+      sharePanel.appendChild(shareLabel);
+      sharePanel.appendChild(shareRow);
+      var shareHint = document.createElement('p');
+      shareHint.className = 'share-hint';
+      shareHint.textContent = shareUrl.length > 1800
+        ? ('This link is quite long (' + shareUrl.length + ' characters) \u2014 if sharing it causes problems, try fewer words or shorter definitions. If you change any words above, click "Get student link" again to refresh it.')
+        : 'If you change any words above, click "Get student link" again to refresh it.';
+      sharePanel.appendChild(shareHint);
+      root.appendChild(sharePanel);
+    }
 
     if (entries.length === 0) {
       var empty = document.createElement('div');
@@ -307,6 +392,58 @@
     render();
   }
 
+  function handleGetLink() {
+    var valid = validateEntries();
+    if (!valid) {
+      formError = entries.length === 0
+        ? 'Add at least one word before creating a link.'
+        : 'Please fill in the highlighted fields before creating a link.';
+      shareUrl = '';
+      renderSetup();
+      return;
+    }
+    formError = '';
+    var compact = {
+      e: entries.map(function (e) {
+        var obj = { w: e.word.trim(), c: e.correct.trim(), d1: e.d1.trim() };
+        if (e.prompt && e.prompt.trim()) obj.p = e.prompt.trim();
+        if (e.d2 && e.d2.trim()) obj.d2 = e.d2.trim();
+        if (e.d3 && e.d3.trim()) obj.d3 = e.d3.trim();
+        if (e.note && e.note.trim()) obj.n = e.note.trim();
+        return obj;
+      })
+    };
+    var encoded = toBase64Url(JSON.stringify(compact));
+    shareUrl = window.location.origin + window.location.pathname + '?d=' + encoded;
+    renderSetup();
+  }
+
+  function copyToClipboard(text, btn) {
+    var original = btn.textContent;
+    function done(ok) {
+      btn.textContent = ok ? 'Copied!' : 'Copy failed \u2014 select and copy manually';
+      setTimeout(function () { btn.textContent = original; }, 1800);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }).catch(function () { done(false); });
+    } else {
+      try {
+        var temp = document.createElement('textarea');
+        temp.value = text;
+        temp.style.position = 'fixed';
+        temp.style.opacity = '0';
+        document.body.appendChild(temp);
+        temp.focus();
+        temp.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(temp);
+        done(ok);
+      } catch (err) {
+        done(false);
+      }
+    }
+  }
+
   function buildQuizQuestion(e) {
     var options = [{ text: e.correct.trim(), correct: true }];
     [e.d1, e.d2, e.d3].forEach(function (d) {
@@ -362,6 +499,7 @@
           };
         });
         formError = '';
+        shareUrl = '';
         renderSetup();
       } catch (err) {
         formError = "That file doesn't look like a saved vocabulary list.";
@@ -379,7 +517,7 @@
     answered = false;
     var q = quizQuestions[current];
 
-    root.appendChild(editLink());
+    if (!isSharedMode) root.appendChild(editLink());
 
     var progress = document.createElement('div');
     progress.className = 'progress';
@@ -488,15 +626,24 @@
     retry.className = 'btn';
     retry.textContent = 'Play again';
     retry.onclick = function () { shuffle(quizQuestions); current = 0; score = 0; mode = 'quiz'; render(); };
-
-    var editBtn = document.createElement('button');
-    editBtn.className = 'btn';
-    editBtn.textContent = 'Edit words';
-    editBtn.onclick = function () { mode = 'setup'; render(); };
-
     actions.appendChild(retry);
-    actions.appendChild(editBtn);
+
+    if (!isSharedMode) {
+      var editBtn = document.createElement('button');
+      editBtn.className = 'btn';
+      editBtn.textContent = 'Edit words';
+      editBtn.onclick = function () { mode = 'setup'; render(); };
+      actions.appendChild(editBtn);
+    }
+
     root.appendChild(actions);
+  }
+
+  // ---------- Init ----------
+  if (isSharedMode) {
+    quizQuestions = sharedEntries.map(buildQuizQuestion);
+    shuffle(quizQuestions);
+    mode = 'quiz';
   }
 
   render();
