@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-07-19T22:40:00">
-<meta name="architect-deploy" content="fix-ai-passage-verbatim-f806">
-<meta name="architect-rev" content="c1-passage-wrap-fix-f806">
+<meta name="architect-build" content="2026-09-01T20:00:00">
+<meta name="architect-deploy" content="pastpaper-extracting-notice-5f6a">
+<meta name="architect-rev" content="pastpaper-progress-feedback-5f6a">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -2834,8 +2834,8 @@
                     <details class="lobby-help-details">
                         <summary title="How past-paper import works">?</summary>
                         <div class="lobby-help-body">
-                            <p>Upload the PDFs for a past paper. Use <strong>Extract text</strong> then <strong>Extract questions</strong> (or paste past-paper JSON and use <strong>Load JSON</strong> in this Editing Suite panel — loading a lesson clears cached PDFs in this browser so you choose files again for this paper).</p>
-                            <p><strong>Extract text</strong> caches PDFs and updates the <strong>resource</strong>, <strong>questions-PDF passages</strong> (including Component 2 layout for the 21st C resource text and the 19th C extract from the question paper), and <strong>mark scheme</strong>. It does <strong>not</strong> change the question bank. Then use <strong>Extract questions</strong> to split <strong>Section A reading</strong> tasks into the bank. If <strong>Extract questions</strong> finds fewer than two items and you left the Section A reading page field empty (Component 2), the app may retry from the full Questions PDF; if you set specific pages, that widening is skipped.</p>
+                            <p><strong>Component 1:</strong> choose the three PDFs (Questions, Resource, Mark scheme) — each is extracted automatically as soon as you pick it, so there's no separate button to click. You stay on this Lobby tab throughout; the app only switches to <strong>Editing Suite</strong> once all three have finished. Fewer than three is fine (at least one PDF is required) — you just won't get the automatic jump, so open Editing Suite yourself when ready. (Or paste past-paper JSON and use <strong>Load JSON</strong> in the Editing Suite panel — loading a lesson clears cached PDFs in this browser so you choose files again for this paper.)</p>
+                            <p>The <strong>Extract text</strong> / <strong>Extract questions</strong> / <strong>Re-extract …</strong> buttons below re-run extraction on demand — use them after changing a page-range field, or for Component 2 (which doesn't auto-load). <strong>Extract text</strong> updates the <strong>resource</strong>, <strong>questions-PDF passages</strong> (including Component 2 layout for the 21st C resource text and the 19th C extract from the question paper), and <strong>mark scheme</strong>; it does <strong>not</strong> change the question bank. <strong>Extract questions</strong> splits <strong>Section A reading</strong> tasks into the bank. If it finds fewer than two items and you left the Section A reading page field empty (Component 2), the app may retry from the full Questions PDF; if you set specific pages, that widening is skipped.</p>
                             <p>At least one PDF is required. <strong>Component 1</strong>: resource page(s) empty → defaults 2–3; question page(s) empty → whole PDF; mark scheme page(s) empty → <strong>5–13</strong>. <strong>Component 2</strong> when a page box is left empty: <strong>Resource</strong> defaults to pages <strong>2–3</strong> (type <code>all</code> for every page). <strong>Section A reading</strong> defaults to page <strong>2</strong>. <strong>19th C passage</strong> defaults to page <strong>3</strong>. Mark scheme: <strong>4–12</strong>. After changing files or page fields, run <strong>Extract text</strong> then <strong>Extract questions</strong> (or the per-part <strong>Re-extract …</strong> buttons).</p>
                             <p>PDFs are stored in <strong>IndexedDB</strong> when you choose files or run <strong>Extract text</strong>, so <strong>Extract questions</strong> and <strong>Re-extract …</strong> still work after a reload. Filenames (not file data) are saved in your lesson JSON; exports for students omit PDF cache.</p>
                         </div>
@@ -14086,7 +14086,9 @@ const app = {
         if(typeof pdfjsLib !== "undefined" && pdfjsLib.getDocument) return Promise.resolve(pdfjsLib);
         if(app._pdfjsLoadPromise) return app._pdfjsLoadPromise;
         app._pdfjsLoadPromise = new Promise(function(resolve, reject) {
-            if(document.getElementById("architect-pdfjs-script")) {
+            var existingScript = document.getElementById("architect-pdfjs-script") ||
+                document.querySelector('script[src*="pdf.js/3.11.174/pdf.min.js"]');
+            if(existingScript) {
                 var t0 = Date.now();
                 (function wait() {
                     if(typeof pdfjsLib !== "undefined" && pdfjsLib.getDocument) return resolve(pdfjsLib);
@@ -14129,10 +14131,17 @@ const app = {
      */
     _pdfTryGetDocumentFromBuffer: function(arrayBuffer) {
         var opts = app._pdfGetDocumentFromBuffer(arrayBuffer);
+        if(opts.disableWorker) return pdfjsLib.getDocument(opts).promise;
+        /** Passing an ArrayBuffer to pdf.js's Worker transfers (detaches) it — clone now so a main-thread fallback below still has an intact, independent copy to parse. */
+        var fallbackBuffer;
+        try { fallbackBuffer = arrayBuffer.slice(0); } catch(eClone) { fallbackBuffer = arrayBuffer; }
         var first = pdfjsLib.getDocument(opts).promise;
-        if(opts.disableWorker) return first;
-        return first.catch(function() {
-            return pdfjsLib.getDocument({ data: arrayBuffer, disableWorker: true }).promise;
+        /** A rejected worker attempt is already caught below, but a Worker that never loads (blocked CDN worker script, COOP, restrictive network) can leave this promise pending forever instead of rejecting — the .catch() alone would then never fire. Race it against a timeout so a hung worker still falls back to main-thread parsing instead of leaving the whole extraction silently stuck. */
+        var timedOut = new Promise(function(resolve, reject) {
+            setTimeout(function() { reject(new Error("PDF.js worker timed out")); }, 6000);
+        });
+        return Promise.race([first, timedOut]).catch(function() {
+            return pdfjsLib.getDocument({ data: fallbackBuffer, disableWorker: true }).promise;
         });
     },
     /** File.arrayBuffer is missing on some older mobile WebViews — use FileReader. */
@@ -15155,9 +15164,10 @@ const app = {
             /** Side channel (same pattern as _lastPdfDebug): any un-numbered header/intro line(s) detected ahead of the real numbered passage — see _pdfSplitLeadingHeaderLinesByIndent. Callers that care (the Component 1 "Extract text" flow) read this right after the returned promise resolves. */
             app._lastPdfExtractedHeaderLines = null;
         } catch(eInitDbg) {}
-        return app.ensurePdfJsLoaded().then(function() {
-            return app._pdfTryGetDocumentFromBuffer(arrayBuffer);
-        }).then(function(pdf) {
+        /** If the caller already parsed this exact buffer earlier in the same extraction pass (e.g. reExtractResourceFromPages does its own page-by-page layout pass first), let it hand us that pdf.js document via importOpts.existingPdf instead of re-parsing the whole PDF from bytes again — a real, measurable cost with the main-thread (no-Worker) parser this app uses. */
+        var pdfReady = importOpts.existingPdf ? Promise.resolve(importOpts.existingPdf)
+            : app.ensurePdfJsLoaded().then(function() { return app._pdfTryGetDocumentFromBuffer(arrayBuffer); });
+        return pdfReady.then(function(pdf) {
             var n = pdf.numPages || 0;
             if(n < 1) throw new Error("PDF has no pages");
             var a = pageFrom != null && Number.isFinite(pageFrom) ? Math.max(1, Math.floor(pageFrom)) : 1;
@@ -19953,10 +19963,22 @@ const app = {
         } catch(eRs) {}
     },
     /** After Lobby extract / re-extract: clear defer flags and paint passage (Lab, Quote Select, editor). */
-    finishPassageAfterExtract: function() {
+    finishPassageAfterExtract: function(opts) {
+        opts = opts || {};
         app._heavyLessonOnLoad = false;
         app._studentPassagePaintScheduled = false;
         if(appData && appData.component !== 2) {
+            if(opts.skipTabJump) {
+                /* Staying in Lobby mid load-and-extract: skip the passage-editor hydrate
+                   retry loop entirely. runEditorHydrate() below calls
+                   hydrateAdminPassageForTeacherSetup(), which forces
+                   localStorage["tsa_admin_tab"] to "edit" as a side effect — harmless once
+                   we're actually navigating to Editing Suite, but while we're deliberately
+                   staying in Lobby (not all three past-paper sources loaded yet) it silently
+                   sets up a later jump this function's own skipTabJump was supposed to
+                   prevent. Editor hydration runs once, fresh, right before the real
+                   single jump in admin.maybeJumpToEditingSuiteAfterPastPaperLoad. */
+            } else {
             if(typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
             else {
                 app._passageExtractHydratePending = true;
@@ -19997,6 +20019,7 @@ const app = {
                 }
                 app._passageExtractHydratePending = false;
             }, 12000);
+            }
         } else {
             try {
                 if(typeof app.syncAdminAiInputFromLesson === "function") {
@@ -20013,7 +20036,7 @@ const app = {
                 if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
             }
         } catch(eUi) { console.warn("finishPassageAfterExtract UI:", eUi); }
-        if(appData && appData.component !== 2 && typeof ui !== "undefined" && typeof ui.openPassageLineEditorFromSetup === "function") {
+        if(!opts.skipTabJump && appData && appData.component !== 2 && typeof ui !== "undefined" && typeof ui.openPassageLineEditorFromSetup === "function") {
             const adm = document.getElementById("modal-admin");
             const settingsOpen = adm && adm.classList.contains("open") && typeof ui.isAdminModalVisible === "function" && ui.isAdminModalVisible();
             if(settingsOpen) {
@@ -20052,8 +20075,8 @@ const app = {
                 }
                 if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll();
             } else if(typeof app.finishPassageAfterExtract === "function") {
-                app.finishPassageAfterExtract();
-                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll({ skipSourceSync: true });
+                app.finishPassageAfterExtract({ skipTabJump: true });
+                if(typeof admin !== "undefined" && admin.renderAll) admin.renderAll({ skipSourceSync: true, skipTabActivate: true });
             } else if(typeof admin !== "undefined" && admin.renderAll) {
                 admin.renderAll();
             }
@@ -26812,6 +26835,29 @@ const admin = {
     _toolbarBoldPlain: null,
     tabsBound: false,
     pastPaperFiles: { questions: null, resource: null, markscheme: null },
+    /** Component 1 load-and-extract: which of the three sources has been extracted at least once (any trigger — auto on choose, a manual Extract/Re-extract click, or restoring cached PDFs after reload) and whether the one-time Editing Suite jump has already fired for this import. */
+    _pastPaperAutoDone: { questions: false, resource: false, markscheme: false },
+    _pastPaperAutoJumped: false,
+    /** Jump to Editing Suite once, only once Questions + Resource + Mark scheme have each been extracted — not after every individual source. Component 1 only; Component 2 uses its own passage-loading path. */
+    maybeJumpToEditingSuiteAfterPastPaperLoad: function() {
+        if(admin._pastPaperAutoJumped) return;
+        const d = admin._pastPaperAutoDone || {};
+        if(!(d.questions && d.resource && d.markscheme)) {
+            /* Not all three done yet — staying in Lobby on purpose. finishPassageAfterExtract's
+               skipTabJump only suppresses its own immediate goAdminTab call; belt-and-braces
+               against anything else (a stray requestIdleCallback, a modal reopen) that might
+               have already forced localStorage["tsa_admin_tab"] to "edit" in the meantime. */
+            app._forceAdminPassageHydrateForSetup = false;
+            app._passageExtractHydratePending = false;
+            try { if(localStorage.getItem("tsa_admin_tab") === "edit") localStorage.setItem("tsa_admin_tab", "export"); } catch(eRestore) {}
+            return;
+        }
+        admin._pastPaperAutoJumped = true;
+        if(appData && appData.component !== 2 && typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
+        if(typeof admin.goAdminTab === "function") admin.goAdminTab("edit");
+        const lb = document.getElementById("level-bank-editor");
+        if(lb) { try { lb.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {} }
+    },
     _pastPaperIdbDb: null,
     _pastPaperIdbName: "tsa_architect_pastpaper_v1",
     _pastPaperIdbStore: "pdfs",
@@ -26855,6 +26901,8 @@ const admin = {
     },
     removePastPaperPdfSlot: async function(slot) {
         if(!slot || !["questions","resource","markscheme"].includes(slot)) return;
+        if(admin._pastPaperAutoDone) admin._pastPaperAutoDone[slot] = false;
+        admin._pastPaperAutoJumped = false;
         try {
             const db = await admin.openPastPaperIdb();
             if(db) {
@@ -26924,6 +26972,8 @@ const admin = {
         /** Clear lesson meta + UI first (sync) so the next app.save() after Load JSON does not persist stale PDF filenames; IndexedDB deletes follow. */
         if(appData && appData.settings) delete appData.settings.pastPaperPdfMeta;
         admin.pastPaperFiles = { questions: null, resource: null, markscheme: null };
+        admin._pastPaperAutoDone = { questions: false, resource: false, markscheme: false };
+        admin._pastPaperAutoJumped = false;
         ["past-paper-name-1","past-paper-name-2","past-paper-name-3"].forEach(id => {
             const el = document.getElementById(id);
             if(el) el.textContent = "";
@@ -27235,13 +27285,26 @@ const admin = {
         const span = document.getElementById(spanId);
         if(span) span.textContent = f ? f.name : "";
         admin.syncPastPaperExtractButtons();
+        if(!admin._pastPaperAutoDone) admin._pastPaperAutoDone = { questions: false, resource: false, markscheme: false };
         if(f) {
+            admin._pastPaperAutoDone[slot] = false;
+            const label = slot === "questions" ? "questions" : slot === "resource" ? "resource passage" : "mark scheme";
+            if(typeof app.showPastPaperExtractNotice === "function") {
+                app.showPastPaperExtractNotice("⏳ Extracting " + label + "&hellip; this can take a few seconds.", { honorUserDismiss: false });
+            }
             const reader = new FileReader();
-            reader.onload = () => {
-                if(reader.result instanceof ArrayBuffer) admin.cachePastPaperPdfBuffer(slot, reader.result, f.name);
+            /** Load-and-extract: cache the PDF, then immediately run this slot's own extractor (same one the Re-extract button uses) so choosing a file is enough — no separate Extract text click needed. Each extractor marks itself done and checks maybeJumpToEditingSuiteAfterPastPaperLoad, which only jumps once all three are done, so this stays in Lobby until the whole paper is loaded. */
+            reader.onload = async () => {
+                if(reader.result instanceof ArrayBuffer) await admin.cachePastPaperPdfBuffer(slot, reader.result, f.name);
+                try {
+                    if(slot === "resource" && typeof admin.reExtractResourceFromPages === "function") await admin.reExtractResourceFromPages();
+                    else if(slot === "markscheme" && typeof admin.reExtractMarkSchemeFromPages === "function") await admin.reExtractMarkSchemeFromPages();
+                    else if(slot === "questions" && typeof admin.reExtractQuestionsFromPages === "function") await admin.reExtractQuestionsFromPages();
+                } catch(eAuto) { console.warn("Load & extract (" + slot + "):", eAuto); }
             };
             reader.readAsArrayBuffer(f);
         } else {
+            admin._pastPaperAutoDone[slot] = false;
             admin.removePastPaperPdfSlot(slot);
         }
         /** Reset the input after reading so re-selecting the SAME file again still fires a change event (browsers otherwise treat an identical selection as "no change" and silently do nothing). */
@@ -28349,7 +28412,9 @@ const admin = {
         const includeQuestions = !(opts && opts.questions === false);
         const files = admin.pastPaperFiles;
         if(!files.questions && !files.resource && !files.markscheme) return;
-        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
+        if(!window.pdfjsLib) {
+            try { await app.ensurePdfJsLoaded(); } catch(ePdfWait) { app.showArchitectAlert("Could not load the PDF tools — check your connection and try again.", { error: true }); return; }
+        }
         app._pastPaperExtractInFlight = true;
         app._pastPaperExtractNoticeUserDismissed = false;
         /** Give visible feedback while this runs — real PDFs (especially a multi-page mark scheme) can take several real seconds, and with no visual change the button looked unresponsive, leading people to click it again or check state before it had actually finished. */
@@ -28662,26 +28727,10 @@ const admin = {
             }
         }
         app.save({ skipRender: true, silent: true, skipQuestionPersist: !!includeQuestions });
-        if(typeof app.afterPastPaperExtractUi === "function") {
-            app.afterPastPaperExtractUi({
-                includeQuestions: includeQuestions,
-                loadAsComponent2: loadAsComponent2
-            });
-        } else {
-            if(!loadAsComponent2) {
-                app.setAiInputValue((appData.sourceText != null && String(appData.sourceText).trim() !== "" ? appData.sourceText : combined).trim());
-            }
-            if(includeQuestions) {
-                admin.syncLevelBankForPastPaperQuestions();
-                admin.autoAssignLevelsByLineRangeIfApplicable();
-            }
-            admin.refreshQuestionsList();
-            if(!loadAsComponent2 && typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
-            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
-            admin.renderAll({ skipSourceSync: true });
-            if(loadAsComponent2 && typeof admin.loadC2PassagesIntoEditor === "function")
-                admin.loadC2PassagesIntoEditor({ goToEditTab: false });
-        }
+        app.afterPastPaperExtractUi({
+            includeQuestions: includeQuestions,
+            loadAsComponent2: loadAsComponent2
+        });
         try {
             if(app._lastPdfDebug && app._lastPdfDebug.kind === "pastPaper") {
                 app._lastPdfDebug.questions = {
@@ -28726,7 +28775,9 @@ const admin = {
             app.showArchitectAlert("Load the Questions PDF first, then run Extract text to cache it, then Extract questions.", { error: true, autoHideMs: 20000 });
             return;
         }
-        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
+        if(!window.pdfjsLib) {
+            try { await app.ensurePdfJsLoaded(); } catch(ePdfWait) { app.showArchitectAlert("Could not load the PDF tools — check your connection and try again.", { error: true }); return; }
+        }
         admin._reExtractQuestionsInFlight = true;
         app._pastPaperExtractNoticeUserDismissed = false;
         const loadModeEl = document.getElementById("past-paper-load-mode");
@@ -28797,6 +28848,7 @@ const admin = {
                     }
                 };
             } catch(eDbg) {}
+            if(!appData) appData = app.repair(defaultData);
             appData.questions = admin.buildQuestionsFromFinalizedPrompts(parsed);
             if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
             if(typeof app.commitExtractedQuestions === "function") app.commitExtractedQuestions(appData.questions);
@@ -28835,7 +28887,9 @@ const admin = {
             app.showArchitectAlert("Load the Questions PDF first.", { error: true });
             return;
         }
-        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
+        if(!window.pdfjsLib) {
+            try { await app.ensurePdfJsLoaded(); } catch(ePdfWait) { app.showArchitectAlert("Could not load the PDF tools — check your connection and try again.", { error: true }); return; }
+        }
         if(!appData || appData.component !== 2 || !appData.component2Layout) {
             app.showArchitectAlert("Re-extract 19th C is for Component 2 only. Set Load as = Component 2 first.", { error: true });
             return;
@@ -28944,7 +28998,9 @@ const admin = {
             app.showArchitectAlert("Load the Resource PDF first, then run Extract text.", { error: true });
             return;
         }
-        if(!window.pdfjsLib) { app.showArchitectAlert("PDF library not loaded.", { error: true }); return; }
+        if(!window.pdfjsLib) {
+            try { await app.ensurePdfJsLoaded(); } catch(ePdfWait) { app.showArchitectAlert("Could not load the PDF tools — check your connection and try again.", { error: true }); return; }
+        }
         const pages = admin.getResourcePageSpec();
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
@@ -29013,10 +29069,16 @@ const admin = {
                         const pTo = pagesToUse && pagesToUse.length ? Math.max.apply(null, pagesToUse) : null;
                         const numberedPlain = await app.extractNumberedPlainFromPdfBuffer(ab, pFrom, pTo, {
                             strictPhysicalLines: true,
-                            useMarginOcr: false
+                            useMarginOcr: false,
+                            existingPdf: pdf
                         });
                         const repaired = app.repairExamMarginDigitArtifacts(String(numberedPlain || ""));
                         let v2 = app.plainNumberedLinesToStructuredV2(repaired, true, { sequentialLineNumbers: true });
+                        if(app._lastPdfExtractedHeaderLines && app._lastPdfExtractedHeaderLines.length && v2 && v2.lines && v2.lines.length) {
+                            /** Auto-detect a leading unnumbered intro/header line (e.g. "The main character in this extract is...") and peel it into headHtml instead of leaving it as numbered body line 1 — same as the bulk Extract-text path. Doing this here, at extraction time, means the teacher's own Optional intro box already has the right text and the body already starts numbering at the real line 1, with no manual cut-and-paste (and no renumbering gap) needed afterwards. */
+                            const peeled = app._peelKnownHeaderFromStructuredV2(v2, app._lastPdfExtractedHeaderLines);
+                            if(peeled) v2 = { v: v2.v, lines: peeled.lines, examMargin: v2.examMargin, headHtml: peeled.headHtml };
+                        }
                         if(v2 && v2.lines && v2.lines.length >= 1) {
                             if(typeof app._bakePdfGeomParagraphFlagsIntoStructuredV2IfPresent === "function")
                                 pdfGeomFromExtractRex = app._bakePdfGeomParagraphFlagsIntoStructuredV2IfPresent(v2);
@@ -29057,15 +29119,15 @@ const admin = {
                 app.save();
             }
             if(!isC2 && typeof app.beginPassageExtractEditorHydrate === "function") app.beginPassageExtractEditorHydrate();
-            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract({ skipTabJump: true });
             else if(isC2) {
                 if(ui.refreshSourceDisplay) ui.refreshSourceDisplay(null, { forcePassage: true });
                 if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: false });
             }
-            admin.renderAll({ skipSourceSync: true });
-            const admRex = document.getElementById("modal-admin");
-            if(!isC2 && admRex && admRex.classList.contains("open") && typeof admin.goAdminTab === "function") {
-                admin.goAdminTab("edit");
+            admin.renderAll({ skipSourceSync: true, skipTabActivate: true });
+            if(!isC2 && admin._pastPaperAutoDone) {
+                admin._pastPaperAutoDone.resource = true;
+                if(typeof admin.maybeJumpToEditingSuiteAfterPastPaperLoad === "function") admin.maybeJumpToEditingSuiteAfterPastPaperLoad();
             }
             app.showPastPaperExtractNotice("<strong>Resource passage re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s). Open <strong>Editing Suite → Component 1 — source passage</strong> to set booklet lines.", { autoHideMs: 18000 });
         } catch(e) {
@@ -29078,7 +29140,9 @@ const admin = {
             alert("Load the Mark scheme PDF first, then run Extract text.");
             return;
         }
-        if(!window.pdfjsLib) { alert("PDF library not loaded."); return; }
+        if(!window.pdfjsLib) {
+            try { await app.ensurePdfJsLoaded(); } catch(ePdfWait) { alert("Could not load the PDF tools — check your connection and try again."); return; }
+        }
         const pages = admin.getMarkSchemePageSpec();
         try {
             const ab = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(f); });
@@ -29098,7 +29162,11 @@ const admin = {
             appData.component2Layout.markSchemeText = app.normalizeMarkSchemeStorageText(markSchemeText);
             appData.markScheme = app.parseMarkSchemeFromText(markSchemeText);
             app.save();
-            admin.renderAll();
+            admin.renderAll({ skipTabActivate: true });
+            if(admin._pastPaperAutoDone) {
+                admin._pastPaperAutoDone.markscheme = true;
+                if(typeof admin.maybeJumpToEditingSuiteAfterPastPaperLoad === "function") admin.maybeJumpToEditingSuiteAfterPastPaperLoad();
+            }
             app.showPastPaperExtractNotice("<strong>Mark scheme re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s).", { autoHideMs: 12000 });
         } catch(e) {
             app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract mark scheme: " + (e.message || String(e)) + "</span>");
@@ -33019,7 +33087,7 @@ const admin = {
     /** After Extract questions: refresh lists, Level Bank L1→Qn, student banners. */
     afterExtractQuestionsUi: function(parsedCount) {
         try {
-            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract();
+            if(typeof app.finishPassageAfterExtract === "function") app.finishPassageAfterExtract({ skipTabJump: true });
             admin.refreshQuestionsList({ skipLevelBank: true });
             if(typeof admin.syncLevelBankForPastPaperQuestions === "function") admin.syncLevelBankForPastPaperQuestions();
             if(typeof admin.autoAssignLevelsByLineRangeIfApplicable === "function") admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
@@ -33033,10 +33101,9 @@ const admin = {
                     if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
                 }
             }
-            if(typeof admin.goAdminTab === "function") admin.goAdminTab("edit");
-            const lb = document.getElementById("level-bank-editor");
-            if(lb) {
-                try { lb.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch(eSc) {}
+            if(admin._pastPaperAutoDone) {
+                admin._pastPaperAutoDone.questions = true;
+                if(typeof admin.maybeJumpToEditingSuiteAfterPastPaperLoad === "function") admin.maybeJumpToEditingSuiteAfterPastPaperLoad();
             }
         } catch(eUi) {
             console.warn("afterExtractQuestionsUi:", eUi);
