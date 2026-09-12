@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-03T16:00:00">
-<meta name="architect-deploy" content="slower-reader-speed-range-c114">
-<meta name="architect-rev" content="autoscroll-pace-3-to-40-c114">
+<meta name="architect-build" content="2026-09-04T09:00:00">
+<meta name="architect-deploy" content="fix-open-quote-bank-btn-d823">
+<meta name="architect-rev" content="settings-to-data-naming-d823">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -1129,7 +1129,7 @@
     .select-q-collapsed-hint { display: none; font-weight: 600; color: var(--primary); opacity: 0.85; font-size: 0.8rem; }
     .component2-pane { font-size: 0.85rem; color: var(--primary); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
     #architect-c2-source-bar:not(.hidden), #architect-c2-source-bar-select:not(.hidden), #header-c2-source-bar:not(.hidden) { display: flex !important; }
-    #view-select { display: flex; flex-direction: column; min-height: 0; }
+    #view-select.active { min-height: 0; }
     #view-select-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
     /* min-height:0 lets the flex child shrink so #source-inline-select-scroll gets a bounded height and can scroll (default min-height:auto sizes to full passage and clips ~line 70+ behind overflow:hidden parents). */
     #source-inline-select-wrap { overflow: hidden; min-height: 0; max-height: 45vh; flex: 1 1 auto; display: flex; flex-direction: column; }
@@ -19775,7 +19775,7 @@ const app = {
             const essayBody = essayTopic.querySelector(".question-banner-content");
             if(title) {
                 essayTopic.classList.remove("hidden");
-                if(essayBody) essayBody.innerHTML = `<strong>Topic:</strong> ${app.escapeHtml(title)}`;
+                if(essayBody) essayBody.innerHTML = `${app.escapeHtml(title)}`;
             } else {
                 essayTopic.classList.add("hidden");
                 if(essayBody) essayBody.innerHTML = "";
@@ -21656,7 +21656,7 @@ const ui = {
             const essayBody = essayTopic.querySelector(".question-banner-content");
             if(title) {
                 essayTopic.classList.remove("hidden");
-                if(essayBody) essayBody.innerHTML = `<strong>Topic:</strong> ${app.escapeHtml(title)}`;
+                if(essayBody) essayBody.innerHTML = `${app.escapeHtml(title)}`;
             } else {
                 essayTopic.classList.add("hidden");
                 if(essayBody) essayBody.innerHTML = "";
@@ -22238,7 +22238,7 @@ const ui = {
         })();
         const focusTags = appData.selection && appData.selection.question ? (appData.selection.question.focusTags || []) : [];
         const html = question
-            ? `<strong>Focus Question:</strong> ${ui.buildQuestionHtml(question, focusTags, "")}`
+            ? ui.buildQuestionHtml(question, focusTags, "")
             : `<span style="opacity:0.9;">${app.escapeHtml("No focus question is linked for this level. Use the lesson topic below, or ask your teacher to assign a question in Level Bank → Questions.")}</span>`;
         const applyBanner = function(el) {
             if(!el) return;
@@ -22601,6 +22601,7 @@ const ui = {
             if(ui.refreshHeaderMarksOrXp) ui.refreshHeaderMarksOrXp();
             if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
         }
+        if(typeof ui.positionReaderWindow === "function") ui.positionReaderWindow();
     },
 
     openModal: (id) => {
@@ -23071,7 +23072,19 @@ const ui = {
     openAdminToQuoteOrSelection: function(quote, poolItem) {
         if(appData.isStandalone) return;
         const q = String(quote || "").trim();
-        if(!q) return;
+        if(!q) {
+            ui._pauseSelectionGate = true;
+            admin.renderAll();
+            if(admin.setTab) admin.setTab("edit");
+            localStorage.setItem("tsa_admin_tab", "edit");
+            ui.openModal("modal-admin");
+            const evidenceSection = document.getElementById("quotes-bank-list");
+            if(evidenceSection) {
+                const detailsEl = evidenceSection.closest("details");
+                if(detailsEl && !detailsEl.open) detailsEl.open = true;
+            }
+            return;
+        }
         const key = app.quoteKey(q);
         const evidenceItem = (appData.items || []).find(i => i && app.quoteKey(i.original) === key);
         if(evidenceItem) {
@@ -24382,7 +24395,7 @@ const ui = {
             cont.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Quote Selection needs more data</div>
                 <div style="opacity:0.8; margin-bottom:8px;">Enable Quote Selection in Settings.</div>
-                <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
+                <button class="btn btn-outline" onclick="ui.openAdmin()">Open Data</button>
             </div>`;
             return;
         }
@@ -24439,7 +24452,7 @@ const ui = {
             cont.innerHTML = `<div class="card" style="cursor:default;">
                 <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Quote Selection needs more data</div>
                 <div style="opacity:0.8; margin-bottom:8px;">Add source text and enable tap text for this level so students can select quotes by tapping the passage.</div>
-                <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
+                <button class="btn btn-outline" onclick="ui.openAdmin()">Open Data</button>
             </div>`;
             return;
         }
@@ -24681,7 +24694,7 @@ const ui = {
                 aiRefsHtml += `</div>`;
             } else if(showMean || showDev || showRub) {
                 const otherHint = quotesOnOtherLevels > 0
-                    ? ` ${quotesOnOtherLevels} quote(s) in the bank are linked to other levels — open Settings → Quote bank and tick <strong>L${level}</strong> on the quotes for this question.`
+                    ? ` ${quotesOnOtherLevels} quote(s) in the bank are linked to other levels — open Data → Quote bank and tick <strong>L${level}</strong> on the quotes for this question.`
                     : "";
                 aiRefsHtml = `<div style="width:100%; flex-basis:100%; margin-top:8px; padding:8px 10px; border-top:1px dashed var(--border); font-size:0.82rem; line-height:1.45; background:rgba(255,152,0,0.08); border-radius:6px;">
                     <strong>No quotes linked to Level ${level}.</strong> Meanings and hints only show for quotes assigned to the level you are on.${otherHint}
@@ -24897,7 +24910,7 @@ const ui = {
                 cont.innerHTML = `<div class="card" style="cursor:default;">
                     <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Source text needed</div>
                     <div style="opacity:0.8;">Add source text in Settings so you can select a quote from the passage.</div>
-                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
+                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Data</button>
                 </div>`;
                 return;
             }
@@ -24962,7 +24975,7 @@ const ui = {
                         <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Not enough evidence</div>
                         <div style="opacity:0.8; margin-bottom:8px;">Goal: ${effectiveGoal} quotes. Tap the passage to select enough quotes for your answer.</div>
                         ${debugLine}
-                        <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
+                        <button class="btn btn-outline" onclick="ui.openAdmin()">Open Data</button>
                     </div>`;
                     return;
                 }
@@ -25237,7 +25250,7 @@ const ui = {
             if(pool.length < 1) {
                 body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Choose the best quote for the question.</div>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Tap the passage to select quotes, or continue to the next step.</div>
-                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>
+                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Data</button>
                     <button class="btn btn-primary" id="selection-continue" style="margin-top:8px;">Continue</button>`;
                 const continueBtn = body.querySelector("#selection-continue");
                 if(continueBtn) {
@@ -25523,7 +25536,7 @@ const ui = {
             if(!correctDevice) {
                 body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">${deviceLabelText}</div>
                     <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Set the device (language/tone/structure) in Quote Selection settings to use this stage.</div>
-                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Settings</button>`;
+                    <button class="btn btn-outline" onclick="ui.openAdmin()">Open Data</button>`;
                 return;
             }
             userState.selectionProgress.align = userState.selectionProgress.align || {};
@@ -26668,7 +26681,6 @@ const ui = {
         try {
             firstDesk = deskStrings.length && ui.ensureQuoteItem ? ui.ensureQuoteItem(deskStrings[0]) : null;
             userState.selectionCompleted = false;
-            userState.view = "desk";
             app.save();
             if(window.getSelection) window.getSelection().removeAllRanges();
             ui._textSelecting = false;
@@ -38268,7 +38280,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             </div>` : "";
         const anchorPreviewBlock = showLineWindowPreview && !needsBookletLb ? `<div class="level-bank-passage-preview" style="margin-top:14px;padding:12px;border:1px dashed var(--border);border-radius:8px;background:rgba(92,107,192,0.06);">
                 <div style="font-weight:700;margin-bottom:6px;">Step 2 — Question excerpt anchors (Quote Select / Lab)</div>
-                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 8px 0;line-height:1.45;">Booklet layout is done. Pick a question in <strong>Q</strong>, then highlight opening/closing words in the <strong>numbered passage in Quote Select</strong> (not the Settings editor). Use <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong> — booklet line numbers fill in automatically.</p>
+                <p style="font-size:0.8rem;opacity:0.88;margin:0 0 8px 0;line-height:1.45;">Booklet layout is done. Pick a question in <strong>Q</strong>, then highlight opening/closing words in the <strong>numbered passage in Quote Select</strong> (not the Data editor). Use <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong> — booklet line numbers fill in automatically.</p>
                 <div class="teacher-passage-range-wizard" id="teacher-passage-preview-wizard">
                     <div style="font-weight:700;margin-bottom:6px;">Level <span class="tsa-range-level-label">L1</span> <span class="tsa-range-q-label" style="opacity:0.85;font-weight:600;"></span></div>
                     <div class="tsa-range-steps">
