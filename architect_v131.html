@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-04T09:00:00">
-<meta name="architect-deploy" content="fix-open-quote-bank-btn-d823">
-<meta name="architect-rev" content="settings-to-data-naming-d823">
+<meta name="architect-build" content="2026-09-04T12:00:00">
+<meta name="architect-deploy" content="levels-needed-cap-9e64">
+<meta name="architect-rev" content="limit-active-levels-9e64">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -2486,6 +2486,11 @@
                         <div style="font-size:0.8rem; opacity:0.75; margin-bottom:8px;">You can list <strong>each paper part</strong> as its own row in <strong>Focus questions</strong> (e.g. Q1a, Q1b). The <strong>Level Bank</strong> decides what students see: assign <strong>one question per level</strong>; Quote Select shows that row only. With one id per level, when the points goal is met the app moves to the <strong>next active level</strong> (next bank assignment). Use multiple ids on one level only if you need several questions on the same level before advancing.</div>
                         <div style="font-size:0.8rem; opacity:0.75; margin-bottom:8px;"><strong>Component 2:</strong> the <strong>C2</strong> column (after <strong>Short</strong>, before <strong>Tap</strong>) sets whether each level shows the 21st-century passage, the 19th-century passage, or both. <strong>exam px</strong> (excerpt / every # / affirm) is hidden — C2 passages are continuous prose with no booklet line numbers.</div>
                         <div style="font-size:0.8rem; opacity:0.75; margin-bottom:8px;"><strong>Quotes</strong> / <strong>Dist</strong> = per-level targets (good quotes to find; distractors per good quote for MC). Set the <strong>MC grid size</strong> in <strong>Quote selection &amp; choices</strong> below. <strong>Points</strong> = exam marks when set (overrides parsed [n] in the question). LoR long tasks: set <strong>Points</strong> to the question total.</div>
+                        <div style="margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <label for="levels-needed-input" style="font-size:0.85rem;"><strong>Levels needed for this lesson:</strong></label>
+                            <input type="number" id="levels-needed-input" class="level-bank-num-input" min="1" max="10" step="1" style="max-width:4em;" value="" placeholder="10" onchange="admin.setLevelsNeeded(this.value)">
+                            <span style="font-size:0.78rem; opacity:0.7;">Leave blank to use all levels with a question assigned. Set a number (e.g. 5) to stop the remaining levels from activating.</span>
+                        </div>
                         <div style="margin-bottom:8px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.copyLevel1ToAll()" title="Copy L1 settings (language tier, quote targets, Tap, etc.) to L2–L10. Keeps each level's question assignment.">Copy L1 settings to all levels</button></div>
                         <div id="level-bank-editor"></div>
                     </details>
@@ -2921,7 +2926,6 @@
                     <div class="btn-group">
                         <button class="btn btn-doc" onclick="admin.exportWorksheet()">📄 Worksheet (Word)</button>
                         <button class="btn btn-primary" style="background:#37474f;" onclick="admin.exportStandalone()">📦 Student App</button>
-                        <label class="btn btn-outline" style="cursor:pointer;">📂 Load JSON<input type="file" id="file-up" class="hidden" onchange="admin.loadFile(this)"></label>
                         <button class="btn btn-outline" onclick="admin.saveConfig()">💾 Save JSON</button>
                     </div>
                     <div style="margin-top:10px; font-size:0.85rem; opacity:0.8;">
@@ -2964,6 +2968,7 @@
                     <div class="btn-group">
                         <button class="btn btn-outline" onclick="admin.saveTemplate()">Save template</button>
                         <label class="btn btn-outline" style="cursor:pointer;">Import template<input type="file" id="templates-up" class="hidden" accept=".json" onchange="admin.importTemplate(this)"></label>
+                        <label class="btn btn-outline" style="cursor:pointer;">📂 Load JSON<input type="file" id="file-up" class="hidden" onchange="admin.loadFile(this)"></label>
                     </div>
                     <p id="template-current" style="margin:8px 0 0 0; font-size:0.9rem; font-weight:500;"></p>
                 </details>
@@ -6933,7 +6938,9 @@ const app = {
         if(next == null && quoteOnly && appData && appData.settings) {
             const activeNow = app.getActiveLevels();
             const candidate = lvl + 1;
-            if(activeNow.indexOf(candidate) < 0 && candidate <= ARCHITECT_MAX_LEVEL) {
+            const capRaw = parseInt(appData.settings.levelsNeeded, 10);
+            const levelCap = Number.isFinite(capRaw) && capRaw >= 1 ? Math.min(ARCHITECT_MAX_LEVEL, capRaw) : ARCHITECT_MAX_LEVEL;
+            if(activeNow.indexOf(candidate) < 0 && candidate <= levelCap) {
                 if(!Array.isArray(appData.settings.activeLevels)) appData.settings.activeLevels = [];
                 appData.settings.activeLevels.push(candidate);
                 appData.settings.activeLevels.sort(function(a, b) { return a - b; });
@@ -17670,6 +17677,14 @@ const app = {
         return false;
     },
     getActiveLevels: function() {
+        const raw = app._getActiveLevelsRaw();
+        const capRaw = appData && appData.settings ? parseInt(appData.settings.levelsNeeded, 10) : NaN;
+        const cap = Number.isFinite(capRaw) && capRaw >= 1 ? Math.min(ARCHITECT_MAX_LEVEL, capRaw) : null;
+        if(cap == null) return raw;
+        const capped = raw.filter(function(n) { return n <= cap; });
+        return capped.length ? capped : [Math.min(cap, raw[0] || 1)];
+    },
+    _getActiveLevelsRaw: function() {
         const questions = Array.isArray(appData && appData.questions) ? appData.questions : [];
         const fromSettings = appData && appData.settings && Array.isArray(appData.settings.activeLevels) && appData.settings.activeLevels.length
             ? appData.settings.activeLevels.map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= ARCHITECT_MAX_LEVEL)
@@ -38700,10 +38715,35 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         admin.setPassageRangeWizardStatus("Highlight words in the <strong>numbered passage below</strong> (Quote Select), then click <strong>Mark start</strong> or <strong>Mark end</strong>.", "warn");
     },
     
+    setLevelsNeeded: function(value) {
+        if(!appData.settings) appData.settings = {};
+        const trimmed = String(value == null ? "" : value).trim();
+        if(!trimmed) {
+            delete appData.settings.levelsNeeded;
+        } else {
+            let n = parseInt(trimmed, 10);
+            if(!Number.isFinite(n)) { delete appData.settings.levelsNeeded; }
+            else {
+                if(n < 1) n = 1;
+                if(n > ARCHITECT_MAX_LEVEL) n = ARCHITECT_MAX_LEVEL;
+                appData.settings.levelsNeeded = n;
+            }
+        }
+        app.save();
+        admin.renderLevelBank();
+        if(app.refreshLessonChromeLite) app.refreshLessonChromeLite();
+        if(ui.renderSelection) ui.renderSelection();
+        if(ui.renderLab) ui.renderLab();
+    },
     renderLevelBank: function(opts) {
         opts = opts || {};
         const wrap = document.getElementById("level-bank-editor");
         if(!wrap) return;
+        const levelsNeededInput = document.getElementById("levels-needed-input");
+        if(levelsNeededInput) {
+            const n = parseInt(appData && appData.settings ? appData.settings.levelsNeeded : NaN, 10);
+            levelsNeededInput.value = Number.isFinite(n) && n >= 1 && n <= ARCHITECT_MAX_LEVEL ? String(n) : "";
+        }
         admin._pushLineRefsFromAppDataToFocusInputs();
         const mountsHaveRows = Array.from(document.querySelectorAll(".questions-list-mount")).some(m => m && m.children && m.children.length > 0);
         if(!opts.skipSyncFromList && mountsHaveRows && !app._importInProgress) {
