@@ -4600,7 +4600,7 @@ const app = {
             const existing = byEntry.get(ms[k]);
             if(!existing || n < existing.n) byEntry.set(ms[k], { n: n, entry: ms[k] });
         });
-        return Array.from(byEntry.values()).sort(function(a, b) { return a.n - b.n; }).map(function(x) { return x.entry; });
+        return Array.from(byEntry.values()).sort(function(a, b) { return a.n - b.n; });
     },
     /** Within one mark scheme block's bullets, pull out just the line(s) for a given sub-part letter (e.g. real answer lines like "(a) 1986 (1)"), skipping restated question text (which also carries the letter but ends in "?"). */
     extractLetterAnswerFromIndicativeContent: function(indicativeContent, letter) {
@@ -4611,16 +4611,22 @@ const app = {
             .filter(function(b) { return letterRe.test(b) && !/\?\s*$/.test(b); });
         return candidates.length ? candidates : null;
     },
-    /** Positionally align question groups to mark scheme blocks and cache the result for this appData.questions/markScheme pair. */
+    /** Align question groups to mark scheme blocks by each question's own number (not list position), so a block missing from extraction is skipped rather than shifting every later question onto its neighbour's content. */
     buildQuestionToMarkSchemeMap: function() {
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const ms = appData && appData.markScheme ? appData.markScheme : {};
         const groups = app.groupQuestionsByParentItem(questions);
         const blocks = app.getOrderedMarkSchemeBlocks(ms);
+        const blockByNumber = new Map(blocks.map(function(b) { return [b.n, b.entry]; }));
         const map = {};
-        for(let i = 0; i < groups.length && i < blocks.length; i++) {
-            const group = groups[i];
-            const block = blocks[i];
+        groups.forEach(function(group) {
+            const first = group && group[0];
+            if(!first || !first.q || !first.q.id) return;
+            const numM = String(first.q.id).match(/(\d+)/);
+            const qNum = numM ? parseInt(numM[1], 10) : null;
+            /** Match by the question's own number, not list position — a missing block (e.g. Q1 never extracted) used to shift every later question onto its neighbour's mark-scheme content instead of being left unmatched. */
+            const block = qNum != null ? blockByNumber.get(qNum) : null;
+            if(!block) return;
             group.forEach(function(item) {
                 if(!item.q || !item.q.id) return;
                 if(item.letter && Array.isArray(block.indicativeContent)) {
@@ -4632,7 +4638,7 @@ const app = {
                 }
                 map[item.q.id] = block;
             });
-        }
+        });
         return map;
     },
     getMarkSchemeEntryForQuestionId: function(questionId) {
