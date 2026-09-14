@@ -229,6 +229,7 @@
             <button onclick="changePhase(4)" id="nav-p4" class="tab-btn">4. INSPECT</button>
         </div>
         
+        <button onclick="toggleHelp()" class="text-gray-400 hover:text-white ml-2 shrink-0" title="How to use this tool"><i class="fas fa-question-circle"></i></button>
         <button onclick="toggleAdmin()" class="text-gray-500 hover:text-white ml-2 shrink-0"><i class="fas fa-cog"></i></button>
     </header>
 
@@ -339,7 +340,7 @@
                         </div>
                         <div class="flex gap-2 w-full md:w-auto">
                              <button onclick="reCompile()" class="flex-1 md:flex-none bg-blue-100 text-blue-700 border border-blue-300 px-3 py-2 rounded text-xs md:text-sm hover:bg-blue-200"><i class="fas fa-sync mr-1"></i> Refresh</button>
-                             <button onclick="downloadStory()" class="flex-1 md:flex-none bg-gray-800 text-white px-4 py-2 rounded text-xs md:text-sm"><i class="fas fa-file-download mr-1"></i> Download</button>
+                             <button onclick="downloadStory()" class="flex-1 md:flex-none bg-gray-800 text-white px-4 py-2 rounded text-xs md:text-sm"><i class="fas fa-file-word mr-1"></i> Download (.doc)</button>
                         </div>
                     </div>
 
@@ -435,6 +436,17 @@
         </div>
     </div>
 
+    <!-- HELP MODAL -->
+    <div id="help-modal" class="modal-overlay hidden">
+        <div class="bg-white w-full h-full md:w-11/12 md:h-5/6 md:rounded-lg shadow-2xl flex flex-col overflow-hidden">
+            <div class="bg-gray-900 text-white p-4 flex justify-between items-center shrink-0">
+                <h2 class="font-bold text-lg"><i class="fas fa-question-circle mr-2 text-blue-400"></i>How to Use <span id="help-app-title">Story Architect Pro</span></h2>
+                <button onclick="toggleHelp()" class="text-gray-300 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div id="help-body" class="flex-grow overflow-y-auto p-4 md:p-8 bg-gray-50"></div>
+        </div>
+    </div>
+
     <script>
         // --- SAFE STORAGE ---
         const SafeStorage = {
@@ -442,6 +454,12 @@
             setItem: (k,v) => { try { localStorage.setItem(k,v) } catch(e){} },
             removeItem: (k) => { try { localStorage.removeItem(k) } catch(e){} }
         };
+
+        // --- HTML ESCAPE (used by exports & help panel) ---
+        function escapeHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
 
         // --- LOAD CONFIG ---
         let config;
@@ -927,15 +945,109 @@
         function feedback(msg) { document.querySelector('#inspection-feedback span').innerText = msg; }
         
         function downloadStory() {
-            const text = document.getElementById('final-editor').innerText;
-            const blob = new Blob([text], {type: 'text/plain'});
-            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'my_story_draft.txt'; a.click();
+            const rawText = document.getElementById('final-editor').innerText;
+            const paragraphs = rawText.split(/\n+/).map(p => p.trim()).filter(p => p.length > 0);
+            const bodyHtml = paragraphs.length > 0
+                ? paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('')
+                : '<p>&nbsp;</p>';
+            const missionHtml = storyData.selectedPrompt
+                ? `<p style="color:#555; font-style:italic; margin-bottom:16pt;">${escapeHtml(storyData.selectedPrompt)}</p>`
+                : '';
+
+            const html = `
+                <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                <head><meta charset='utf-8'><title>My Story</title>
+                <style>
+                    body { font-family: Calibri, Arial, sans-serif; font-size: 12pt; line-height: 1.5; color:#1a1a1a; }
+                    h1 { font-size: 14pt; color:#2c5282; margin-bottom: 4pt; }
+                    p { margin: 0 0 12pt 0; }
+                </style>
+                </head><body>
+                <h1>${escapeHtml(config.appTitle || 'My Story')}</h1>
+                ${missionHtml}
+                ${bodyHtml}
+                </body></html>`;
+
+            const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'my_story.doc';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // --- HELP PANEL (always reflects the current live config) ---
+        function toggleHelp() {
+            const m = document.getElementById('help-modal');
+            m.classList.toggle('hidden');
+            if (!m.classList.contains('hidden')) {
+                document.getElementById('admin-modal').classList.add('hidden');
+                renderHelp();
+            }
+        }
+
+        function renderHelp() {
+            document.getElementById('help-app-title').innerText = config.appTitle || 'Story Architect Pro';
+
+            // Live question categories (same grouping logic as renderPhase1)
+            const categoryCounts = {};
+            (config.examPrompts || []).forEach(p => {
+                const type = p.type || 'Event';
+                categoryCounts[type] = (categoryCounts[type] || 0) + 1;
+            });
+            const categoryNames = Object.keys(categoryCounts);
+            const categoryText = categoryNames.length > 0 ? categoryNames.join(', ') : 'your teacher\'s';
+
+            // Live skill / planning prompts (Phase 2)
+            const skills = (config.blueprintPrompts || []).filter(p => p.title);
+            const skillsListHtml = skills.length
+                ? skills.map(p => `<li><strong>${escapeHtml(p.title)}</strong>${p.prompt ? ' — ' + escapeHtml(p.prompt) : ''}</li>`).join('')
+                : '<li>(No planning prompts have been set up yet)</li>';
+
+            // Live structure stages (Phase 3)
+            const steps = config.structureSteps || [];
+            const stepsListHtml = steps.length
+                ? steps.map((s, i) => `<li><strong>${escapeHtml(s.title || ('Stage ' + (i + 1)))}</strong>${s.guidance ? ' — ' + escapeHtml(s.guidance) : ''}</li>`).join('')
+                : '<li>(No stages have been set up yet)</li>';
+
+            const el = document.getElementById('help-body');
+            el.innerHTML = `
+                <p class="mb-4 text-gray-700">This tool helps you plan and write your GCSE story, one careful step at a time. Use the four tabs at the top of the screen to move between stages, and come back to this guide any time by pressing the <i class="fas fa-question-circle text-blue-500"></i> button.</p>
+
+                <h3 class="text-blue-700 font-bold text-lg mt-5 mb-2 border-b border-blue-200 pb-1">1. Mission — Choose Your Question</h3>
+                <p class="text-sm text-gray-600 mb-2">Browse the question categories (${escapeHtml(categoryText)}). Use the arrows on each card to see other questions in that category, tap a card to select it, then press <em>Initialize Blueprint</em>.</p>
+
+                <h3 class="text-blue-700 font-bold text-lg mt-5 mb-2 border-b border-blue-200 pb-1">2. Blueprint — Plan Your Ideas</h3>
+                <p class="text-sm text-gray-600 mb-2">Your teacher has set up ${skills.length} planning prompt${skills.length === 1 ? '' : 's'} for this stage:</p>
+                <ul class="list-disc pl-6 text-sm text-gray-600 mb-2 space-y-1">${skillsListHtml}</ul>
+                <p class="text-sm text-gray-600 mb-2">Fill in as many boxes as you can, then press <em>Proceed to Construction</em>.</p>
+
+                <h3 class="text-blue-700 font-bold text-lg mt-5 mb-2 border-b border-blue-200 pb-1">3. Construct — Build Your Story</h3>
+                <p class="text-sm text-gray-600 mb-2">Your story is currently set up with ${steps.length} stage${steps.length === 1 ? '' : 's'}:</p>
+                <ol class="list-decimal pl-6 text-sm text-gray-600 mb-2 space-y-1">${stepsListHtml}</ol>
+                <p class="text-sm text-gray-600 mb-2">Answer the small prompts in each stage — watch the Paragraph Preview build automatically underneath — then press <em>Compile Full Draft</em>.</p>
+
+                <h3 class="text-blue-700 font-bold text-lg mt-5 mb-2 border-b border-blue-200 pb-1">4. Inspect — Check and Finish</h3>
+                <p class="text-sm text-gray-600 mb-2">Edit your draft directly in the box, use <em>Dialogue Validator</em> and <em>Spell Check</em> to review it, then press <em>Download (.doc)</em> to save your story as a Word document you can open, edit, or hand in.</p>
+
+                <h3 class="text-blue-700 font-bold text-lg mt-5 mb-2 border-b border-blue-200 pb-1">Sidebar Tools</h3>
+                <ul class="list-disc pl-6 text-sm text-gray-600 mb-2 space-y-1">
+                    <li><strong>Current Mission</strong> — reminds you of your chosen question.</li>
+                    <li><strong>Project Assets</strong> — tap a Blueprint answer to copy it, ready to reuse in your writing.</li>
+                    <li><strong>Start New Story</strong> — erases your current work and starts again. This cannot be undone.</li>
+                </ul>
+
+                <p class="text-xs text-gray-400 mt-6 border-t pt-3">If your work seems to have disappeared, make sure you're using the same device and browser as before. Still stuck? Ask your teacher.</p>
+            `;
         }
 
         // --- ADMIN FUNCTIONS ---
         function toggleAdmin() {
             const m = document.getElementById('admin-modal'); m.classList.toggle('hidden');
             if(!m.classList.contains('hidden')) {
+                document.getElementById('help-modal').classList.add('hidden');
                 document.getElementById('admin-lock').classList.remove('hidden');
                 document.getElementById('admin-unlocked').classList.add('hidden');
                 document.getElementById('admin-footer').classList.add('hidden');
