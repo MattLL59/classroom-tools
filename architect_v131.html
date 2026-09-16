@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-16T00:00:00">
-<meta name="architect-deploy" content="markscheme-wrapped-bullet-merge-fix">
-<meta name="architect-rev" content="rejoin-linewrapped-bullets-in-fallback-parser">
+<meta name="architect-build" content="2026-09-16T01:00:00">
+<meta name="architect-deploy" content="markscheme-wrapped-bullet-fix-v2">
+<meta name="architect-rev" content="fix-applied-to-actually-executing-tagged-parser">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3852,6 +3852,8 @@ const app = {
                 { re: /^\s*What the writers say[^\n]*$/i, t: "ideas" },
                 { re: /^\s*How the writers get across[^\n]*$/i, t: "methods" }
             ];
+            const bulletMarkerRe = /^[\s•\u2022\u25A0\u25AA\u25CF\uF000-\uF0FF\-*]+\s*/;
+            const anyMarked = lines.some(l => bulletMarkerRe.test(l) && l.replace(bulletMarkerRe, "").trim().length >= 6);
             for(const l of lines) {
                 const trimmed = l.trim();
                 const wl = tryWriterLine(trimmed);
@@ -3868,12 +3870,19 @@ const app = {
                     }
                 }
                 if(headerHit) continue;
-                const clean = l.replace(/^[\s•\u2022\u25A0\u25AA\u25CF\uF000-\uF0FF\-*]+\s*/, "").trim();
-                if(clean.length < 6) continue;
+                const hasMarker = bulletMarkerRe.test(l);
+                const clean = l.replace(bulletMarkerRe, "").trim();
+                if(!clean) continue;
                 if(/^Note:\s*max/i.test(clean)) continue;
                 if(isBandDescriptorLine(clean)) continue;
                 if(app.isMarkSchemeNoiseLine && app.isMarkSchemeNoiseLine(clean)) continue;
                 if(/^(This is not a checklist|Look for and reward)/i.test(clean)) continue;
+                /** Same PDF line-wrap issue fixed in the fallback bullet parser below: an unmarked line inside a marker-led region is the previous bullet wrapping onto a second printed line, not noise or a new bullet — join it back rather than splitting the bullet in two. */
+                if(anyMarked && !hasMarker && tagged.length && tagged[tagged.length - 1].tag === tag) {
+                    tagged[tagged.length - 1].text = (tagged[tagged.length - 1].text + " " + clean).replace(/\s+/g, " ").trim();
+                    continue;
+                }
+                if(clean.length < 6) continue;
                 tagged.push({ tag, text: clean });
             }
             return tagged;
