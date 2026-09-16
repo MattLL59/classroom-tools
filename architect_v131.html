@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-15T02:00:00">
-<meta name="architect-deploy" content="markscheme-fill-save-persist-fix">
-<meta name="architect-rev" content="skip-dom-resync-on-markscheme-fill-save">
+<meta name="architect-build" content="2026-09-16T00:00:00">
+<meta name="architect-deploy" content="markscheme-wrapped-bullet-merge-fix">
+<meta name="architect-rev" content="rejoin-linewrapped-bullets-in-fallback-parser">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3895,15 +3895,24 @@ const app = {
             }
             if(!indicative.length) {
                 const lines = block.split(/\n/);
-                for(const l of lines) {
-                    const clean = l.replace(/^[\s•\u2022\u25A0\u25AA\u25CF\uF000-\uF0FF\-*]+\s*/, "").trim();
-                    if(clean.length < 5) continue;
+                const bulletMarkerRe = /^[\s•\u2022\u25A0\u25AA\u25CF\uF000-\uF0FF\-*]+\s*/;
+                const candidateLines = lines.map(l => ({ hasMarker: bulletMarkerRe.test(l), clean: l.replace(bulletMarkerRe, "").trim() }));
+                const anyMarked = candidateLines.some(c => c.hasMarker && c.clean.length >= 5);
+                for(const c of candidateLines) {
+                    const clean = c.clean;
+                    if(!clean) continue;
                     if(/^Details candidates$/i.test(clean)) continue;
                     if(/^(Give|This is not|No mark|Look for and reward|Note:\s*Max)/i.test(clean)) continue;
                     if(isBandDescriptorLine(clean)) continue;
                     if(app.isMarkSchemeNoiseLine && app.isMarkSchemeNoiseLine(clean)) continue;
                     if(/^\d+\s*$/.test(clean) || /^\([A-Za-z]\)\s*$/.test(clean)) continue;
                     if(/^©\s*/.test(clean)) continue;
+                    /** In a marker-led bullet list, a line with no marker is a PDF line-wrap continuing the previous bullet (e.g. a long bullet split mid-sentence across two printed lines) — join it back rather than filing it as its own truncated entry. Only applies once we've seen at least one real marker in this region, so unmarked bullet lists still split one-line-per-bullet as before. */
+                    if(anyMarked && !c.hasMarker && indicative.length) {
+                        indicative[indicative.length - 1] = (indicative[indicative.length - 1] + " " + clean).replace(/\s+/g, " ").trim();
+                        continue;
+                    }
+                    if(clean.length < 5) continue;
                     indicative.push(clean);
                 }
                 indicative = indicative.slice(0, 40);
