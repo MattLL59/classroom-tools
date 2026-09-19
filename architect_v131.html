@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-16T01:00:00">
-<meta name="architect-deploy" content="markscheme-wrapped-bullet-fix-v2">
-<meta name="architect-rev" content="fix-applied-to-actually-executing-tagged-parser">
+<meta name="architect-build" content="2026-09-19T00:00:00">
+<meta name="architect-deploy" content="question-split-midtext-readlines-fix">
+<meta name="architect-rev" content="anchor-readlines-marker-and-recognise-wjec-evaluation-opener">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3747,6 +3747,46 @@ const app = {
         return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\u00a0/g, " ").trim();
     },
     /** Parse mark scheme text (C1 default pages 5–13; C2 default 4–12). Extracts indicative content per question for retrieval (Q1) style. Also supports Component 2 (1 1, 1 2, … 1 6). */
+    /**
+     * Cheap, non-cryptographic fingerprint of a passage's plain text — used only to detect
+     * "this mark scheme was extracted for a different passage", not for anything security-sensitive.
+     * Hashes the same cleaned plain-text representation used for quote matching (not the raw
+     * source string), so incidental JSON/HTML formatting differences don't cause false mismatches.
+     */
+    computePassageFingerprint: function(sourceText) {
+        let plain = String(sourceText || "");
+        if(!plain.trim()) return null;
+        if(/<[^>]+>/.test(plain) || (app.isStructuredPassageSource && app.isStructuredPassageSource(plain))) {
+            plain = app.cleanSourceText ? app.cleanSourceText(plain) : plain;
+        }
+        plain = plain.replace(/\s+/g, " ").trim();
+        if(!plain) return null;
+        let hash = 0;
+        for(let i = 0; i < plain.length; i++) { hash = ((hash << 5) - hash + plain.charCodeAt(i)) | 0; }
+        return plain.length + ":" + hash;
+    },
+    /** Call right after (re-)parsing appData.markScheme, so it's stamped with which passage it was extracted alongside. */
+    recordMarkSchemeFingerprint: function() {
+        try {
+            const sourceText = (typeof admin !== "undefined" && admin.getSourceTextForMarkSchemeQuoteMatch) ? admin.getSourceTextForMarkSchemeQuoteMatch() : "";
+            appData.markSchemeSourceFingerprint = app.computePassageFingerprint(sourceText);
+        } catch(eFingerprint) { appData.markSchemeSourceFingerprint = null; }
+    },
+    /**
+     * Returns a warning string if the currently-loaded passage doesn't match the passage the mark
+     * scheme was extracted alongside (e.g. a different paper was loaded without re-running Extract
+     * text on its mark scheme). Returns null when there's nothing to warn about — including when no
+     * fingerprint was ever recorded (older saved lessons predate this check), so this never blocks
+     * lessons that simply haven't been touched since the check was added.
+     */
+    checkMarkSchemeMatchesPassage: function() {
+        const stamped = appData.markSchemeSourceFingerprint;
+        if(!stamped) return null;
+        const sourceText = (typeof admin !== "undefined" && admin.getSourceTextForMarkSchemeQuoteMatch) ? admin.getSourceTextForMarkSchemeQuoteMatch() : "";
+        const current = app.computePassageFingerprint(sourceText);
+        if(!current || current === stamped) return null;
+        return "The extracted mark scheme doesn't match the passage that's currently loaded — it looks like it was extracted for a different paper. Re-run \"Extract text\" on this paper's mark scheme PDF (Lobby \u2192 Import past paper) before using Fill from mark scheme.";
+    },
     parseMarkSchemeFromText: function(text) {
         if(!text || typeof text !== "string") return {};
         const raw = app.stripMarkSchemePasteToPlain(text);
@@ -20256,6 +20296,7 @@ const app = {
                 question: typeof appData.question === "string" ? appData.question : "",
                 markScheme: (appData.markScheme && typeof appData.markScheme === "object" && Object.keys(appData.markScheme).length)
                     ? JSON.parse(JSON.stringify(appData.markScheme)) : null,
+                markSchemeSourceFingerprint: appData.markSchemeSourceFingerprint || null,
                 markSchemeText: (appData.component2Layout && appData.component2Layout.markSchemeText)
                     ? String(appData.component2Layout.markSchemeText) : ""
             };
@@ -20345,10 +20386,18 @@ const app = {
         }
         const hasMs = b.markScheme && typeof b.markScheme === "object" && Object.keys(b.markScheme).length;
         const curMs = safe.markScheme && typeof safe.markScheme === "object" && Object.keys(safe.markScheme).length;
-        if(hasMs && !curMs) { safe.markScheme = JSON.parse(JSON.stringify(b.markScheme)); changed = true; }
+        if(hasMs && !curMs) {
+            safe.markScheme = JSON.parse(JSON.stringify(b.markScheme));
+            safe.markSchemeSourceFingerprint = b.markSchemeSourceFingerprint || null;
+            changed = true;
+        }
         if(!hasMs && msText && typeof app.parseMarkSchemeFromText === "function") {
             const parsed = app.parseMarkSchemeFromText(msText);
-            if(parsed && Object.keys(parsed).length) { safe.markScheme = parsed; changed = true; }
+            if(parsed && Object.keys(parsed).length) {
+                safe.markScheme = parsed;
+                if(app.recordMarkSchemeFingerprint) app.recordMarkSchemeFingerprint();
+                changed = true;
+            }
         }
         return changed;
     },
@@ -28393,8 +28442,8 @@ const admin = {
         /** When layout yields 4 chunks but ≥5 line-range anchors (Read / Refer to lines … — common AQA), re-split the raw slice on those anchors. */
         const tryReadLinesResplit = (curChunks, sourceRaw) => {
             if(!Array.isArray(curChunks) || curChunks.length !== 4 || !sourceRaw) return curChunks;
-            /* AQA: "Read the lines:" (with "the") and/or "Read lines 62 to the end of the passage." — not only "Read lines 3–15". */
-            const readAnchor = /(?:Read\s+the\s+lines\s*:?|Read\s+lines\s+(?:\d+\s*[-–]\s*\d+|\d+\s+to\s+the\s+end(?:\s+of\s+the\s+passage)?\.?)|Refer\s+to\s+lines?\s+\d+\s*[-–]\s*\d+)/gi;
+            /* AQA: "Read the lines:" (with "the") and/or "Read lines 62 to the end of the passage." — not only "Read lines 3–15". Anchored to a line start so a mid-sentence "read lines X-Y" (e.g. WJEC's "To answer this question you need to read lines 56-70…") isn't mistaken for a new question's opener. */
+            const readAnchor = /(?:^|[\r\n])\s*(?:Read\s+the\s+lines\s*:?|Read\s+lines\s+(?:\d+\s*[-–]\s*\d+|\d+\s+to\s+the\s+end(?:\s+of\s+the\s+passage)?\.?)|Refer\s+to\s+lines?\s+\d+\s*[-–]\s*\d+)/gi;
             const anchors = sourceRaw.match(readAnchor);
             if(!anchors || anchors.length < 5) return curChunks;
             let sc = sourceRaw.split(new RegExp("(?=" + readAnchor.source + ")", "i")).map(normalize).filter(s => s.length >= minLen);
@@ -28556,11 +28605,12 @@ const admin = {
             chunks = chunks.filter(s => s.length >= minLen);
             if(chunks.length >= 2) return chunks;
         }
-        const readLinesMarker = /(?=Read\s+the\s+lines\s*:?|Read\s+lines\s+(?:\d+\s*[-–]\s*\d+|\d+\s+to\s+the\s+end(?:\s+of\s+the\s+passage)?\.?)|Refer\s+to\s+lines?\s+\d+\s*[-–]\s*\d+)/i;
+        /** Anchored to a line start: an unanchored version matched "read lines X-Y" anywhere, including mid-sentence inside WJEC's evaluation-question opener ("To answer this question you need to read lines 56-70…"), which fractured that single question into two. Also recognise that WJEC opener itself as a valid question start, since it doesn't begin with "Read lines". */
+        const readLinesMarker = /(?:^|[\r\n])\s*(?=Read\s+the\s+lines\s*:?|Read\s+lines\s+(?:\d+\s*[-–]\s*\d+|\d+\s+to\s+the\s+end(?:\s+of\s+the\s+passage)?\.?)|Refer\s+to\s+lines?\s+\d+\s*[-–]\s*\d+|To\s+answer\s+this\s+question\s+you\s+need\s+to\s+read\s+lines?\s+\d+)/i;
         chunks = raw.split(readLinesMarker).map(normalize).filter(s => s.length >= minLen);
         if(chunks.length >= 2) {
             const firstChunk = chunks[0];
-            const startsReadLines = /^(?:Read\s+the\s+lines\s*:?|Read\s+lines\s+(?:\d+\s*[-–]\s*\d+|\d+\s+to\s+the\s+end(?:\s+of\s+the\s+passage)?\.?)|Refer\s+to\s+lines?\s+\d+\s*[-–]\s*\d+)/i.test(firstChunk);
+            const startsReadLines = /^(?:Read\s+the\s+lines\s*:?|Read\s+lines\s+(?:\d+\s*[-–]\s*\d+|\d+\s+to\s+the\s+end(?:\s+of\s+the\s+passage)?\.?)|Refer\s+to\s+lines?\s+\d+\s*[-–]\s*\d+|To\s+answer\s+this\s+question\s+you\s+need\s+to\s+read\s+lines?\s+\d+)/i.test(firstChunk);
             if(!startsReadLines && !firstChunkLooksLikeExamQuestion(firstChunk)) chunks = chunks.slice(1);
             if(chunks.length >= 2) return chunks;
         }
@@ -28887,6 +28937,7 @@ const admin = {
         }
         if(markSchemeText.trim()) {
             appData.markScheme = app.parseMarkSchemeFromText(markSchemeText);
+            app.recordMarkSchemeFingerprint();
         }
         if(includeQuestions) {
             appData.items = [];
@@ -29366,6 +29417,7 @@ const admin = {
             if(!appData.component2Layout || typeof appData.component2Layout !== "object") appData.component2Layout = {};
             appData.component2Layout.markSchemeText = app.normalizeMarkSchemeStorageText(markSchemeText);
             appData.markScheme = app.parseMarkSchemeFromText(markSchemeText);
+            app.recordMarkSchemeFingerprint();
             app.save();
             admin.renderAll({ skipTabActivate: true });
             if(admin._pastPaperAutoDone) {
@@ -34319,6 +34371,7 @@ const admin = {
             ms = app.parseMarkSchemeFromText(raw);
             if(ms && typeof ms === "object" && Object.keys(ms).length) {
                 appData.markScheme = ms;
+                app.recordMarkSchemeFingerprint();
                 app.save();
                 return ms;
             }
@@ -34349,6 +34402,8 @@ const admin = {
             alert("No mark scheme in the lesson. Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text (or paste mark scheme text).");
             return;
         }
+        const mismatch = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
+        if(mismatch) { alert(mismatch); return; }
         /** Short retrieval-type questions (1–2 marks) don't have a matchable "quote" answer — e.g. the real answer to "When was the agreement signed?" is just "1986", which no passage sentence will closely match. The bulk "Fill from mark scheme" button already knows to use the short indicative-bullet answer for these instead of hunting for a quote; this per-question button was always using the quote-matcher regardless of question type, which reliably failed (with an alert easy to miss) on exactly this kind of question. */
         if(app.questionUsesRetrievalAnswersFromMarkScheme && app.questionUsesRetrievalAnswersFromMarkScheme(q.id)) {
             const bullets = app.pickOwnWordsBulletsFromMarkScheme(q.id);
@@ -34404,6 +34459,8 @@ const admin = {
             alert("No mark scheme in the lesson. Upload the mark scheme PDF, run Extract text, or paste mark scheme text.");
             return;
         }
+        const mismatch = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
+        if(mismatch) { alert(mismatch); return; }
         const sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
         if(!String(sourceText).trim()) {
             alert("Add source text (resource passage) first.");
@@ -34431,6 +34488,8 @@ const admin = {
         admin.ensureSelectionData();
         const ms = admin.ensureMarkSchemeParsedFromLayout();
         if(!ms || !Object.keys(ms).length) return alert("Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text.");
+        const mismatchQType = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
+        if(mismatchQType) return alert(mismatchQType);
         const sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
         if(!String(sourceText).trim()) return alert("Add source text (resource passage) first.");
         const levelBank = app.getLevelBank();
@@ -34510,6 +34569,8 @@ const admin = {
         admin.ensureSelectionData();
         const ms = admin.ensureMarkSchemeParsedFromLayout();
         if(!ms || !Object.keys(ms).length) return alert("Upload the mark scheme PDF (Lobby → Import past paper → file 3), set page range, then run Extract text.");
+        const mismatchQuotes = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
+        if(mismatchQuotes) return alert(mismatchQuotes);
         let sourceText = admin.getSourceTextForMarkSchemeQuoteMatch();
         if(!sourceText.trim()) return alert("Add source text (resource passage) first.");
         const levelBank = app.getLevelBank();
