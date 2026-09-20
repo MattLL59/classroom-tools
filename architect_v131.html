@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-19T01:00:00">
-<meta name="architect-deploy" content="sync-preserve-excerpt-lineref-fix">
-<meta name="architect-rev" content="dont-wipe-fields-on-empty-dom-read-in-visibilitychange-autosave">
+<meta name="architect-build" content="2026-09-20T00:00:00">
+<meta name="architect-deploy" content="worksheet-defaults-and-largeprint-export">
+<meta name="architect-rev" content="auto-include-questions-plus-enlarge-friendly-fulltext-export">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -2946,6 +2946,7 @@
                     </details>
                     <div class="btn-group">
                         <button class="btn btn-doc" onclick="admin.exportWorksheet()">📄 Worksheet (Word)</button>
+                        <button class="btn btn-doc" onclick="admin.exportEnlargedFullText()">📖 Full Text (large print)</button>
                         <button class="btn btn-primary" style="background:#37474f;" onclick="admin.exportStandalone()">📦 Student App</button>
                         <button class="btn btn-outline" onclick="admin.saveConfig()">💾 Save JSON</button>
                     </div>
@@ -39832,7 +39833,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 return { id: fq.id, prompt: (full && String(full.prompt || "").trim()) ? full.prompt : fq.prompt };
             });
         } else {
-            worksheetFocusQs = allQsWithPrompt.filter(q => q.includeInWorksheet === true);
+            /** Default ON: every question with prompt text goes on the worksheet without needing to be ticked. Set appData.settings.worksheetOnlyTickedQuestions = true to restore the old opt-in-per-question behaviour. */
+            const worksheetAutoIncludeAllQs = !(appData.settings && appData.settings.worksheetOnlyTickedQuestions === true);
+            worksheetFocusQs = worksheetAutoIncludeAllQs ? allQsWithPrompt.slice() : allQsWithPrompt.filter(q => q.includeInWorksheet === true);
             wsQSet = new Set(worksheetFocusQs.map(q => normWsQid(q.id)));
             const hasExplicitWorksheetExclusion = allLessonQs.some(q => q.includeInWorksheet === false);
             worksheetQuestionFilterActive = hasExplicitWorksheetExclusion || (allQsWithPrompt.length > 0 && worksheetFocusQs.length < allQsWithPrompt.length);
@@ -39848,8 +39851,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 return;
             }
         }
-        if(!worksheetQuotesTicked.length) {
-            alert("No quotes selected for the worksheet. In Quote bank, tick Include on worksheet on each row you want (or use All good → worksheet).");
+        if(!worksheetFocusQs.length && !worksheetQuotesTicked.length) {
+            alert("No worksheet content: no questions with text, and no quotes ticked. Add question text under Load & AI, or tick Include on worksheet on quote bank rows.");
             return;
         }
         worksheetFocusQs = app.orderWorksheetFocusQuestions(worksheetFocusQs);
@@ -40302,6 +40305,68 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content += `</body></html>`;
         const b = new Blob(['\ufeff'+content], {type:'application/msword'});
         const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download="Worksheet.doc"; a.click();
+    },
+
+    /**
+     * Full passage text as a standalone, print-ready HTML page with genuine margin line numbers
+     * (every 5th line, matching WJEC's own convention) that stay locked to their line even when the
+     * text wraps — unlike Word's native line-numbering feature, which only stays accurate up to
+     * ~18pt before wrapped lines desync the margin numbers. Each line is its own flex row here, so a
+     * wrapped line never pushes any other row's number out of place, at any size.
+     * A live on-page size slider lets the teacher pick the right size per student, then print (Ctrl+P).
+     */
+    exportEnlargedFullText: function() {
+        const sourceText = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || appData.sourceText || "";
+        if(!String(sourceText).trim()) { alert("No passage loaded to export. Load a passage under Load & AI / Lobby first."); return; }
+        let lines = [];
+        const parsed = app.isStructuredPassageSource && app.isStructuredPassageSource(sourceText) ? app.parseStructuredPassageSource(sourceText) : null;
+        if(parsed && Array.isArray(parsed.lines) && parsed.lines.length) {
+            lines = parsed.lines.map(L => ({
+                n: L.n,
+                text: (app.htmlFragmentToPlainText ? app.htmlFragmentToPlainText(L.html || "") : String(L.html || "").replace(/<[^>]+>/g, "")).trim()
+            })).filter(l => l.text);
+        }
+        if(!lines.length) {
+            lines = String(sourceText).replace(/\r\n/g, "\n").split(/\n+/).map((t, i) => ({ n: i + 1, text: t.trim() })).filter(l => l.text);
+        }
+        if(!lines.length) { alert("Could not read any lines from the current passage."); return; }
+        const title = (appData.title || appData.lessonTitle || "Full Text") + " — Large Print";
+        const rowsHtml = lines.map(l => {
+            const showNum = (l.n % 5 === 0);
+            return `<div class="line-row"><span class="line-num">${showNum ? l.n : ""}</span><span class="line-text">${app.escapeHtml(l.text)}</span></div>`;
+        }).join("\n");
+        const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${app.escapeHtml(title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 16pt; line-height: 1.75; color: #111; background: #fff; margin: 0; padding: 0; }
+  .controls { padding: 10px 16px; background: #f0f0f0; border-bottom: 2px solid #333; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: Arial, sans-serif; }
+  .controls label { font-size: 14px; }
+  .controls button { font-size: 14px; padding: 6px 14px; cursor: pointer; }
+  @media print { .controls { display: none; } body { font-size: inherit; } }
+  .passage { padding: 0.6cm 1cm 1.5cm 1cm; }
+  .line-row { display: flex; align-items: baseline; }
+  .line-num { width: 2.6em; flex: 0 0 auto; text-align: right; padding-right: 0.7em; color: #333; font-weight: 700; font-size: 0.8em; user-select: none; }
+  .line-text { flex: 1 1 auto; white-space: pre-wrap; word-wrap: break-word; }
+</style>
+</head>
+<body>
+<div class="controls">
+  <label>Text size: <input type="range" id="fs" min="12" max="32" value="16" oninput="document.body.style.fontSize=this.value+'pt'; document.getElementById('fsval').textContent=this.value+'pt';"></label>
+  <span id="fsval">16pt</span>
+  <button onclick="window.print()">Print</button>
+  <span style="opacity:0.75;">Line numbers stay against their line at any size — set the size first, then print.</span>
+</div>
+<div class="passage">
+${rowsHtml}
+</div>
+</body></html>`;
+        const b = new Blob([html], {type: 'text/html'});
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(b);
+        a.download = "Full-Text-Large-Print.html";
+        a.click();
     },
 
     exportStandalone: () => {
