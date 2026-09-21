@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-20T01:00:00">
-<meta name="architect-deploy" content="ao-driven-worksheet-guidance">
-<meta name="architect-rev" content="ao-code-parsing-plus-tone-structure-gated-guidance">
+<meta name="architect-build" content="2026-09-21T00:00:00">
+<meta name="architect-deploy" content="worksheet-heading-quotebank-decouple-fix">
+<meta name="architect-rev" content="separate-heading-questions-from-quote-task-focus">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -39928,12 +39928,19 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 return { id: fq.id, prompt: (full && String(full.prompt || "").trim()) ? full.prompt : fq.prompt };
             });
         } else {
-            /** Default ON: every question with prompt text goes on the worksheet without needing to be ticked. Set appData.settings.worksheetOnlyTickedQuestions = true to restore the old opt-in-per-question behaviour. */
-            const worksheetAutoIncludeAllQs = !(appData.settings && appData.settings.worksheetOnlyTickedQuestions === true);
-            worksheetFocusQs = worksheetAutoIncludeAllQs ? allQsWithPrompt.slice() : allQsWithPrompt.filter(q => q.includeInWorksheet === true);
+            worksheetFocusQs = allQsWithPrompt.filter(q => q.includeInWorksheet === true);
             wsQSet = new Set(worksheetFocusQs.map(q => normWsQid(q.id)));
             const hasExplicitWorksheetExclusion = allLessonQs.some(q => q.includeInWorksheet === false);
             worksheetQuestionFilterActive = hasExplicitWorksheetExclusion || (allQsWithPrompt.length > 0 && worksheetFocusQs.length < allQsWithPrompt.length);
+        }
+        const worksheetOnlyTickedQs = appData.settings && appData.settings.worksheetOnlyTickedQuestions === true;
+        /** Independent of the quoteBankFocus/uiFocus priority above: a stray quote-bank linkage (even leftover demo data) narrowing worksheetFocusQs down to one question must not also hide every other question's own heading/guidance/write-in-space section below. This is always every question with prompt text by default — set appData.settings.worksheetOnlyTickedQuestions = true to restore the old opt-in-per-question behaviour for this too. */
+        let worksheetHeadingQs = worksheetOnlyTickedQs
+            ? allQsWithPrompt.filter(q => q.includeInWorksheet === true)
+            : allQsWithPrompt.slice();
+        if(!worksheetHeadingQs.length) {
+            const qLegHeading = String(appData.question || "").trim();
+            if(qLegHeading) worksheetHeadingQs = [{ id: "q1", prompt: qLegHeading }];
         }
         if(!worksheetFocusQs.length) {
             const qLeg = String(appData.question || "").trim();
@@ -39941,12 +39948,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 worksheetFocusQs = [{ id: "q1", prompt: qLeg }];
                 wsQSet = new Set(["q1"]);
                 worksheetQuestionFilterActive = false;
-            } else if(!worksheetQuotesTicked.length) {
-                alert("No worksheet content: tick Include on worksheet on quote bank rows (Quote bank → Worksheet buttons), and set focus question text under Load & AI.");
-                return;
             }
         }
-        if(!worksheetFocusQs.length && !worksheetQuotesTicked.length) {
+        if(!worksheetHeadingQs.length && !worksheetFocusQs.length && !worksheetQuotesTicked.length) {
             alert("No worksheet content: no questions with text, and no quotes ticked. Add question text under Load & AI, or tick Include on worksheet on quote bank rows.");
             return;
         }
@@ -40071,8 +40075,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content += `<h1>${app.escapeHtml(appData.meta.title || "Worksheet")}</h1>`;
         content += `<p class="tag" style="margin:0 0 4px 0;">Use your <strong>exam source booklet</strong> for the passage. Write your answers for the question(s) below.</p>`;
         const wsQclean = (p) => (app.cleanQuestionPromptForWorksheet ? app.cleanQuestionPromptForWorksheet(p) : String(p || "").trim()) || String(p || "").trim();
-        if(worksheetFocusQs && worksheetFocusQs.length) {
-            worksheetFocusQs.forEach((q) => {
+        if(worksheetHeadingQs && worksheetHeadingQs.length) {
+            worksheetHeadingQs.forEach((q) => {
                 const p = String(q.prompt || "").trim();
                 if(!p) return;
                 const label = app.worksheetQuestionHeadingLabel(q);
