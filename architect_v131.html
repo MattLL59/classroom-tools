@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-20T00:00:00">
-<meta name="architect-deploy" content="worksheet-defaults-and-largeprint-export">
-<meta name="architect-rev" content="auto-include-questions-plus-enlarge-friendly-fulltext-export">
+<meta name="architect-build" content="2026-09-20T01:00:00">
+<meta name="architect-deploy" content="ao-driven-worksheet-guidance">
+<meta name="architect-rev" content="ao-code-parsing-plus-tone-structure-gated-guidance">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3932,6 +3932,16 @@ const app = {
             block = truncateSectionB(stripNoise(block));
             const maxM = block.match(/\[(\d+)\]/);
             const max = maxM ? parseInt(maxM[1], 10) : 5;
+            /** WJEC/Eduqas prints e.g. "(AO2 1a, c and d)" or "(AO4)" right after the question stem. The leading digit before each letter (the "1" in "1a") is a strand-group number, not a strand itself — only the trailing a/b/c/d letters matter here, and "and" is a conjunction, not itself a strand letter, so split on it before reading trailing letters. */
+            const aoM = block.match(/\(\s*AO\s*(\d+)\s*([^)]*)\)/i);
+            let aoNumber = null;
+            let aoStrands = [];
+            if(aoM) {
+                aoNumber = parseInt(aoM[1], 10);
+                aoStrands = String(aoM[2] || "").replace(/\band\b/gi, ",").split(",")
+                    .map(s => { const mm = s.trim().match(/([a-d])\s*$/i); return mm ? mm[1].toLowerCase() : null; })
+                    .filter(Boolean);
+            }
             const startIdx = findIndicativeRegionStart(block);
             let indicative = [];
             let taggedBullets = [];
@@ -3972,6 +3982,8 @@ const app = {
             indicative = indicative.filter((s, i, a) => s && a.indexOf(s) === i).filter(s => !(app.isMarkSchemeNoiseLine && app.isMarkSchemeNoiseLine(s))).slice(0, 28);
             const entry = {
                 maxMarks: max,
+                ao: aoNumber,
+                aoStrands: aoStrands,
                 indicativeContent: indicative,
                 taggedBullets: taggedBullets.length ? taggedBullets.slice(0, 40) : undefined,
                 embeddedPhrases: embeddedPhrases.length ? embeddedPhrases : undefined
@@ -4732,6 +4744,89 @@ const app = {
             if(m >= 1) return Math.min(100, m);
         }
         return null;
+    },
+    /**
+     * Standing "how to get the marks" guidance per WJEC Component 1 question type, keyed off each
+     * question's own AO code + marks (not the question wording) so this works on any paper, not
+     * just one lesson. Base guidance is the minimum Point-Evidence approach needed to pass — Tone
+     * and Structure are optional add-ons, since Eduqas doesn't require them for a pass at every
+     * level. Structure only appears when BOTH the teacher has it switched on in Load & AI's
+     * selection devices AND this specific question's own mark scheme actually credits it (AO2
+     * strand b) — a device being on generally doesn't mean every question tests it. Tone has no
+     * equivalent single AO2 strand, so it's gated on the toggle alone.
+     * @param {{ao?: number, aoStrands?: string[], maxMarks?: number}} entry mark-scheme entry for this question (may be null/partial)
+     * @param {{tone?: boolean, structure?: boolean}} deviceSettings appData.settings.selectionDevices
+     * @returns {{ bullets: string[], starterTable: {headers: string[], rows: string[][]} | null }}
+     */
+    buildWorksheetMarkGuidance: function(entry, deviceSettings) {
+        const ao = entry && entry.ao != null ? entry.ao : null;
+        const strands = (entry && Array.isArray(entry.aoStrands)) ? entry.aoStrands : [];
+        const marks = (entry && entry.maxMarks) || null;
+        const toneOn = !!(deviceSettings && deviceSettings.tone === true);
+        const structureOn = !!(deviceSettings && deviceSettings.structure === true);
+        if(ao === 1) {
+            return {
+                bullets: [
+                    `Write one point per line${marks ? ` — ${marks} separate points` : ""}.`,
+                    `Each point should make sense on its own: start with "He…", "She…" or "It…".`,
+                    `Only use information from the lines given.`,
+                    `Don't copy a whole sentence — keep each point short.`
+                ],
+                starterTable: null
+            };
+        }
+        if(ao === 4) {
+            return {
+                bullets: [
+                    `Evaluate the text critically and support this with appropriate textual references.`,
+                    `Develop a wide range of personal thoughts and feelings: "In my opinion…", "I think…", "My impression is that…"`,
+                    `Start with an overview of the text as a whole: "Overall… At first… Later in the extract… In the lines… Finally…"`,
+                    `Make thoughtful, considered judgements throughout.`
+                ],
+                starterTable: null
+            };
+        }
+        if(ao === 2) {
+            let bullets;
+            let starterTable = null;
+            if(marks && marks <= 5) {
+                bullets = [
+                    `Make four or five different inferences.`,
+                    `Select the most relevant and precise quotation to support each point.`,
+                    `Show your understanding of how the writer creates effects.`
+                ];
+                starterTable = {
+                    headers: ["Sentence starter", "Evidence", "Effect"],
+                    rows: [
+                        ["The writer uses", "'…quote…'", "which implies…"],
+                        ["The writer presents", "the phrase…", "which suggests…"],
+                        ["The writer says", "a description of…", "which shows…"],
+                        ["The writer includes", "an example of…", "to emphasise…"]
+                    ]
+                };
+            } else {
+                bullets = [
+                    `Track through the text, making a wide range of different inferences (5+), each supported by a short quotation.`,
+                    `Select the most relevant and precise quotations, from across all the lines.`,
+                    `Focus on the meaning, using relevant subject terminology to support your comments.`,
+                    `Zoom in on individual words and comment on the effect on the reader.`
+                ];
+            }
+            if(structureOn && strands.includes("b")) {
+                bullets.push(`Comment on how the writer structures or paces events — what's revealed early or late, how the pace builds — to add to your analysis.`);
+            }
+            if(toneOn) {
+                bullets.push(`Where relevant, comment on the tone created by the writer's word choices.`);
+            }
+            return { bullets, starterTable };
+        }
+        return {
+            bullets: [
+                `Use short, well-chosen quotations to support each point you make.`,
+                `Explain what each quotation shows or suggests, in your own words.`
+            ],
+            starterTable: null
+        };
     },
     questionUsesRetrievalAnswersFromMarkScheme: function(questionId) {
         const m = app.getExamMarksForQuestionId(questionId);
@@ -39981,7 +40076,36 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 const p = String(q.prompt || "").trim();
                 if(!p) return;
                 const label = app.worksheetQuestionHeadingLabel(q);
-                content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.escapeHtml(label)}:</strong> ${app.escapeHtml(wsQclean(p))}</p>`;
+                const questionLabel = /^Q\d/i.test(label) ? label.replace(/^Q/i, "Question ") : label;
+                const msEntry = app.getMarkSchemeEntryForQuestionId ? app.getMarkSchemeEntryForQuestionId(q.id) : null;
+                const marks = (app.getExamMarksForQuestionId ? app.getExamMarksForQuestionId(q.id) : null) || (msEntry && msEntry.maxMarks) || null;
+                const lineRef = q.lineRef ? String(q.lineRef).trim() : "";
+                let heading = questionLabel;
+                if(lineRef) heading += ` — Read lines ${lineRef}`;
+                if(marks) heading += `   [${marks} marks]`;
+                content += `<h3 style="margin:12px 0 3px 0;font-size:11pt;">${app.escapeHtml(heading)}</h3>`;
+                content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.escapeHtml(wsQclean(p))}</strong></p>`;
+                const guidance = app.buildWorksheetMarkGuidance ? app.buildWorksheetMarkGuidance(msEntry, selDevWs) : null;
+                if(guidance && guidance.bullets && guidance.bullets.length) {
+                    content += `<p style="font-size:9pt;margin:2px 0 2px 0;font-style:italic;">How to get the marks:</p>`;
+                    content += `<ul style="margin:0 0 6px 0;padding-left:18px;font-size:9pt;">` +
+                        guidance.bullets.map(b => `<li style="margin:0 0 2px 0;">${app.escapeHtml(b)}</li>`).join("") +
+                        `</ul>`;
+                }
+                if(guidance && guidance.starterTable) {
+                    const t = guidance.starterTable;
+                    content += `<p style="font-size:9pt;margin:2px 0 2px 0;font-style:italic;">Sentence starters:</p>`;
+                    content += `<table style="border-collapse:collapse;width:100%;font-size:9pt;margin:0 0 6px 0;">`;
+                    content += `<tr>` + t.headers.map(h => `<th style="border:1px solid #999;padding:3px 6px;text-align:left;background:#f0f0f0;">${app.escapeHtml(h)}</th>`).join("") + `</tr>`;
+                    t.rows.forEach(row => {
+                        content += `<tr>` + row.map(cell => `<td style="border:1px solid #999;padding:3px 6px;">${app.escapeHtml(cell)}</td>`).join("") + `</tr>`;
+                    });
+                    content += `</table>`;
+                }
+                const ruleCount = Math.max(4, Math.min(11, marks || 5));
+                content += `<table style="border-collapse:collapse;width:100%;margin:0 0 12px 0;">` +
+                    Array.from({ length: ruleCount }).map(() => `<tr><td style="border-bottom:1px solid #999;height:20px;">&nbsp;</td></tr>`).join("") +
+                    `</table>`;
             });
         } else if(appData.question && String(appData.question).trim()) {
             const label = app.worksheetQuestionHeadingLabel("q1");
