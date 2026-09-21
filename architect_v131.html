@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-21T06:00:00">
-<meta name="architect-deploy" content="quotebank-autofill-scope-fix">
-<meta name="architect-rev" content="function-called-via-admin-not-app">
+<meta name="architect-build" content="2026-09-21T07:00:00">
+<meta name="architect-deploy" content="quotebank-hide-stale-items">
+<meta name="architect-rev" content="shared-passage-check-hides-not-deletes-mismatched-quotes">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3792,6 +3792,28 @@ const app = {
         const current = app.computePassageFingerprint(sourceText);
         if(!current || current === stamped) return null;
         return "The extracted mark scheme doesn't match the passage that's currently loaded — it looks like it was extracted for a different paper. Re-run \"Extract text\" on this paper's mark scheme PDF (Lobby \u2192 Import past paper) before using Fill from mark scheme.";
+    },
+    /**
+     * Whether a quote-bank item's own quote text appears anywhere in the currently-loaded passage.
+     * A quote that doesn't is stale data — left over from a previous lesson/paper, or the tool's own
+     * shipped demo content — not something relevant to what's loaded now. Shared by the Worksheet
+     * export and the Quote Bank view (Editing Suite), so both draw the same line consistently. Fails
+     * open (returns true) when there's no readable passage to check against at all, so this never
+     * hides/blocks anything when there's simply nothing yet to compare against.
+     */
+    quoteTextExistsInLoadedPassage: function(quoteText) {
+        let t = (typeof admin !== "undefined" && admin.getSourceTextForMarkSchemeQuoteMatch) ? admin.getSourceTextForMarkSchemeQuoteMatch() : "";
+        t = t || "";
+        try {
+            if(/<[^>]+>/.test(t) || (app.isStructuredPassageSource && app.isStructuredPassageSource(t))) {
+                t = app.cleanSourceText ? app.cleanSourceText(t) : t;
+            }
+            t = t.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").toLowerCase();
+        } catch(eQeP) { t = ""; }
+        if(!t) return true;
+        const norm = String(quoteText || "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim().toLowerCase();
+        if(!norm) return false;
+        return t.includes(norm);
     },
     parseMarkSchemeFromText: function(text) {
         if(!text || typeof text !== "string") return {};
@@ -34367,6 +34389,8 @@ const admin = {
         const examLink = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
         const bankLvl = app.getQuotesBankViewLevel ? app.getQuotesBankViewLevel() : 1;
         let indexed = items.map((item, idx) => ({ item, idx })).filter(x => x.item && x.item.correct !== false);
+        const staleCount = indexed.filter(x => !app.quoteTextExistsInLoadedPassage(x.item.quote)).length;
+        if(staleCount > 0) indexed = indexed.filter(x => app.quoteTextExistsInLoadedPassage(x.item.quote));
         if(admin.quotesBankExamScope !== "all") {
             indexed = indexed.filter(x => admin.quoteItemMatchesQuotesBankView(x.item));
         }
@@ -34374,6 +34398,9 @@ const admin = {
         const maxRender = app.MAX_QUOTES_BANK_RENDER || 28;
         const totalShown = quoteList.length;
         let capNote = "";
+        let staleNote = staleCount > 0
+            ? `<div style="opacity:0.75;padding:6px 10px;margin-bottom:8px;border:1px dashed var(--border);border-radius:6px;font-size:0.78rem;">${staleCount} quote${staleCount === 1 ? "" : "s"} hidden — not found in the currently-loaded passage (likely left over from a different paper). Not deleted; they'll reappear here if that passage is loaded again.</div>`
+            : "";
         let quoteRender = quoteList;
         if(totalShown > maxRender) {
             capNote = `<div style="opacity:0.85;padding:8px 10px;margin-bottom:10px;border:1px dashed var(--border);border-radius:6px;font-size:0.82rem;">Showing first ${maxRender} of ${totalShown} quote rows (memory limit). Use compact view or filter by level.</div>`;
@@ -34470,7 +34497,7 @@ const admin = {
         const quoteSection = quoteList.length
             ? `<div><div class="admin-h" style="margin-bottom:8px;">${listHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${quoteRender.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>`
             : (examEmptyHint || "<div style='opacity:0.7;'>No quotes yet. Use + Add quote — attach plausible wrong quotations under <strong>Wrong quotations</strong> on each row.</div>");
-        wrap.innerHTML = capNote + quoteSection;
+        wrap.innerHTML = staleNote + capNote + quoteSection;
         } catch(eQb) {
             console.error("Quote bank render failed:", eQb);
             wrap.innerHTML = "<div style='padding:10px;border:1px solid var(--error);border-radius:6px;font-size:0.85rem;'>Quote bank could not render. Try <strong>All levels</strong> in the exam toolbar, or reload the page. Error: " + app.escapeHtml(String(eQb && eQb.message ? eQb.message : eQb)) + "</div>";
@@ -40013,22 +40040,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
         }
         const quoteBankFocus = app.getWorksheetFocusFromQuoteBank();
-        /** A ticked quote-bank item whose quote text doesn't appear anywhere in the currently-loaded passage is stale data from a previous lesson/paper (or the tool's own shipped demo content), not something relevant to what's loaded now — skip it rather than tacking an unrelated match/rubric section onto the worksheet. Fails open (keeps the item) if there's no readable passage to check against at all, so this never blocks worksheet generation outright. */
-        const wsPassagePlainForQuoteCheck = (function() {
-            try {
-                let t = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || "";
-                if(/<[^>]+>/.test(t) || (app.isStructuredPassageSource && app.isStructuredPassageSource(t))) {
-                    t = app.cleanSourceText ? app.cleanSourceText(t) : t;
-                }
-                return t.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").toLowerCase();
-            } catch(eWsPassage) { return ""; }
-        })();
-        const wsQuoteExistsInPassage = (q) => {
-            if(!wsPassagePlainForQuoteCheck) return true;
-            const norm = String(q || "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim().toLowerCase();
-            if(!norm) return false;
-            return wsPassagePlainForQuoteCheck.includes(norm);
-        };
+        /** A ticked quote-bank item whose quote text doesn't appear anywhere in the currently-loaded passage is stale data from a previous lesson/paper (or the tool's own shipped demo content), not something relevant to what's loaded now — skip it rather than tacking an unrelated match/rubric section onto the worksheet. */
+        const wsQuoteExistsInPassage = (q) => app.quoteTextExistsInLoadedPassage(q);
         const worksheetQuotesTicked = (appData.items || []).filter(i => i && i.includeInWorksheet === true && i.correct !== false && wsQuoteExistsInPassage(i.quote));
         let worksheetFocusQs;
         let wsQSet;
