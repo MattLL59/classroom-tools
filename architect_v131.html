@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-21T04:00:00">
-<meta name="architect-deploy" content="markscheme-default-page-range-widened">
-<meta name="architect-rev" content="c1-markscheme-default-starts-page-2">
+<meta name="architect-build" content="2026-09-21T05:00:00">
+<meta name="architect-deploy" content="quotebank-autofill-from-markscheme">
+<meta name="architect-rev" content="lobby-toggle-plus-levelbank-quota-based-quote-fill">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -2917,9 +2917,14 @@
                             <label style="font-size:0.85rem;">Mark scheme page(s):</label>
                             <input type="text" id="past-paper-markscheme-pages" placeholder="C1: 2-13 · C2: 4-12 (if empty)" style="max-width:200px; padding:4px 8px;">
                         </div>
+                        <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+                            <input type="checkbox" id="past-paper-autofill-quotebank" onchange="if(!appData.settings) appData.settings={}; appData.settings.autoFillQuoteBankFromMarkScheme = this.checked; app.save({skipQuestionPersist:true});">
+                            <label for="past-paper-autofill-quotebank" style="font-size:0.85rem; cursor:pointer;" title="After importing, automatically top up each active level's Quote Bank from the mark scheme, up to that level's own Quo setting in Editing Suite. Uses the same local matching as Fill from mark scheme — no AI call. Never touches quotes you've picked by hand.">Auto-fill Quote Bank from mark scheme on import</label>
+                        </div>
                     </div>
                     <button type="button" class="btn btn-outline" id="past-paper-extract-btn" onclick="admin.extractPastPaperText({ questions: false })" disabled title="Cache PDFs, pull resource + questions-PDF passages (C2 layout), and mark scheme. Does not change the question bank — use Extract questions next.">Extract text</button>
                     <button type="button" class="btn btn-primary" id="past-paper-reextract-btn" onclick="admin.reExtractQuestionsFromPages()" style="margin-left:8px;" disabled title="Split Section A reading tasks from the Questions PDF into the question bank (same engine as before; uses Section A reading page(s) only)">Extract questions</button>
+                    <button type="button" class="btn btn-outline" style="margin-left:8px;" onclick="const r = app.autoPopulateQuoteBankFromMarkScheme(); admin.renderQuotesBank(); if(admin.renderLevelBank) admin.renderLevelBank(); app.showPastPaperExtractNotice(r.added ? ('<strong>' + r.added + ' quote(s)</strong> added to the Quote Bank from the mark scheme.') : 'No quotes added — either every level is already at its Quo target, or no mark-scheme match was found. Manually-picked quotes are never affected.', { autoHideMs: 15000 });" title="Top up each active level's Quote Bank from the mark scheme now, up to that level's own Quo setting. Same local matching as Fill from mark scheme — no AI call. Never touches quotes you've picked by hand. Useful for an already-loaded lesson, or after changing a level's question/Quo in Editing Suite.">Fill Quote Bank from mark scheme now</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.copyLastPdfDebugReport && admin.copyLastPdfDebugReport()" style="margin-left:8px;" title="After Extract text/questions, copy the last PDF debug report (strategy decisions, line counts, insert width estimate).">Copy PDF debug</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-19th-btn" onclick="admin.reExtract19thFromPages()" style="margin-left:8px;" title="Re-extract 19th C passage from Questions PDF (C2 only)">Re-extract 19th C</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-resource-btn" onclick="admin.reExtractResourceFromPages()" style="margin-left:8px;" title="Re-extract 21st C resource passage from Resource PDF">Re-extract resource</button>
@@ -29098,12 +29103,23 @@ const admin = {
         const resMissing = !!(files.resource && !String(resourcePassageText || "").trim());
         if(includeQuestions) {
             const qCount = Array.isArray(appData.questions) ? appData.questions.length : 0;
+            let autoFillMsg = "";
+            if(qCount >= 1) {
+                /** The JSON-template import path already does this (syncLevelBankForPastPaperQuestions + autoAssignLevelsByLineRangeIfApplicable right after questions load); this PDF-import path never did, so a fresh import could leave Level Bank question assignments stale until a separate manual sync. Doing it here closes that gap the same way. */
+                if(admin.syncLevelBankForPastPaperQuestions) admin.syncLevelBankForPastPaperQuestions();
+                if(admin.autoAssignLevelsByLineRangeIfApplicable) admin.autoAssignLevelsByLineRangeIfApplicable({ silent: true });
+                if(appData.settings && appData.settings.autoFillQuoteBankFromMarkScheme === true && app.autoPopulateQuoteBankFromMarkScheme) {
+                    const qbResult = app.autoPopulateQuoteBankFromMarkScheme();
+                    if(qbResult && qbResult.added > 0) autoFillMsg = " Auto-filled <strong>" + qbResult.added + " quote(s)</strong> into the Quote Bank from the mark scheme.";
+                }
+            }
             let msg = "<strong>Past paper loaded.</strong> ";
             if(qCount >= 2) msg += qCount + " Section A reading questions added to the bank.";
             else if(qCount === 1) msg += "One focus question detected — set Section A reading page(s) and click <strong>Extract questions</strong> if you expected more.";
             else msg += "No questions split yet — set Section A reading page(s) and click <strong>Extract questions</strong>, or paste prompts manually.";
             if(resMissing) msg += " <span style=\"color:var(--error)\">Resource PDF returned no text — try all pages or OCR.</span>";
             msg += " Passage should appear in Quote Select / Lab now.";
+            msg += autoFillMsg;
             app.showPastPaperExtractNotice(msg, { autoHideMs: 20000 });
         } else {
             let msg = "<strong>Extract text done.</strong> PDFs cached; passages and mark scheme updated.";
@@ -32841,6 +32857,8 @@ const admin = {
         if(c2Row) c2Row.classList.toggle("hidden", !isC2);
         const msPages = document.getElementById("past-paper-markscheme-pages");
         if(msPages) msPages.placeholder = isC2 ? "4-12 (default if empty)" : "2-13 (default if empty)";
+        const autoFillCb = document.getElementById("past-paper-autofill-quotebank");
+        if(autoFillCb) autoFillCb.checked = !!(appData && appData.settings && appData.settings.autoFillQuoteBankFromMarkScheme === true);
         const re19th = document.getElementById("past-paper-reextract-19th-btn");
         if(re19th) re19th.style.display = isC2 ? "" : "none";
         if(isC2) {
@@ -34545,6 +34563,89 @@ const admin = {
         q.answerPassageExcerpt = body;
         app.save({ skipQuestionPersist: true });
         admin.refreshQuestionsList();
+    },
+    /**
+     * Auto-populate the Quote Bank from the mark scheme for every active Level Bank level's assigned
+     * question, up to that level's own Quo (quoteTarget) setting — using the same local, algorithmic
+     * quote-matching already built for "Fill from mark scheme" (no AI call). Never touches or removes
+     * a teacher's own manually-picked items; only tops up levels that are short of their target,
+     * skipping any quote that already exists as an item (manual pick or an earlier auto-add) for any
+     * question, so this is safe to re-run at any time — e.g. after loading a new paper, or after
+     * changing a level's question assignment or Quo value.
+     * @returns {{ added: number, skippedLevels: number }}
+     */
+    autoPopulateQuoteBankFromMarkScheme: function() {
+        const bank = app.getLevelBank ? app.getLevelBank() : null;
+        const ms = admin.ensureMarkSchemeParsedFromLayout ? admin.ensureMarkSchemeParsedFromLayout() : appData.markScheme;
+        if(!bank || !ms || !Object.keys(ms).length) return { added: 0, skippedLevels: 0 };
+        const sourceText = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || "";
+        if(!sourceText.trim()) return { added: 0, skippedLevels: 0 };
+        const mismatch = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
+        if(mismatch) return { added: 0, skippedLevels: 0 };
+        if(!Array.isArray(appData.items)) appData.items = [];
+        const normQid = app.normQuestionId;
+        const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
+        const existingQuotesNorm = new Set(appData.items.filter(i => i && i.quote).map(i => String(i.quote).trim().toLowerCase()));
+        let added = 0;
+        let skippedLevels = 0;
+        const levelNums = Object.keys(bank).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+        levelNums.forEach(lvl => {
+            const entry = bank[lvl] || {};
+            const qids = Array.isArray(entry.questionIds) ? entry.questionIds.filter(Boolean) : [];
+            if(!qids.length) { skippedLevels++; return; }
+            const qid = normQid(qids[0]);
+            const q = (appData.questions || []).find(qq => qq && normQid(qq.id) === qid);
+            if(!q) { skippedLevels++; return; }
+            /** Q1-style retrieval questions get skipped here, same distinction "Fill from mark scheme" already makes: their marking guidance is paraphrased points, not literal quotable passage text, so quote-matching isn't the right tool for them. */
+            if(app.questionUsesRetrievalAnswersFromMarkScheme && app.questionUsesRetrievalAnswersFromMarkScheme(qid)) return;
+            const target = parseInt(entry.quoteTarget, 10) || 0;
+            if(target <= 0) return;
+            const existingForLevel = appData.items.filter(i => i && i.correct !== false && Array.isArray(i.levels) && i.levels.includes(lvl));
+            if(existingForLevel.length >= target) return;
+            const need = target - existingForLevel.length;
+            const msEntry = app.getMarkSchemeEntryForQuestionId ? app.getMarkSchemeEntryForQuestionId(qid) : null;
+            if(!msEntry || !Array.isArray(msEntry.indicativeContent) || !msEntry.indicativeContent.length) { skippedLevels++; return; }
+            const lr = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(q.prompt)) || null);
+            const cands = app.findQuoteCandidatesFromMarkScheme(qid, sourceText, ms, lr, lvl) || [];
+            let addedForThisLevel = 0;
+            for(const c of cands) {
+                if(addedForThisLevel >= need) break;
+                const quoteText = String(c.quote || "").trim();
+                if(!quoteText) continue;
+                const norm = quoteText.toLowerCase();
+                if(existingQuotesNorm.has(norm)) continue;
+                const reasonText = String(c.reason || "").trim();
+                appData.items.push({
+                    id: `ms_${Date.now()}_${added}`,
+                    original: quoteText,
+                    quote: quoteText,
+                    translation: reasonText || "Meaning not provided.",
+                    translationDistractors: [],
+                    type: "language",
+                    device: "language",
+                    effect: reasonText,
+                    effectDistractors: [],
+                    levels: [lvl],
+                    questionIds: [qid],
+                    includeInWorksheet: true,
+                    reasons: reasonText ? [reasonText] : [],
+                    deviceReason: reasonText,
+                    starter: "",
+                    starters: [],
+                    starterDistractors: [],
+                    link: "",
+                    links: [],
+                    linkDistractors: [],
+                    modelAnswer: "",
+                    fromMarkScheme: true
+                });
+                existingQuotesNorm.add(norm);
+                added++;
+                addedForThisLevel++;
+            }
+        });
+        if(added > 0) app.save({ skipQuestionPersist: true });
+        return { added, skippedLevels };
     },
     /**
      * Bulk-fill <code>answerPassageExcerpt</code> on focus questions from mark scheme (same matcher as quote bank suggest).
