@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-21T00:00:00">
-<meta name="architect-deploy" content="worksheet-heading-quotebank-decouple-fix">
-<meta name="architect-rev" content="separate-heading-questions-from-quote-task-focus">
+<meta name="architect-build" content="2026-09-21T02:00:00">
+<meta name="architect-deploy" content="q1-retrieval-markscheme-support">
+<meta name="architect-rev" content="award-marks-pattern-plus-ao-based-retrieval-routing">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -3834,7 +3834,8 @@ const app = {
                 /Details that candidates may explore or comment on:\s*\n/gi,
                 /Details candidates may explore or comment\s+on\s+could\s+be:\s*\n/gi,
                 /details candidates may select,?\s*explore or comment\s+on\s+could\s+be:\s*\n/gi,
-                /details that candidates may synthesise[^\n]*:\s*\n/gi
+                /details that candidates may synthesise[^\n]*:\s*\n/gi,
+                /Award\s+\w+\s+marks?\s+for\s+each\s+point[\s\S]*?maximum\s+of\s+\w+\s*:\s*\n/gi
             ];
             let best = -1;
             for(const re of patterns) {
@@ -3917,7 +3918,7 @@ const app = {
                 if(/^Note:\s*max/i.test(clean)) continue;
                 if(isBandDescriptorLine(clean)) continue;
                 if(app.isMarkSchemeNoiseLine && app.isMarkSchemeNoiseLine(clean)) continue;
-                if(/^(This is not a checklist|Look for and reward)/i.test(clean)) continue;
+                if(/^(This is not a checklist|Look for and reward|No mark)/i.test(clean)) continue;
                 /** Same PDF line-wrap issue fixed in the fallback bullet parser below: an unmarked line inside a marker-led region is the previous bullet wrapping onto a second printed line, not noise or a new bullet — join it back rather than splitting the bullet in two. */
                 if(anyMarked && !hasMarker && tagged.length && tagged[tagged.length - 1].tag === tag) {
                     tagged[tagged.length - 1].text = (tagged[tagged.length - 1].text + " " + clean).replace(/\s+/g, " ").trim();
@@ -4829,16 +4830,18 @@ const app = {
         };
     },
     questionUsesRetrievalAnswersFromMarkScheme: function(questionId) {
+        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
+        if(ent && ent.ao === 1) return true;
         const m = app.getExamMarksForQuestionId(questionId);
         if(m != null) return m <= 2;
-        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
         if(ent && ent.maxMarks != null) return parseInt(ent.maxMarks, 10) <= 2;
         return false;
     },
     questionUsesQuoteSuggestFromMarkScheme: function(questionId) {
+        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
+        if(ent && ent.ao === 1) return false;
         const m = app.getExamMarksForQuestionId(questionId);
         if(m != null) return m >= 4;
-        const ent = app.getMarkSchemeEntryForQuestionId(questionId);
         if(ent && ent.maxMarks != null) return parseInt(ent.maxMarks, 10) >= 4;
         return false;
     },
@@ -39909,7 +39912,23 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
         }
         const quoteBankFocus = app.getWorksheetFocusFromQuoteBank();
-        const worksheetQuotesTicked = (appData.items || []).filter(i => i && i.includeInWorksheet === true && i.correct !== false);
+        /** A ticked quote-bank item whose quote text doesn't appear anywhere in the currently-loaded passage is stale data from a previous lesson/paper (or the tool's own shipped demo content), not something relevant to what's loaded now — skip it rather than tacking an unrelated match/rubric section onto the worksheet. Fails open (keeps the item) if there's no readable passage to check against at all, so this never blocks worksheet generation outright. */
+        const wsPassagePlainForQuoteCheck = (function() {
+            try {
+                let t = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || "";
+                if(/<[^>]+>/.test(t) || (app.isStructuredPassageSource && app.isStructuredPassageSource(t))) {
+                    t = app.cleanSourceText ? app.cleanSourceText(t) : t;
+                }
+                return t.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").toLowerCase();
+            } catch(eWsPassage) { return ""; }
+        })();
+        const wsQuoteExistsInPassage = (q) => {
+            if(!wsPassagePlainForQuoteCheck) return true;
+            const norm = String(q || "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim().toLowerCase();
+            if(!norm) return false;
+            return wsPassagePlainForQuoteCheck.includes(norm);
+        };
+        const worksheetQuotesTicked = (appData.items || []).filter(i => i && i.includeInWorksheet === true && i.correct !== false && wsQuoteExistsInPassage(i.quote));
         let worksheetFocusQs;
         let wsQSet;
         let worksheetQuestionFilterActive;
@@ -39982,6 +40001,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
 
         const itemMatchesWorksheetFocus = (item) => {
             if(!item || item.includeInWorksheet !== true) return false;
+            if(!wsQuoteExistsInPassage(item.quote)) return false;
             if(!worksheetQuestionFilterActive) return true;
             const iq = Array.isArray(item.questionIds) ? item.questionIds : [];
             if(iq.some(qid => wsQSet.has(normWsQid(qid)))) return true;
