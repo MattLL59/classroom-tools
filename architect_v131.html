@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-21T07:00:00">
-<meta name="architect-deploy" content="quotebank-hide-stale-items">
-<meta name="architect-rev" content="shared-passage-check-hides-not-deletes-mismatched-quotes">
+<meta name="architect-build" content="2026-09-21T08:00:00">
+<meta name="architect-deploy" content="stuck-panel-markscheme-points">
+<meta name="architect-rev" content="q1-paraphrase-points-instead-of-quotes-when-stuck">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -24998,6 +24998,12 @@ const ui = {
                 </div>`;
             }
             helpWrap.classList.remove("hidden");
+            /** For a retrieval-type question with no quote-bank content (Q1-style — paraphrased facts, not literal passage text), surface the mark-scheme's own indicative points instead of the generic "tap a phrase" fallback, clearly labelled as points to paraphrase rather than quotes to copy. Same underlying data already feeding the Worksheet's short-answer section (pickOwnWordsBulletsFromMarkScheme). */
+            const stuckMsQIds = noQuotesHelpLevel && app.resolveQuestionIdsForLevel ? app.resolveQuestionIdsForLevel(level) : [];
+            const msPointsForStuck = (stuckMsQIds && stuckMsQIds.length === 1 && app.pickOwnWordsBulletsFromMarkScheme)
+                ? (app.pickOwnWordsBulletsFromMarkScheme(stuckMsQIds[0]) || [])
+                : [];
+            const msPointsHelpOn = userState.studentMarkSchemePointsHelp !== false;
             const deskSentenceBankHelpLabel = appData.isStandalone
                 ? `<label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-desk-sentence-bank" ${userState.studentHelpDeskSentenceBank ? "checked" : ""}> Show sentence-bank chips on Writing Desk (markers, starters, analysis…)</label>`
                 : "";
@@ -25011,7 +25017,9 @@ const ui = {
             helpWrap.innerHTML = `<details id="selection-student-help-details" style="margin:0;"${helpDetailsOpen}><summary style="cursor:pointer;">I'm stuck — get help</summary><div id="selection-student-help-options" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:12px;">
                 ${wsPracticeLabel}
                 ${noQuotesHelpLevel
-                    ? `<div style="width:100%; flex-basis:100%; font-size:0.82rem; line-height:1.4; padding:7px 10px; background:rgba(255,152,0,0.08); border-radius:6px;"><strong>No direct quotes for this question.</strong> Tap a phrase in the passage to help you find the right part — then explain it in your own words, or use it to make an inference. Don't copy it into your answer.</div>`
+                    ? (msPointsForStuck.length
+                        ? `<label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-ms-points" ${msPointsHelpOn ? "checked" : ""}> Show mark-scheme points to consider</label>${msPointsHelpOn ? `<div style="width:100%; flex-basis:100%; margin-top:6px; padding:8px 10px; background:rgba(76,175,80,0.08); border-radius:6px; font-size:0.82rem; line-height:1.4;"><strong>Some things you could mention</strong> (put these in your own words — don't copy this wording):<ul style="margin:4px 0 0 18px; padding:0;">${msPointsForStuck.slice(0, 3).map(b => `<li>${app.escapeHtml(b)}</li>`).join("")}</ul></div>` : ""}`
+                        : `<div style="width:100%; flex-basis:100%; font-size:0.82rem; line-height:1.4; padding:7px 10px; background:rgba(255,152,0,0.08); border-radius:6px;"><strong>No direct quotes for this question.</strong> Tap a phrase in the passage to help you find the right part — then explain it in your own words, or use it to make an inference. Don't copy it into your answer.</div>`)
                     : `<label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:${canOfferQuoteList ? "pointer" : "default"}; ${!canOfferQuoteList ? "opacity:0.8;" : ""}"><input type="checkbox" id="student-help-quote-list" ${userState.studentQuoteListHelp ? "checked" : ""} ${!canOfferQuoteList ? "disabled" : ""}> Give me quote choices to pick from${quoteListNeedLabel} <span style="opacity:0.75; font-weight:400;">(you can still highlight in the passage)</span></label>`}
                 <label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-synonyms" ${userState.studentSynonymsHelp ? "checked" : ""}> Show synonym suggestions in Writing Desk</label>
                 ${deskSentenceBankHelpLabel}
@@ -25038,6 +25046,7 @@ const ui = {
             };
             const wsPracticeCb = document.getElementById("student-help-worksheet-practice");
             const quoteListCb = document.getElementById("student-help-quote-list");
+            const msPointsCb = document.getElementById("student-help-ms-points");
             const synCb = document.getElementById("student-help-synonyms");
             const deskBankCb = document.getElementById("student-help-desk-sentence-bank");
             const meanCb = document.getElementById("student-help-ai-meanings");
@@ -25052,6 +25061,12 @@ const ui = {
                     ui._freeSelectPendingQuote = "";
                     if(window.getSelection) window.getSelection().removeAllRanges();
                 }
+                app.save();
+                ui.renderSelection();
+            };
+            if(msPointsCb) msPointsCb.onchange = () => {
+                keepHelpOpen();
+                userState.studentMarkSchemePointsHelp = msPointsCb.checked;
                 app.save();
                 ui.renderSelection();
             };
