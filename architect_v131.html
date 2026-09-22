@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-22T01:00:00">
-<meta name="architect-deploy" content="student-app-autoreflow-nonpersistent">
-<meta name="architect-rev" content="export-reflow-no-longer-mutates-live-lesson-fixes-compounding-narrowing">
+<meta name="architect-build" content="2026-09-22T02:00:00">
+<meta name="architect-deploy" content="student-app-autoreflow-dom-restore-fix">
+<meta name="architect-rev" content="restore-now-covers-ai-input-dom-not-just-appdata-sourcetext">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -40730,8 +40730,25 @@ ${rowsHtml}
 
                 // Always restore the live lesson to its exact original state — never leave the
                 // reflow's result (good or bad) sitting in appData beyond this point.
+                //
+                // CRITICAL: reflowC1PassageBodyToNaturalInsertWidthCh (and applySuggestedPassageInsertWidthCh)
+                // write their result to the DOM editor too, via their own internal setAiInputValue() call —
+                // not just to appData.sourceText. Restoring only appData.sourceText left the live #ai-input
+                // element holding the bad, narrow-reflowed content (confirmed live: still present in the DOM,
+                // just hidden, after export). flushAiInputToLessonSourceIfEditable() reads FROM that DOM
+                // element and writes INTO appData.sourceText — so on the very next call, it silently pulled
+                // the stale bad content straight back in, undoing this restore before it had any effect. This
+                // is what let the corruption persist across repeated exports despite the "restore" existing.
                 if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(originalCanon);
                 if(appData.meta) appData.meta.pdfInsertWidthCh = originalWidthCh;
+                if(typeof app.setAiInputValue === "function") {
+                    try { app.setAiInputValue(originalCanon); } catch(eRestoreDom) {}
+                }
+                if(typeof ui !== "undefined" && ui.refreshAllPassageDisplays) {
+                    try { ui.refreshAllPassageDisplays(originalCanon); } catch(eRestoreUi) {}
+                } else if(typeof ui !== "undefined" && ui.refreshSourceDisplay) {
+                    try { ui.refreshSourceDisplay(); } catch(eRestoreUi2) {}
+                }
                 if(typeof app.save === "function") app.save({ skipRender: true, silent: true });
 
                 if(looksDestructive) {
