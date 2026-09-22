@@ -6,9 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-22T00:00:00">
-<meta name="architect-deploy" content="student-app-autoreflow-before-export">
-<meta name="architect-rev" content="verified-against-looksexploded-detection-plus-safety-revert">
+<meta name="architect-build" content="2026-09-22T01:00:00">
+<meta name="architect-deploy" content="student-app-autoreflow-nonpersistent">
+<meta name="architect-rev" content="export-reflow-no-longer-mutates-live-lesson-fixes-compounding-narrowing">
 <title>Answer Architect (v131)</title>
 <style>
     /* --- 1. CSS VARIABLES & RESET --- */
@@ -40695,25 +40695,50 @@ ${rowsHtml}
          * has its own separate "looksExploded" detection for exactly this pattern (short stub rows) —
          * confirmed against real reconstructed data before wiring this in — and does not call into the
          * different _passageV2CollapseWidthBakeLikely / collapse-to-one-line code path implicated in an
-         * earlier, unrelated data-loss incident. Kept a line-count safety check regardless: if the reflow
-         * would drastically shrink the line count (that incident's specific signature), revert to the
-         * pre-reflow passage and warn, rather than silently exporting something corrupted.
+         * earlier, unrelated data-loss incident.
+         *
+         * CRITICAL: applySuggestedPassageInsertWidthCh and reflowC1PassageBodyToNaturalInsertWidthCh both
+         * persist their result back into the live appData/localStorage internally (their own app.save()
+         * calls) — there's no "preview only" mode. Left unguarded, that meant every export permanently
+         * narrowed the live lesson's stored passage by however much that run's width-suggestion drifted,
+         * and the NEXT export then measured and reflowed from that already-narrowed baseline — compounding
+         * across repeated exports into a genuinely corrupted stored passage (confirmed live: one real lesson
+         * ended up at 202 stored rows, all 4–38 characters, after a small handful of exports). So: snapshot
+         * the live canonical passage + width first, let the reflow run (and save) as it always has, capture
+         * its result, then unconditionally restore the live lesson back to the exact original afterward —
+         * the reflowed result is used ONLY for this export's own snapshot (exportData, built further below),
+         * never left sitting in the working lesson. This makes repeated exports idempotent: every export
+         * reflows from the same stable, teacher-authored baseline, never from a previous export's output.
          */
+        let _exportReflowedSourceText = null;
+        let _exportReflowedWidthCh = null;
         if(typeof app.reflowC1PassageBodyToNaturalInsertWidthCh === "function" && appData && appData.component !== 2) {
             try {
-                const beforeCanon = typeof appData.sourceText === "string" ? appData.sourceText : "";
-                const beforeParsed = (app.isStructuredPassageSource && app.isStructuredPassageSource(beforeCanon)) ? app.parseStructuredPassageSource(beforeCanon) : null;
+                const originalCanon = typeof appData.sourceText === "string" ? appData.sourceText : "";
+                const originalWidthCh = appData.meta ? appData.meta.pdfInsertWidthCh : undefined;
+                const beforeParsed = (app.isStructuredPassageSource && app.isStructuredPassageSource(originalCanon)) ? app.parseStructuredPassageSource(originalCanon) : null;
                 const beforeLineCount = beforeParsed && Array.isArray(beforeParsed.lines) ? beforeParsed.lines.length : null;
+
                 if(typeof app.applySuggestedPassageInsertWidthCh === "function") app.applySuggestedPassageInsertWidthCh({ silent: true });
                 app.reflowC1PassageBodyToNaturalInsertWidthCh({ silent: true });
-                const afterCanon = typeof appData.sourceText === "string" ? appData.sourceText : "";
-                const afterParsed = (app.isStructuredPassageSource && app.isStructuredPassageSource(afterCanon)) ? app.parseStructuredPassageSource(afterCanon) : null;
+
+                const reflowedCanon = typeof appData.sourceText === "string" ? appData.sourceText : "";
+                const reflowedWidthCh = appData.meta ? appData.meta.pdfInsertWidthCh : undefined;
+                const afterParsed = (app.isStructuredPassageSource && app.isStructuredPassageSource(reflowedCanon)) ? app.parseStructuredPassageSource(reflowedCanon) : null;
                 const afterLineCount = afterParsed && Array.isArray(afterParsed.lines) ? afterParsed.lines.length : null;
-                if(beforeLineCount != null && afterLineCount != null && beforeLineCount >= 6 && afterLineCount < beforeLineCount * 0.5) {
-                    if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(beforeCanon);
-                    if(typeof app.save === "function") app.save();
-                    console.warn("Auto-reflow before Student App export looked destructive (" + beforeLineCount + " -> " + afterLineCount + " lines) — reverted to the pre-reflow passage.");
-                    alert("Heads up: the automatic line-width fit before export looked like it would drastically shrink the passage (" + beforeLineCount + " \u2192 " + afterLineCount + " lines), so it was skipped this time and the original passage was kept instead. Export is continuing with the passage as it was — you can still fix wrapping manually via Reflow body (natural wrap) in Editing Suite if needed.");
+                const looksDestructive = beforeLineCount != null && afterLineCount != null && beforeLineCount >= 6 && afterLineCount < beforeLineCount * 0.5;
+
+                // Always restore the live lesson to its exact original state — never leave the
+                // reflow's result (good or bad) sitting in appData beyond this point.
+                if(typeof app.syncLessonSourceCanonical === "function") app.syncLessonSourceCanonical(originalCanon);
+                if(appData.meta) appData.meta.pdfInsertWidthCh = originalWidthCh;
+                if(typeof app.save === "function") app.save({ skipRender: true, silent: true });
+
+                if(looksDestructive) {
+                    console.warn("Auto-reflow before Student App export looked destructive (" + beforeLineCount + " -> " + afterLineCount + " lines) — exporting with the original, unreflowed passage instead.");
+                } else if(reflowedCanon && reflowedCanon !== originalCanon) {
+                    _exportReflowedSourceText = reflowedCanon;
+                    _exportReflowedWidthCh = reflowedWidthCh;
                 }
             } catch(eAutoReflow) { console.warn("Auto-reflow before Student App export failed:", eAutoReflow); }
         }
@@ -40723,6 +40748,11 @@ ${rowsHtml}
         }
         // 1. Prepare data with lock
         const exportData = JSON.parse(JSON.stringify(appData));
+        if(_exportReflowedSourceText) {
+            exportData.sourceText = _exportReflowedSourceText;
+            exportData.meta = exportData.meta && typeof exportData.meta === "object" ? exportData.meta : {};
+            if(_exportReflowedWidthCh != null) exportData.meta.pdfInsertWidthCh = _exportReflowedWidthCh;
+        }
         exportData.isStandalone = true;
         if(exportData.settings && exportData.settings.pastPaperPdfMeta) delete exportData.settings.pastPaperPdfMeta;
         if(exportData.settings && exportData.settings.modulesActive && !exportData.settings.modulesActive.selection) {
