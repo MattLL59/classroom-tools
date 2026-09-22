@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-22T16:45:00">
-<meta name="architect-deploy" content="student-app-export-DEBUG3">
+<meta name="architect-build" content="2026-09-22T17:15:00">
+<meta name="architect-deploy" content="passage-crossrow-orphan-fix">
 <meta name="architect-rev" content="removed-dom-dependent-autoreflow-domfree-fragmentation-check-only">
 <title>Answer Architect (v131)</title>
 <style>
@@ -12925,7 +12925,33 @@ const app = {
              * Use max(fallback, nextBooklet): fix sequential collisions, and still honour larger explicit refs (gaps on the insert, e.g. line 5 then 20).
              * Use {@link getPassageSplitPlainMaxChars} (not raw insert `ch`) so segment width matches one browser line beside the gutter tick.
              */
-            const rowStart = nextBooklet != null ? Math.max(fallbackStart, nextBooklet) : fallbackStart;
+            let rowStart = nextBooklet != null ? Math.max(fallbackStart, nextBooklet) : fallbackStart;
+            /**
+             * Cross-row orphan fix: {@link _mergeOrphanSoftBreakParts} below only reaches a tiny stub
+             * that has something AFTER it within the SAME stored row's own wrap. A stub stranded at
+             * the very END of a row — nothing left in that row to merge with — stays stranded even
+             * though the next row's text sits right there on screen (this is what left "you leap" /
+             * "to," orphan lines throughout an otherwise perfectly normal passage: stored rows average
+             * one sentence each, close to one column's width, so most rows spill a word or two over).
+             * Reclaim the previous piece's own line and fold it onto the START of this row's text
+             * before wrapping, so the normal wrap redistributes the extra word(s) across this row's
+             * own lines instead of leaving an orphan — patching only the seam (rather than re-wrapping
+             * the whole row) was tried first and just pushed a fresh orphan a line or two further on.
+             * Sentence-ending punctuation on the stub is expected here (rows are ~1 sentence each) and
+             * must not block this the way it rightly does for the same-row check — only a genuine new
+             * paragraph should stop it, hence the row.paragraphStart guard.
+             */
+            if(pieces.length && hardParts.length && !row.paragraphStart && !(gutterOpts && gutterOpts.skipOrphanSegmentMerge)) {
+                const prevPiece = pieces[pieces.length - 1];
+                const prevText = String((prevPiece && prevPiece.text) || "").trim();
+                const prevWc = prevText ? prevText.split(/\s+/).filter(Boolean).length : 0;
+                if(prevWc > 0 && prevWc <= 2 && prevText.length <= 28) {
+                    pieces.pop();
+                    rowStart = prevPiece.n;
+                    nextBooklet = rowStart;
+                    hardParts[0] = (prevText + " " + hardParts[0]).trim();
+                }
+            }
             let segs = [];
             hardParts.forEach(function(part) {
                 /** Always run {@link splitPlainIntoVisualLinesByCh} (canvas width), not a raw char-length shortcut. A segment can be **under** `splitMc` characters yet still exceed the inner pixel budget — skipping wrap forced one wide line where the insert would wrap twice (PDF had two lines; booklet numbers trailed by one). */
@@ -40706,43 +40732,6 @@ ${rowsHtml}
          * stored passage looks fragmented, warn and let the teacher choose to fix it first or export
          * anyway — never attempts an automatic fix here, since that's exactly the part that kept failing.
          */
-        try {
-            var _dbg_st = (appData && typeof appData.sourceText === "string") ? appData.sourceText : null;
-            var _dbg_isStruct = typeof app.isStructuredPassageSource === "function" && _dbg_st != null ? app.isStructuredPassageSource(_dbg_st) : null;
-            var _dbg_lines = 0, _dbg_whole = null, _dbg_head = null;
-            if(_dbg_isStruct) {
-                var _dbg_o = app.parseStructuredPassageSource(_dbg_st);
-                if(_dbg_o && Array.isArray(_dbg_o.lines)) {
-                    _dbg_lines = _dbg_o.lines.length;
-                    var _dbg_statFn = function(lines) {
-                        var wc = 0, shortRows = 0;
-                        for(var i = 0; i < lines.length; i++) {
-                            var L = lines[i];
-                            var plain = app.htmlFragmentToPlainText(String(L && L.html != null ? L.html : "")).replace(/\s+/g, " ").trim();
-                            var nw = plain.split(/\s+/).filter(Boolean).length;
-                            wc += nw;
-                            if(nw <= 2) shortRows++;
-                        }
-                        var avg = wc / Math.max(1, lines.length);
-                        var frac = shortRows / Math.max(1, lines.length);
-                        var frag = (lines.length >= 6 && avg < 6) || (lines.length >= 8 && shortRows >= 6 && frac >= 0.28);
-                        return { shortRows: shortRows, total: lines.length, avg: avg, frac: frac, frag: frag };
-                    };
-                    _dbg_whole = _dbg_statFn(_dbg_o.lines);
-                    _dbg_head = _dbg_o.lines.length > 20 ? _dbg_statFn(_dbg_o.lines.slice(0, 20)) : null;
-                }
-            }
-            var _dbg_fmt = function(s) { return s ? ("shortRows=" + s.shortRows + "/" + s.total + " (" + Math.round(s.frac * 100) + "%), avgWords=" + s.avg.toFixed(2) + ", fragmented=" + s.frag) : "n/a"; };
-            alert(
-                "DEBUG3 \u2014 Student App export\n\n" +
-                "component: " + (appData ? appData.component : "?") + "\n" +
-                "isStructuredPassageSource: " + _dbg_isStruct + "\n" +
-                "lines parsed: " + _dbg_lines + "\n\n" +
-                "WHOLE: " + _dbg_fmt(_dbg_whole) + "\n\n" +
-                "FIRST 20: " + _dbg_fmt(_dbg_head) + "\n\n" +
-                "==> WARNING WILL SHOW NEXT: " + !!((_dbg_whole && _dbg_whole.frag) || (_dbg_head && _dbg_head.frag))
-            );
-        } catch(eDbg) { alert("DEBUG error: " + (eDbg && eDbg.stack || eDbg)); }
         if(appData && appData.component !== 2 && typeof appData.sourceText === "string" && app.isStructuredPassageSource && app.isStructuredPassageSource(appData.sourceText)) {
             try {
                 const fragO = app.parseStructuredPassageSource(appData.sourceText);
