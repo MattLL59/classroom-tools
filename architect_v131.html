@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-23T16:00:00">
+<meta name="architect-build" content="2026-09-23T18:00:00">
 <meta name="architect-deploy" content="markscheme-autofill-default-on">
 <meta name="architect-rev" content="removed-dom-dependent-autoreflow-domfree-fragmentation-check-only">
 <title>Answer Architect (v131)</title>
@@ -2926,7 +2926,7 @@
                     </div>
                     <button type="button" class="btn btn-outline" id="past-paper-extract-btn" onclick="admin.extractPastPaperText({ questions: false })" disabled title="Cache PDFs, pull resource + questions-PDF passages (C2 layout), and mark scheme. Does not change the question bank — use Extract questions next.">Extract text</button>
                     <button type="button" class="btn btn-primary" id="past-paper-reextract-btn" onclick="admin.reExtractQuestionsFromPages()" style="margin-left:8px;" disabled title="Split Section A reading tasks from the Questions PDF into the question bank (same engine as before; uses Section A reading page(s) only)">Extract questions</button>
-                    <button type="button" class="btn btn-outline" style="margin-left:8px;" onclick="const r = admin.autoPopulateQuoteBankFromMarkScheme(); admin.renderQuotesBank(); if(admin.renderLevelBank) admin.renderLevelBank(); app.showPastPaperExtractNotice(r.added ? ('<strong>' + r.added + ' quote(s)</strong> added to the Quote Bank from the mark scheme.') : 'No quotes added — either every level is already at its Quo target, or no mark-scheme match was found. Manually-picked quotes are never affected.', { autoHideMs: 15000 });" title="Top up each active level's Quote Bank from the mark scheme now, up to that level's own Quo setting. Same local matching as Fill from mark scheme — no AI call. Never touches quotes you've picked by hand. Useful for an already-loaded lesson, or after changing a level's question/Quo in Editing Suite.">Fill Quote Bank from mark scheme now</button>
+                    <button type="button" class="btn btn-outline" style="margin-left:8px;" onclick="const r = admin.autoPopulateQuoteBankFromMarkScheme(); admin.renderQuotesBank(); if(admin.renderLevelBank) admin.renderLevelBank(); app.showPastPaperExtractNotice(r.blocked ? ('<strong>Not filled.</strong> ' + app.escapeHtml(r.blocked)) : r.added ? ('<strong>' + r.added + ' quote(s)</strong> added to the Quote Bank from the mark scheme.') : 'No quotes added — either every level is already at its Quo target, or no mark-scheme match was found. Manually-picked quotes are never affected.', { autoHideMs: 15000 });" title="Top up each active level's Quote Bank from the mark scheme now, up to that level's own Quo setting. Same local matching as Fill from mark scheme — no AI call. Never touches quotes you've picked by hand. Useful for an already-loaded lesson, or after changing a level's question/Quo in Editing Suite.">Fill Quote Bank from mark scheme now</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.copyLastPdfDebugReport && admin.copyLastPdfDebugReport()" style="margin-left:8px;" title="After Extract text/questions, copy the last PDF debug report (strategy decisions, line counts, insert width estimate).">Copy PDF debug</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-19th-btn" onclick="admin.reExtract19thFromPages()" style="margin-left:8px;" title="Re-extract 19th C passage from Questions PDF (C2 only)">Re-extract 19th C</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-resource-btn" onclick="admin.reExtractResourceFromPages()" style="margin-left:8px;" title="Re-extract 21st C resource passage from Resource PDF">Re-extract resource</button>
@@ -3891,13 +3891,44 @@ const app = {
      * fingerprint was ever recorded (older saved lessons predate this check), so this never blocks
      * lessons that simply haven't been touched since the check was added.
      */
+    /**
+     * Share of the mark scheme's key words (from every question's indicative content) that appear in the passage.
+     * The right paper scores roughly 0.5; a different paper scores under 0.05 — so the gap is wide and robust to
+     * re-flowed lines, an added intro line, typo fixes or a re-extracted passage (which the old exact fingerprint was not).
+     * @returns {{checked:number, hit:number, share:number}}
+     */
+    markSchemePassageOverlap: function(ms, sourceText) {
+        const STOP = new Set(("about above after again against because been before being below between both could does doing down during each from further have having here into itself more most other ought same should some such than that their theirs them themselves then there these they this those through under until very were what when where which while whom with would your yours shows show shown writer writers reader readers language structure structures candidates candidate answer answers question questions passage lines text texts effect effects character characters things something really seems think thinks though also just only well even much many still however maybe perhaps quite rather makes making made uses using used create creates created").split(" "));
+        const words = (str) => String(str || "").toLowerCase().replace(/[\u2018\u2019']/g, "").match(/[a-z]{5,}/g) || [];
+        const stem = (x) => x.replace(/(ing|ed|es|s|ly)$/, "");
+        const bullets = new Set();
+        Object.keys(ms || {}).forEach(k => {
+            const e = ms[k];
+            if(e && Array.isArray(e.indicativeContent)) e.indicativeContent.forEach(b => bullets.add(String(b || "")));
+        });
+        const key = new Set();
+        bullets.forEach(b => words(b).forEach(x => { if(!STOP.has(x)) key.add(x); }));
+        let t = String(sourceText || "");
+        try { if(/<[^>]+>/.test(t) || (app.isStructuredPassageSource && app.isStructuredPassageSource(t))) t = app.cleanSourceText(t); } catch(e) {}
+        const pw = new Set(words(t));
+        const ps = new Set(Array.from(pw).map(stem));
+        let hit = 0;
+        key.forEach(x => { if(pw.has(x) || ps.has(stem(x))) hit++; });
+        return { checked: key.size, hit: hit, share: key.size ? hit / key.size : 1 };
+    },
     checkMarkSchemeMatchesPassage: function() {
-        const stamped = appData.markSchemeSourceFingerprint;
-        if(!stamped) return null;
+        const ms = appData.markScheme;
+        if(!ms || typeof ms !== "object" || !Object.keys(ms).length) return null;
         const sourceText = (typeof admin !== "undefined" && admin.getSourceTextForMarkSchemeQuoteMatch) ? admin.getSourceTextForMarkSchemeQuoteMatch() : "";
-        const current = app.computePassageFingerprint(sourceText);
-        if(!current || current === stamped) return null;
-        return "The extracted mark scheme doesn't match the passage that's currently loaded — it looks like it was extracted for a different paper. Re-run \"Extract text\" on this paper's mark scheme PDF (Lobby \u2192 Import past paper) before using Fill from mark scheme.";
+        if(!String(sourceText).trim()) return null;
+        const stamped = appData.markSchemeSourceFingerprint;
+        if(stamped && app.computePassageFingerprint(sourceText) === stamped) return null;
+        /* Judge by content, not an exact copy of the passage: the old exact-text fingerprint raised false alarms
+           whenever the passage was re-flowed, re-extracted or lightly edited after the mark scheme was read. */
+        const ov = app.markSchemePassageOverlap(ms, sourceText);
+        if(ov.checked < 12) return null;
+        if(ov.share >= 0.2) return null;
+        return "The extracted mark scheme doesn't seem to match the passage that's currently loaded — only " + ov.hit + " of its " + ov.checked + " key words appear in this passage, so it looks like it's for a different paper. Re-run \"Extract text\" on this paper's mark scheme PDF (Lobby \u2192 Import past paper) before using Fill from mark scheme.";
     },
     /**
      * Whether a quote-bank item's own quote text appears anywhere in the currently-loaded passage.
@@ -29367,6 +29398,7 @@ const admin = {
                 if((!appData.settings || appData.settings.autoFillQuoteBankFromMarkScheme !== false) && admin.autoPopulateQuoteBankFromMarkScheme) {
                     const qbResult = admin.autoPopulateQuoteBankFromMarkScheme();
                     if(qbResult && qbResult.added > 0) autoFillMsg = " Auto-filled <strong>" + qbResult.added + " quote(s)</strong> into the Quote Bank from the mark scheme.";
+                    else if(qbResult && qbResult.blocked) autoFillMsg = " <span style=\"color:var(--error)\">Quote Bank was <strong>not</strong> auto-filled: " + app.escapeHtml(qbResult.blocked) + "</span>";
                 }
             }
             let msg = "<strong>Past paper loaded.</strong> ";
@@ -35176,7 +35208,7 @@ const admin = {
         const sourceText = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || "";
         if(!sourceText.trim()) return { added: 0, skippedLevels: 0 };
         const mismatch = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
-        if(mismatch) return { added: 0, skippedLevels: 0 };
+        if(mismatch) return { added: 0, skippedLevels: 0, blocked: mismatch };
         if(!Array.isArray(appData.items)) appData.items = [];
         const normQid = app.normQuestionId;
         const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
@@ -35196,8 +35228,9 @@ const admin = {
             const target = parseInt(entry.quoteTarget, 10) || 0;
             if(target <= 0) return;
             const existingForLevel = appData.items.filter(i => i && i.correct !== false && Array.isArray(i.levels) && i.levels.includes(lvl));
-            if(existingForLevel.length >= target) return;
-            const need = target - existingForLevel.length;
+            /* Quo no longer caps what is pulled in: every matching quote joins the pool, and the teacher's Include
+               ticks (pre-set to the Quo suggestion) decide what students see. */
+            const need = Infinity;
             const msEntry = app.getMarkSchemeEntryForQuestionId ? app.getMarkSchemeEntryForQuestionId(qid) : null;
             if(!msEntry || !Array.isArray(msEntry.indicativeContent) || !msEntry.indicativeContent.length) { skippedLevels++; return; }
             const lr = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(q.prompt)) || null);
