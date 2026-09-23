@@ -3665,6 +3665,110 @@ const app = {
         const m = String(id || "").match(/q0?(\d+[a-z]?)/i);
         return m ? ("Q" + m[1]) : (String(id || "").trim() || "Question");
     },
+    /** Tags (Language / Tone / Structure) on a quote. A quote may carry several. Tags label a quote — they never hide it. */
+    getItemDevices: function(item) {
+        const ok = (d) => d === "language" || d === "tone" || d === "structure";
+        if(item && Array.isArray(item.devices)) {
+            const list = item.devices.map(d => String(d || "").toLowerCase()).filter(ok);
+            if(list.length) return Array.from(new Set(list));
+        }
+        const one = item ? String(item.device || item.type || "").toLowerCase() : "";
+        return ok(one) ? [one] : [];
+    },
+    /**
+     * True when the level's question asks about the passage as a whole — the question's own "wholePassage" flag if the
+     * teacher set it, otherwise its wording. Its focus lines still show, but quotes from anywhere in the passage stay usable.
+     */
+    questionCoversWholePassageForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        let qid = null;
+        try { const w = app.resolveQuoteSelectLineWindow(lvl); qid = w && w.currentQId; } catch(e) {}
+        if(!qid && app.getLevelBankQuestionIdForLevel) qid = app.getLevelBankQuestionIdForLevel(lvl);
+        return app.questionCoversWholePassage(qid);
+    },
+    questionCoversWholePassage: function(qid) {
+        if(!qid) return false;
+        const questions = Array.isArray(appData.questions) ? appData.questions : [];
+        const norm = app.normQuestionId || ((x) => String(x || "").toLowerCase());
+        const q = questions.find(qq => qq && (qq.id === qid || norm(qq.id) === norm(qid)));
+        if(!q) return false;
+        if(q.wholePassage === true) return true;
+        if(q.wholePassage === false) return false;
+        return app.questionWordingCoversWholePassage(q.prompt);
+    },
+    questionWordingCoversWholePassage: function(prompt) {
+        return /(passage|text|extract|source|story|article)\s+as\s+a\s+whole|whole\s+(of\s+the\s+)?(passage|text|extract|source)/i.test(String(prompt || ""));
+    },
+    /** All quote items in the lesson's single quote bank. */
+    _quotePoolItems: function() {
+        if(appData && appData.selection && Array.isArray(appData.selection.items)) return appData.selection.items;
+        return (appData && Array.isArray(appData.items)) ? appData.items : [];
+    },
+    _quotePickId: function(item) {
+        if(!item) return "";
+        return item.id ? "id:" + item.id : "q:" + app.quoteKey(item.quote || item.original || "");
+    },
+    /** Is this quote linked to this level (and, in exam lessons, to the level's question)? */
+    quoteItemLinkedToLevel: function(item, level) {
+        if(!item) return false;
+        const lvl = parseInt(level, 10) || 1;
+        const exam = !!(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions());
+        if(exam) return !!app.quoteItemVisibleForSelectionLevel(item, lvl);
+        const levels = Array.isArray(item.levels) ? item.levels : [];
+        return levels.length === 0 || levels.includes(lvl);
+    },
+    /**
+     * The level's quote pool with where each quote sits in the passage — used by the teacher's "Students see" list.
+     * @returns {Array<{item:Object, found:boolean, start:(number|null), end:(number|null), inLines:boolean}>}
+     */
+    getQuotePoolForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const src = app.getSourceText ? app.getSourceText() : (appData.sourceText || "");
+        const hasSrc = !!String(src || "").trim();
+        let range = null;
+        try { const w = app.resolveQuoteSelectLineWindow(lvl); range = w && w.lineRange; } catch(e) {}
+        return app._quotePoolItems()
+            .filter(i => i && i.correct !== false && String(i.quote || i.original || "").trim() && app.quoteItemLinkedToLevel(i, lvl))
+            .map((i, n) => {
+                const loc = hasSrc && app.locateQuoteInPassage ? app.locateQuoteInPassage(i.quote || i.original || "", src) : { found: true, start: null, end: null };
+                const inLines = !range || !hasSrc || (loc.found && Number.isFinite(loc.start) && loc.end >= range.from && loc.start <= range.to);
+                return { item: i, n: n, found: !!loc.found, start: loc.start, end: loc.end, inLines: !!inLines, range: range };
+            });
+    },
+    /** Quotes the app suggests students see on this level: up to the level's quote target, focus lines first, then passage order. */
+    getSuggestedQuotePicksForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const items = app._quotePoolItems();
+        const src = app.getSourceText ? app.getSourceText() : (appData.sourceText || "");
+        const target = app.getQuoteTargetForLevel ? app.getQuoteTargetForLevel(lvl) : 4;
+        const whole = app.questionCoversWholePassageForLevel(lvl);
+        const key = [target, whole ? 1 : 0, String(src).length, app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions() ? 1 : 0,
+            JSON.stringify((app.getLevelBank && app.getLevelBank()[lvl]) ? app.getLevelBank()[lvl].questionIds || [] : []),
+            items.map(i => i ? [i.id, i.quote || i.original, (i.levels || []).join(","), (i.questionIds || []).join(","), i.correct === false ? 0 : 1].join("|") : "").join("~")].join("#");
+        if(!app._suggestPickCache) app._suggestPickCache = {};
+        const hit = app._suggestPickCache[lvl];
+        if(hit && hit.key === key) return hit.ids;
+        const pool = app.getQuotePoolForLevel(lvl).filter(o => o.found && (whole || o.inLines));
+        pool.sort((a, b) => ((a.inLines === b.inLines) ? 0 : (a.inLines ? -1 : 1))
+            || ((Number.isFinite(a.start) ? a.start : 1e9) - (Number.isFinite(b.start) ? b.start : 1e9))
+            || (a.n - b.n));
+        const ids = new Set(pool.slice(0, Math.max(1, target)).map(o => app._quotePickId(o.item)));
+        app._suggestPickCache[lvl] = { key: key, ids: ids };
+        return ids;
+    },
+    /** Has the teacher ticked or unticked any quote for this level? If not, the app's suggestion applies. */
+    levelHasTeacherQuotePicks: function(level) {
+        const k = String(parseInt(level, 10) || 1);
+        return app._quotePoolItems().some(i => i && i.studentUse && typeof i.studentUse === "object" && typeof i.studentUse[k] === "boolean" && app.quoteItemLinkedToLevel(i, level));
+    },
+    /** Do students see this quote on this level? Teacher ticks decide; until the teacher ticks anything, the suggestion applies. Quotes not linked to the level pass through (other filters handle linking). */
+    isQuoteInUseForLevel: function(item, level) {
+        if(!item) return false;
+        if(!app.quoteItemLinkedToLevel(item, level)) return true;
+        const k = String(parseInt(level, 10) || 1);
+        if(app.levelHasTeacherQuotePicks(level)) return !!(item.studentUse && item.studentUse[k] === true);
+        return app.getSuggestedQuotePicksForLevel(level).has(app._quotePickId(item));
+    },
     quoteItemOnWorksheetForLevel: function(item, level) {
         if(!item || item.correct === false || item.includeInWorksheet !== true) return false;
         const lvl = parseInt(level, 10) || 1;
@@ -4514,18 +4618,18 @@ const app = {
         quotesToScan.forEach(key => {
             const j = String((userState.selectionJustification || {})[key] || "").trim();
             const item = findItemForKey(key);
-            const itemDev = item && item.device ? String(item.device).toLowerCase() : "";
+            const itemDevs = item && app.getItemDevices ? app.getItemDevices(item) : [];
             if(wantLang && !satisfied.language) {
                 if(app.studentTouchesAnalysisAngle(j, "language")) satisfied.language = true;
-                else if(itemDev === "language" && j.length >= minJustify) satisfied.language = true;
+                else if(itemDevs.includes("language") && j.length >= minJustify) satisfied.language = true;
             }
             if(wantTone && !satisfied.tone) {
                 if(app.studentTouchesAnalysisAngle(j, "tone")) satisfied.tone = true;
-                else if(itemDev === "tone" && j.length >= minJustify) satisfied.tone = true;
+                else if(itemDevs.includes("tone") && j.length >= minJustify) satisfied.tone = true;
             }
             if(wantStruct && !satisfied.structure) {
                 if(app.studentTouchesAnalysisAngle(j, "structure")) satisfied.structure = true;
-                else if(itemDev === "structure" && j.length >= minJustify) satisfied.structure = true;
+                else if(itemDevs.includes("structure") && j.length >= minJustify) satisfied.structure = true;
             }
         });
         let pointsMade = 0;
@@ -6166,9 +6270,8 @@ const app = {
             if(!i || i.correct === false) return false;
             const q = String((i.quote || i.original) || "").trim();
             if(!q) return false;
-            if(exam) return app.quoteItemVisibleForSelectionLevel(i, lvl);
-            const levels = Array.isArray(i.levels) ? i.levels : [];
-            return levels.length === 0 || levels.includes(lvl);
+            if(!app.quoteItemLinkedToLevel(i, lvl)) return false;
+            return !app.isQuoteInUseForLevel || app.isQuoteInUseForLevel(i, lvl);
         }).length;
     },
     /** Good quotes in the bank assigned to a different Level Bank row (for stuck-help messaging). */
@@ -7881,7 +7984,7 @@ const app = {
             const out = {
                 id: (q && typeof q.id === "string") ? q.id : ("q" + (i + 1)),
                 prompt: (q && typeof q.prompt === "string") ? q.prompt : "",
-                lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined, wholePassage: (q && typeof q.wholePassage === "boolean") ? q.wholePassage : undefined,
                 passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
                 passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined
             };
@@ -7894,7 +7997,7 @@ const app = {
                 const out = {
                     id: (q && typeof q.id === "string") ? q.id : ("q" + (i + 1)),
                     prompt: (q && typeof q.prompt === "string") ? q.prompt : "",
-                    lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                    lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined, wholePassage: (q && typeof q.wholePassage === "boolean") ? q.wholePassage : undefined,
                     passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
                     passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined
                 };
@@ -17003,15 +17106,19 @@ const app = {
             const parts = q.split(/\s*(?:\.{3,}|…)\s*/).map(p => normalize(p.trim())).filter(Boolean);
             if(parts.length >= 2) {
                 let pos = 0;
+                let allFound = true;
                 for(const part of parts) {
                     const idx = ns.indexOf(part, pos);
-                    if(idx < 0) return false;
+                    if(idx < 0) { allFound = false; break; }
                     pos = idx + part.length;
                 }
-                return true;
+                if(allFound) return true;
+                return !!(app.locateQuoteInPassage && app.locateQuoteInPassage(quote, sourceText).found);
             }
         }
-        return ns.includes(nq);
+        if(ns.includes(nq)) return true;
+        /* Fallback: shared locator (handles quotes that run over a line break with printed line numbers). */
+        return !!(app.locateQuoteInPassage && app.locateQuoteInPassage(quote, sourceText).found);
     },
     /**
      * Share of “significant” words from the official answer-box excerpt that also appear in the student’s highlight (used for soft mismatch warnings).
@@ -17789,6 +17896,58 @@ const app = {
         return { html: selPassageHtml, useExcerptShell: useExcerpt, excerptSliceFailed: excerptSliceFailed, lineRange: lineRange };
     },
     /** Booklet line span where {@link quote} appears (handles quotes split across two margin lines). */
+    /**
+     * Shared quote locator used by both "is it in the passage?" and "which lines?" checks.
+     * Copes with "..." / "…" (parts must appear in order), quotes running over a line break,
+     * printed line numbers, straight/curly quote marks and apostrophes, and punctuation differences.
+     * @returns {{found:boolean, start:(number|null), end:(number|null)}}
+     */
+    locateQuoteInPassage: function(quote, sourceText) {
+        const miss = { found: false, start: null, end: null };
+        const q = String(quote || "").trim();
+        if(!q) return miss;
+        const norm = (str) => String(str || "")
+            .toLowerCase()
+            .replace(/[\u2018\u2019\u201A\u201B\u2032'`]/g, "")
+            .replace(/[^a-z0-9\s]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        const parts = q.split(/\s*(?:\.{3,}|\u2026)\s*/).map(norm).filter(Boolean);
+        if(!parts.length) return miss;
+        let rows = [];
+        try { rows = app.parseWJECStyleBookletRows ? (app.parseWJECStyleBookletRows(sourceText) || []) : []; } catch(e) { rows = []; }
+        let hay = "";
+        const starts = [];
+        if(rows.length) {
+            rows.forEach(r => {
+                const t = norm(r && (r.body != null ? r.body : r.text));
+                if(!t) return;
+                starts.push({ at: hay.length, num: r.num });
+                hay += t + " ";
+            });
+        } else {
+            let src = String(sourceText || "");
+            if(/<[^>]+>/.test(src) || (app.isStructuredPassageSource && app.isStructuredPassageSource(src))) src = app.cleanSourceText(src);
+            hay = norm(src) + " ";
+        }
+        if(!hay.trim()) return miss;
+        const lineAt = (pos) => {
+            if(!starts.length) return null;
+            let n = starts[0].num;
+            for(let i = 0; i < starts.length; i++) { if(starts[i].at <= pos) n = starts[i].num; else break; }
+            return n;
+        };
+        let pos = 0, first = -1, last = -1;
+        for(const part of parts) {
+            const idx = hay.indexOf(part, pos);
+            if(idx < 0) return miss;
+            if(first < 0) first = idx;
+            last = idx + part.length - 1;
+            pos = idx + part.length;
+        }
+        const a = lineAt(first), b = lineAt(last);
+        return { found: true, start: a, end: b };
+    },
     getQuoteBookletLineSpan: function(quote, sourceText) {
         const q = String(quote || "").trim();
         if(!q) return null;
@@ -17824,6 +17983,9 @@ const app = {
                 return { start: lineNum, end: lineNum };
             }
         }
+        /* Fallback: shared locator (handles "..." quotes and punctuation/apostrophe differences). */
+        const loc = app.locateQuoteInPassage ? app.locateQuoteInPassage(quote, sourceText) : null;
+        if(loc && loc.found && Number.isFinite(loc.start) && Number.isFinite(loc.end)) return { start: loc.start, end: loc.end };
         return null;
     },
     /** Map a highlighted passage phrase to booklet line numbers using layout rows (same as excerpt slicing). */
@@ -18099,6 +18261,8 @@ const app = {
         const ellipsesAt = app.QUOTE_DISPLAY_ELLIPSES_AT;
         items.forEach(item => {
             if(!item.originalFull) item.originalFull = item.original;
+            /* Already shortened (contains an ellipsis) — never shorten again, or "long ... walks" becomes "long ... ... walks". */
+            if(/\.{3}|\u2026/.test(String(item.original || ""))) return;
             const words = app.wordList(item.original);
             const total = words.length;
             if(total === 0) return;
@@ -18613,6 +18777,7 @@ const app = {
                 if(c2PassageHint) o.c2PassageHint = c2PassageHint;
                 if(typeof q.answerPassageExcerpt === "string" && q.answerPassageExcerpt.trim()) o.answerPassageExcerpt = q.answerPassageExcerpt.trim();
                 if(q.includeInWorksheet === false) o.includeInWorksheet = false;
+                if(typeof q.wholePassage === "boolean") o.wholePassage = q.wholePassage;
                 if(typeof q.worksheetInferenceModel === "string" && q.worksheetInferenceModel.trim()) o.worksheetInferenceModel = q.worksheetInferenceModel.trim();
                 if(Array.isArray(q.worksheetInferenceDistractors)) {
                     const di = q.worksheetInferenceDistractors.map(x => String(x == null ? "" : x).trim()).filter(Boolean).slice(0, 12);
@@ -18905,6 +19070,16 @@ const app = {
                 deviceReason: typeof item.deviceReason === 'string' ? item.deviceReason.trim() : (effect || ''),
                 modelAnswer: modelAnswer
             };
+            /* Extra tags (a quote can be Language and Tone) and the teacher's per-level "students see this" ticks. */
+            if(Array.isArray(item.devices)) {
+                const devs = item.devices.map(d => String(d || '').toLowerCase()).filter(d => d === 'tone' || d === 'language' || d === 'structure');
+                if(devs.length) out.devices = Array.from(new Set(devs));
+            }
+            if(item.studentUse && typeof item.studentUse === 'object' && !Array.isArray(item.studentUse)) {
+                const su = {};
+                Object.keys(item.studentUse).forEach(k => { if(/^\d+$/.test(k) && typeof item.studentUse[k] === 'boolean') su[k] = item.studentUse[k]; });
+                if(Object.keys(su).length) out.studentUse = su;
+            }
             app.sanitizeQuotationDistractors(out, safe.sourceText);
             return out;
         });
@@ -18953,7 +19128,8 @@ const app = {
                 const q = (s.quote || s.original || '').trim();
                 if(!q) return;
                 const key = app.quoteKey(q);
-                const existing = safe.items.find(i => app.quoteKey(i.original || i.quote || '') === key);
+                /* Same id = same quote, even when one copy's display text was shortened with "..." — match by id first to avoid duplicates. */
+                const existing = (s.id && safe.items.find(i => i && i.id === s.id)) || safe.items.find(i => app.quoteKey(i.original || i.quote || '') === key);
                 if(existing) {
                     existing.correct = s.correct !== false;
                     existing.reasons = Array.isArray(s.reasons) && s.reasons.length ? s.reasons : existing.reasons;
@@ -19966,7 +20142,7 @@ const app = {
         const snap = {
             component: data.component,
             sourceTextLen: typeof data.sourceText === "string" ? data.sourceText.length : 0,
-            questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef, passageStartAnchor: q.passageStartAnchor, passageEndAnchor: q.passageEndAnchor }) : [],
+            questions: Array.isArray(data.questions) ? data.questions.map(q => q && { id: q.id, prompt: q.prompt, lineRef: q.lineRef, wholePassage: q.wholePassage, passageStartAnchor: q.passageStartAnchor, passageEndAnchor: q.passageEndAnchor }) : [],
             question: typeof data.question === "string" ? data.question : "",
             meta: data.meta && typeof data.meta === "object" ? {
                 title: data.meta.title,
@@ -24803,14 +24979,17 @@ const ui = {
         let currentQId = lineWinEarly.currentQId;
         let lineRange = lineWinEarly.lineRange;
         const displayLineRange = lineWinEarly.displayLineRange || lineRange;
+        /* "Passage as a whole" questions: focus lines still show, but quotes from anywhere in the passage count. */
+        const quoteLineRange = (app.questionCoversWholePassageForLevel && app.questionCoversWholePassageForLevel(level)) ? null : lineRange;
         const usePerQuestionGoal = hasMultipleQuestions;
         const pointsGoal = app.getSelectionPointsGoalForLevel(level);
         const tapHighlightEvidenceMode = quoteOnlyShort || (levelEntry && levelEntry.shortAnswersOnly === true) || app.getEffectiveTapText(level) || app.isTeacherTapRecordPassageMode();
         const evidenceGoalForUi = app.getSelectionEvidenceGoalForLevel(level);
         const distractorTarget = Math.max(0, parseInt(levelEntry.distractorCount, 10) || 0);
         const optionCount = Math.max(2, Math.min(20, pointsGoal + distractorTarget));
+        /* Tags (Language / Tone / Structure) never hide a quote. The teacher's ticks decide what students see on this level. */
         let correctItemsAll = sel.items.filter(i => i.correct)
-            .filter(i => !i.device || selectionDevices[i.device] !== false);
+            .filter(i => !app.isQuoteInUseForLevel || app.isQuoteInUseForLevel(i, level));
         if(worksheetPracticeOn) {
             correctItemsAll = correctItemsAll.filter(i => app.quoteItemOnWorksheetForLevel(i, level));
         }
@@ -24914,7 +25093,7 @@ const ui = {
         }
         const isInSource = (q) => hasSource ? app.quoteInSource(q, sourceText) : true;
         const getQuote = (i) => (i && (i.quote || i.original)) || "";
-        const quoteInRangeForLevel = (i) => !lineRange || !hasSource || (getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
+        const quoteInRangeForLevel = (i) => !quoteLineRange || !hasSource || (getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, quoteLineRange));
         const hasLevelMatch = (i) => Array.isArray(i.levels) && i.levels.length > 0 && i.levels.includes(level);
         const examQuoteFilter = app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions();
         let correctItems = correctItemsAll.filter(i => {
@@ -24931,8 +25110,8 @@ const ui = {
             }
             return true;
         });
-        if(lineRange && hasSource) {
-            correctItems = correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
+        if(quoteLineRange && hasSource) {
+            correctItems = correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, quoteLineRange));
         }
         let correctInSource = correctItems.filter(i => isInSource(getQuote(i)));
         const minQuotesInSourceForFilter = tapHighlightEvidenceMode ? pointsGoal : 1;
@@ -24953,7 +25132,7 @@ const ui = {
                 const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
                 if(qids.length === 0) return true;
                 return qids.some(qid => normId(qid) === normId(currentQId));
-            }) : levelCorrectKeysBase)).filter(i => !lineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, lineRange));
+            }) : levelCorrectKeysBase)).filter(i => !quoteLineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, quoteLineRange));
         if(helpWrap) {
             const prevHelpDetails = helpWrap.querySelector("details");
             if(prevHelpDetails && prevHelpDetails.open) userState.studentHelpPanelOpen = true;
@@ -25388,7 +25567,7 @@ const ui = {
         };
         let distractorItems = baseDistractors.map(d => ({ quote: d.quote, reason: d.reason, correct: false }))
             .filter(d => d.quote && isInSource(d.quote))
-            .filter(d => !lineRange || !hasSource || app.quoteInLineRange(d.quote, sourceText, lineRange));
+            .filter(d => !quoteLineRange || !hasSource || app.quoteInLineRange(d.quote, sourceText, quoteLineRange));
         const fallbackIncorrect = distractorItems.map(d => ({ quote: d.quote, correct: false, item: { quote: d.quote, correct: false, reasons: [d.reason].filter(Boolean) } }))
             .filter(i => i.quote);
         const eliminatedSet = new Set((userState.selectionEliminated || []).map(q => app.quoteKey(q)));
@@ -25433,10 +25612,10 @@ const ui = {
         /* When the question pins a line window and at least one bank quote sits inside it, "Strong" only applies to those; lesson quotes outside the window are valid "Not strong" (retrieval hygiene), not falsely marked Strong. */
         const strictlyInRangeCorrect = (!lineRange || !hasSource)
             ? correctItems.slice()
-            : correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, lineRange));
+            : correctItems.filter(i => getQuote(i) && app.quoteInLineRange(getQuote(i), sourceText, quoteLineRange));
         const hasExamWindow = !!(lineRange && hasSource && strictlyInRangeCorrect.length > 0);
         const lessonQuotesOutsideExamWindow = hasExamWindow
-            ? correctItems.filter(i => getQuote(i) && !app.quoteInLineRange(getQuote(i), sourceText, lineRange))
+            ? correctItems.filter(i => getQuote(i) && !app.quoteInLineRange(getQuote(i), sourceText, quoteLineRange))
             : [];
         const noiseFromLessonOutsideExam = lessonQuotesOutsideExamWindow.map(i => ({
             quote: getQuote(i),
@@ -25464,7 +25643,7 @@ const ui = {
             .filter(o => !levelCorrectKeys.has(app.quoteKey(o.quote)))
             .filter(o => !eliminatedSet.has(app.quoteKey(o.quote)))
             .filter(o => !correctForOtherQuestionOnLevel.has(app.quoteKey(o.quote)))
-            .filter(o => !lineRange || !hasSource || app.quoteInLineRange(o.quote, sourceText, lineRange));
+            .filter(o => !quoteLineRange || !hasSource || app.quoteInLineRange(o.quote, sourceText, quoteLineRange));
         const incorrectPool = [...incorrectPoolInRange, ...noiseFromLessonOutsideExam]
             .filter(o => o && o.quote && o.quote !== primaryQuoteText)
             .filter((o, idx, arr) => arr.findIndex(x => app.quoteKey(x.quote) === app.quoteKey(o.quote)) === idx);
@@ -33648,6 +33827,7 @@ const admin = {
             if(!id || !/^q[\w-]+$/i.test(id)) id = "q" + (i + 1);
             const old = prev.find(q => q && String(q.id) === id);
             const o = { id, prompt: r.prompt };
+            if(old && typeof old.wholePassage === "boolean") o.wholePassage = old.wholePassage;
             let lrTrim = r.lineRefRaw != null ? String(r.lineRefRaw).trim() : "";
             if(!lrTrim && appData && appData.component !== 2 && typeof app.inferLineRefFromQuestionPrompt === "function") {
                 const inferred = app.inferLineRefFromQuestionPrompt(r.prompt);
@@ -34539,13 +34719,149 @@ const admin = {
         const quoteSection = quoteList.length
             ? `<div><div class="admin-h" style="margin-bottom:8px;">${listHdr}</div><div style="display:flex; flex-direction:column; gap:12px;">${quoteRender.map(({ item, idx }) => renderCard(item, idx)).join("")}</div></div>`
             : (examEmptyHint || "<div style='opacity:0.7;'>No quotes yet. Use + Add quote — attach plausible wrong quotations under <strong>Wrong quotations</strong> on each row.</div>");
-        wrap.innerHTML = staleNote + capNote + quoteSection;
+        let pickPanel = "";
+        try { pickPanel = admin.renderStudentQuotePicksPanel ? admin.renderStudentQuotePicksPanel(bankLvl) : ""; } catch(ePick) { console.error("Students-see panel failed:", ePick); }
+        wrap.innerHTML = staleNote + capNote + pickPanel + quoteSection;
         } catch(eQb) {
             console.error("Quote bank render failed:", eQb);
             wrap.innerHTML = "<div style='padding:10px;border:1px solid var(--error);border-radius:6px;font-size:0.85rem;'>Quote bank could not render. Try <strong>All levels</strong> in the exam toolbar, or reload the page. Error: " + app.escapeHtml(String(eQb && eQb.message ? eQb.message : eQb)) + "</div>";
         } finally {
             admin._renderingQuotesBank = false;
         }
+    },
+    /**
+     * "Students see" list for one level: the whole quote pool, one tick per quote, tag chips that label (never hide),
+     * and plain-English checks. Until the teacher ticks anything the app's suggestion applies (up to the level's quote target).
+     */
+    renderStudentQuotePicksPanel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const active = app.getActiveLevels ? app.getActiveLevels() : [lvl];
+        if(Array.isArray(active) && active.length && !active.includes(lvl)) return "";
+        const esc = app.escapeHtml;
+        const pool = app.getQuotePoolForLevel(lvl);
+        const qid = (function() { try { return app.resolveQuoteSelectLineWindow(lvl).currentQId; } catch(e) { return null; } })() || (app.getLevelBankQuestionIdForLevel ? app.getLevelBankQuestionIdForLevel(lvl) : null);
+        const qLabel = qid ? String(qid).replace(/^q0?/i, "Q") : "";
+        const range = pool.length ? pool[0].range : (function() { try { return app.resolveQuoteSelectLineWindow(lvl).lineRange; } catch(e) { return null; } })();
+        const whole = app.questionCoversWholePassageForLevel(lvl);
+        const target = app.getQuoteTargetForLevel ? app.getQuoteTargetForLevel(lvl) : 4;
+        const teacherPicks = app.levelHasTeacherQuotePicks(lvl);
+        const rangeTxt = range ? (range.from === range.to ? "line " + range.from : "lines " + range.from + "–" + range.to) : "";
+        const rows = pool.slice().sort((a, b) => ((Number.isFinite(a.start) ? a.start : 1e9) - (Number.isFinite(b.start) ? b.start : 1e9)) || (a.n - b.n));
+        let ticked = 0;
+        const tagNames = { language: "Language", tone: "Tone", structure: "Structure" };
+        const rowHtml = rows.map(o => {
+            const item = o.item;
+            const idx = appData.items.indexOf(item);
+            if(idx < 0) return "";
+            const on = app.isQuoteInUseForLevel(item, lvl);
+            if(on) ticked++;
+            const lineTxt = Number.isFinite(o.start) ? (o.start === o.end ? String(o.start) : o.start + "–" + o.end) : "—";
+            let note = "", noteColor = "inherit";
+            if(!o.found) { note = "Not found in this passage — check the wording or delete it"; noteColor = "var(--error)"; }
+            else if(!o.inLines && whole) { note = "Outside " + rangeTxt + " — fine, the question covers the whole passage"; noteColor = "inherit"; }
+            else if(!o.inLines) { note = "Outside " + rangeTxt + " — students won’t see it on this level"; noteColor = "var(--error)"; }
+            const devs = app.getItemDevices(item);
+            const chips = ["language", "tone", "structure"].map(d => {
+                const pressed = devs.includes(d);
+                return `<button type="button" class="btn btn-small ${pressed ? "" : "btn-outline"}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Remove" : "Add"} ${tagNames[d]} tag" onclick="admin.toggleQuoteTag(${idx}, '${d}')" style="min-width:34px; padding:2px 8px;">${tagNames[d].charAt(0)}</button>`;
+            }).join("");
+            const quoteTxt = app.stripLineNumbersFromQuote ? app.stripLineNumbersFromQuote(item.quote || item.original || "") : (item.quote || item.original || "");
+            return `<div style="display:grid; grid-template-columns: 34px 52px minmax(0,1fr) auto; gap:8px; align-items:start; padding:8px; border-radius:8px; border:1px solid ${on ? "var(--primary, #4F7A5D)" : "rgba(128,128,128,0.35)"}; ${on ? "" : "opacity:0.85;"}">
+                <input type="checkbox" ${on ? "checked" : ""} aria-label="Students see the quote on line ${esc(lineTxt)}" onchange="admin.setStudentQuoteUse(${idx}, ${lvl}, this.checked)" style="width:20px; height:20px; margin-top:2px; cursor:pointer;">
+                <span style="font-weight:700; font-variant-numeric:tabular-nums;">${esc(lineTxt)}</span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;">
+                    <span>“${esc(quoteTxt)}”</span>
+                    ${item.translation ? `<span style="font-size:0.85rem; opacity:0.75;">${esc(item.translation)}</span>` : ""}
+                    ${note ? `<span style="font-size:0.85rem; color:${noteColor};">${esc(note)}</span>` : ""}
+                </span>
+                <span style="display:flex; gap:4px;" role="group" aria-label="Tags">${chips}</span>
+            </div>`;
+        }).join("");
+        const status = !pool.length
+            ? `No quotes are linked to Level ${lvl}${qLabel ? " (" + esc(qLabel) + ")" : ""} yet.`
+            : `<strong>${ticked} of ${pool.length}</strong> ticked · suggested number: ${target}` + (teacherPicks ? "" : " · <em>showing the app’s suggestion — tick or untick to take over</em>");
+        const wholeRow = range && pool.length ? `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:4px 0 8px;"><input type="checkbox" ${whole ? "checked" : ""} onchange="admin.setQuestionWholePassageForLevel(${lvl}, this.checked)" style="width:18px; height:18px;"> The question covers the whole passage — quotes outside ${esc(rangeTxt)} can be used</label>` : "";
+        return `<div id="students-see-panel" style="border:2px solid var(--primary, #4F7A5D); border-radius:10px; padding:12px; margin-bottom:14px;">
+            <div class="admin-h" style="margin-bottom:4px;">Students see on Level ${lvl}${qLabel ? " · " + esc(qLabel) : ""}</div>
+            <div style="font-size:0.9rem; margin-bottom:6px;">${status}</div>
+            ${wholeRow}
+            ${pool.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+                <button type="button" class="btn btn-small" onclick="admin.tickSuggestedQuotes(${lvl})">Tick suggested</button>
+                <button type="button" class="btn btn-outline btn-small" onclick="admin.setAllStudentQuotes(${lvl}, true)">Tick all</button>
+                <button type="button" class="btn btn-outline btn-small" onclick="admin.setAllStudentQuotes(${lvl}, false)">Untick all</button>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px;">${rowHtml}</div>
+            <div style="font-size:0.8rem; opacity:0.75; margin-top:8px;">Only ticked quotes appear to students on this level. Tags (L / T / S) label a quote and can be combined — they never hide it.</div>` : ""}
+        </div>`;
+    },
+    /** Turn the app's suggestion into explicit ticks for a level, so one change doesn't untick everything else. */
+    _materializeStudentQuotePicks: function(lvl) {
+        const k = String(lvl);
+        if(app.levelHasTeacherQuotePicks(lvl)) return;
+        const suggested = app.getSuggestedQuotePicksForLevel(lvl);
+        app._quotePoolItems().forEach(i => {
+            if(!i || i.correct === false || !app.quoteItemLinkedToLevel(i, lvl)) return;
+            if(!i.studentUse || typeof i.studentUse !== "object") i.studentUse = {};
+            i.studentUse[k] = suggested.has(app._quotePickId(i));
+        });
+    },
+    _afterStudentQuotePicksChange: function() {
+        app._suggestPickCache = {};
+        app.save();
+        admin.renderQuotesBank();
+        try { ui.renderSelection(); } catch(e) {}
+    },
+    setStudentQuoteUse: function(idx, level, on) {
+        const item = appData.items[idx];
+        const lvl = parseInt(level, 10) || 1;
+        if(!item) return;
+        admin._materializeStudentQuotePicks(lvl);
+        if(!item.studentUse || typeof item.studentUse !== "object") item.studentUse = {};
+        item.studentUse[String(lvl)] = !!on;
+        admin._afterStudentQuotePicksChange();
+    },
+    setAllStudentQuotes: function(level, on) {
+        const lvl = parseInt(level, 10) || 1;
+        app._quotePoolItems().forEach(i => {
+            if(!i || i.correct === false || !app.quoteItemLinkedToLevel(i, lvl)) return;
+            if(!i.studentUse || typeof i.studentUse !== "object") i.studentUse = {};
+            i.studentUse[String(lvl)] = !!on;
+        });
+        admin._afterStudentQuotePicksChange();
+    },
+    /** Back to the app's suggestion for this level (clears the teacher's ticks for this level only). */
+    tickSuggestedQuotes: function(level) {
+        const k = String(parseInt(level, 10) || 1);
+        app._quotePoolItems().forEach(i => {
+            if(i && i.studentUse && typeof i.studentUse === "object" && k in i.studentUse) {
+                delete i.studentUse[k];
+                if(!Object.keys(i.studentUse).length) delete i.studentUse;
+            }
+        });
+        admin._afterStudentQuotePicksChange();
+    },
+    toggleQuoteTag: function(idx, device) {
+        const item = appData.items[idx];
+        if(!item || !["language", "tone", "structure"].includes(device)) return;
+        const devs = app.getItemDevices(item);
+        const has = devs.includes(device);
+        if(has && devs.length === 1) return; /* keep at least one tag */
+        const next = has ? devs.filter(d => d !== device) : devs.concat([device]);
+        item.devices = next;
+        item.device = next[0];
+        item.type = next[0];
+        admin._afterStudentQuotePicksChange();
+    },
+    setQuestionWholePassageForLevel: function(level, on) {
+        const lvl = parseInt(level, 10) || 1;
+        let qid = null;
+        try { qid = app.resolveQuoteSelectLineWindow(lvl).currentQId; } catch(e) {}
+        if(!qid && app.getLevelBankQuestionIdForLevel) qid = app.getLevelBankQuestionIdForLevel(lvl);
+        const norm = app.normQuestionId || ((x) => String(x || "").toLowerCase());
+        const q = qid && Array.isArray(appData.questions) ? appData.questions.find(qq => qq && (qq.id === qid || norm(qq.id) === norm(qid))) : null;
+        if(!q) return;
+        q.wholePassage = !!on;
+        admin._afterStudentQuotePicksChange();
     },
     /** Parse `component2Layout.markSchemeText` into `appData.markScheme` when the object is still empty (same as quote suggest). */
     ensureMarkSchemeParsedFromLayout: function() {
@@ -35086,6 +35402,7 @@ const admin = {
             const v = String(value || "").toLowerCase();
             item.device = (v === "tone" || v === "language" || v === "structure") ? v : "language";
             item.type = item.device;
+            item.devices = [item.device];
         } else if(key === "translation") item.translation = String(value || "");
         else if(key === "effect") item.effect = String(value || "");
         else if(key === "includeInWorksheet") item.includeInWorksheet = !!value;
@@ -36353,7 +36670,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
                     lesson.questions = j.questions.map((q, i) => ({
                         id: (q && q.id) ? q.id : ("q" + (i + 1)),
                         prompt: (q && typeof q.prompt === "string") ? q.prompt : (typeof q === "string" ? q : ""),
-                        lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                        lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined, wholePassage: (q && typeof q.wholePassage === "boolean") ? q.wholePassage : undefined,
                         passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
                         passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined,
                         includeInWorksheet: q && q.includeInWorksheet === true
@@ -37038,7 +37355,7 @@ CRITICAL: Your entire response must be ONLY the raw JSON object. No text, explan
                     const row = {
                         id: (q && q.id) ? q.id : "q" + (i+1),
                         prompt: (q && typeof q.prompt === "string") ? q.prompt : (typeof q === "string" ? q : ""),
-                        lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined,
+                        lineRef: (q && typeof q.lineRef === "string" && q.lineRef.trim()) ? q.lineRef.trim() : undefined, wholePassage: (q && typeof q.wholePassage === "boolean") ? q.wholePassage : undefined,
                         passageStartAnchor: (q && typeof q.passageStartAnchor === "string" && q.passageStartAnchor.trim()) ? q.passageStartAnchor.trim() : undefined,
                         passageEndAnchor: (q && typeof q.passageEndAnchor === "string" && q.passageEndAnchor.trim()) ? q.passageEndAnchor.trim() : undefined,
                         includeInWorksheet: q && q.includeInWorksheet === true
@@ -38042,6 +38359,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         }
     },
     autoAssignSelectionLevels: (unassignedOnly) => {
+        /* Automatic calls (after loading or preparing a lesson) pass `false`. They must never re-link quotes the lesson
+           already links to a level — that overrode the teacher's / lesson file's choices on every load. They now only place
+           quotes that have no level yet. The "match targets" button (no argument) still redistributes everything. */
+        if(unassignedOnly === false) unassignedOnly = true;
         admin.ensureSelectionData();
         const sel = appData.selection;
         if(!sel || !Array.isArray(sel.items) || !sel.items.length) return;
@@ -38226,9 +38547,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const hasAnyRange = levelRanges.some(r => r.range);
         if(!hasAnyRange) { if(!silent) alert("No questions have line ranges (e.g. 'lines 1-5', 'lines 6-10'). Assign questions with line numbers in Level Bank first."); return; }
         let assigned = 0;
+        const onlyUnlinked = !!(opts && opts.onlyUnlinked);
         sel.items.forEach(it => {
             const q = (it.quote || it.original || "").trim();
             if(!q) return;
+            if(onlyUnlinked && Array.isArray(it.levels) && it.levels.length) return;
             const lineNum = app.getLineNumberForQuote && app.getLineNumberForQuote(q, sourceText);
             if(lineNum == null) return;
             let bestLvl = null;
@@ -38264,7 +38587,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const items = (sel && sel.items) ? sel.items : [];
         const sourceText = (sel && sel.text && sel.text.source) ? sel.text.source : (appData.sourceText || "");
         if(!items.length || !sourceText.trim()) return;
-        admin.autoAssignSelectionLevelsByLineRange(opts || {});
+        /* Automatic pass: only place quotes the lesson hasn't linked to a level. */
+        admin.autoAssignSelectionLevelsByLineRange(Object.assign({ onlyUnlinked: true }, opts || {}));
     },
     /** After past paper extraction: map L1→q1, L2→q2 etc. and set active levels. */
     syncLevelBankForPastPaperQuestions: () => {
@@ -40850,8 +41174,8 @@ ${rowsHtml}
         exportData.meta.passageDisplayScope = typeof ui.getPassageDisplayScope === "function" ? ui.getPassageDisplayScope() : "whole";
 
         const exportDevices = app.getExportDevices();
-        let allowedTypes = Object.keys(exportDevices).filter(k => exportDevices[k]);
-        if (allowedTypes.length === 0) allowedTypes = ["language", "tone", "structure"];
+        /* Tags label quotes; they never remove them from the student version. The teacher's ticks travel with each quote. */
+        const allowedTypes = ["language", "tone", "structure"];
         const norm = (t) => (typeof t === "string" ? t.toLowerCase().trim() : "");
         const allowedSet = new Set(allowedTypes.map(norm));
         if(!Array.isArray(exportData.items)) exportData.items = [];
