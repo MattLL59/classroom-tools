@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-23T13:30:00">
+<meta name="architect-build" content="2026-09-23T16:00:00">
 <meta name="architect-deploy" content="markscheme-autofill-default-on">
 <meta name="architect-rev" content="removed-dom-dependent-autoreflow-domfree-fragmentation-check-only">
 <title>Answer Architect (v131)</title>
@@ -2556,6 +2556,10 @@
                     </details>
                     <details class="admin-console-pane">
                         <summary>💬 Quote bank</summary>
+                        <div style="font-size:0.9rem; margin:4px 0 10px 0;">Tick what students see on each level. Click a quote or meaning to edit it; <strong>More…</strong> holds everything else.</div>
+                        <div id="quotes-bank-list" style="padding-right:8px;"></div>
+                        <details id="quotes-bank-more-tools" style="margin-top:14px; border-top:1px solid var(--border); padding-top:8px;">
+                            <summary style="cursor:pointer; font-weight:600;">More tools — fill from mark scheme, bank mode, worksheet picks</summary>
                         <div style="font-size:0.85rem; opacity:0.7; margin-bottom:8px;">Add or edit <strong>good quotes</strong> here. Tick <strong>Include on worksheet</strong> to add a row to the Word sheet and the student <strong>Worksheet practice</strong> game. <strong>Wrong quotations</strong> = verbatim passage lines (quote-choice round). <strong>Wrong explanations</strong> = flawed analysis about the same quote (justify round). Set wrong-quotation count in <strong>Level Bank → Dist</strong> (default 2).</div>
                         <div style="font-size:0.78rem; opacity:0.88; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(33,150,243,0.06); line-height:1.45;"><strong>Hybrid workflow (shorter AI):</strong> (1) Import past paper and run <strong>Extract text</strong> (mark scheme PDF). (2) <strong>Fill from mark scheme</strong> — <strong>1-mark</strong> parts → short answers on focus rows + linked quote rows; <strong>4+ mark</strong> parts → suggest passage quotes into the bank (local match, no AI). (3) AI tab → <strong>Compact enrich prompt</strong> for meanings, <code>modelAnswer</code>, wrong quotations.</div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
@@ -2636,10 +2640,7 @@
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.worksheetPickNone()" title="Clear worksheet include on every quote">Clear all worksheet picks</button>
                             <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; cursor:pointer;" title="Students can turn on Worksheet practice in I'm stuck — quote MC then justify MC using rows ticked below."><input type="checkbox" id="setting-worksheet-practice-offer" onchange="admin.setWorksheetPracticeOffer(this.checked)"> Offer worksheet practice game</label>
                         </div>
-                        <div id="quotes-bank-list" style="padding-right:8px;"></div>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0 0;">
-                            <button class="btn btn-success" onclick="admin.addQuoteItem(true)">+ Add quote</button>
-                        </div>
+                        </details>
                     </details>
                 </details>
 
@@ -19173,6 +19174,15 @@ const app = {
         if(app.sanitizeAllQuotationDistractors(safe.items, safe.sourceText)) {
             safe.selection.items = safe.items;
         }
+        /* The app's demo quote ("bruised purple", from the reset sample passage) must not live on in real lessons. */
+        try {
+            const demoKey = app.quoteKey("bruised purple");
+            const lessonSrc = String(safe.sourceText || "");
+            if(lessonSrc.trim() && !(app.locateQuoteInPassage && app.locateQuoteInPassage("bruised purple", lessonSrc).found)) {
+                const keep = safe.items.filter(it => !(it && app.quoteKey(it.quote || it.original || "") === demoKey));
+                if(keep.length !== safe.items.length) { safe.items = keep; safe.selection.items = safe.items; }
+            }
+        } catch(eDemo) {}
         safe.selection = app.repairSelection(safe.selection, { activeLevels: safe.settings.activeLevels, lessonItems: safe.items, lessonSourceText: safe.sourceText });
         /**
          * C1: only pull from `selection.text.source` when `sourceText` is empty, or when the root passage is not structured but selection holds a valid v2 string.
@@ -34587,6 +34597,8 @@ const admin = {
         admin._renderingQuotesBank = true;
         try {
         if(!appData) { wrap.innerHTML = "<div style='opacity:0.7;'>Load a lesson first.</div>"; return; }
+        /* Single quote bank: one list per level — include tick + in-place editing + "More…" (replaces the old cards). */
+        if(admin.renderSingleQuoteBank) { wrap.innerHTML = admin.renderSingleQuoteBank(); return; }
         if(admin.ensureSelectionData) admin.ensureSelectionData();
         if(admin.quotesBankViewLevel == null) admin.quotesBankViewLevel = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
         if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
@@ -34731,6 +34743,201 @@ const admin = {
         } finally {
             admin._renderingQuotesBank = false;
         }
+    },
+    /** Items shown on the quote bank tab for a level (includes brand-new rows with no text yet). */
+    _qbItemsForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        return (appData.items || []).filter(it => {
+            if(!it || it.correct === false) return false;
+            const q = String(it.quote || it.original || "").trim();
+            if(!q) return Array.isArray(it.levels) && it.levels.includes(lvl);
+            return app.quoteItemLinkedToLevel(it, lvl);
+        });
+    },
+    /** Good quotes not linked to any active level (so nothing disappears from the teacher's view). */
+    _qbUnlinkedItems: function() {
+        const active = app.getActiveLevels ? app.getActiveLevels() : [];
+        return (appData.items || []).filter(it => it && it.correct !== false && !active.some(l => (String(it.quote || it.original || "").trim() ? app.quoteItemLinkedToLevel(it, l) : (Array.isArray(it.levels) && it.levels.includes(l)))));
+    },
+    renderSingleQuoteBank: function() {
+        const esc = app.escapeHtml;
+        const attr = app.escapeHtmlAttr || app.escapeHtml;
+        const active = (app.getActiveLevels && app.getActiveLevels().length) ? app.getActiveLevels() : [1];
+        let lvl = parseInt(admin.quotesBankViewLevel, 10);
+        const showUnlinked = admin._qbShowUnlinked === true;
+        if(!active.includes(lvl)) lvl = active.includes(app.getEffectiveLevel && app.getEffectiveLevel()) ? app.getEffectiveLevel() : active[0];
+        const src = app.getSourceText ? app.getSourceText() : (appData.sourceText || "");
+        const hasSrc = !!String(src || "").trim();
+        const qidFor = (l) => { try { return app.resolveQuoteSelectLineWindow(l).currentQId || app.getLevelBankQuestionIdForLevel(l); } catch(e) { return app.getLevelBankQuestionIdForLevel ? app.getLevelBankQuestionIdForLevel(l) : ""; } };
+        const qShort = (qid) => qid ? String(qid).replace(/^q0?/i, "Q") : "";
+        const unlinked = admin._qbUnlinkedItems();
+        /* Level tabs */
+        let tabs = active.map(l => {
+            const items = admin._qbItemsForLevel(l);
+            const n = items.filter(it => String(it.quote || it.original || "").trim() && app.isQuoteInUseForLevel(it, l)).length;
+            const sel = !showUnlinked && l === lvl;
+            const sub = items.length ? `${n} of ${items.length} included` : "No quotes yet";
+            return `<button type="button" role="tab" aria-selected="${sel ? "true" : "false"}" class="btn btn-small ${sel ? "btn-primary" : "btn-outline"}" onclick="admin._qbShowUnlinked=false; admin.setQuotesBankViewLevel(${l}); admin.renderQuotesBank();" style="display:flex; flex-direction:column; align-items:flex-start; gap:1px; min-height:44px; padding:4px 12px; line-height:1.25;"><strong>Level ${l}${qidFor(l) ? " · " + esc(qShort(qidFor(l))) : ""}</strong><span style="font-size:0.78rem; font-weight:400;">${sub}</span></button>`;
+        }).join("");
+        if(unlinked.length) {
+            tabs += `<button type="button" role="tab" aria-selected="${showUnlinked ? "true" : "false"}" class="btn btn-small ${showUnlinked ? "btn-primary" : "btn-outline"}" onclick="admin._qbShowUnlinked=true; admin.renderQuotesBank();" style="display:flex; flex-direction:column; align-items:flex-start; gap:1px; min-height:44px; padding:4px 12px; line-height:1.25;"><strong>Not on a level</strong><span style="font-size:0.78rem; font-weight:400;">${unlinked.length} quote${unlinked.length === 1 ? "" : "s"}</span></button>`;
+        }
+        const tabsHtml = `<div role="tablist" aria-label="Levels" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">${tabs}</div>`;
+        const levelOptions = (cur) => active.map(l => `<option value="${l}" ${l === cur ? "selected" : ""}>Level ${l}${qidFor(l) ? " · " + esc(qShort(qidFor(l))) : ""}</option>`).join("");
+        const tagNames = { language: "Language", tone: "Tone", structure: "Structure" };
+        const openKey = admin._qbOpen || "";
+        const rowHtml = (it, ctx) => {
+            const idx = appData.items.indexOf(it);
+            if(idx < 0) return "";
+            const q = String(it.quote || it.original || "").trim();
+            const loc = (q && hasSrc && app.locateQuoteInPassage) ? app.locateQuoteInPassage(q, src) : { found: !q ? false : true, start: null, end: null };
+            const lineTxt = loc.found && Number.isFinite(loc.start) ? (loc.start === loc.end ? String(loc.start) : loc.start + "–" + loc.end) : "—";
+            let note = "", noteColor = "var(--primary)";
+            if(ctx.unlinked) { note = "Not on any level — use More… to move it"; noteColor = "var(--error)"; }
+            else if(!q) { note = "New quote — type the words from the passage"; noteColor = "var(--error)"; }
+            else if(hasSrc && !loc.found) { note = "Not found in this passage — check the wording or delete it"; noteColor = "var(--error)"; }
+            else if(ctx.range && loc.found && Number.isFinite(loc.start) && !(loc.end >= ctx.range.from && loc.start <= ctx.range.to)) {
+                if(ctx.whole) { note = "Outside " + ctx.rangeTxt + " — fine, whole passage"; noteColor = "inherit"; }
+                else { note = "Outside " + ctx.rangeTxt + " — students won’t see it here"; noteColor = "var(--error)"; }
+            } else if(ctx.range) { note = "Inside " + ctx.rangeTxt; }
+            const on = !ctx.unlinked && !!q && app.isQuoteInUseForLevel(it, ctx.lvl);
+            const devs = app.getItemDevices(it);
+            const chips = ["language", "tone", "structure"].map(d => {
+                const pressed = devs.includes(d);
+                return `<button type="button" class="btn btn-small ${pressed ? "btn-primary" : "btn-outline"}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Remove" : "Add"} ${tagNames[d]} tag" onclick="admin.toggleQuoteTag(${idx}, '${d}')" style="min-width:38px; min-height:38px; padding:2px 8px; border-radius:999px;">${tagNames[d].charAt(0)}</button>`;
+            }).join("");
+            const key = String(it.id || idx);
+            const isOpen = openKey === key;
+            const reasons = Array.isArray(it.reasons) ? it.reasons.join("\n") : "";
+            const wq = Array.isArray(it.distractors) ? it.distractors.map(d => app.stripLineNumbersFromQuote ? app.stripLineNumbersFromQuote(d.quote || "") : (d.quote || "")).filter(Boolean).join("\n") : "";
+            const we = Array.isArray(it.distractorPoints) ? it.distractorPoints.join("\n") : "";
+            const shownQuote = app.stripLineNumbersFromQuote ? app.stripLineNumbersFromQuote(q) : q;
+            const tickHtml = ctx.unlinked
+                ? `<span aria-hidden="true"></span>`
+                : `<input type="checkbox" ${on ? "checked" : ""} ${q ? "" : "disabled"} aria-label="Include the quote on line ${attr(lineTxt)} for students" onchange="admin.setStudentQuoteUse(${idx}, ${ctx.lvl}, this.checked)" style="width:22px; height:22px; margin-top:6px; cursor:pointer;">`;
+            const more = isOpen ? `
+                <div class="qb-more" style="grid-column:1 / -1; margin-left:clamp(0px, 8vw, 110px); padding:12px; border-radius:8px; background:rgba(128,128,128,0.08); display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px 14px;">
+                    <label style="display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:0.85rem;">Point / good reasons (one per line)
+                        <textarea rows="3" onchange="admin.qbEdit(${idx}, 'reasons', this.value)" style="font-weight:400;">${esc(reasons)}</textarea></label>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:0.85rem;">Effect
+                        <textarea rows="3" onchange="admin.qbEdit(${idx}, 'effect', this.value)" style="font-weight:400;">${esc(it.effect || "")}</textarea></label>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:0.85rem;">Wrong quotations (lines from the passage, one per line)
+                        <textarea rows="3" onchange="admin.qbEdit(${idx}, 'distractors', this.value)" placeholder="None yet" style="font-weight:400;">${esc(wq)}</textarea></label>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:0.85rem;">Wrong explanations (one per line)
+                        <textarea rows="3" onchange="admin.qbEdit(${idx}, 'distractorPoints', this.value)" placeholder="None yet" style="font-weight:400;">${esc(we)}</textarea></label>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:0.85rem;">Move to level
+                        <select onchange="admin.qbMoveToLevel(${idx}, parseInt(this.value, 10))">${ctx.unlinked ? `<option value="" selected>Choose a level…</option>` : ""}${levelOptions(ctx.unlinked ? null : ctx.lvl)}</select></label>
+                    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; min-height:40px;"><input type="checkbox" ${it.includeInWorksheet === true ? "checked" : ""} onchange="admin.qbEdit(${idx}, 'includeInWorksheet', this.checked)" style="width:18px; height:18px;"> Include on worksheet</label>
+                        <button type="button" class="btn btn-danger btn-small" onclick="if(confirm('Delete this quote from the lesson?')) { admin._qbOpen = ''; admin.delQuoteItem(${idx}); }">Delete quote</button>
+                    </div>
+                </div>` : "";
+            return `<div class="qb-row" style="display:grid; grid-template-columns:34px 48px minmax(0, 1fr) auto; gap:8px 10px; align-items:start; padding:8px 10px; border-radius:10px; border:${on ? "2px solid var(--primary)" : "1px solid rgba(128,128,128,0.35)"};">
+                ${tickHtml}
+                <span style="font-weight:700; padding-top:6px; font-variant-numeric:tabular-nums;">${esc(lineTxt)}</span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;">
+                    <input type="text" value="${attr(shownQuote)}" placeholder="Type the quote exactly as it appears in the passage" aria-label="Quote text" onchange="admin.qbEdit(${idx}, 'quote', this.value)" style="font-weight:700; width:100%; box-sizing:border-box;">
+                    <textarea rows="2" placeholder="Meaning in plain words (students see this)" aria-label="Meaning students see" onchange="admin.qbEdit(${idx}, 'translation', this.value)" style="width:100%; box-sizing:border-box; resize:vertical;">${esc(it.translation || "")}</textarea>
+                    ${note ? `<span style="font-size:0.82rem; color:${noteColor};">${esc(note)}</span>` : ""}
+                </span>
+                <span style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                    <span role="group" aria-label="Tags" style="display:flex; gap:4px;">${chips}</span>
+                    <button type="button" class="btn btn-outline btn-small" aria-expanded="${isOpen ? "true" : "false"}" onclick="admin._qbOpen = (admin._qbOpen === '${attr(key)}' ? '' : '${attr(key)}'); admin.renderQuotesBank();">${isOpen ? "Hide details" : "More…"}</button>
+                </span>
+                ${more}
+            </div>`;
+        };
+        if(showUnlinked) {
+            const rows = unlinked.map(it => rowHtml(it, { unlinked: true })).join("");
+            return tabsHtml + `<div style="font-size:0.9rem; margin-bottom:8px;">These quotes aren’t linked to any level, so students never see them. Open <strong>More…</strong> to move one to a level, or delete it.</div><div style="display:flex; flex-direction:column; gap:6px;">${rows}</div>`;
+        }
+        const items = admin._qbItemsForLevel(lvl);
+        let range = null;
+        try { range = app.resolveQuoteSelectLineWindow(lvl).lineRange; } catch(e) {}
+        const rangeTxt = range ? (range.from === range.to ? "line " + range.from : "lines " + range.from + "–" + range.to) : "";
+        const whole = app.questionCoversWholePassageForLevel(lvl);
+        const own = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl));
+        const target = app.getQuoteTargetForLevel ? app.getQuoteTargetForLevel(lvl) : 4;
+        const teacherPicks = app.levelHasTeacherQuotePicks(lvl);
+        const withText = items.filter(it => String(it.quote || it.original || "").trim());
+        const ticked = withText.filter(it => app.isQuoteInUseForLevel(it, lvl)).length;
+        const prompt = app.getFocusQuestionPromptForLevel ? app.getFocusQuestionPromptForLevel(lvl) : "";
+        const promptShort = String(prompt || "").replace(/\s+/g, " ").replace(/^0\s*\d\s*/, "").trim();
+        let status, statusBg;
+        if(!items.length) { status = "No quotes on this level yet — use <strong>+ Add quote</strong>."; statusBg = "rgba(244,67,54,0.10)"; }
+        else if(!teacherPicks) { status = `<strong>${ticked} of ${withText.length} included</strong> · the app’s suggestion (up to ${target}). Tick or untick to take over.`; statusBg = "rgba(128,128,128,0.10)"; }
+        else if(ticked === 0) { status = `<strong>0 of ${withText.length} included</strong> · students will see no quotes on this level.`; statusBg = "rgba(244,67,54,0.10)"; }
+        else { status = `<strong>${ticked} of ${withText.length} included</strong> · your choice — students see these ${ticked}.`; statusBg = "rgba(76,175,80,0.12)"; }
+        const sorted = items.slice().sort((a, b) => {
+            const qa = String(a.quote || a.original || "").trim(), qb = String(b.quote || b.original || "").trim();
+            if(!qa !== !qb) return !qa ? -1 : 1;
+            const la = qa && hasSrc ? app.locateQuoteInPassage(qa, src).start : null, lb = qb && hasSrc ? app.locateQuoteInPassage(qb, src).start : null;
+            return (Number.isFinite(la) ? la : 1e9) - (Number.isFinite(lb) ? lb : 1e9);
+        });
+        const ctx = { lvl, range, rangeTxt, whole };
+        const rows = sorted.map(it => rowHtml(it, ctx)).join("");
+        const header = `<div style="border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:10px; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+                <div style="flex:1 1 320px; min-width:0;">
+                    <div style="font-size:0.78rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; opacity:0.8;">Level ${lvl}${qidFor(lvl) ? " · " + esc(qShort(qidFor(lvl))) : ""}${rangeTxt ? " · focus " + esc(rangeTxt) : ""}</div>
+                    ${promptShort ? `<div style="font-size:0.9rem; line-height:1.4;">${esc(promptShort.length > 260 ? promptShort.slice(0, 257) + "…" : promptShort)}</div>` : ""}
+                    ${own ? `<div style="font-size:0.82rem; opacity:0.85; margin-top:2px;">Own-words question: students paraphrase, so quote choices aren’t offered. Included quotes still feed meanings and hints.</div>` : ""}
+                </div>
+                <button type="button" class="btn btn-success btn-small" onclick="admin.qbAddQuote(${lvl})">+ Add quote</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; padding:8px 10px; border-radius:8px; background:${statusBg}; font-size:0.9rem;">
+                <span>${status}</span>
+                ${withText.length ? `<span style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-primary btn-small" onclick="admin.tickSuggestedQuotes(${lvl})">Tick suggested (${target})</button>
+                    <button type="button" class="btn btn-outline btn-small" onclick="admin.setAllStudentQuotes(${lvl}, true)">Tick all</button>
+                    <button type="button" class="btn btn-outline btn-small" onclick="admin.setAllStudentQuotes(${lvl}, false)">Untick all</button>
+                </span>` : ""}
+            </div>
+            ${range ? `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem;"><input type="checkbox" ${whole ? "checked" : ""} onchange="admin.setQuestionWholePassageForLevel(${lvl}, this.checked)" style="width:18px; height:18px;"> This question covers the whole passage — quotes outside ${esc(rangeTxt)} can be used</label>` : ""}
+        </div>`;
+        const legend = `<div style="font-size:0.8rem; opacity:0.8; margin-top:8px;">Only included quotes reach students on this level. Tags L (Language), T (Tone) and S (Structure) can be combined — they label a quote and never hide it. Meanings are shown to students, so keep them short and plain.</div>`;
+        return tabsHtml + header + `<div style="display:flex; flex-direction:column; gap:6px;">${rows}</div>` + legend;
+    },
+    /** Edit one field from the quote bank row, then refresh checks and counts. */
+    qbEdit: function(idx, key, value) {
+        const item = appData.items[idx];
+        if(!item) return;
+        admin.updateQuoteItem(idx, key, value);
+        if(key === "quote") { const t = String(value || "").trim(); item.quote = t; item.original = t; item.originalFull = t; }
+        app._suggestPickCache = {};
+        admin.renderQuotesBank();
+    },
+    qbMoveToLevel: function(idx, level) {
+        const item = appData.items[idx];
+        const lvl = parseInt(level, 10);
+        if(!item || !lvl) return;
+        if(app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions() && app.assignQuoteToExamLevel) {
+            app.assignQuoteToExamLevel(item, lvl);
+        } else {
+            item.levels = [lvl];
+            const qid = app.getLevelBankQuestionIdForLevel ? app.getLevelBankQuestionIdForLevel(lvl) : null;
+            if(qid && Array.isArray(item.questionIds) && item.questionIds.length) item.questionIds = [qid];
+        }
+        if(!Array.isArray(item.levels) || !item.levels.includes(lvl)) item.levels = [lvl];
+        admin._qbOpen = "";
+        admin._qbShowUnlinked = false;
+        admin.quotesBankViewLevel = lvl;
+        admin._afterStudentQuotePicksChange();
+    },
+    qbAddQuote: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        admin.ensureSelectionData();
+        const qid = app.getLevelBankQuestionIdForLevel ? app.getLevelBankQuestionIdForLevel(lvl) : null;
+        const dev = app.getQuotesBankDefaultDevice ? app.getQuotesBankDefaultDevice() : "language";
+        const it = { id: "q" + Date.now(), original: "", quote: "", translation: "", translationDistractors: [], type: dev, effect: "", effectDistractors: [],
+            levels: [lvl], includeInWorksheet: false, correct: true, reasons: [], distractors: [], distractorPoints: [], dismissPhrase: "",
+            questionIds: qid ? [qid] : [], device: dev, devices: [dev], deviceReason: "", modelAnswer: "" };
+        appData.items.push(it);
+        appData.selection.items = appData.items;
+        admin._qbOpen = "";
+        app.save();
+        admin.renderQuotesBank();
+        setTimeout(function() { try { const el = document.querySelector("#quotes-bank-list .qb-row input[type=text]"); if(el) el.focus(); } catch(e) {} }, 30);
     },
     /**
      * "Students see" list for one level: the whole quote pool, one tick per quote, tag chips that label (never hide),
