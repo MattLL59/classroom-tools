@@ -79,63 +79,45 @@
         .building-container {
             display: flex;
             align-items: flex-end;
-            gap: 15px;
-            padding-bottom: 0px;
-            border-bottom: 4px solid #4a5568; 
-            margin-bottom: 20px;
+            gap: 10px;
+            flex: 1 1 auto;
+            min-height: 380px;
+            padding: 12px 12px 0;
+            border-bottom: 8px solid #4a5568; /* the ground */
             overflow-x: auto;
-            min-height: 500px;
-            padding-left: 20px;
-            padding-right: 20px;
+            overflow-y: hidden;
             position: relative;
             background: linear-gradient(to top, #e2e8f0 0%, #f1f5f9 100%);
         }
-        
-        /* Direct SVG Skyline Background */
-        .skyline-svg {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-            pointer-events: none;
-            opacity: 0.6;
-        }
-        
+
         .building {
-            flex-shrink: 0;
-            width: 260px;
+            flex: 1 1 0;
+            min-width: 130px;
             background: rgba(255, 255, 255, 0.95);
             border: 2px solid #64748b;
             border-bottom: none;
             position: relative;
             display: flex;
             flex-direction: column;
-            justify-content: flex-end;
-            padding: 10px;
+            padding: 8px;
             transition: all 0.3s;
-            z-index: 1; 
+            z-index: 1;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             border-radius: 4px 4px 0 0;
+            min-height: 0;
         }
-        
-        /* Height Variations for Arc */
-        .b-step-0 { height: 280px; border-top: 4px solid #3b82f6; } 
-        .b-step-1 { height: 320px; border-top: 4px solid #2563eb; } 
-        .b-step-2 { height: 360px; border-top: 4px solid #ea580c; } 
-        .b-step-3 { height: 420px; border-top: 4px solid #dc2626; } 
-        .b-step-4 { height: 340px; border-top: 4px solid #ea580c; } 
-        .b-step-5 { height: 280px; border-top: 4px solid #16a34a; } 
+        .building label { overflow-wrap: anywhere; }
+        .building-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+        .building-preview { flex-shrink: 0; max-height: 5.5em; overflow-y: auto; }
 
         .window-pane {
             background: white;
             border: 1px solid #cbd5e1;
-            margin-top: auto;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             border-radius: 4px;
             overflow: hidden;
-            flex-grow: 1;
+            flex: 1 1 auto;
+            min-height: 0;
             display: flex; flex-direction: column;
         }
         
@@ -190,6 +172,14 @@
             outline: none;
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
         }
+
+        /* Simple (non-skyline) draft layout */
+        .simple-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding-bottom: 20px; }
+        .step-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+
+        /* Worksheet preview options panel */
+        .ws-opts { max-height: 40vh; }
+        @media (min-width: 768px) { .ws-opts { max-height: none; } }
     </style>
 </head>
 <body class="flex flex-col">
@@ -197,8 +187,19 @@
     <!-- CONFIG BLOCK -->
     <script id="app-config" type="application/json">
     {
+        "mode": "teacher",
+        "appId": "",
         "adminPass": "ChiefInspector",
         "appTitle": "STORY ARCHITECT: PRO",
+        "settings": {
+            "missionMode": "choice",
+            "fixedPrompt": "",
+            "phases": { "plan": true, "draft": true, "inspect": true },
+            "draftLayout": "skyline",
+            "tools": { "tiptop": true, "sentences": true, "dialogue": true },
+            "tiptopWords": ["Later", "Suddenly", "Meanwhile", "Next", "After", "Before", "Then", "In the distance", "Inside"],
+            "exportFilename": ""
+        },
         "examPrompts": [
             { "type": "Decision", "text": "Write about a time when you had to be brave." },
             { "type": "Decision", "text": "Write about a time when you had to make a difficult choice." },
@@ -323,7 +324,7 @@
             <button onclick="changePhase(4)" id="nav-p4" class="tab-btn">4. INSPECT</button>
         </div>
         
-        <button onclick="toggleAdmin()" class="text-gray-500 hover:text-white ml-2 shrink-0"><i class="fas fa-cog"></i></button>
+        <button id="admin-btn" onclick="toggleAdmin()" class="text-gray-500 hover:text-white ml-2 shrink-0" title="Teacher settings"><i class="fas fa-cog"></i></button>
     </header>
 
     <!-- CONTENT AREA -->
@@ -341,7 +342,7 @@
             <div class="bg-blue-900 bg-opacity-50 border border-blue-400 p-3 rounded mb-4 shadow-inner">
                 <h3 class="text-blue-300 text-xs font-bold uppercase tracking-wider mb-1"><i class="fas fa-crosshairs mr-1"></i> Current Mission</h3>
                 <p id="sidebar-mission-text" class="text-white text-sm font-serif italic">No prompt selected.</p>
-                <button onclick="changePhase(1); if(window.innerWidth < 768) toggleSidebar();" class="mt-2 text-xs text-blue-300 hover:text-white underline">Change Prompt</button>
+                <button id="change-prompt-link" onclick="changePhase(1); if(window.innerWidth < 768) toggleSidebar();" class="mt-2 text-xs text-blue-300 hover:text-white underline">Change Prompt</button>
                 
                 <!-- NEW START AGAIN BUTTON IN MISSION BOX -->
                 <button onclick="startNewSession()" class="mt-4 w-full bg-red-600 hover:bg-red-500 text-white text-xs py-2 rounded text-center flex items-center justify-center gap-2">
@@ -349,20 +350,20 @@
                 </button>
             </div>
 
-            <h2 class="text-blue-300 font-bold mb-4 border-b border-blue-500 pb-2 hidden md:block">PROJECT ASSETS</h2>
+            <div id="assets-heading"><h2 class="text-blue-300 font-bold mb-4 border-b border-blue-500 pb-2 hidden md:block">PROJECT ASSETS</h2></div>
             <div id="assets-container" class="space-y-4">
                 <p class="text-xs text-blue-200 italic">Complete Phase 2 to generate your story assets here.</p>
             </div>
             
-            <div class="mt-auto pt-6">
+            <div id="tools-section" class="mt-auto pt-6">
                 <h3 class="text-blue-300 font-bold mb-2 text-sm">GRAMMAR TOOLS</h3>
-                <button onclick="checkParagraphs()" class="w-full bg-orange-600 hover:bg-orange-500 text-white text-xs py-3 rounded mb-2 text-left px-3">
+                <button id="tool-tiptop" onclick="checkParagraphs()" style="background-color:#ea580c;" class="w-full text-white text-xs py-3 rounded mb-2 text-left px-3">
                     <i class="fas fa-paragraph mr-2"></i> TiPToP Paragraph Check
                 </button>
-                <button onclick="checkSentences()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs py-3 rounded mb-2 text-left px-3">
+                <button id="tool-sentences" onclick="checkSentences()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs py-3 rounded mb-2 text-left px-3">
                     <i class="fas fa-text-height mr-2"></i> Sentence Variety Map
                 </button>
-                <button onclick="analyzeDialogue()" class="w-full bg-green-600 hover:bg-green-500 text-white text-xs py-3 rounded mb-2 text-left px-3">
+                <button id="tool-dialogue" onclick="analyzeDialogue()" class="w-full bg-green-600 hover:bg-green-500 text-white text-xs py-3 rounded mb-2 text-left px-3">
                     <i class="fas fa-comments mr-2"></i> Dialogue Validator
                 </button>
             </div>
@@ -377,8 +378,8 @@
             <!-- PHASE 1: PROMPT SELECTION -->
             <div id="phase-1" class="absolute inset-0 p-4 md:p-8 overflow-y-auto bg-gray-50 pb-32">
                 <div class="max-w-5xl mx-auto">
-                    <h2 class="text-2xl md:text-3xl font-bold text-gray-800 mb-2">1. Select Your Mission</h2>
-                    <p class="text-sm md:text-base text-gray-500 mb-6">Choose an archetype below. Use arrows to browse specific questions.</p>
+                    <h2 id="ph-title-1" class="text-2xl md:text-3xl font-bold text-gray-800 mb-2">1. Select Your Mission</h2>
+                    <p id="p1-sub" class="text-sm md:text-base text-gray-500 mb-6">Choose an archetype below. Use arrows to browse specific questions.</p>
                     
                     <div id="deck-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                         <!-- Decks Injected Here -->
@@ -399,72 +400,30 @@
             
             <!-- PHASE 2: BLUEPRINT (THE PLAN) -->
             <div id="phase-2" class="absolute inset-0 p-4 md:p-8 overflow-y-auto hidden">
-                <h2 class="text-2xl font-bold text-gray-800 mb-2">2. The Plan</h2>
+                <h2 id="ph-title-2" class="text-2xl font-bold text-gray-800 mb-2">2. The Plan</h2>
                 <p class="text-sm text-gray-500 mb-6">Define the core elements.</p>
                 <div id="blueprint-inputs" class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                     <!-- Injected via JS -->
                 </div>
                 <div class="h-20"></div>
-                <button onclick="changePhase(3)" class="mt-4 bg-blue-600 text-white px-8 py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 float-right mb-8">
+                <button id="plan-next-btn" class="mt-4 bg-blue-600 text-white px-8 py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 float-right mb-8">
                     Proceed to Construction <i class="fas fa-arrow-right ml-2"></i>
                 </button>
             </div>
 
             <!-- PHASE 3: CONSTRUCTION (THE DRAFT) -->
-            <div id="phase-3" class="absolute inset-0 p-4 md:p-8 overflow-x-auto overflow-y-auto hidden">
-                <h2 class="text-2xl font-bold text-gray-800 mb-2 sticky left-0 z-10">3. The Draft</h2>
-                <p class="text-sm text-gray-500 mb-6 sticky left-0 z-10">Build your story beat-by-beat.</p>
-                
-                <!-- SKYLINE CONTAINER -->
-                <div id="structure-inputs" class="building-container">
-                    <!-- NEW SVG SKYLINE BACKGROUND -->
-                    <svg class="skyline-svg" viewBox="0 0 1200 600" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-                        <defs>
-                            <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                                <stop offset="0%" style="stop-color:#bfdbfe;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#eff6ff;stop-opacity:1" />
-                            </linearGradient>
-                        </defs>
-                        <rect width="100%" height="100%" fill="url(#skyGradient)"/>
-                        
-                        <!-- Ground -->
-                        <rect x="0" y="550" width="1200" height="50" fill="#475569" />
-
-                        <!-- Bungalow -->
-                        <rect x="50" y="450" width="150" height="100" fill="#cbd5e1" stroke="#64748b" stroke-width="2" />
-                        <polygon points="40,450 125,380 210,450" fill="#94a3b8" stroke="#64748b" stroke-width="2" />
-
-                        <!-- House -->
-                        <rect x="250" y="400" width="180" height="150" fill="#cbd5e1" stroke="#64748b" stroke-width="2" />
-                        <polygon points="240,400 340,320 440,400" fill="#94a3b8" stroke="#64748b" stroke-width="2" />
-
-                        <!-- Flats -->
-                        <rect x="480" y="300" width="200" height="250" fill="#cbd5e1" stroke="#64748b" stroke-width="2" />
-                        <rect x="500" y="320" width="30" height="40" fill="#e2e8f0" />
-                        <rect x="550" y="320" width="30" height="40" fill="#e2e8f0" />
-                        <rect x="600" y="320" width="30" height="40" fill="#e2e8f0" />
-                        <rect x="500" y="380" width="30" height="40" fill="#e2e8f0" />
-                        <rect x="550" y="380" width="30" height="40" fill="#e2e8f0" />
-                        <rect x="600" y="380" width="30" height="40" fill="#e2e8f0" />
-
-                        <!-- Skyscraper -->
-                        <rect x="750" y="100" width="220" height="450" fill="#94a3b8" stroke="#64748b" stroke-width="2" />
-                        <line x1="750" y1="100" x2="970" y2="550" stroke="white" stroke-width="1" opacity="0.3" />
-                        <line x1="970" y1="100" x2="750" y2="550" stroke="white" stroke-width="1" opacity="0.3" />
-
-                        <!-- Small House -->
-                        <rect x="1020" y="450" width="140" height="100" fill="#cbd5e1" stroke="#64748b" stroke-width="2" />
-                        <polygon points="1010,450 1090,390 1170,450" fill="#94a3b8" stroke="#64748b" stroke-width="2" />
-                    </svg>
-                    <!-- Injected via JS -->
-                </div>
-
-                <div class="h-24"></div> <!-- Spacer -->
-                
-                <div class="fixed bottom-6 right-6 md:bottom-8 md:right-8 z-30">
-                    <button onclick="compileStory()" class="bg-green-600 text-white px-6 py-3 md:px-8 md:py-4 rounded-full font-bold shadow-2xl hover:bg-green-700 transform hover:scale-105 transition flex items-center text-sm md:text-base">
+            <div id="phase-3" class="absolute inset-0 p-4 md:p-6 flex flex-col overflow-y-auto hidden">
+                <div class="flex flex-wrap justify-between items-end gap-3 mb-3 shrink-0">
+                    <div>
+                        <h2 id="ph-title-3" class="text-2xl font-bold text-gray-800 mb-1">3. The Draft</h2>
+                        <p class="text-sm text-gray-500">Build your story beat-by-beat.</p>
+                    </div>
+                    <button id="compile-btn" class="bg-green-600 text-white px-5 py-3 rounded-lg font-bold shadow-lg hover:bg-green-700 transition flex items-center text-sm md:text-base">
                         <span>Compile Full Draft</span> <i class="fas fa-hammer ml-2"></i>
                     </button>
+                </div>
+                <div id="structure-inputs" class="building-container">
+                    <!-- Injected via JS -->
                 </div>
             </div>
 
@@ -473,7 +432,7 @@
                 <div class="h-full flex flex-col">
                     <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 gap-2">
                         <div>
-                            <h2 class="text-2xl font-bold text-gray-800">4. Inspection</h2>
+                            <h2 id="ph-title-4" class="text-2xl font-bold text-gray-800">4. Inspection</h2>
                             <p class="text-sm text-gray-500">Review, refine, and check your work.</p>
                         </div>
                         <div class="flex gap-2 w-full md:w-auto">
@@ -488,7 +447,7 @@
                     
                     <div id="inspection-feedback" class="min-h-[3rem] mt-4 bg-gray-100 rounded border border-gray-300 p-3 flex items-center text-xs md:text-sm text-gray-600">
                         <i class="fas fa-info-circle text-blue-500 text-xl mr-3"></i>
-                        <span>Ready for inspection. Click 'Dialogue Validator' or 'Spell Check' in the sidebar menu.</span>
+                        <span id="feedback-text">Ready for inspection. Use the checking tools in the sidebar.</span>
                     </div>
                 </div>
             </div>
@@ -499,7 +458,7 @@
     <div id="admin-modal" class="modal-overlay hidden">
         <div class="bg-white w-full h-full md:w-11/12 md:h-5/6 md:rounded-lg shadow-2xl flex flex-col overflow-hidden">
             <div class="bg-gray-100 p-4 border-b flex justify-between items-center">
-                <h2 class="font-bold text-lg text-gray-700">Chief Architect Admin Panel</h2>
+                <h2 class="font-bold text-lg text-gray-700">Chief Architect Admin Panel <span id="dirty-flag" class="hidden ml-2 text-xs font-normal bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Unsaved changes</span></h2>
                 <button onclick="toggleAdmin()" class="text-gray-500 hover:text-red-500 text-2xl">&times;</button>
             </div>
             
@@ -507,7 +466,7 @@
             <div id="admin-lock" class="flex-grow flex flex-col justify-center items-center p-4">
                 <p class="text-gray-500 mb-4">Enter password to configure blueprint.</p>
                 <div id="pass-hint" class="bg-yellow-100 text-yellow-800 p-2 rounded text-xs mb-4 hidden">Default: ChiefInspector</div>
-                <input type="password" id="admin-pass" class="border p-2 rounded w-64 text-center mb-4" placeholder="Password">
+                <input type="password" id="admin-pass" class="border p-2 rounded w-64 text-center mb-4" placeholder="Password" onkeydown="if(event.key==='Enter') unlockAdmin()">
                 <button onclick="unlockAdmin()" class="bg-blue-600 text-white px-6 py-2 rounded font-bold">UNLOCK</button>
             </div>
 
@@ -526,16 +485,74 @@
                 </div>
                 
                 <!-- TABS -->
-                 <div class="flex border-b overflow-x-auto">
-                    <button class="px-4 py-2 text-sm font-bold text-blue-600 border-b-2 border-blue-600 whitespace-nowrap" onclick="showTab('prompts')">The Plan</button>
-                    <button class="px-4 py-2 text-sm font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap" onclick="showTab('structure')">The Draft</button>
-                    <button class="px-4 py-2 text-sm font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap" onclick="showTab('exam')">Exam Prompts</button>
+                <div class="flex border-b overflow-x-auto" id="admin-tabs">
+                    <button data-tab="setup" class="admin-tab px-4 py-2 text-sm font-bold whitespace-nowrap" onclick="showTab('setup')">Student Setup</button>
+                    <button data-tab="exam" class="admin-tab px-4 py-2 text-sm font-bold whitespace-nowrap" onclick="showTab('exam')">Exam Prompts</button>
+                    <button data-tab="prompts" class="admin-tab px-4 py-2 text-sm font-bold whitespace-nowrap" onclick="showTab('prompts')">The Plan</button>
+                    <button data-tab="structure" class="admin-tab px-4 py-2 text-sm font-bold whitespace-nowrap" onclick="showTab('structure')">The Draft</button>
+                    <button data-tab="presets" class="admin-tab px-4 py-2 text-sm font-bold whitespace-nowrap" onclick="showTab('presets')">Presets</button>
+                </div>
+
+                <!-- Student Setup -->
+                <div id="tab-setup" class="space-y-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="space-y-4">
+                            <div class="border p-4 rounded bg-purple-50">
+                                <h3 class="font-bold text-purple-800 mb-2">Mission</h3>
+                                <label class="flex items-center gap-2 text-sm mb-1"><input type="radio" name="set-mode" value="choice" onchange="delayedSave()"> Students choose from the switched-on exam prompts</label>
+                                <label class="flex items-center gap-2 text-sm mb-2"><input type="radio" name="set-mode" value="fixed" onchange="delayedSave()"> Everyone answers one set question</label>
+                                <select id="set-fixed" class="w-full border rounded p-2 text-sm admin-input" onchange="delayedSave()"></select>
+                            </div>
+                            <div class="border p-4 rounded bg-blue-50">
+                                <h3 class="font-bold text-blue-800 mb-2">Stages students see</h3>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked disabled> Mission (always on)</label>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set-plan" onchange="delayedSave()"> The Plan</label>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set-draft" onchange="delayedSave()"> The Draft</label>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set-inspect" onchange="delayedSave()"> Inspect (needs The Draft)</label>
+                                <label class="block text-xs font-bold text-gray-500 mt-3 mb-1">Draft layout</label>
+                                <select id="set-layout" class="border rounded p-2 text-sm admin-input" onchange="delayedSave()">
+                                    <option value="skyline">Skyline (buildings rise to the climax)</option>
+                                    <option value="simple">Simple cards (better on small screens)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="border p-4 rounded bg-green-50">
+                                <h3 class="font-bold text-green-800 mb-2">Checking tools (Inspect stage)</h3>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set-tool-tiptop" onchange="delayedSave()"> TiPToP Paragraph Check</label>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set-tool-sentences" onchange="delayedSave()"> Sentence Variety Map</label>
+                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set-tool-dialogue" onchange="delayedSave()"> Dialogue Validator</label>
+                                <label class="block text-xs font-bold text-gray-500 mt-3 mb-1">TiPToP trigger words (comma separated)</label>
+                                <textarea id="set-tiptop-words" class="w-full border rounded p-2 text-xs h-16 admin-input" oninput="delayedSave()"></textarea>
+                            </div>
+                            <div class="border p-4 rounded bg-gray-50">
+                                <h3 class="font-bold text-gray-800 mb-2">Student app file</h3>
+                                <label class="block text-xs font-bold text-gray-500 mb-1">File name for GitHub</label>
+                                <input id="set-filename" class="w-full border rounded p-2 text-sm admin-input" oninput="delayedSave()">
+                                <p class="text-xs text-gray-500 mt-1">Use <strong>index.html</strong> if this will be the only page in its own repository. Keep the same name when you update it so students keep their saved work.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="border p-4 rounded bg-white">
+                        <h3 class="font-bold text-gray-800 mb-2">What students will get</h3>
+                        <div id="set-summary" class="text-sm text-gray-700 space-y-1"></div>
+                    </div>
+                </div>
+
+                <!-- Exam Prompts Editor -->
+                <div id="tab-exam" class="hidden border p-4 rounded bg-purple-50">
+                    <h3 class="font-bold text-purple-800 mb-2">Phase 1: Exam Questions</h3>
+                    <p class="text-xs text-gray-600 mb-2">Untick a question to hide it from students without deleting it.</p>
+                    <div id="exam-bulk" class="flex flex-wrap gap-2 mb-3"></div>
+                    <div id="exam-editor" class="space-y-3"></div>
+                    <button onclick="addExamPrompt()" class="mt-2 text-xs bg-purple-600 text-white px-2 py-1 rounded">+ Add Question</button>
                 </div>
 
                 <!-- Prompts Editor -->
-                <div id="tab-prompts" class="space-y-6">
+                <div id="tab-prompts" class="hidden space-y-6">
                     <div class="border p-4 rounded bg-blue-50">
                         <h3 class="font-bold text-blue-800 mb-2">Phase 2: The Plan (Skill Prompts)</h3>
+                        <p class="text-xs text-gray-600 mb-2">Untick a prompt to hide it from students and from the worksheet.</p>
                         <div id="prompts-editor" class="space-y-3"></div>
                         <button onclick="addPrompt()" class="mt-2 text-xs bg-blue-600 text-white px-2 py-1 rounded">+ Add Prompt</button>
                     </div>
@@ -544,31 +561,68 @@
                 <!-- Structure Editor (STRIPS) -->
                 <div id="tab-structure" class="hidden space-y-6">
                     <div class="border p-4 rounded bg-green-50">
-                        <h3 class="font-bold text-green-800 mb-2">Phase 3: The Draft (Structure & Strips)</h3>
+                        <h3 class="font-bold text-green-800 mb-2">Phase 3: The Draft (Structure &amp; Strips)</h3>
+                        <p class="text-xs text-gray-600 mb-2">Untick a step to leave it out. A step with no micro-prompts gives students one open writing box.</p>
                         <div id="structure-editor" class="space-y-6"></div>
                         <button onclick="addStep()" class="mt-4 text-xs bg-green-600 text-white px-2 py-1 rounded">+ Add Step</button>
                     </div>
                 </div>
 
-                <!-- Exam Prompts Editor -->
-                <div id="tab-exam" class="hidden border p-4 rounded bg-purple-50">
-                    <h3 class="font-bold text-purple-800 mb-2">Phase 1: Exam Questions</h3>
-                    <div id="exam-editor" class="space-y-3"></div>
-                    <button onclick="addExamPrompt()" class="mt-2 text-xs bg-purple-600 text-white px-2 py-1 rounded">+ Add Question</button>
+                <!-- Presets -->
+                <div id="tab-presets" class="hidden space-y-4">
+                    <div class="border p-4 rounded bg-yellow-50">
+                        <h3 class="font-bold text-yellow-800 mb-2">Presets</h3>
+                        <p class="text-xs text-gray-600 mb-3">A preset stores the whole setup: questions, plan, draft steps, stages and tools. Presets are kept in this browser, so download the presets file to share them with colleagues or move them to another computer.</p>
+                        <div class="flex flex-col md:flex-row gap-2 mb-4">
+                            <input id="preset-name" class="flex-grow border rounded p-2 text-sm" placeholder="Preset name, e.g. Rebel lesson, plan only">
+                            <button onclick="savePreset()" class="bg-yellow-600 text-white px-4 py-2 rounded font-bold text-sm">Save current setup as preset</button>
+                        </div>
+                        <div id="preset-list" class="space-y-2"></div>
+                        <div class="flex flex-col md:flex-row gap-2 mt-4">
+                            <button onclick="exportPresets()" class="bg-gray-700 text-white px-4 py-2 rounded text-sm">Download presets file</button>
+                            <button onclick="document.getElementById('preset-import').click()" class="bg-white border border-gray-400 px-4 py-2 rounded text-sm">Import presets file</button>
+                            <input type="file" id="preset-import" accept=".json,application/json" class="hidden" onchange="importPresets(this)">
+                        </div>
+                    </div>
                 </div>
 
             </div>
 
             <!-- Footer -->
-            <div id="admin-footer" class="hidden bg-gray-50 p-4 border-t flex flex-col md:flex-row justify-between gap-4">
-                <button onclick="resetDefaults()" class="text-red-500 text-sm">Reset Defaults</button>
-                <div class="flex flex-col md:flex-row gap-2">
-                    <button onclick="generateWorksheet()" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded font-bold text-sm text-center">
-                        <i class="fas fa-file-word mr-2"></i> Worksheet (.doc)
+            <div id="admin-footer" class="hidden bg-gray-50 p-4 border-t flex flex-col lg:flex-row justify-between gap-4">
+                <button onclick="resetDefaults()" class="text-red-500 text-sm text-left">Reset Defaults</button>
+                <div class="flex flex-col md:flex-row flex-wrap gap-2">
+                    <button onclick="openWorksheetPreview()" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded font-bold text-sm text-center">
+                        <i class="fas fa-file-alt mr-2"></i> Worksheet Preview
                     </button>
-                    <button onclick="copySource()" class="bg-gray-700 text-white px-4 py-2 rounded font-bold text-sm">Copy Source</button>
-                    <button onclick="exportFile()" class="bg-purple-700 text-white px-4 py-2 rounded font-bold text-sm">Download File</button>
+                    <button onclick="copySource()" class="bg-gray-600 text-white px-4 py-2 rounded font-bold text-sm">Copy Teacher Source</button>
+                    <button onclick="exportFile()" class="bg-gray-700 text-white px-4 py-2 rounded font-bold text-sm">Download Teacher Copy</button>
+                    <button onclick="copyStudentSource()" class="bg-green-600 text-white px-4 py-2 rounded font-bold text-sm">Copy Student Source</button>
+                    <button onclick="exportStudentApp()" class="bg-green-700 text-white px-4 py-2 rounded font-bold text-sm"><i class="fas fa-user-graduate mr-2"></i>Export Student App</button>
                     <button onclick="saveLocal()" id="btn-save-local" class="bg-blue-600 text-white px-4 py-2 rounded font-bold text-sm">Save (Local)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WORKSHEET PREVIEW MODAL -->
+    <div id="worksheet-modal" class="modal-overlay hidden" style="z-index:60;">
+        <div class="bg-white w-full h-full md:w-11/12 md:h-5/6 md:rounded-lg shadow-2xl flex flex-col overflow-hidden">
+            <div class="bg-gray-100 p-4 border-b flex justify-between items-center">
+                <h2 class="font-bold text-lg text-gray-700"><i class="fas fa-file-alt mr-2"></i>Worksheet Preview</h2>
+                <button onclick="closeWorksheetPreview()" class="text-gray-500 hover:text-red-500 text-2xl">&times;</button>
+            </div>
+            <div class="flex flex-col md:flex-row flex-grow overflow-hidden">
+                <div id="ws-options" class="ws-opts md:w-80 shrink-0 border-b md:border-b-0 md:border-r p-4 overflow-y-auto text-sm space-y-4 bg-gray-50"></div>
+                <div class="flex-grow flex flex-col overflow-hidden">
+                    <div class="px-4 py-2 border-b flex flex-wrap items-center justify-between gap-2 bg-white">
+                        <span id="ws-pages" class="text-xs text-gray-600"></span>
+                        <div class="flex gap-2">
+                            <button onclick="printWorksheet()" class="bg-white border border-gray-400 px-3 py-2 rounded text-sm"><i class="fas fa-print mr-1"></i> Print / PDF</button>
+                            <button onclick="downloadWorksheet()" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-2 rounded font-bold text-sm"><i class="fas fa-file-word mr-1"></i> Download Word (.doc)</button>
+                        </div>
+                    </div>
+                    <iframe id="ws-frame" class="flex-grow w-full border-0" style="background:#d1d5db;" title="Worksheet preview"></iframe>
                 </div>
             </div>
         </div>
@@ -582,88 +636,228 @@
             removeItem: (k) => { try { localStorage.removeItem(k) } catch(e){} }
         };
 
+        // Snapshot of this file exactly as loaded, before anything is rendered.
+        // Exports are built from this, so they never carry a student's work or the rendered screens.
+        const PRISTINE_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+
+        const ARCHETYPES = ['Decision', 'Event', 'Journey', 'Constraint'];
+        const DEFAULT_SETTINGS = {
+            missionMode: 'choice',
+            fixedPrompt: '',
+            phases: { plan: true, draft: true, inspect: true },
+            draftLayout: 'skyline',
+            tools: { tiptop: true, sentences: true, dialogue: true },
+            tiptopWords: ["Later", "Suddenly", "Meanwhile", "Next", "After", "Before", "Then", "In the distance", "Inside"],
+            exportFilename: ''
+        };
+        const PHASES = {
+            1: { tab: 'MISSION', title: 'Select Your Mission' },
+            2: { tab: 'THE PLAN', title: 'The Plan' },
+            3: { tab: 'THE DRAFT', title: 'The Draft' },
+            4: { tab: 'INSPECT', title: 'Inspection' }
+        };
+        const PRESET_KEY = 'storyArchPresets';
+
         // --- LOAD CONFIG ---
         let config;
         try {
             config = JSON.parse(document.getElementById('app-config').textContent);
         } catch(e) { console.error("Config Error", e); config = {}; }
 
-        // Local Override
-        try {
-            const local = SafeStorage.getItem('storyArchConfig');
-            if(local) config = { ...config, ...JSON.parse(local) };
-        } catch(e){}
+        const IS_STUDENT = config.mode === 'student';
+
+        // Teacher copy only: local override from Save (Local).
+        // A student app ignores it, so a teacher's working setup on the same site can't leak into it.
+        if(!IS_STUDENT) {
+            try {
+                const local = SafeStorage.getItem('storyArchConfig');
+                if(local) config = { ...config, ...JSON.parse(local), mode: 'teacher' };
+            } catch(e){}
+        }
+        normaliseConfig();
+
+        // Each exported student app keeps its own saved progress.
+        const PROGRESS_KEY = IS_STUDENT ? 'storyArchProgress_' + (config.appId || 'student') : 'storyArchProgress';
+
+        function normaliseConfig() {
+            config.appTitle = config.appTitle || 'STORY ARCHITECT';
+            config.examPrompts = Array.isArray(config.examPrompts) ? config.examPrompts : [];
+            config.blueprintPrompts = Array.isArray(config.blueprintPrompts) ? config.blueprintPrompts : [];
+            config.structureSteps = Array.isArray(config.structureSteps) ? config.structureSteps : [];
+            const s = config.settings || {};
+            config.settings = {
+                ...DEFAULT_SETTINGS, ...s,
+                phases: { ...DEFAULT_SETTINGS.phases, ...(s.phases || {}) },
+                tools: { ...DEFAULT_SETTINGS.tools, ...(s.tools || {}) },
+                tiptopWords: (Array.isArray(s.tiptopWords) && s.tiptopWords.length) ? s.tiptopWords : DEFAULT_SETTINGS.tiptopWords.slice()
+            };
+            config.examPrompts.forEach(p => {
+                if(p.enabled === undefined) p.enabled = true;
+                if(!p.type) p.type = 'Event';
+                if(p.text == null) p.text = '';
+            });
+            config.blueprintPrompts.forEach((p, i) => {
+                if(p.enabled === undefined) p.enabled = true;
+                if(!p.id) p.id = 'p' + i + '_' + Date.now().toString(36);
+                if(p.title == null) p.title = '';
+                if(p.prompt == null) p.prompt = '';
+            });
+            config.structureSteps.forEach(st => {
+                if(st.enabled === undefined) st.enabled = true;
+                if(!Array.isArray(st.strips)) st.strips = [];
+                if(st.title == null) st.title = '';
+                if(st.guidance == null) st.guidance = '';
+            });
+        }
+
+        // --- HELPERS ---
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+        function plainEscape(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function slugify(s) {
+            return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'story_architect';
+        }
+        function enabledExam() { return config.examPrompts.filter(p => p.enabled !== false && String(p.text).trim()); }
+        function fixedPromptObj() {
+            if(config.settings.missionMode !== 'fixed') return null;
+            return enabledExam().find(p => p.text === config.settings.fixedPrompt) || null;
+        }
+        function visiblePrompts() { const f = fixedPromptObj(); return f ? [f] : enabledExam(); }
+        function enabledPlan() { return config.blueprintPrompts.filter(p => p.enabled !== false); }
+        function enabledSteps() {
+            return config.structureSteps.map((step, index) => ({ step, index })).filter(o => o.step.enabled !== false);
+        }
+        function phaseOn(n) {
+            const ph = config.settings.phases;
+            if(n === 1) return true;
+            if(n === 2) return !!ph.plan;
+            if(n === 3) return !!ph.draft;
+            if(n === 4) return !!ph.draft && !!ph.inspect;
+            return false;
+        }
+        function nextPhase(n) { for(let k = n + 1; k <= 4; k++) if(phaseOn(k)) return k; return null; }
+        function anyToolOn() { const t = config.settings.tools; return t.tiptop || t.sentences || t.dialogue; }
+        function downloadBlob(content, mime, filename) {
+            const blob = new Blob(content, { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        }
+        function copyText(text, msg) {
+            const fallback = () => {
+                const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+                try { document.execCommand('copy'); alert(msg); } catch(e) { prompt('Copy:', text); }
+                document.body.removeChild(ta);
+            };
+            if(navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => alert(msg)).catch(fallback);
+            } else fallback();
+        }
 
         // --- STATE ---
-        let storyData = {
-            selectedPrompt: null,
-            assets: {},
-            drafts: {} 
-        };
-        
+        let storyData = { selectedPrompt: null, assets: {}, drafts: {} };
         let deckState = { 'Decision': 0, 'Event': 0, 'Journey': 0, 'Constraint': 0 };
+        let deckCats = {};
 
         // --- INIT ---
         window.onload = function() {
             document.title = config.appTitle;
             document.getElementById('header-title').innerText = config.appTitle;
-            
-            // 1. Initial Render (Default State)
-            renderPhase1(); // Deck
-            renderPhase2(); // Blueprint
-            renderPhase3(); // Construction
-            
-            // 2. Load Saved Data
-            const saved = SafeStorage.getItem('storyArchProgress');
+
+            const saved = SafeStorage.getItem(PROGRESS_KEY);
             if(saved) {
-                storyData = JSON.parse(saved);
-                
-                // RESTORE UI STATE WITHOUT CHANGING PHASE
-                if(storyData.selectedPrompt) {
-                     // Update Sidebar Text
-                     document.getElementById('sidebar-mission-text').innerText = `"${storyData.selectedPrompt}"`;
-                     
-                     // Sync Deck View (Phase 1)
-                     const pConfig = config.examPrompts.find(p => p.text === storyData.selectedPrompt);
-                     if (pConfig) {
-                        const type = pConfig.type || 'Event';
-                        const typePrompts = config.examPrompts.filter(p => (p.type || 'Event') === type);
-                        const idx = typePrompts.findIndex(p => p.text === storyData.selectedPrompt);
-                        
-                        if (idx !== -1) deckState[type] = idx;
-                        
-                        // Re-render Phase 1
-                        renderPhase1();
-                        
-                        // Visual Select
-                        const card = document.getElementById(`card-${type}`);
-                        if(card) card.classList.add('selected');
-                        
-                        // Enable Button
-                        const btn = document.getElementById('start-btn');
-                        if(btn) {
-                            btn.disabled = false;
-                            btn.classList.remove('bg-gray-400', 'cursor-not-allowed');
-                            btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
-                            btn.innerHTML = 'Continue Blueprint <i class="fas fa-chevron-right ml-2"></i>';
-                        }
-                     }
+                try {
+                    const d = JSON.parse(saved);
+                    storyData = { selectedPrompt: d.selectedPrompt || null, assets: d.assets || {}, drafts: d.drafts || {} };
+                } catch(e) {}
+            }
+            const f = fixedPromptObj();
+            if(f) storyData.selectedPrompt = f.text;
+            syncDeckToSelection();
+
+            buildApp();
+            changePhase(1);
+        };
+
+        function buildApp() {
+            applyLayoutSettings();
+            renderPhase1();
+            renderPhase2();
+            renderPhase3();
+            restoreInputs();
+            updateAssetsSidebar();
+        }
+
+        function syncDeckToSelection() {
+            if(!storyData.selectedPrompt) return;
+            const p = visiblePrompts().find(x => x.text === storyData.selectedPrompt);
+            if(!p) return;
+            const idx = visiblePrompts().filter(x => x.type === p.type).findIndex(x => x.text === p.text);
+            if(idx !== -1) deckState[p.type] = idx;
+        }
+
+        // Shows/hides stages, renumbers tabs, sets tools, removes teacher controls in student mode
+        function applyLayoutSettings() {
+            const fixed = !!fixedPromptObj();
+            let num = 0;
+            [1,2,3,4].forEach(n => {
+                const on = phaseOn(n);
+                const btn = document.getElementById('nav-p' + n);
+                btn.classList.toggle('hidden', !on);
+                if(on) {
+                    num++;
+                    btn.innerText = `${num}. ${PHASES[n].tab}`;
+                    const title = (n === 1 && fixed) ? 'Your Mission' : PHASES[n].title;
+                    document.getElementById('ph-title-' + n).innerText = `${num}. ${title}`;
                 }
-                
-                restoreInputs();
-                updateAssetsSidebar();
+            });
+
+            document.getElementById('p1-sub').innerText = fixed
+                ? 'Your teacher has set the question for this task.'
+                : 'Choose an archetype below. Use arrows to browse specific questions.';
+            document.getElementById('change-prompt-link').classList.toggle('hidden', fixed);
+
+            const planBtn = document.getElementById('plan-next-btn');
+            if(phaseOn(3)) {
+                planBtn.innerHTML = 'Proceed to Construction <i class="fas fa-arrow-right ml-2"></i>';
+                planBtn.onclick = () => changePhase(3);
+            } else {
+                planBtn.innerHTML = '<i class="fas fa-file-download mr-2"></i> Download My Plan';
+                planBtn.onclick = downloadPlan;
             }
 
-            // 3. FORCE START ON PHASE 1 (The Fix)
-            changePhase(1); 
-        };
+            const compileBtn = document.getElementById('compile-btn');
+            if(phaseOn(4)) {
+                compileBtn.innerHTML = '<span>Compile Full Draft</span> <i class="fas fa-hammer ml-2"></i>';
+                compileBtn.onclick = () => compileStory();
+            } else {
+                compileBtn.innerHTML = '<span>Download My Draft</span> <i class="fas fa-file-download ml-2"></i>';
+                compileBtn.onclick = downloadDraft;
+            }
+
+            const t = config.settings.tools;
+            document.getElementById('tool-tiptop').classList.toggle('hidden', !t.tiptop);
+            document.getElementById('tool-sentences').classList.toggle('hidden', !t.sentences);
+            document.getElementById('tool-dialogue').classList.toggle('hidden', !t.dialogue);
+            document.getElementById('tools-section').classList.toggle('hidden', !phaseOn(4) || !anyToolOn());
+            document.getElementById('assets-heading').classList.toggle('hidden', !phaseOn(2));
+            feedback(anyToolOn()
+                ? 'Ready for inspection. Use the checking tools in the sidebar.'
+                : 'Ready for inspection. Read your story through and improve it here.');
+
+            if(IS_STUDENT) {
+                const ab = document.getElementById('admin-btn'); if(ab) ab.remove();
+            }
+        }
 
         // --- MOBILE SIDEBAR TOGGLE ---
         function toggleSidebar() {
             const sidebar = document.getElementById('main-sidebar');
             const overlay = document.getElementById('sidebar-overlay');
             const isClosed = sidebar.classList.contains('-translate-x-full');
-            
             if(isClosed) {
                 sidebar.classList.remove('-translate-x-full');
                 overlay.classList.remove('hidden');
@@ -675,398 +869,324 @@
         
         // --- NEW SESSION LOGIC ---
         function startNewSession() {
-            if(confirm("Start a new story? This will erase your current work.")) {
-                SafeStorage.removeItem('storyArchProgress');
-                // Reset State
-                storyData = { selectedPrompt: null, assets: {}, drafts: {} };
-                // Wipe Inputs
-                document.querySelectorAll('textarea, input').forEach(el => {
-                     // Don't wipe admin inputs!
-                     if(!el.classList.contains('admin-input') && !el.classList.contains('e-text')) {
-                         el.value = '';
-                     }
-                });
-                document.getElementById('final-editor').innerText = '';
-                document.getElementById('sidebar-mission-text').innerText = 'No prompt selected.';
-                // Reset Phase 1 selection visuals
-                document.querySelectorAll('.deck-card').forEach(c => c.classList.remove('selected'));
-                document.getElementById('start-btn').disabled = true;
-                document.getElementById('start-btn').classList.add('bg-gray-400', 'cursor-not-allowed');
-                document.getElementById('start-btn').innerHTML = 'Initialize Blueprint <i class="fas fa-chevron-right ml-2"></i>';
-                
-                updateAssetsSidebar();
-                changePhase(1);
-            }
-        }
-
-        // --- WORKSHEET GENERATOR (LINED PAPER) ---
-        function generateWorksheet() {
-            const archetypes = {};
-            config.examPrompts.forEach(p => {
-                if(!archetypes[p.type]) archetypes[p.type] = [];
-                archetypes[p.type].push(p.text);
-            });
-            
-            let selectedPrompts = [];
-            ['Decision', 'Event', 'Journey', 'Constraint'].forEach(type => {
-                if(archetypes[type] && archetypes[type].length > 0) {
-                    const randomIdx = Math.floor(Math.random() * archetypes[type].length);
-                    selectedPrompts.push(archetypes[type][randomIdx]);
-                }
-            });
-            
-            if(selectedPrompts.length < 4) {
-                 const all = config.examPrompts.map(p => p.text);
-                 for(let i=0; i<all.length && selectedPrompts.length < 4; i++) {
-                     if(!selectedPrompts.includes(all[i])) selectedPrompts.push(all[i]);
-                 }
-            }
-            
-            // Helper to generate a lined table
-            const createLinedTable = (rows, height = '24px') => {
-                let table = `<table style='width:100%; border-collapse: collapse; margin-top:2px; margin-bottom:10px; border: 1px solid #000;'>`;
-                for(let i=0; i<rows; i++) {
-                    table += `<tr><td style='height: ${height}; border-bottom: 1px solid #ccc;'>&nbsp;</td></tr>`;
-                }
-                table += `</table>`;
-                return table;
-            };
-
-            let html = `
-            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-            <head><meta charset='utf-8'><title>${config.appTitle} Worksheet</title>
-            <style>
-                /* COMPACT PAGE SETTINGS */
-                @page { size: 21cm 29.7cm; margin: 1.27cm; } /* 0.5 Inch margins */
-                body { font-family: Arial, sans-serif; font-size: 10pt; line-height: 1.1; } /* Reduced line height */
-                h1 { color: #2c5282; font-size: 14pt; border-bottom: 2px solid #2c5282; padding-bottom: 2px; margin-bottom: 5px; margin-top: 0; }
-                h2 { color: #2b6cb0; font-size: 11pt; margin-top: 10px; margin-bottom: 5px; background: #ebf8ff; padding: 2px; border-bottom: 1px solid #bee3f8; font-weight: bold; }
-                h3 { font-size: 10pt; font-weight: bold; margin-top: 5px; margin-bottom: 2px; color: #2d3748; }
-                p { margin: 2px 0; font-size: 9pt; color: #4a5568; }
-                .prompt-box { border: 1px solid #cbd5e1; padding: 4px; margin-bottom: 3px; background: #f8fafc; font-size: 9pt; }
-                .checkbox { width: 10px; height: 10px; border: 1px solid #000; display: inline-block; margin-right: 5px; }
-                ul { margin: 2px 0; padding-left: 15px; font-size: 9pt; color: #555; }
-                li { margin-bottom: 1px; }
-            </style>
-            </head><body>
-            <h1>${config.appTitle} - Planning Worksheet</h1>
-            
-            <h2>1. SELECT YOUR MISSION</h2>
-            <p>Choose <strong>ONE</strong> of the following exam prompts to answer:</p>
-            ${selectedPrompts.map(p => `<div class='prompt-box'><span class='checkbox'>&nbsp;</span> ${p}</div>`).join('')}
-
-            <h2>2. THE PLAN</h2>
-            <p>Plan your core story elements.</p>
-            ${config.blueprintPrompts.map(p => `
-                <h3>${p.title}: ${p.prompt}</h3>
-                ${createLinedTable(1, '24px')}
-            `).join('')}
-
-            <div style="height: 10px;"></div> 
-
-            <h2>3. THE DRAFT</h2>
-            <p>Build your narrative arc (use bullet points or short notes).</p>
-            ${config.structureSteps.map(s => {
-                // ROW COUNT LOGIC: Match number of strips (micro-prompts)
-                const rowCount = (s.strips && s.strips.length > 0) ? s.strips.length : 3;
-                return `
-                <h3>${s.title}</h3>
-                <p><em>Guidance: ${s.guidance}</em></p>
-                <ul>
-                    ${s.strips ? s.strips.map(strip => `<li>${strip}</li>`).join('') : ''}
-                </ul>
-                ${createLinedTable(rowCount, '24px')} 
-            `}).join('')}
-            </body></html>`;
-
-            const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${config.appTitle.replace(/[^a-z0-9]/gi, '_')}_worksheet.doc`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            if(!confirm("Start a new story? This will erase your current work.")) return;
+            SafeStorage.removeItem(PROGRESS_KEY);
+            storyData = { selectedPrompt: null, assets: {}, drafts: {} };
+            const f = fixedPromptObj();
+            if(f) storyData.selectedPrompt = f.text;
+            document.getElementById('final-editor').innerText = '';
+            document.getElementById('sidebar-mission-text').innerText = 'No prompt selected.';
+            buildApp();
+            changePhase(1);
         }
 
         // --- RENDERERS ---
+        function updateStartButton() {
+            const btn = document.getElementById('start-btn');
+            if(!btn) return;
+            if(storyData.selectedPrompt) {
+                btn.disabled = false;
+                btn.classList.remove('bg-gray-400', 'cursor-not-allowed');
+                btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                const started = Object.values(storyData.assets).some(v => v && v.trim()) || Object.values(storyData.drafts).some(v => v && v.trim());
+                btn.innerHTML = (started ? 'Continue Blueprint' : 'Initialize Blueprint') + ' <i class="fas fa-chevron-right ml-2"></i>';
+            } else {
+                btn.disabled = true;
+                btn.classList.add('bg-gray-400', 'cursor-not-allowed');
+                btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                btn.innerHTML = 'Initialize Blueprint <i class="fas fa-chevron-right ml-2"></i>';
+            }
+        }
+
         function renderPhase1() {
             const container = document.getElementById('deck-grid');
-            container.innerHTML = '';
-            
-            const categories = { 'Decision': [], 'Event': [], 'Journey': [], 'Constraint': [] };
-            
-            // Build categories from config
-            config.examPrompts.forEach(p => { 
-                const type = p.type || 'Event';
-                if(!categories[type]) categories[type] = [];
-                categories[type].push(p.text); 
+            deckCats = {};
+            visiblePrompts().forEach(p => { (deckCats[p.type] = deckCats[p.type] || []).push(p.text); });
+            const types = Object.keys(deckCats).sort((a, b) => {
+                const ia = ARCHETYPES.indexOf(a), ib = ARCHETYPES.indexOf(b);
+                return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
             });
 
-            Object.keys(categories).forEach(type => {
-                if(!deckState.hasOwnProperty(type)) deckState[type] = 0;
-            });
-
-            for (const [type, prompts] of Object.entries(categories)) {
-                if(prompts.length === 0) continue;
-                if(deckState[type] >= prompts.length) deckState[type] = 0;
-                const currentText = prompts[deckState[type]];
-                
-                const headerClass = `header-${type}` in { 'header-Decision':1, 'header-Event':1, 'header-Journey':1, 'header-Constraint':1 } ? `header-${type}` : 'header-Default';
-
-                container.innerHTML += `
-                    <div class="deck-card group" id="card-${type}" onclick="selectDeck('${type}', '${currentText.replace(/'/g, "\\'")}')">
+            if(!types.length) {
+                container.innerHTML = '<p class="text-gray-500">No questions have been set up yet. Ask your teacher.</p>';
+                updateStartButton();
+                return;
+            }
+            const fixed = !!fixedPromptObj();
+            let html = '';
+            types.forEach(type => {
+                const prompts = deckCats[type];
+                if(deckState[type] === undefined || deckState[type] >= prompts.length) deckState[type] = 0;
+                const text = prompts[deckState[type]];
+                const headerClass = ARCHETYPES.includes(type) ? `header-${type}` : 'header-Default';
+                const multi = prompts.length > 1;
+                const selected = text === storyData.selectedPrompt;
+                html += `
+                    <div class="deck-card group ${selected ? 'selected' : ''}" id="card-${esc(type)}" data-type="${esc(type)}" onclick="selectDeck(this.dataset.type)">
                         <div class="deck-header ${headerClass}">
-                            <span>${type}</span>
-                            <span class="text-sm font-bold opacity-100">${deckState[type] + 1}/${prompts.length}</span>
+                            <span>${fixed ? 'Set question' : esc(type)}</span>
+                            <span class="text-sm font-bold opacity-100">${multi ? `${deckState[type] + 1}/${prompts.length}` : ''}</span>
                         </div>
                         <div class="deck-body">
-                            <button onclick="prevPrompt(event, '${type}')" class="nav-arrow nav-left"><i class="fas fa-chevron-left"></i></button>
-                            <p class="px-8 leading-snug font-serif text-lg" id="text-${type}">"${currentText}"</p>
-                            <button onclick="nextPrompt(event, '${type}')" class="nav-arrow nav-right"><i class="fas fa-chevron-right"></i></button>
+                            ${multi ? `<button onclick="prevPrompt(event, this.closest('.deck-card').dataset.type)" class="nav-arrow nav-left"><i class="fas fa-chevron-left"></i></button>` : ''}
+                            <p class="px-8 leading-snug font-serif text-lg">"${esc(text)}"</p>
+                            ${multi ? `<button onclick="nextPrompt(event, this.closest('.deck-card').dataset.type)" class="nav-arrow nav-right"><i class="fas fa-chevron-right"></i></button>` : ''}
                         </div>
-                    </div>
-                `;
-            }
+                    </div>`;
+            });
+            container.innerHTML = html;
+            updateStartButton();
         }
 
         function renderPhase2() {
             const container = document.getElementById('blueprint-inputs');
-            container.innerHTML = '';
-            config.blueprintPrompts.forEach(p => {
-                container.innerHTML += `
-                    <div class="bg-white border p-4 rounded shadow-sm">
-                        <label class="block text-blue-800 font-bold mb-1">${p.title}</label>
-                        <p class="text-xs text-gray-500 mb-2">${p.prompt}</p>
-                        <textarea id="input-${p.id}" class="w-full border bg-gray-50 p-2 rounded h-24 focus:ring-2 ring-blue-300 outline-none" oninput="saveProgress()"></textarea>
-                    </div>
-                `;
-            });
+            container.innerHTML = enabledPlan().map(p => `
+                <div class="bg-white border p-4 rounded shadow-sm">
+                    <label class="block text-blue-800 font-bold mb-1" for="input-${esc(p.id)}">${esc(p.title)}</label>
+                    <p class="text-xs text-gray-500 mb-2">${esc(p.prompt)}</p>
+                    <textarea id="input-${esc(p.id)}" class="w-full border bg-gray-50 p-2 rounded h-24 focus:ring-2 ring-blue-300 outline-none" oninput="saveProgress()"></textarea>
+                </div>`).join('');
+        }
+
+        // Heights and colours follow the arc: rising to the climax, then falling
+        function arcStyle(k, n) {
+            const peak = Math.min(n - 1, Math.floor(n * 0.6));
+            let h;
+            if(k <= peak) h = 62 + (peak === 0 ? 38 : Math.round(38 * k / peak));
+            else h = 100 - Math.round(38 * (k - peak) / Math.max(1, n - 1 - peak));
+            let col = '#3b82f6';
+            if(k === peak) col = '#dc2626';
+            else if(k === n - 1 && n > 1) col = '#16a34a';
+            else if(Math.abs(k - peak) === 1) col = '#ea580c';
+            return { h, col };
         }
 
         function renderPhase3() {
             const container = document.getElementById('structure-inputs');
-            container.innerHTML = '';
-            
-            config.structureSteps.forEach((s, stepIndex) => {
+            const skyline = config.settings.draftLayout !== 'simple';
+            container.className = skyline ? 'building-container' : 'simple-steps';
+            const steps = enabledSteps();
+            const n = steps.length;
+
+            container.innerHTML = steps.map(({ step: s, index: i }, k) => {
                 let stripsHtml = '';
-                
                 if(s.strips && s.strips.length > 0) {
-                    s.strips.forEach((stripPrompt, stripIndex) => {
-                        stripsHtml += `
-                            <div class="mb-3">
-                                <label class="block text-xs font-bold text-gray-500 mb-1 pl-2 border-l-2 border-gray-300 uppercase">${stripPrompt}</label>
-                                <input id="strip-${stepIndex}-${stripIndex}" autocomplete="off" class="w-full p-2 bg-white border border-gray-200 rounded strip-input focus:outline-none" placeholder="..." oninput="updateLivePreview(${stepIndex})">
-                            </div>
-                        `;
-                    });
+                    stripsHtml = s.strips.map((stripPrompt, j) => `
+                        <div class="mb-3">
+                            <label class="block text-xs font-bold text-gray-500 mb-1 pl-2 border-l-2 border-gray-300 uppercase" for="strip-${i}-${j}">${esc(stripPrompt)}</label>
+                            <input id="strip-${i}-${j}" autocomplete="off" class="w-full p-2 bg-white border border-gray-200 rounded strip-input focus:outline-none" placeholder="..." oninput="updateLivePreview(${i})">
+                        </div>`).join('');
                 } else {
-                    stripsHtml = `<textarea id="draft-step-${stepIndex}" class="w-full border p-3 rounded h-32" oninput="saveProgress()"></textarea>`;
+                    stripsHtml = `<textarea id="draft-step-${i}" class="w-full border p-3 rounded h-32" oninput="saveProgress()"></textarea>`;
                 }
-                
-                // Building Style Logic
-                const bClass = `b-step-${stepIndex}`;
-                
-                container.innerHTML += `
-                    <div class="building ${bClass}">
-                        <div class="${stepIndex===0||stepIndex===5 ? 'roof' : 'flat-roof'}"></div>
+                const { h, col } = arcStyle(k, n);
+                const preview = (s.strips && s.strips.length) ? `
+                    <div class="mt-2 p-2 bg-white border border-gray-400 rounded text-xs italic text-gray-600">
+                        <p id="preview-step-${i}">...</p>
+                    </div>` : '';
+
+                if(skyline) {
+                    return `
+                    <div class="building" style="height:${h}%; border-top:4px solid ${col};">
                         <div class="mb-2 text-center">
-                            <span class="block font-bold text-sm text-gray-800">${s.title}</span>
+                            <span class="block font-bold text-sm text-gray-800">${esc(s.title)}</span>
                         </div>
-                        
                         <div class="window-pane">
                              <div class="window-header">DRAFTING WINDOW</div>
-                             <div class="p-2 space-y-2 overflow-y-auto" style="max-height: 200px;">
-                                 ${stripsHtml}
-                             </div>
+                             <div class="p-2 space-y-2 building-scroll">${stripsHtml}</div>
                         </div>
-
-                        <!-- Live Preview (Basement) -->
-                        <div class="mt-2 p-2 bg-white border border-gray-400 rounded text-xs italic text-gray-600">
-                            <p id="preview-step-${stepIndex}">...</p>
-                        </div>
-                    </div>
-                `;
-            });
+                        ${preview.replace('class="mt-2 ', 'class="building-preview ')}
+                    </div>`;
+                }
+                return `
+                    <div class="step-card" style="border-top:4px solid ${col};">
+                        <span class="block font-bold text-gray-800">${esc(s.title)}</span>
+                        ${s.guidance ? `<p class="text-xs text-gray-500 italic mb-2">${esc(s.guidance)}</p>` : ''}
+                        ${stripsHtml}
+                        ${preview}
+                    </div>`;
+            }).join('');
         }
 
         function updateAssetsSidebar() {
             const container = document.getElementById('assets-container');
-            container.innerHTML = '';
-            
-            config.blueprintPrompts.forEach(p => {
+            if(!phaseOn(2)) { container.innerHTML = ''; return; }
+            let html = '';
+            enabledPlan().forEach(p => {
                 const val = storyData.assets[p.id];
                 if(val && val.trim().length > 0) {
-                    container.innerHTML += `
-                        <div class="asset-card" onclick="insertAsset('${val.replace(/'/g, "\\'")}')">
-                            <div class="font-bold text-blue-200 text-xs mb-1">${p.title}</div>
-                            <div class="text-white italic">"${val.substring(0, 50)}${val.length>50?'...':''}"</div>
-                        </div>
-                    `;
+                    html += `
+                        <div class="asset-card" data-id="${esc(p.id)}" onclick="insertAsset(this.dataset.id)">
+                            <div class="font-bold text-blue-200 text-xs mb-1">${esc(p.title)}</div>
+                            <div class="text-white italic">"${esc(val.substring(0, 50))}${val.length > 50 ? '...' : ''}"</div>
+                        </div>`;
                 }
             });
+            container.innerHTML = html || '<p class="text-xs text-blue-200 italic">Complete The Plan to generate your story assets here.</p>';
         }
 
         // --- LOGIC ---
         function updateLivePreview(stepIndex) {
             const step = config.structureSteps[stepIndex];
-            if(!step.strips) return;
-            
+            if(!step || !step.strips || !step.strips.length) return;
             let text = "";
-            step.strips.forEach((_, stripIndex) => {
-                const el = document.getElementById(`strip-${stepIndex}-${stripIndex}`);
+            step.strips.forEach((_, j) => {
+                const el = document.getElementById(`strip-${stepIndex}-${j}`);
                 if(el && el.value.trim()) text += el.value.trim() + " ";
             });
-            
             const previewEl = document.getElementById(`preview-step-${stepIndex}`);
-            if(text) {
-                previewEl.innerText = text;
-                previewEl.classList.remove('opacity-50');
-            } else {
-                previewEl.innerText = "Start typing above...";
-                previewEl.classList.add('opacity-50');
+            if(previewEl) {
+                if(text) { previewEl.innerText = text; previewEl.classList.remove('opacity-50'); }
+                else { previewEl.innerText = "Start typing above..."; previewEl.classList.add('opacity-50'); }
             }
             saveProgress();
         }
 
         function nextPrompt(e, type) {
             e.stopPropagation();
-            const prompts = config.examPrompts.filter(p => p.type === type);
-            // Dynamic State Check
-            if (deckState[type] === undefined) deckState[type] = 0;
-            deckState[type] = (deckState[type] + 1) % prompts.length;
+            const prompts = deckCats[type] || [];
+            if(!prompts.length) return;
+            deckState[type] = ((deckState[type] || 0) + 1) % prompts.length;
             renderPhase1();
-            
-            // Re-apply selection if this card matches the selected prompt
-            const currentText = prompts[deckState[type]];
-            if(currentText === storyData.selectedPrompt) {
-                 document.getElementById(`card-${type}`).classList.add('selected');
-            }
         }
 
         function prevPrompt(e, type) {
             e.stopPropagation();
-            const prompts = config.examPrompts.filter(p => p.type === type);
-            if (deckState[type] === undefined) deckState[type] = 0;
-            deckState[type] = (deckState[type] - 1 + prompts.length) % prompts.length;
+            const prompts = deckCats[type] || [];
+            if(!prompts.length) return;
+            deckState[type] = ((deckState[type] || 0) - 1 + prompts.length) % prompts.length;
             renderPhase1();
-
-            // Re-apply selection
-            const currentText = prompts[deckState[type]];
-            if(currentText === storyData.selectedPrompt) {
-                 document.getElementById(`card-${type}`).classList.add('selected');
-            }
         }
 
-        function selectDeck(type, text) {
-            storyData.selectedPrompt = text;
+        function selectDeck(type) {
+            const prompts = deckCats[type];
+            if(!prompts) return;
+            storyData.selectedPrompt = prompts[deckState[type] || 0];
             document.querySelectorAll('.deck-card').forEach(c => c.classList.remove('selected'));
-            document.getElementById(`card-${type}`).classList.add('selected');
-            
-            const btn = document.getElementById('start-btn');
-            btn.disabled = false;
-            btn.classList.remove('bg-gray-400', 'cursor-not-allowed');
-            btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            const card = document.querySelector(`.deck-card[data-type="${CSS.escape(type)}"]`);
+            if(card) card.classList.add('selected');
+            updateStartButton();
         }
 
-        function confirmPrompt(silent = false) {
+        function confirmPrompt() {
             if(!storyData.selectedPrompt) return;
             document.getElementById('sidebar-mission-text').innerText = `"${storyData.selectedPrompt}"`;
-            changePhase(2);
-            if(!silent) saveProgress();
+            saveProgress();
+            const n = nextPhase(1);
+            if(n) changePhase(n);
         }
 
         function changePhase(n) {
+            if(!phaseOn(n)) n = 1;
             document.querySelectorAll('[id^="phase-"]').forEach(el => el.classList.add('hidden'));
-            
-            const targetId = `phase-${n}`;
-            const targetEl = document.getElementById(targetId);
+            const targetEl = document.getElementById(`phase-${n}`);
             if(targetEl) targetEl.classList.remove('hidden');
-            
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById(`nav-p${n}`).classList.add('active');
-
             if(n === 3) updateAssetsSidebar();
         }
 
         function saveProgress() {
-            // Blueprint
             config.blueprintPrompts.forEach(p => {
                 const el = document.getElementById(`input-${p.id}`);
                 if(el) storyData.assets[p.id] = el.value;
             });
-            // Construction (Strips)
-            config.structureSteps.forEach((s, stepIndex) => {
-                if(s.strips) {
-                    s.strips.forEach((_, stripIndex) => {
-                         const el = document.getElementById(`strip-${stepIndex}-${stripIndex}`);
-                         if(el) storyData.drafts[`${stepIndex}-${stripIndex}`] = el.value;
-                    });
-                }
+            config.structureSteps.forEach((s, i) => {
+                (s.strips || []).forEach((_, j) => {
+                    const el = document.getElementById(`strip-${i}-${j}`);
+                    if(el) storyData.drafts[`${i}-${j}`] = el.value;
+                });
+                const free = document.getElementById(`draft-step-${i}`);
+                if(free) storyData.drafts[`${i}-free`] = free.value;
             });
-            
-            SafeStorage.setItem('storyArchProgress', JSON.stringify(storyData));
+            SafeStorage.setItem(PROGRESS_KEY, JSON.stringify(storyData));
             updateAssetsSidebar();
         }
 
         function restoreInputs() {
-            if(storyData.selectedPrompt) document.getElementById('sidebar-mission-text').innerText = `"${storyData.selectedPrompt}"`;
-            
+            document.getElementById('sidebar-mission-text').innerText = storyData.selectedPrompt ? `"${storyData.selectedPrompt}"` : 'No prompt selected.';
             config.blueprintPrompts.forEach(p => {
                 const el = document.getElementById(`input-${p.id}`);
-                if(el && storyData.assets[p.id]) el.value = storyData.assets[p.id];
+                if(el) el.value = storyData.assets[p.id] || '';
             });
-            
-            // Restore Strips
-            config.structureSteps.forEach((s, stepIndex) => {
-                if(s.strips) {
-                    s.strips.forEach((_, stripIndex) => {
-                         const el = document.getElementById(`strip-${stepIndex}-${stripIndex}`);
-                         const val = storyData.drafts[`${stepIndex}-${stripIndex}`];
-                         if(el && val) {
-                             el.value = val;
-                         }
+            config.structureSteps.forEach((s, i) => {
+                (s.strips || []).forEach((_, j) => {
+                    const el = document.getElementById(`strip-${i}-${j}`);
+                    if(el) el.value = storyData.drafts[`${i}-${j}`] || '';
+                });
+                const free = document.getElementById(`draft-step-${i}`);
+                if(free) free.value = storyData.drafts[`${i}-free`] || '';
+                if(document.getElementById(`preview-step-${i}`)) updateLivePreview(i);
+            });
+        }
+
+        function buildDraftText() {
+            let fullText = "";
+            enabledSteps().forEach(({ step: s, index: i }) => {
+                let para = "";
+                if(s.strips && s.strips.length) {
+                    s.strips.forEach((_, j) => {
+                        const val = storyData.drafts[`${i}-${j}`];
+                        if(val && val.trim()) para += val.trim() + " ";
                     });
-                    updateLivePreview(stepIndex);
+                } else {
+                    const val = storyData.drafts[`${i}-free`];
+                    if(val && val.trim()) para = val.trim();
                 }
+                if(para.trim()) fullText += para.trim() + "\n\n";
             });
+            return fullText;
         }
 
         function compileStory() {
-            let fullText = "";
-            config.structureSteps.forEach((s, stepIndex) => {
-                let para = "";
-                if(s.strips) {
-                    s.strips.forEach((_, stripIndex) => {
-                        const val = storyData.drafts[`${stepIndex}-${stripIndex}`];
-                        if(val) para += val.trim() + " ";
-                    });
-                }
-                if(para.trim()) fullText += para + "\n\n";
-            });
-            
+            saveProgress();
+            const fullText = buildDraftText();
             const editor = document.getElementById('final-editor');
             if(editor.innerText.trim() === "" || confirm("Overwrite current draft?")) {
                 editor.innerText = fullText;
-                changePhase(4); 
+                changePhase(4);
             }
         }
-        
-        function reCompile() {
-             compileStory();
+        function reCompile() { compileStory(); }
+
+        function insertAsset(id) {
+            const text = storyData.assets[id] || '';
+            try { navigator.clipboard.writeText(text).then(() => alert("Copied!")).catch(() => prompt("Copy:", text)); }
+            catch(e) { prompt("Copy:", text); }
         }
 
-        function insertAsset(text) {
-             try { navigator.clipboard.writeText(text).then(() => alert("Copied!")); } catch(e) { prompt("Copy:", text); }
+        function missionHeader() {
+            return storyData.selectedPrompt ? `${storyData.selectedPrompt}\n\n` : '';
+        }
+        function downloadPlan() {
+            saveProgress();
+            let text = `${config.appTitle}: My Plan\n\n${missionHeader()}`;
+            enabledPlan().forEach(p => { text += `${p.title}\n${p.prompt}\n${(storyData.assets[p.id] || '').trim() || '(not answered)'}\n\n`; });
+            downloadBlob([text], 'text/plain', 'my_story_plan.txt');
+        }
+        function downloadDraft() {
+            saveProgress();
+            const body = buildDraftText();
+            if(!body.trim()) { alert('Your draft is empty. Write something in the drafting windows first.'); return; }
+            downloadBlob([missionHeader() + body], 'text/plain', 'my_story_draft.txt');
         }
 
         // --- TOOLS ---
+        function goInspect() {
+            if(phaseOn(4) && document.getElementById('phase-4').classList.contains('hidden')) changePhase(4);
+        }
+        function editorText() {
+            goInspect();
+            const raw = document.getElementById('final-editor').innerText;
+            if(!raw.trim()) { feedback('There is no draft to check yet. Compile your draft first.'); return null; }
+            return raw;
+        }
+
         function analyzeDialogue() {
-            const editor = document.getElementById('final-editor');
-            let html = editor.innerText;
-            html = html.replace(/(".*?")/g, '<span class="highlight-good">$1</span>');
-            editor.innerHTML = html;
-            feedback("Dialogue highlighted.");
+            const raw = editorText(); if(raw === null) return;
+            const html = plainEscape(raw).replace(/(["\u201C][^"\u201C\u201D]*["\u201D])/g, '<span class="highlight-dialogue">$1</span>');
+            document.getElementById('final-editor').innerHTML = html.replace(/\n/g, '<br>');
+            feedback("Dialogue highlighted in green. Check the punctuation sits inside the speech marks and each new speaker starts a new line.");
         }
 
         function checkSpelling() {
@@ -1077,52 +1197,79 @@
         }
 
         function checkParagraphs() {
-            const editor = document.getElementById('final-editor');
-            let text = editor.innerText;
-            const triggers = ["Later", "Suddenly", "Meanwhile", "Next", "After", "Before", "Then", "In the distance", "Inside"];
-            triggers.forEach(word => {
-                const regex = new RegExp(`\\b${word}\\b`, 'g');
-                text = text.replace(regex, `<span class="highlight-tiptop">${word}</span>`);
-            });
-            editor.innerHTML = text;
+            const raw = editorText(); if(raw === null) return;
+            const words = config.settings.tiptopWords
+                .filter(w => w.trim())
+                .sort((a, b) => b.length - a.length)
+                .map(w => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+            let html = plainEscape(raw);
+            if(words.length) {
+                const regex = new RegExp(`\\b(${words.join('|')})\\b`, 'g');
+                html = html.replace(regex, '<span class="highlight-tiptop">$1</span>');
+            }
+            document.getElementById('final-editor').innerHTML = html.replace(/\n/g, '<br>');
             feedback("Paragraph Check: 'TiPToP' words highlighted. Check for new lines.");
         }
 
         function checkSentences() {
-            const editor = document.getElementById('final-editor');
-            let raw = editor.innerText;
-            const sentences = raw.match(/[^\.!\?]+[\.!\?]+/g) || [];
-            let newHtml = "";
-            sentences.forEach(s => {
-                const wordCount = s.trim().split(/\s+/).length;
-                let cssClass = "";
-                if(wordCount < 6) cssClass = "highlight-short"; 
-                else if(wordCount > 20) cssClass = "highlight-long"; 
-                if(cssClass) newHtml += `<span class="${cssClass}">${s}</span>`;
-                else newHtml += s;
+            const raw = editorText(); if(raw === null) return;
+            const out = raw.split('\n').map(line => {
+                const parts = line.match(/[^.!?]+[.!?]+["'\u201D\u2019]*|[^.!?]+$/g);
+                if(!parts || parts.join('') !== line) return plainEscape(line);
+                return parts.map(s => {
+                    const wc = s.trim().split(/\s+/).filter(Boolean).length;
+                    const e = plainEscape(s);
+                    if(!wc) return e;
+                    if(wc < 6) return `<span class="highlight-short">${e}</span>`;
+                    if(wc > 20) return `<span class="highlight-long">${e}</span>`;
+                    return e;
+                }).join('');
             });
-            if(newHtml) editor.innerHTML = newHtml;
+            document.getElementById('final-editor').innerHTML = out.join('<br>');
             feedback("Sentence Map: BLUE = Short (Tension), PURPLE = Long (Description).");
         }
 
-        function feedback(msg) { document.querySelector('#inspection-feedback span').innerText = msg; }
+        function feedback(msg) { document.getElementById('feedback-text').innerText = msg; }
         
         function downloadStory() {
             const text = document.getElementById('final-editor').innerText;
-            const blob = new Blob([text], {type: 'text/plain'});
-            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'my_story_draft.txt'; a.click();
+            downloadBlob([missionHeader() + text], 'text/plain', 'my_story_draft.txt');
         }
 
-        // --- ADMIN FUNCTIONS ---
+        // =====================================================================
+        // TEACHER-ONLY: ADMIN, PRESETS, EXPORTS, WORKSHEET PREVIEW
+        // =====================================================================
+        let adminDirty = false;
+        let saveTimer = null;
+
+        function isAdminOpen() { return !document.getElementById('admin-unlocked').classList.contains('hidden'); }
+
+        function delayedSave() {
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => { collectConfig(); markDirty(true); refreshSetupPanel(); }, 250);
+        }
+        function markDirty(d) {
+            adminDirty = d;
+            const f = document.getElementById('dirty-flag'); if(f) f.classList.toggle('hidden', !d);
+        }
+
         function toggleAdmin() {
-            const m = document.getElementById('admin-modal'); m.classList.toggle('hidden');
-            if(!m.classList.contains('hidden')) {
-                document.getElementById('admin-lock').classList.remove('hidden');
-                document.getElementById('admin-unlocked').classList.add('hidden');
-                document.getElementById('admin-footer').classList.add('hidden');
-                document.getElementById('admin-pass').value = '';
-                if(config.adminPass === 'ChiefInspector') document.getElementById('pass-hint').classList.remove('hidden');
+            if(IS_STUDENT) return;
+            const m = document.getElementById('admin-modal');
+            const opening = m.classList.contains('hidden');
+            if(!opening) {
+                if(isAdminOpen()) { clearTimeout(saveTimer); collectConfig(); }
+                m.classList.add('hidden');
+                // Show the teacher what students will now see (still needs Save to keep it)
+                if(adminDirty) { saveProgress(); syncDeckToSelection(); const f = fixedPromptObj(); if(f) storyData.selectedPrompt = f.text; buildApp(); changePhase(1); }
+                return;
             }
+            m.classList.remove('hidden');
+            document.getElementById('admin-lock').classList.remove('hidden');
+            document.getElementById('admin-unlocked').classList.add('hidden');
+            document.getElementById('admin-footer').classList.add('hidden');
+            document.getElementById('admin-pass').value = '';
+            if(config.adminPass === 'ChiefInspector') document.getElementById('pass-hint').classList.remove('hidden');
         }
         function unlockAdmin() {
             if(document.getElementById('admin-pass').value === config.adminPass) {
@@ -1130,118 +1277,574 @@
                 document.getElementById('admin-unlocked').classList.remove('hidden');
                 document.getElementById('admin-footer').classList.remove('hidden');
                 renderAdminUI();
+                showTab('setup');
             } else alert("Access Denied");
         }
         function showTab(id) {
-            ['prompts','structure','exam'].forEach(t => document.getElementById(`tab-${t}`).classList.add('hidden'));
-            document.getElementById(`tab-${id}`).classList.remove('hidden');
+            ['setup','exam','prompts','structure','presets'].forEach(t => document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== id));
+            document.querySelectorAll('.admin-tab').forEach(b => {
+                const on = b.dataset.tab === id;
+                b.classList.toggle('text-blue-600', on);
+                b.classList.toggle('border-b-2', on);
+                b.classList.toggle('border-blue-600', on);
+                b.classList.toggle('text-gray-500', !on);
+            });
         }
 
         function renderAdminUI() {
             document.getElementById('edit-title').value = config.appTitle;
-            document.getElementById('edit-pass').value = config.adminPass;
-
-            // Prompts
-            const pc = document.getElementById('prompts-editor'); pc.innerHTML = '';
-            config.blueprintPrompts.forEach((p, i) => {
-                pc.innerHTML += `<div class="bg-white p-2 rounded border mb-2"><input class="w-full text-xs font-bold border-b mb-1 p-title admin-input" value="${p.title.replace(/"/g, '&quot;')}" placeholder="Title" oninput="delayedSave()"><input class="w-full text-xs text-gray-600 p-prompt admin-input" value="${p.prompt.replace(/"/g, '&quot;')}" placeholder="Prompt" oninput="delayedSave()"><button onclick="delPrompt(${i})" class="text-red-500 font-bold text-xs mt-1">Delete</button></div>`;
-            });
-
-            // Structure (with Strips)
-            const sc = document.getElementById('structure-editor'); sc.innerHTML = '';
-            config.structureSteps.forEach((s, i) => {
-                // Join strips for editing
-                const stripsText = s.strips ? s.strips.join('\n') : "";
-                sc.innerHTML += `
-                    <div class="bg-white p-3 rounded border mb-4">
-                        <div class="flex justify-between mb-2">
-                            <input class="font-bold text-sm border-b s-title w-1/2 admin-input" value="${s.title.replace(/"/g, '&quot;')}" placeholder="Step Title" oninput="delayedSave()">
-                            <button onclick="delStep(${i})" class="text-red-500 font-bold text-xs">Delete Step</button>
-                        </div>
-                        <input class="w-full text-xs text-gray-600 s-guide mb-2 border rounded p-1 admin-input" value="${s.guidance.replace(/"/g, '&quot;')}" placeholder="Guidance" oninput="delayedSave()">
-                        <label class="block text-xs font-bold text-blue-600 mb-1">Micro-Prompts (One per line)</label>
-                        <textarea class="w-full text-xs border rounded p-2 h-20 s-strips admin-input" placeholder="Enter strips...">${stripsText}</textarea>
-                    </div>
-                `;
-            });
-
-            // Exam Prompts
-            const ec = document.getElementById('exam-editor'); ec.innerHTML = '';
-            config.examPrompts.forEach((e, i) => {
-                 // FIX: Corrected template string interpolation here
-                 ec.innerHTML += `<div class="flex gap-2 mb-2 bg-white p-2 rounded border"><select class="text-xs border rounded e-type admin-input" oninput="delayedSave()"><option ${e.type==='Decision'?'selected':''}>Decision</option><option ${e.type==='Event'?'selected':''}>Event</option><option ${e.type==='Journey'?'selected':''}>Journey</option><option ${e.type==='Constraint'?'selected':''}>Constraint</option></select><input class="flex-grow text-xs border rounded px-1 e-text admin-input" value="${e.text.replace(/"/g, '&quot;')}"/><button onclick="delExamPrompt(${i})" class="text-red-500 font-bold">&times;</button></div>`;
-            });
+            document.getElementById('edit-pass').value = config.adminPass || '';
+            renderSetupTab();
+            renderExamTab();
+            renderPlanTab();
+            renderStructureTab();
+            renderPresetsTab();
         }
 
-        // Actions
-        function addPrompt() { config.blueprintPrompts.push({id: "p"+Date.now(), title:"", prompt:""}); renderAdminUI(); }
-        function delPrompt(i) { if(confirm('Delete?')) { config.blueprintPrompts.splice(i,1); renderAdminUI(); } }
-        function addStep() { config.structureSteps.push({title:"", guidance:"", strips:[]}); renderAdminUI(); }
-        function delStep(i) { if(confirm('Delete?')) { config.structureSteps.splice(i,1); renderAdminUI(); } }
-        function addExamPrompt() { config.examPrompts.push({type:"Decision", text:""}); renderAdminUI(); }
-        function delExamPrompt(i) { if(confirm('Delete?')) { config.examPrompts.splice(i,1); renderAdminUI(); } }
+        function renderSetupTab() {
+            const st = config.settings;
+            document.querySelectorAll('input[name="set-mode"]').forEach(r => r.checked = r.value === st.missionMode);
+            document.getElementById('set-plan').checked = !!st.phases.plan;
+            document.getElementById('set-draft').checked = !!st.phases.draft;
+            document.getElementById('set-inspect').checked = !!st.phases.inspect;
+            document.getElementById('set-layout').value = st.draftLayout;
+            document.getElementById('set-tool-tiptop').checked = !!st.tools.tiptop;
+            document.getElementById('set-tool-sentences').checked = !!st.tools.sentences;
+            document.getElementById('set-tool-dialogue').checked = !!st.tools.dialogue;
+            document.getElementById('set-tiptop-words').value = st.tiptopWords.join(', ');
+            document.getElementById('set-filename').value = st.exportFilename || '';
+            refreshSetupPanel(true);
+        }
+
+        function refreshSetupPanel(force) {
+            const st = config.settings;
+            // Set-question dropdown (don't rebuild while the teacher is using it)
+            const sel = document.getElementById('set-fixed');
+            if(force || document.activeElement !== sel) {
+                const ex = enabledExam();
+                sel.innerHTML = '<option value="">Choose the set question...</option>' +
+                    ex.map(p => `<option value="${esc(p.text)}" ${p.text === st.fixedPrompt ? 'selected' : ''}>${esc(p.type)}: ${esc(p.text)}</option>`).join('');
+            }
+            sel.disabled = st.missionMode !== 'fixed';
+            document.getElementById('set-inspect').disabled = !st.phases.draft;
+            document.getElementById('set-filename').placeholder = slugify(config.appTitle) + '_student.html';
+            renderExamBulk();
+
+            const ex = enabledExam();
+            const types = new Set(ex.map(p => p.type));
+            const lines = [];
+            if(st.missionMode === 'fixed') {
+                const f = fixedPromptObj();
+                lines.push(f ? `Everyone answers: <em>"${esc(f.text)}"</em>`
+                             : '<span class="text-red-600">Choose a set question. Until you do, students choose from all switched-on questions.</span>');
+            } else {
+                lines.push(`${ex.length} question${ex.length === 1 ? '' : 's'} to choose from, across ${types.size} archetype${types.size === 1 ? '' : 's'}.`);
+            }
+            if(!ex.length) lines.push('<span class="text-red-600">No exam questions are switched on. Students will have nothing to choose.</span>');
+            lines.push(st.phases.plan ? `The Plan: ${enabledPlan().length} planning prompt${enabledPlan().length === 1 ? '' : 's'}.` : 'The Plan is switched off.');
+            if(st.phases.draft) {
+                const steps = enabledSteps();
+                const strips = steps.reduce((a, o) => a + o.step.strips.length, 0);
+                lines.push(`The Draft: ${steps.length} stage${steps.length === 1 ? '' : 's'} with ${strips} micro-prompt${strips === 1 ? '' : 's'}, ${st.draftLayout === 'simple' ? 'simple cards' : 'skyline'} layout.`);
+            } else lines.push('The Draft is switched off, so Inspect is off too. Students download their plan at the end.');
+            if(phaseOn(4)) {
+                const t = [];
+                if(st.tools.tiptop) t.push('TiPToP Paragraph Check');
+                if(st.tools.sentences) t.push('Sentence Variety Map');
+                if(st.tools.dialogue) t.push('Dialogue Validator');
+                lines.push(t.length ? `Inspect tools: ${t.join(', ')}.` : 'Inspect is on with no checking tools.');
+            } else if(st.phases.draft) lines.push('Inspect is switched off. Students download their draft at the end of The Draft.');
+            if(st.phases._warn) lines.push(`<span class="text-red-600">${st.phases._warn}</span>`);
+            lines.push(`Student file: <strong>${esc(studentFilename())}</strong>`);
+            document.getElementById('set-summary').innerHTML = lines.map(l => `<p>${l}</p>`).join('');
+        }
+
+        function renderExamBulk() {
+            document.getElementById('exam-bulk').innerHTML = ARCHETYPES.map(t => {
+                const all = config.examPrompts.filter(p => p.type === t);
+                const on = all.filter(p => p.enabled !== false).length;
+                return `<div class="flex items-center gap-2 bg-white border rounded px-2 py-1 text-xs">
+                    <span class="font-bold">${t}</span><span class="text-gray-500">${on}/${all.length} on</span>
+                    <button onclick="bulkExam('${t}', true)" class="text-blue-600 underline">all on</button>
+                    <button onclick="bulkExam('${t}', false)" class="text-gray-600 underline">all off</button>
+                </div>`;
+            }).join('');
+        }
+
+        function renderExamTab() {
+            renderExamBulk();
+            document.getElementById('exam-editor').innerHTML = config.examPrompts.map((e, i) => `
+                <div class="admin-row flex gap-2 mb-2 bg-white p-2 rounded border items-center ${e.enabled === false ? 'opacity-50' : ''}">
+                    <input type="checkbox" class="e-on" title="Show to students" ${e.enabled !== false ? 'checked' : ''} onchange="this.closest('.admin-row').classList.toggle('opacity-50', !this.checked); delayedSave()">
+                    <select class="text-xs border rounded e-type admin-input" onchange="delayedSave()">
+                        ${ARCHETYPES.map(t => `<option ${e.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    </select>
+                    <input class="flex-grow text-xs border rounded px-1 py-1 e-text admin-input" value="${esc(e.text)}" oninput="delayedSave()"/>
+                    <button onclick="delExamPrompt(${i})" class="text-red-500 font-bold">&times;</button>
+                </div>`).join('');
+        }
+
+        function renderPlanTab() {
+            document.getElementById('prompts-editor').innerHTML = config.blueprintPrompts.map((p, i) => `
+                <div class="admin-row bg-white p-2 rounded border mb-2 ${p.enabled === false ? 'opacity-50' : ''}" data-id="${esc(p.id)}">
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" class="p-on" title="Show to students" ${p.enabled !== false ? 'checked' : ''} onchange="this.closest('.admin-row').classList.toggle('opacity-50', !this.checked); delayedSave()">
+                        <input class="flex-grow text-xs font-bold border-b mb-1 p-title admin-input" value="${esc(p.title)}" placeholder="Title" oninput="delayedSave()">
+                    </div>
+                    <input class="w-full text-xs text-gray-600 p-prompt admin-input" value="${esc(p.prompt)}" placeholder="Prompt" oninput="delayedSave()">
+                    <button onclick="delPrompt(${i})" class="text-red-500 font-bold text-xs mt-1">Delete</button>
+                </div>`).join('');
+        }
+
+        function renderStructureTab() {
+            document.getElementById('structure-editor').innerHTML = config.structureSteps.map((s, i) => `
+                <div class="admin-row bg-white p-3 rounded border mb-4 ${s.enabled === false ? 'opacity-50' : ''}">
+                    <div class="flex justify-between items-center mb-2 gap-2">
+                        <input type="checkbox" class="s-on" title="Show to students" ${s.enabled !== false ? 'checked' : ''} onchange="this.closest('.admin-row').classList.toggle('opacity-50', !this.checked); delayedSave()">
+                        <input class="font-bold text-sm border-b s-title flex-grow admin-input" value="${esc(s.title)}" placeholder="Step Title" oninput="delayedSave()">
+                        <button onclick="delStep(${i})" class="text-red-500 font-bold text-xs">Delete Step</button>
+                    </div>
+                    <input class="w-full text-xs text-gray-600 s-guide mb-2 border rounded p-1 admin-input" value="${esc(s.guidance)}" placeholder="Guidance" oninput="delayedSave()">
+                    <label class="block text-xs font-bold text-blue-600 mb-1">Micro-Prompts (One per line)</label>
+                    <textarea class="w-full text-xs border rounded p-2 h-20 s-strips admin-input" placeholder="Enter strips..." oninput="delayedSave()">${esc(s.strips.join('\n'))}</textarea>
+                </div>`).join('');
+        }
+
+        // Actions (collect first so typed edits aren't lost on re-render)
+        function adminChange(fn) { clearTimeout(saveTimer); collectConfig(); fn(); renderAdminUI(); markDirty(true); }
+        function addPrompt() { adminChange(() => config.blueprintPrompts.push({ id: "p" + Date.now().toString(36), title: "", prompt: "", enabled: true })); }
+        function delPrompt(i) { if(confirm('Delete?')) adminChange(() => config.blueprintPrompts.splice(i, 1)); }
+        function addStep() { adminChange(() => config.structureSteps.push({ title: "", guidance: "", strips: [], enabled: true })); }
+        function delStep(i) { if(confirm('Delete?')) adminChange(() => config.structureSteps.splice(i, 1)); }
+        function addExamPrompt() { adminChange(() => config.examPrompts.push({ type: "Decision", text: "", enabled: true })); }
+        function delExamPrompt(i) { if(confirm('Delete?')) adminChange(() => config.examPrompts.splice(i, 1)); }
+        function bulkExam(type, on) { adminChange(() => config.examPrompts.forEach(p => { if(p.type === type) p.enabled = on; })); }
 
         function collectConfig() {
+            if(!isAdminOpen()) return;
             config.appTitle = document.getElementById('edit-title').value;
             config.adminPass = document.getElementById('edit-pass').value;
-            
-            // Collect Prompts
-            const newPrompts = [];
-            document.querySelectorAll('#prompts-editor > div').forEach((row, i) => {
-                newPrompts.push({ id: "p"+i, title: row.querySelector('.p-title').value, prompt: row.querySelector('.p-prompt').value });
-            });
-            config.blueprintPrompts = newPrompts;
 
-            // Collect Structure & Strips
-            const newSteps = [];
-            document.querySelectorAll('#structure-editor > div').forEach(row => {
-                const rawStrips = row.querySelector('.s-strips').value;
-                const stripsArray = rawStrips.split('\n').filter(l => l.trim() !== "");
-                newSteps.push({ 
-                    title: row.querySelector('.s-title').value, 
-                    guidance: row.querySelector('.s-guide').value,
-                    strips: stripsArray
-                });
-            });
-            config.structureSteps = newSteps;
+            config.blueprintPrompts = [...document.querySelectorAll('#prompts-editor > div')].map((row, i) => ({
+                id: row.dataset.id || ('p' + i + '_' + Date.now().toString(36)),
+                title: row.querySelector('.p-title').value,
+                prompt: row.querySelector('.p-prompt').value,
+                enabled: row.querySelector('.p-on').checked
+            }));
 
-            // Collect Exam Prompts
-            const newExam = [];
-            document.querySelectorAll('#exam-editor > div').forEach(row => {
-                newExam.push({ type: row.querySelector('.e-type').value, text: row.querySelector('.e-text').value });
-            });
-            config.examPrompts = newExam;
+            config.structureSteps = [...document.querySelectorAll('#structure-editor > div')].map(row => ({
+                title: row.querySelector('.s-title').value,
+                guidance: row.querySelector('.s-guide').value,
+                strips: row.querySelector('.s-strips').value.split('\n').map(l => l.trim()).filter(l => l !== ""),
+                enabled: row.querySelector('.s-on').checked
+            }));
+
+            config.examPrompts = [...document.querySelectorAll('#exam-editor > div')].map(row => ({
+                type: row.querySelector('.e-type').value,
+                text: row.querySelector('.e-text').value,
+                enabled: row.querySelector('.e-on').checked
+            }));
+
+            const st = config.settings;
+            const mode = document.querySelector('input[name="set-mode"]:checked');
+            st.missionMode = mode ? mode.value : 'choice';
+            st.fixedPrompt = document.getElementById('set-fixed').value || (st.missionMode === 'fixed' ? st.fixedPrompt : '');
+            st.phases = {
+                plan: document.getElementById('set-plan').checked,
+                draft: document.getElementById('set-draft').checked,
+                inspect: document.getElementById('set-inspect').checked
+            };
+            if(!st.phases.plan && !st.phases.draft) {
+                st.phases.draft = true;
+                document.getElementById('set-draft').checked = true;
+                st.phases._warn = 'At least one of The Plan or The Draft must stay on, so The Draft has been switched back on.';
+            }
+            st.draftLayout = document.getElementById('set-layout').value;
+            st.tools = {
+                tiptop: document.getElementById('set-tool-tiptop').checked,
+                sentences: document.getElementById('set-tool-sentences').checked,
+                dialogue: document.getElementById('set-tool-dialogue').checked
+            };
+            const words = document.getElementById('set-tiptop-words').value.split(/[,\n]/).map(w => w.trim()).filter(Boolean);
+            st.tiptopWords = words.length ? words : DEFAULT_SETTINGS.tiptopWords.slice();
+            st.exportFilename = document.getElementById('set-filename').value.trim();
         }
 
-        function saveLocal() { collectConfig(); SafeStorage.setItem('storyArchConfig', JSON.stringify(config)); alert("Saved!"); location.reload(); }
-        
-        function prepareDOMForExport() {
+        function cleanConfigForSave(cfg) {
+            const c = JSON.parse(JSON.stringify(cfg));
+            if(c.settings && c.settings.phases) delete c.settings.phases._warn;
+            return c;
+        }
+
+        function saveLocal() {
             collectConfig();
-            document.getElementById('app-config').textContent = JSON.stringify(config, null, 4);
-            document.getElementById('admin-modal').classList.add('hidden');
-            document.getElementById('admin-lock').classList.remove('hidden');
-            document.getElementById('admin-unlocked').classList.add('hidden');
-            document.getElementById('admin-footer').classList.add('hidden');
-            document.getElementById('admin-pass').value = '';
-        }
-
-        function exportFile() {
-            prepareDOMForExport();
-            const html = document.documentElement.outerHTML;
-            const blob = new Blob([html], {type: 'text/html'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `story_architect_custom.html`; a.click(); location.reload();
-        }
-
-        function copySource() {
-            prepareDOMForExport();
-            const html = document.documentElement.outerHTML;
-            const ta = document.createElement("textarea"); ta.value = html; document.body.appendChild(ta); ta.select(); 
-            try { document.execCommand('copy'); alert("Copied!"); } catch(e) { prompt("Copy:", html); }
-            document.body.removeChild(ta); location.reload();
+            SafeStorage.setItem('storyArchConfig', JSON.stringify(cleanConfigForSave(config)));
+            markDirty(false);
+            alert("Saved!");
+            location.reload();
         }
 
         function resetDefaults() { if(confirm('Reset?')) { SafeStorage.removeItem('storyArchConfig'); location.reload(); } }
+
+        // --- PRESETS ---
+        function getPresets() { try { return JSON.parse(SafeStorage.getItem(PRESET_KEY)) || {}; } catch(e) { return {}; } }
+        function setPresets(p) { SafeStorage.setItem(PRESET_KEY, JSON.stringify(p)); }
+        function presetPayload() {
+            const c = cleanConfigForSave(config);
+            return { appTitle: c.appTitle, examPrompts: c.examPrompts, blueprintPrompts: c.blueprintPrompts, structureSteps: c.structureSteps, settings: c.settings };
+        }
+
+        function renderPresetsTab() {
+            const presets = getPresets();
+            const names = Object.keys(presets).sort((a, b) => a.localeCompare(b));
+            document.getElementById('preset-list').innerHTML = names.length ? names.map(name => {
+                const p = presets[name];
+                const when = p.savedAt ? new Date(p.savedAt).toLocaleDateString() : '';
+                return `<div class="flex flex-wrap items-center justify-between gap-2 bg-white border rounded p-2" data-name="${esc(name)}">
+                    <div><span class="font-bold text-sm">${esc(name)}</span> <span class="text-xs text-gray-500">${esc(when)}</span></div>
+                    <div class="flex gap-2">
+                        <button onclick="loadPreset(this.closest('[data-name]').dataset.name)" class="text-xs bg-blue-600 text-white px-2 py-1 rounded">Load</button>
+                        <button onclick="deletePreset(this.closest('[data-name]').dataset.name)" class="text-xs text-red-600 underline">Delete</button>
+                    </div>
+                </div>`;
+            }).join('') : '<p class="text-xs text-gray-500 italic">No presets saved in this browser yet.</p>';
+        }
+
+        function savePreset() {
+            collectConfig();
+            const name = document.getElementById('preset-name').value.trim();
+            if(!name) { alert('Give the preset a name first.'); return; }
+            const presets = getPresets();
+            if(presets[name] && !confirm(`Replace the preset "${name}"?`)) return;
+            presets[name] = { savedAt: new Date().toISOString(), config: presetPayload() };
+            setPresets(presets);
+            document.getElementById('preset-name').value = '';
+            renderPresetsTab();
+        }
+
+        function loadPreset(name) {
+            const p = getPresets()[name];
+            if(!p) return;
+            if(!confirm(`Load "${name}"? This replaces the setup in the admin panel. Click Save (Local) afterwards to keep it as your working setup.`)) return;
+            config = { ...config, ...JSON.parse(JSON.stringify(p.config)) };
+            normaliseConfig();
+            renderAdminUI();
+            markDirty(true);
+            showTab('setup');
+        }
+
+        function deletePreset(name) {
+            if(!confirm(`Delete the preset "${name}"?`)) return;
+            const presets = getPresets(); delete presets[name]; setPresets(presets); renderPresetsTab();
+        }
+
+        function exportPresets() {
+            const presets = getPresets();
+            if(!Object.keys(presets).length) { alert('There are no presets to download yet.'); return; }
+            downloadBlob([JSON.stringify({ type: 'story-architect-presets', version: 1, presets }, null, 2)], 'application/json', 'story_architect_presets.json');
+        }
+
+        function importPresets(input) {
+            const file = input.files && input.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const data = JSON.parse(reader.result);
+                    const incoming = data.presets || data;
+                    const presets = getPresets();
+                    let count = 0;
+                    Object.entries(incoming).forEach(([name, p]) => {
+                        if(!p || !p.config || !Array.isArray(p.config.examPrompts)) return;
+                        let n = name; if(presets[n]) n = name + ' (imported)';
+                        presets[n] = p; count++;
+                    });
+                    setPresets(presets);
+                    renderPresetsTab();
+                    alert(count ? `Imported ${count} preset${count === 1 ? '' : 's'}.` : 'That file has no Story Architect presets in it.');
+                } catch(e) { alert('That file could not be read as a presets file.'); }
+                input.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        // --- EXPORTS ---
+        function studentFilename() {
+            let f = (config.settings.exportFilename || '').trim() || (slugify(config.appTitle) + '_student');
+            f = f.replace(/[^a-z0-9_\-.]/gi, '_');
+            if(!/\.html?$/i.test(f)) f += '.html';
+            return f;
+        }
+
+        function exportConfig(student) {
+            collectConfig();
+            const cfg = cleanConfigForSave(config);
+            if(student) {
+                cfg.mode = 'student';
+                cfg.adminPass = '';
+                cfg.appId = 'sa_' + slugify(studentFilename().replace(/\.html?$/i, ''));
+                cfg.examPrompts = cfg.examPrompts.filter(p => p.enabled !== false && String(p.text).trim());
+                cfg.blueprintPrompts = cfg.blueprintPrompts.filter(p => p.enabled !== false);
+                cfg.structureSteps = cfg.structureSteps.filter(s => s.enabled !== false);
+                if(cfg.settings.missionMode === 'fixed' && !cfg.examPrompts.some(p => p.text === cfg.settings.fixedPrompt)) {
+                    cfg.settings.missionMode = 'choice';
+                }
+            } else {
+                cfg.mode = 'teacher';
+                cfg.appId = '';
+            }
+            return cfg;
+        }
+
+        function buildExportHTML(cfg, student) {
+            const doc = new DOMParser().parseFromString(PRISTINE_HTML, 'text/html');
+            doc.getElementById('app-config').textContent = '\n' + JSON.stringify(cfg, null, 4).replace(/<\//g, '<\\/') + '\n    ';
+            doc.title = cfg.appTitle;
+            if(student) {
+                ['admin-modal', 'worksheet-modal', 'admin-btn'].forEach(id => { const el = doc.getElementById(id); if(el) el.remove(); });
+            }
+            return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+        }
+
+        function checkStudentReady() {
+            collectConfig();
+            if(!enabledExam().length) { alert('Switch on at least one exam question before exporting.'); return false; }
+            return true;
+        }
+
+        function exportStudentApp() {
+            if(!checkStudentReady()) return;
+            downloadBlob([buildExportHTML(exportConfig(true), true)], 'text/html', studentFilename());
+        }
+
+        function copyStudentSource() {
+            if(!checkStudentReady()) return;
+            copyText(buildExportHTML(exportConfig(true), true),
+                `Student app copied. In GitHub, open your repository, choose Add file > Create new file, name it ${studentFilename()} and paste.`);
+        }
+
+        function exportFile() {
+            downloadBlob([buildExportHTML(exportConfig(false), false)], 'text/html', slugify(config.appTitle) + '_teacher.html');
+        }
+
+        function copySource() {
+            copyText(buildExportHTML(exportConfig(false), false), 'Teacher copy copied (includes the admin panel).');
+        }
+
+        // --- WORKSHEET PREVIEW ---
+        const wsState = {
+            ready: false, promptMode: 'archetype', picked: [], chosen: new Set(),
+            sections: { mission: true, plan: true, draft: true },
+            planLines: 2, stripLines: 1, showStrips: true, fontSize: 14, nameLine: true
+        };
+
+        function openWorksheetPreview() {
+            collectConfig();
+            const f = fixedPromptObj();
+            wsState.sections = { mission: true, plan: phaseOn(2), draft: phaseOn(3) };
+            wsState.promptMode = f ? 'fixed' : (wsState.promptMode === 'fixed' ? 'archetype' : wsState.promptMode);
+            const live = new Set(enabledExam().map(p => p.text));
+            wsState.chosen = new Set([...wsState.chosen].filter(t => live.has(t)));
+            rollPrompts();
+            renderWsOptions();
+            document.getElementById('worksheet-modal').classList.remove('hidden');
+            updateWsPreview();
+        }
+        function closeWorksheetPreview() { document.getElementById('worksheet-modal').classList.add('hidden'); }
+
+        function rollPrompts() {
+            const ex = enabledExam();
+            if(wsState.promptMode === 'fixed') {
+                const f = fixedPromptObj(); wsState.picked = f ? [f.text] : [];
+            } else if(wsState.promptMode === 'all') {
+                wsState.picked = ex.map(p => p.text);
+            } else if(wsState.promptMode === 'choose') {
+                wsState.picked = ex.filter(p => wsState.chosen.has(p.text)).map(p => p.text);
+            } else {
+                const types = [...new Set(ex.map(p => p.type))].sort((a, b) => ARCHETYPES.indexOf(a) - ARCHETYPES.indexOf(b));
+                wsState.picked = types.map(t => {
+                    const list = ex.filter(p => p.type === t);
+                    return list[Math.floor(Math.random() * list.length)].text;
+                });
+            }
+        }
+
+        function renderWsOptions() {
+            const ex = enabledExam();
+            const hasFixed = !!fixedPromptObj();
+            const s = wsState;
+            const numInput = (id, val, min, max) => `<input type="number" id="${id}" value="${val}" min="${min}" max="${max}" class="w-16 border rounded p-1" onchange="onWsChange()">`;
+            document.getElementById('ws-options').innerHTML = `
+                <div>
+                    <h4 class="font-bold text-gray-700 mb-2">Questions</h4>
+                    <select id="ws-mode" class="w-full border rounded p-2" onchange="onWsChange(true)">
+                        ${hasFixed ? `<option value="fixed" ${s.promptMode === 'fixed' ? 'selected' : ''}>The set question only</option>` : ''}
+                        <option value="archetype" ${s.promptMode === 'archetype' ? 'selected' : ''}>One random question per archetype</option>
+                        <option value="all" ${s.promptMode === 'all' ? 'selected' : ''}>All switched-on questions (${ex.length})</option>
+                        <option value="choose" ${s.promptMode === 'choose' ? 'selected' : ''}>Pick the questions myself</option>
+                    </select>
+                    ${s.promptMode === 'archetype' ? `<button onclick="rollPrompts(); updateWsPreview();" class="mt-2 text-xs bg-white border border-gray-400 px-2 py-1 rounded"><i class="fas fa-random mr-1"></i> Shuffle questions</button>` : ''}
+                    ${s.promptMode === 'choose' ? `<div class="mt-2 max-h-48 overflow-y-auto border rounded bg-white p-2 space-y-1">
+                        ${ex.map(p => `<label class="flex gap-2 text-xs items-start"><input type="checkbox" class="ws-pick mt-1" data-text="${esc(p.text)}" ${s.chosen.has(p.text) ? 'checked' : ''} onchange="onWsChange()"><span><strong>${esc(p.type)}:</strong> ${esc(p.text)}</span></label>`).join('')}
+                    </div>` : ''}
+                </div>
+                <div>
+                    <h4 class="font-bold text-gray-700 mb-2">Sections</h4>
+                    <label class="flex items-center gap-2"><input type="checkbox" id="ws-sec-mission" ${s.sections.mission ? 'checked' : ''} onchange="onWsChange()"> Select your mission</label>
+                    <label class="flex items-center gap-2"><input type="checkbox" id="ws-sec-plan" ${s.sections.plan ? 'checked' : ''} onchange="onWsChange()"> The plan</label>
+                    <label class="flex items-center gap-2"><input type="checkbox" id="ws-sec-draft" ${s.sections.draft ? 'checked' : ''} onchange="onWsChange()"> The draft</label>
+                </div>
+                <div class="space-y-2">
+                    <h4 class="font-bold text-gray-700">Writing lines</h4>
+                    <label class="flex items-center justify-between gap-2">Lines per plan prompt ${numInput('ws-plan-lines', s.planLines, 1, 8)}</label>
+                    <label class="flex items-center justify-between gap-2">Lines per micro-prompt ${numInput('ws-strip-lines', s.stripLines, 1, 4)}</label>
+                    <label class="flex items-center gap-2"><input type="checkbox" id="ws-show-strips" ${s.showStrips ? 'checked' : ''} onchange="onWsChange()"> Print micro-prompts above their lines</label>
+                </div>
+                <div class="space-y-2">
+                    <h4 class="font-bold text-gray-700">Page</h4>
+                    <label class="flex items-center justify-between gap-2">Text size
+                        <select id="ws-font" class="border rounded p-1" onchange="onWsChange()">
+                            ${[14, 16, 18].map(n => `<option value="${n}" ${s.fontSize === n ? 'selected' : ''}>${n}pt</option>`).join('')}
+                        </select>
+                    </label>
+                    <label class="flex items-center gap-2"><input type="checkbox" id="ws-name" ${s.nameLine ? 'checked' : ''} onchange="onWsChange()"> Name and date line</label>
+                </div>
+                <p class="text-xs text-gray-500">The worksheet follows the questions, plan prompts and draft steps switched on in the admin panel. Calibri, black and white.</p>`;
+        }
+
+        function onWsChange(modeChanged) {
+            const clamp = (v, lo, hi, d) => { v = parseInt(v, 10); return isNaN(v) ? d : Math.min(hi, Math.max(lo, v)); };
+            const s = wsState;
+            s.promptMode = document.getElementById('ws-mode').value;
+            document.querySelectorAll('.ws-pick').forEach(cb => { if(cb.checked) s.chosen.add(cb.dataset.text); else s.chosen.delete(cb.dataset.text); });
+            s.sections = {
+                mission: document.getElementById('ws-sec-mission').checked,
+                plan: document.getElementById('ws-sec-plan').checked,
+                draft: document.getElementById('ws-sec-draft').checked
+            };
+            s.planLines = clamp(document.getElementById('ws-plan-lines').value, 1, 8, 2);
+            s.stripLines = clamp(document.getElementById('ws-strip-lines').value, 1, 4, 1);
+            s.showStrips = document.getElementById('ws-show-strips').checked;
+            s.fontSize = clamp(document.getElementById('ws-font').value, 14, 18, 14);
+            s.nameLine = document.getElementById('ws-name').checked;
+            if(modeChanged || s.promptMode === 'choose' || s.promptMode === 'all') rollPrompts();
+            if(modeChanged) renderWsOptions();
+            updateWsPreview();
+        }
+
+        function worksheetCss() {
+            const fs = wsState.fontSize;
+            const lineH = fs <= 14 ? '0.95cm' : (fs <= 16 ? '1.05cm' : '1.15cm');
+            return `
+                @page { size: 21cm 29.7cm; margin: 1.27cm; }
+                body { font-family: Calibri, Carlito, Arial, sans-serif; font-size: ${fs}pt; line-height: 1.2; color: #000; }
+                h1 { font-size: ${fs + 6}pt; margin: 0 0 6pt; padding-bottom: 3pt; border-bottom: 2pt solid #000; }
+                h2 { font-size: ${fs + 2}pt; margin: 14pt 0 4pt; padding: 2pt 4pt; background: #EEEEEE; border-bottom: 1pt solid #000; page-break-after: avoid; }
+                h3 { font-size: ${fs}pt; margin: 10pt 0 2pt; page-break-after: avoid; }
+                p { margin: 2pt 0; }
+                .guide { font-style: italic; }
+                .strip { margin: 6pt 0 0; page-break-after: avoid; }
+                .prompt-box { border: 1pt solid #000; padding: 4pt 6pt; margin: 0 0 4pt; }
+                .meta { margin: 0 0 8pt; }
+                table.lines { width: 100%; border-collapse: collapse; margin: 0 0 6pt; }
+                table.lines td { height: ${lineH}; border-bottom: 1pt solid #000; padding: 0; }`;
+        }
+
+        function worksheetBody() {
+            const s = wsState;
+            const lines = (n) => `<table class="lines">${'<tr><td>&nbsp;</td></tr>'.repeat(Math.max(1, n))}</table>`;
+            let sec = 0;
+            let html = `<h1>${esc(config.appTitle)} - Planning Worksheet</h1>`;
+            if(s.nameLine) html += `<p class="meta">Name: ________________________________ &nbsp;&nbsp; Date: ________________</p>`;
+
+            if(s.sections.mission) {
+                sec++;
+                html += `<h2>${sec}. ${s.picked.length === 1 ? 'YOUR MISSION' : 'SELECT YOUR MISSION'}</h2>`;
+                if(s.picked.length > 1) {
+                    html += `<p>Choose <strong>ONE</strong> of the following exam prompts to answer:</p>`;
+                    html += s.picked.map(t => `<p class="prompt-box">&#9744; ${esc(t)}</p>`).join('');
+                } else if(s.picked.length === 1) {
+                    html += `<p class="prompt-box">${esc(s.picked[0])}</p>`;
+                } else {
+                    html += `<p><em>No questions selected.</em></p>`;
+                }
+            }
+
+            if(s.sections.plan && enabledPlan().length) {
+                sec++;
+                html += `<h2>${sec}. THE PLAN</h2><p>Plan your core story elements.</p>`;
+                html += enabledPlan().map(p => `<h3>${esc(p.title)}</h3><p>${esc(p.prompt)}</p>${lines(s.planLines)}`).join('');
+            }
+
+            if(s.sections.draft && enabledSteps().length) {
+                sec++;
+                html += `<h2>${sec}. THE DRAFT</h2><p>Build your narrative arc (use bullet points or short notes).</p>`;
+                html += enabledSteps().map(({ step: st }) => {
+                    let out = `<h3>${esc(st.title)}</h3>`;
+                    if(st.guidance) out += `<p class="guide">Guidance: ${esc(st.guidance)}</p>`;
+                    if(!st.strips.length) return out + lines(4);
+                    if(s.showStrips) return out + st.strips.map(x => `<p class="strip">&#8226; ${esc(x)}</p>${lines(s.stripLines)}`).join('');
+                    return out + lines(st.strips.length * s.stripLines);
+                }).join('');
+            }
+            return html;
+        }
+
+        function updateWsPreview() {
+            const frame = document.getElementById('ws-frame');
+            const previewCss = `
+                html { background: #d1d5db; }
+                body { margin: 0; padding: 24px 12px; }
+                .sheet { width: 21cm; margin: 0 auto; padding: 1.27cm; box-sizing: border-box; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.25); position: relative; }
+                .pg-guide { position: absolute; left: 0; right: 0; border-top: 2px dashed #9ca3af; font: 11px Arial, sans-serif; color: #6b7280; text-align: right; padding: 2px 6px 0 0; }
+                @media print {
+                    html { background: none; } body { padding: 0; }
+                    .sheet { width: auto; min-height: 0 !important; padding: 0; box-shadow: none; }
+                    .pg-guide { display: none; }
+                }`;
+            frame.onload = measureWsPages;
+            frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(config.appTitle)} Worksheet</title>
+                <style>${worksheetCss()}${previewCss}</style></head>
+                <body><div class="sheet"><div class="ws-content">${worksheetBody()}</div></div></body></html>`;
+        }
+
+        function measureWsPages() {
+            const frame = document.getElementById('ws-frame');
+            const doc = frame.contentDocument;
+            if(!doc) return;
+            const sheet = doc.querySelector('.sheet');
+            const content = doc.querySelector('.ws-content');
+            if(!sheet || !content) return;
+            const cm = 96 / 2.54;
+            const pad = 1.27 * cm;
+            const usable = (29.7 - 2.54) * cm;
+            const pages = Math.max(1, Math.ceil((content.offsetHeight - 2) / usable));
+            sheet.style.minHeight = (pages * 29.7) + 'cm';
+            for(let k = 1; k < pages; k++) {
+                const g = doc.createElement('div');
+                g.className = 'pg-guide';
+                g.style.top = (pad + k * usable) + 'px';
+                g.textContent = `page ${k + 1}`;
+                sheet.appendChild(g);
+            }
+            const label = document.getElementById('ws-pages');
+            label.innerHTML = `About <strong>${pages}</strong> side${pages === 1 ? '' : 's'} of A4` +
+                (pages > 4 ? ' <span class="text-red-600 font-bold">Over 4 sides: try fewer lines or questions.</span>' : '') +
+                ' <span class="text-gray-400">(Word may break pages slightly differently)</span>';
+        }
+
+        function downloadWorksheet() {
+            const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                <head><meta charset='utf-8'><title>${esc(config.appTitle)} Worksheet</title><style>${worksheetCss()}</style></head>
+                <body>${worksheetBody()}</body></html>`;
+            downloadBlob(['\ufeff', html], 'application/msword', `${config.appTitle.replace(/[^a-z0-9]/gi, '_')}_worksheet.doc`);
+        }
+
+        function printWorksheet() {
+            const frame = document.getElementById('ws-frame');
+            try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+            catch(e) { alert('Printing is blocked here. Download the Word file and print from Word instead.'); }
+        }
     </script>
 </body>
 </html>
