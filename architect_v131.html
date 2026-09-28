@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-23T21:00:00">
+<meta name="architect-build" content="2026-09-24T22:00:00">
 <meta name="architect-deploy" content="markscheme-autofill-default-on">
 <meta name="architect-rev" content="removed-dom-dependent-autoreflow-domfree-fragmentation-check-only">
 <title>Answer Architect (v131)</title>
@@ -2938,6 +2938,7 @@
                         </div>
                     </details>
                     <div class="btn-group">
+                        <button class="btn btn-doc" onclick="admin.openWorksheetPreview()" title="See exactly what will print, switch sections on/off, fix question wording and pick quotes — then download">👁 Preview worksheet</button>
                         <button class="btn btn-doc" onclick="admin.exportWorksheet()">📄 Worksheet (Word)</button>
                         <button class="btn btn-doc" onclick="admin.exportEnlargedFullText()">📖 Full Text (large print)</button>
                         <button class="btn btn-primary" style="background:#37474f;" onclick="admin.exportStandalone()">📦 Student App</button>
@@ -5594,8 +5595,128 @@ const app = {
         s = String(s || "");
         s = s.replace(/\b(\d)\s+(\d)\b/g, " ");
         s = s.replace(/^\s*\d{1,2}\s*[.)]\s*/m, "");
+        if(typeof app.repairQuestionPromptGlue === "function") s = app.repairQuestionPromptGlue(s);
         s = s.replace(/\s{2,}/g, " ").trim();
         return s;
+    },
+    /** Words that turn up in exam question wording (used to un-glue PDF joins such as "relevantsubject" / "thepassage"). */
+    _WS_PROMPT_VOCAB: "subject|terminology|relevant|appropriate|passage|extract|extracts|text|texts|source|sources|language|structure|writer|writers|reader|readers|answer|answers|support|refer|reference|references|quotation|quotations|quote|quotes|evidence|effect|effects|create|creates|created|impression|impressions|character|characters|thoughts|feelings|presented|present|presents|view|views|agree|disagree|whole|line|lines|question|questions|consider|compare|contrast|explain|analyse|analysis|evaluate|evaluation|opinion|statement|use|used|using|show|shows|write|about|following|section|read|marks|techniques|technique|methods|ideas|attitudes|perspectives|viewpoint|viewpoints|exciting|dramatic|tension|atmosphere|mood|tone|narrator|story|article|writing|drama|excitement|change|changes",
+    _WS_PROMPT_JOINERS: "the|a|an|and|of|to|in|for|with|by|on|at",
+    /**
+     * Question wording only (worksheet + preview): repair the common PDF joins without touching the passage.
+     * Splits a lowercase run into two words only when the second half is exam-question vocabulary and the first half is a
+     * known word — so "relevantsubject" → "relevant subject", "thepassage" → "the passage", but ordinary words stay whole.
+     */
+    repairQuestionPromptGlue: function(text) {
+        let s = String(text || "");
+        if(!s) return s;
+        s = s.replace(/(\blines?\s+\d+\s*[-\u2013]\s*\d+)(?=[A-Z][a-z])/g, "$1. ");
+        s = s.replace(/\s*\u2022\s*/g, " \u2022 ");
+        s = s.replace(/([a-z,]\s+)Where appropriate\b/g, "$1where appropriate");
+        const vocab = new Set(app._WS_PROMPT_VOCAB.split("|"));
+        const joiners = new Set(app._WS_PROMPT_JOINERS.split("|"));
+        const known = new Set();
+        try {
+            const W = typeof app._getExamGlueWordSet === "function" ? app._getExamGlueWordSet() : null;
+            if(W) W.forEach(w => known.add(w));
+        } catch(eW) {}
+        vocab.forEach(w => known.add(w));
+        joiners.forEach(w => known.add(w));
+        try {
+            let t = (typeof admin !== "undefined" && admin.getSourceTextForMarkSchemeQuoteMatch) ? admin.getSourceTextForMarkSchemeQuoteMatch() : "";
+            if(t && (/<[^>]+>/.test(t) || (app.isStructuredPassageSource && app.isStructuredPassageSource(t)))) t = app.cleanSourceText ? app.cleanSourceText(t) : t;
+            String(t || "").toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).forEach(w => { if(w.length > 1) known.add(w); });
+        } catch(eP) {}
+        s = s.replace(/\b([A-Za-z])([a-z]{5,})\b/g, (m) => {
+            const low = m.toLowerCase();
+            if(known.has(low)) return m;
+            for(let i = 1; i <= low.length - 3; i++) {
+                const a = low.slice(0, i);
+                const b = low.slice(i);
+                if(a.length === 1 && a !== "a") continue;
+                if(!vocab.has(b) || !known.has(a)) continue;
+                if(!(vocab.has(a) || joiners.has(a))) continue;
+                return m.slice(0, i) + " " + m.slice(i);
+            }
+            return m;
+        });
+        return s.replace(/\s{2,}/g, " ").trim();
+    },
+    /** Question wording as worksheet HTML: bullet points and the "You must / You should" rubric lines start on new lines. */
+    worksheetPromptHtml: function(text) {
+        let h = app.escapeHtml(String(text || ""));
+        h = h.replace(/\s*\u2022\s*/g, "<br>\u2022 ");
+        h = h.replace(/\s+(You must refer|You must use|You should write|You should use|You should consider)/g, "<br>$1");
+        return h.replace(/^(<br>)+/, "");
+    },
+    /** Which blocks the Word worksheet prints (Worksheet preview → On the sheet). Missing keys default to on. */
+    WORKSHEET_SECTION_KEYS: ["intro", "questions", "questionText", "guidance", "starters", "writingLines", "shortAnswer", "matchMeaning", "matchPoint", "rubric", "deviceMatch"],
+    getWorksheetSections: function() {
+        const raw = appData && appData.settings && appData.settings.worksheetSections && typeof appData.settings.worksheetSections === "object"
+            ? appData.settings.worksheetSections : {};
+        const out = {};
+        app.WORKSHEET_SECTION_KEYS.forEach(k => { out[k] = raw[k] !== false; });
+        return out;
+    },
+    /** Small deterministic RNG so the preview and the downloaded file jumble the match columns identically. */
+    worksheetSeededRng: function(seed) {
+        let a = (seed >>> 0) || 1;
+        return function() {
+            a = (a + 0x6D2B79F5) >>> 0;
+            let t = a;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    },
+    /** Warnings for quotes that were probably cut at a printed line break rather than at a sentence/phrase boundary. */
+    worksheetQuoteFragmentWarnings: function(raw) {
+        const t = String(raw || "").trim().replace(/^["\u201C\u2018']+|["\u201D\u2019']+$/g, "").trim();
+        const w = [];
+        if(!t) return w;
+        if(/^[a-z]/.test(t)) w.push("starts mid-sentence");
+        const words = t.split(/\s+/);
+        const last = (words[words.length - 1] || "").toLowerCase().replace(/[^a-z']/g, "");
+        const danglers = new Set(["a","an","the","and","but","or","of","to","in","on","at","by","for","with","from","that","which","who","was","were","he","she","they","it","her","his","their","its","as","if","so","be","been","is","are","into","out","up","than","then","when","while","had","has","have","would","could","not"]);
+        if(!/[.!?\u2026]$/.test(t) && danglers.has(last)) w.push("ends mid-sentence (\u201c" + last + "\u201d)");
+        if(/(^|\s)\d{1,3}\s/.test(t)) w.push("contains a printed line number");
+        return w;
+    },
+    /** Extend a quote out to the full sentence(s) it sits in, using the loaded passage. Returns "" when it cannot be found. */
+    worksheetExtendQuoteToSentence: function(raw) {
+        let src = "";
+        /* Prefer the structured lines (no margin line numbers mixed into the text). */
+        try {
+            const o = JSON.parse(String(appData.sourceText || ""));
+            if(o && Array.isArray(o.lines)) {
+                const d = document.createElement("div");
+                src = o.lines.map(l => { d.innerHTML = String((l && l.html) || "").replace(/<br\s*\/?>/gi, " "); return d.textContent || ""; }).join(" ");
+            }
+        } catch(eV2) { src = ""; }
+        if(!src) {
+            src = (typeof admin !== "undefined" && admin.getSourceTextForMarkSchemeQuoteMatch) ? admin.getSourceTextForMarkSchemeQuoteMatch() : "";
+            try {
+                if(src && (/<[^>]+>/.test(src) || (app.isStructuredPassageSource && app.isStructuredPassageSource(src)))) src = app.cleanSourceText ? app.cleanSourceText(src) : src;
+            } catch(e) {}
+            src = String(src || "").replace(/(^|\s)(?:[1-9]\d?\d?)(?=\s)/g, (m, pre) => pre);
+        }
+        src = String(src || "").replace(/\s+/g, " ");
+        if(!src) return "";
+        const lowSrc = src.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').toLowerCase();
+        const q = String(raw || "").trim().replace(/^["\u201C\u2018']+|["\u201D\u2019']+$/g, "").replace(/\s+/g, " ")
+            .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').toLowerCase().trim();
+        if(q.length < 3) return "";
+        const at = lowSrc.indexOf(q);
+        if(at < 0) return "";
+        let start = at;
+        while(start > 0 && !/[.!?]/.test(lowSrc[start - 1])) start--;
+        let end = at + q.length;
+        if(!/[.!?]$/.test(q)) {
+            while(end < lowSrc.length && !/[.!?]/.test(lowSrc[end])) end++;
+            if(end < lowSrc.length) end++;
+        }
+        while(end < lowSrc.length && /["'\u201D\u2019]/.test(src[end])) end++;
+        return src.slice(start, end).trim();
     },
     /** Normalize quote text so variants (ellipsis spacing, quotes) dedupe on worksheet export. */
     worksheetQuoteDedupeKey: function(raw) {
@@ -36844,6 +36965,8 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
         }
         if(prevSettings.worksheetMatchMode) target.settings.worksheetMatchMode = prevSettings.worksheetMatchMode;
         if(prevSettings.worksheetScaffoldMode) target.settings.worksheetScaffoldMode = prevSettings.worksheetScaffoldMode;
+        if(prevSettings.worksheetSections && typeof prevSettings.worksheetSections === "object") target.settings.worksheetSections = Object.assign({}, prevSettings.worksheetSections);
+        if(prevSettings.worksheetTextSize === "large" || prevSettings.worksheetTextSize === "compact") target.settings.worksheetTextSize = prevSettings.worksheetTextSize;
         if(typeof prevSettings.worksheetIncludeAnswerKey === "boolean") target.settings.worksheetIncludeAnswerKey = prevSettings.worksheetIncludeAnswerKey;
         if(prevSettings.worksheetMaxQuotes != null) {
             let wmq = parseInt(prevSettings.worksheetMaxQuotes, 10);
@@ -37270,6 +37393,8 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             }
             if(typeof s.worksheetMatchMode === "string") appData.settings.worksheetMatchMode = s.worksheetMatchMode;
             if(typeof s.worksheetScaffoldMode === "string") appData.settings.worksheetScaffoldMode = s.worksheetScaffoldMode;
+            if(s.worksheetSections && typeof s.worksheetSections === "object") appData.settings.worksheetSections = Object.assign({}, s.worksheetSections);
+            if(s.worksheetTextSize === "large" || s.worksheetTextSize === "compact") appData.settings.worksheetTextSize = s.worksheetTextSize;
             if(typeof s.worksheetIncludeAnswerKey === "boolean") appData.settings.worksheetIncludeAnswerKey = s.worksheetIncludeAnswerKey;
             if(s.worksheetMaxQuotes != null) {
                 let wmq = parseInt(s.worksheetMaxQuotes, 10);
@@ -37310,6 +37435,8 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             modulesActive: Object.assign({ selection: true, lab: true, desk: true }, settings.modulesActive || {}),
             worksheetMatchMode: settings.worksheetMatchMode || "jumbled",
             worksheetScaffoldMode: settings.worksheetScaffoldMode || "guided",
+            worksheetSections: Object.assign({}, settings.worksheetSections || {}),
+            worksheetTextSize: settings.worksheetTextSize === "large" ? "large" : "compact",
             worksheetIncludeAnswerKey: settings.worksheetIncludeAnswerKey === true,
             worksheetMaxQuotes: (() => {
                 let n = parseInt(settings.worksheetMaxQuotes, 10);
@@ -40594,7 +40721,336 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
 
     // EXPORTS
-    exportWorksheet: function() {
+    /* ================= Worksheet preview ================= */
+    _wsPrevSeed: 1,
+    _wsPrevQuoteBankDirty: false,
+    _wsPrevTextTimer: null,
+    _wsPrevEnsureStyle: function() {
+        if(document.getElementById("wsp-style")) return;
+        const st = document.createElement("style");
+        st.id = "wsp-style";
+        st.textContent = `
+#ws-preview-overlay{position:fixed;inset:0;z-index:60000;background:rgba(0,0,0,0.55);display:none;align-items:stretch;justify-content:center;padding:14px;box-sizing:border-box;}
+#ws-preview-overlay .wsp-panel{background:var(--bg,#fff);color:var(--text,#111);width:100%;max-width:1500px;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.35);}
+#ws-preview-overlay .wsp-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 14px;background:var(--card,#f5f5f5);border-bottom:1px solid var(--border,#ccc);}
+#ws-preview-overlay .wsp-head .wsp-title{font-weight:700;font-size:1.05rem;}
+#ws-preview-overlay .wsp-head .wsp-sum{font-size:0.85rem;opacity:0.85;flex:1 1 220px;}
+#ws-preview-overlay .wsp-head .wsp-actions{display:flex;gap:6px;flex-wrap:wrap;}
+#ws-preview-overlay .wsp-body{flex:1 1 auto;display:flex;min-height:0;}
+#ws-preview-overlay .wsp-side{width:430px;flex:0 0 430px;overflow-y:auto;padding:12px 14px;border-right:1px solid var(--border,#ccc);font-size:0.88rem;box-sizing:border-box;}
+#ws-preview-overlay .wsp-page{flex:1 1 auto;min-width:0;background:#8a8a8a;}
+#ws-preview-overlay .wsp-page iframe{width:100%;height:100%;border:0;display:block;background:#8a8a8a;}
+#ws-preview-overlay details.wsp-sec{border:1px solid var(--border,#ccc);border-radius:8px;margin:0 0 10px 0;background:var(--card,#fafafa);}
+#ws-preview-overlay details.wsp-sec>summary{cursor:pointer;font-weight:700;padding:8px 10px;}
+#ws-preview-overlay .wsp-sec-body{padding:2px 10px 10px 10px;}
+#ws-preview-overlay label.wsp-chk{display:flex;gap:7px;align-items:flex-start;margin:4px 0;cursor:pointer;line-height:1.35;}
+#ws-preview-overlay label.wsp-chk.wsp-sub{margin-left:22px;}
+#ws-preview-overlay label.wsp-chk.wsp-dim{opacity:0.5;}
+#ws-preview-overlay .wsp-note{font-size:0.78rem;opacity:0.78;margin:2px 0 6px 0;line-height:1.35;}
+#ws-preview-overlay .wsp-row{display:flex;gap:8px;align-items:center;margin:5px 0;flex-wrap:wrap;}
+#ws-preview-overlay .wsp-row select,#ws-preview-overlay .wsp-row input[type=number]{padding:3px 4px;}
+#ws-preview-overlay .wsp-q{border-top:1px solid var(--border,#ddd);padding:8px 0 6px 0;}
+#ws-preview-overlay .wsp-q textarea{width:100%;box-sizing:border-box;min-height:74px;font-family:inherit;font-size:0.82rem;padding:5px;border:1px solid var(--border,#bbb);border-radius:5px;background:var(--bg,#fff);color:inherit;}
+#ws-preview-overlay .wsp-badge{display:inline-block;font-size:0.72rem;padding:1px 6px;border-radius:9px;border:1px solid currentColor;margin-left:4px;opacity:0.85;}
+#ws-preview-overlay .wsp-quote{border-top:1px solid var(--border,#ddd);padding:6px 0;display:flex;gap:7px;align-items:flex-start;}
+#ws-preview-overlay .wsp-quote .wsp-qt{flex:1 1 auto;min-width:0;}
+#ws-preview-overlay .wsp-quote .wsp-num{font-weight:700;min-width:1.6em;}
+#ws-preview-overlay .wsp-status{font-size:0.76rem;margin-top:2px;line-height:1.35;}
+#ws-preview-overlay .wsp-warn{font-size:0.76rem;margin-top:2px;color:#b35900;}
+#ws-preview-overlay .wsp-skip .wsp-qt{opacity:0.72;}
+#ws-preview-overlay .wsp-mini{font-size:0.75rem;padding:1px 7px;margin-top:3px;}
+@media (max-width: 860px){
+  #ws-preview-overlay{padding:0;}
+  #ws-preview-overlay .wsp-body{flex-direction:column;}
+  #ws-preview-overlay .wsp-side{width:auto;flex:0 0 auto;max-height:46vh;border-right:0;border-bottom:1px solid var(--border,#ccc);}
+  #ws-preview-overlay .wsp-page{min-height:50vh;}
+}`;
+        document.head.appendChild(st);
+    },
+    openWorksheetPreview: function() {
+        try { if(admin.syncQuestionsFromListCore) admin.syncQuestionsFromListCore(); } catch(e) {}
+        admin._wsPrevEnsureStyle();
+        admin._wsPrevSeed = Math.floor(Math.random() * 1e9) + 1;
+        admin._wsPrevQuoteBankDirty = false;
+        let ov = document.getElementById("ws-preview-overlay");
+        if(!ov) {
+            ov = document.createElement("div");
+            ov.id = "ws-preview-overlay";
+            ov.setAttribute("role", "dialog");
+            ov.setAttribute("aria-label", "Worksheet preview");
+            document.body.appendChild(ov);
+            ov.addEventListener("keydown", (e) => { if(e.key === "Escape") admin.closeWorksheetPreview(); });
+        }
+        ov.innerHTML = `<div class="wsp-panel">
+            <div class="wsp-head">
+                <span class="wsp-title">👁 Worksheet preview</span>
+                <span class="wsp-sum" id="wsp-summary"></span>
+                <span class="wsp-actions">
+                    <button type="button" class="btn btn-outline btn-small" onclick="admin.worksheetPreviewReshuffle()" title="New jumbled order for the match columns">🔀 Reshuffle</button>
+                    <button type="button" class="btn btn-doc btn-small" onclick="admin.worksheetPreviewDownload()" title="Downloads exactly what the preview shows">📄 Download Word</button>
+                    <button type="button" class="btn btn-outline btn-small" onclick="admin.closeWorksheetPreview()">✕ Close</button>
+                </span>
+            </div>
+            <div class="wsp-body">
+                <div class="wsp-side" id="wsp-side"></div>
+                <div class="wsp-page"><iframe id="wsp-frame" title="Worksheet page preview"></iframe></div>
+            </div>
+        </div>`;
+        ov.style.display = "flex";
+        admin.renderWorksheetPreview();
+    },
+    closeWorksheetPreview: function() {
+        const ov = document.getElementById("ws-preview-overlay");
+        if(ov) { ov.style.display = "none"; ov.innerHTML = ""; }
+        if(admin._wsPrevQuoteBankDirty) {
+            try { if(admin.renderQuotesBank) admin.renderQuotesBank(); } catch(e) {}
+            admin._wsPrevQuoteBankDirty = false;
+        }
+    },
+    worksheetPreviewReshuffle: function() {
+        admin._wsPrevSeed = Math.floor(Math.random() * 1e9) + 1;
+        admin.renderWorksheetPreview();
+    },
+    worksheetPreviewDownload: function() {
+        admin.exportWorksheet({ seed: admin._wsPrevSeed });
+    },
+    /** Wrap the Word HTML so it reads like an A4 page on screen (preview only — the download is unchanged). */
+    _wsPrevPageDoc: function(html) {
+        const pageCss = `<style id="wsp-page-css">html{background:#8a8a8a;}body{background:#fff !important;color:#000;width:21cm;max-width:calc(100% - 20px);box-sizing:border-box;margin:14px auto !important;padding:1cm 1.2cm !important;min-height:29.7cm;box-shadow:0 2px 8px rgba(0,0,0,0.35);}</style>`;
+        return String(html).replace("</head>", pageCss + "</head>");
+    },
+    renderWorksheetPreview: function() {
+        const side = document.getElementById("wsp-side");
+        const frame = document.getElementById("wsp-frame");
+        if(!side || !frame) return;
+        const sideScroll = side.scrollTop;
+        let frameScroll = 0;
+        try { frameScroll = frame.contentWindow ? frame.contentWindow.scrollY : 0; } catch(e) {}
+        const openSecs = Array.from(side.querySelectorAll("details.wsp-sec")).reduce((acc, d) => { acc[d.dataset.k] = d.open; return acc; }, {});
+        const report = {};
+        let res;
+        try { res = admin.exportWorksheet({ returnHtml: true, seed: admin._wsPrevSeed, report }); }
+        catch(err) { res = { html: null, message: "Preview failed: " + (err && err.message ? err.message : err) }; }
+        const html = res && res.html ? admin._wsPrevPageDoc(res.html)
+            : `<html><body style="font-family:sans-serif;padding:24px;background:#fff;">${app.escapeHtml((res && res.message) || "Nothing to show yet.")}</body></html>`;
+        frame.onload = () => { try { frame.contentWindow.scrollTo(0, frameScroll); } catch(e) {} };
+        frame.srcdoc = html;
+        side.innerHTML = admin._wsPrevSideHtml(report, openSecs);
+        side.scrollTop = sideScroll;
+        const sum = document.getElementById("wsp-summary");
+        if(sum) {
+            const qs = (report.questions || []).filter(q => !q.hidden).length;
+            const on = (report.quotes || []).filter(q => q.status === "on" && !q.merged).length;
+            const skipped = (report.quotes || []).filter(q => q.status === "skip").length;
+            sum.textContent = `${qs} question${qs === 1 ? "" : "s"} · ${on} quote${on === 1 ? "" : "s"} printing` + (skipped ? ` · ${skipped} ticked but not printing` : "") + (report.level ? ` · rubric Level ${report.level}` : "");
+        }
+    },
+    _wsPrevSideHtml: function(r, openSecs) {
+        const esc = (t) => app.escapeHtml(String(t == null ? "" : t));
+        const S = app.getWorksheetSections();
+        const set = appData.settings || {};
+        const isOpen = (k, dflt) => (openSecs && typeof openSecs[k] === "boolean") ? openSecs[k] : dflt;
+        const chk = (key, label, sub, note, dim) => `<label class="wsp-chk${sub ? " wsp-sub" : ""}${dim ? " wsp-dim" : ""}"><input type="checkbox" ${S[key] ? "checked" : ""} onchange="admin.wsPrevSetSection('${key}', this.checked)"><span>${label}${note ? `<div class="wsp-note">${note}</div>` : ""}</span></label>`;
+        const headsOff = !S.questions;
+        const quotes = r.quotes || [];
+        const printing = quotes.filter(q => q.status === "on").sort((a, b) => a.num - b.num);
+        const noQuotes = printing.length === 0;
+        const fq0 = Array.isArray(appData.questions) && appData.questions[0] ? appData.questions[0] : null;
+        const hasShortModel = !!(fq0 && String(fq0.worksheetInferenceModel || "").trim()) && appData.component !== 2;
+        let h = "";
+
+        /* --- On the sheet --- */
+        h += `<details class="wsp-sec" data-k="sections" ${isOpen("sections", true) ? "open" : ""}><summary>On the sheet</summary><div class="wsp-sec-body">`;
+        h += chk("intro", "Title and “use your source booklet” line");
+        h += chk("questions", "Question headings (number, lines, marks)");
+        h += chk("questionText", "Full question wording", true, "", headsOff);
+        h += chk("guidance", "“How to get the marks” tips", true, "", headsOff);
+        h += chk("starters", "Sentence-starter tables", true, "", headsOff);
+        h += chk("writingLines", "Answer lines", true, noQuotes ? "Also the “Your response” space when no quotes print." : "", headsOff && !noQuotes);
+        h += chk("shortAnswer", "Short answer practice (Q1)", false, hasShortModel ? "" : "Nothing to print — no model short answer on Q1.", !hasShortModel);
+        h += chk("matchMeaning", "Match quote → meaning", false, noQuotes ? "No quotes are printing." : "", noQuotes);
+        h += chk("matchPoint", "Match quote → point / analysis", false, noQuotes ? "No quotes are printing." : (r.hasPointExercise ? "" : "Nothing to print — no points saved on these quotes."), noQuotes || !r.hasPointExercise);
+        h += chk("rubric", "Rubric (sentence elements) for each quote", false, noQuotes ? "No quotes are printing." : "", noQuotes);
+        h += chk("deviceMatch", "Match quote → focus (language / tone / structure)", false, r.showDeviceMatch ? "" : "Only prints when the quotes on the sheet cover two or more foci.", !r.showDeviceMatch);
+        h += `<label class="wsp-chk"><input type="checkbox" ${set.worksheetIncludeAnswerKey === true ? "checked" : ""} onchange="admin.wsPrevSetOpt('answerKey', this.checked)"><span>Teacher answer key at the end</span></label>`;
+        h += `</div></details>`;
+
+        /* --- Layout --- */
+        const mm = set.worksheetMatchMode || "jumbled";
+        const sm = set.worksheetScaffoldMode || "guided";
+        const act = Array.isArray(set.activeLevels) && set.activeLevels.length ? set.activeLevels : [1, 2, 3, 4, 5];
+        const lvOv = parseInt(set.worksheetRubricLevel, 10);
+        h += `<details class="wsp-sec" data-k="layout" ${isOpen("layout", false) ? "open" : ""}><summary>Layout</summary><div class="wsp-sec-body">`;
+        h += `<div class="wsp-row">Text size <select onchange="admin.wsPrevSetOpt('textSize', this.value)">
+                <option value="compact" ${set.worksheetTextSize !== "large" ? "selected" : ""}>Compact (fits more on a page)</option>
+                <option value="large" ${set.worksheetTextSize === "large" ? "selected" : ""}>Large — Calibri, 14pt minimum</option></select></div>`;
+        h += `<div class="wsp-row">Match game <select onchange="admin.wsPrevSetOpt('matchMode', this.value)">
+                <option value="jumbled" ${mm === "jumbled" ? "selected" : ""}>Jumbled (draw lines)</option>
+                <option value="aligned" ${mm === "aligned" ? "selected" : ""}>Aligned (copy lines)</option>
+                <option value="list" ${mm === "list" ? "selected" : ""}>Simple list</option></select></div>`;
+        h += `<div class="wsp-row">Rubric <select onchange="admin.wsPrevSetOpt('scaffold', this.value)">
+                <option value="guided" ${sm === "guided" ? "selected" : ""}>Scaffolded (model wording + word banks)</option>
+                <option value="blank" ${sm === "blank" ? "selected" : ""}>Blank grid only</option></select></div>`;
+        h += `<div class="wsp-row">Rubric level <select onchange="admin.wsPrevSetOpt('rubricLevel', this.value)">
+                <option value="" ${!Number.isFinite(lvOv) ? "selected" : ""}>Auto (Level ${esc(r.levelAuto || "?")})</option>
+                ${act.map(lv => `<option value="${lv}" ${lvOv === lv ? "selected" : ""}>Level ${lv}</option>`).join("")}</select></div>`;
+        h += `<div class="wsp-note">The rubric rows come from that level’s Sentence Structure.</div>`;
+        h += `<div class="wsp-row">Max unique quotes <input type="number" min="1" max="50" value="${esc(r.maxQuotes || 8)}" style="width:56px;" onchange="admin.wsPrevSetOpt('maxQuotes', this.value)"></div>`;
+        h += `</div></details>`;
+
+        /* --- Questions --- */
+        const qs = r.questions || [];
+        h += `<details class="wsp-sec" data-k="questions" ${isOpen("questions", true) ? "open" : ""}><summary>Questions (${qs.filter(q => !q.hidden).length} of ${qs.length} on the sheet)</summary><div class="wsp-sec-body">`;
+        if(!qs.length) h += `<div class="wsp-note">No focus questions with text. Add them in Load &amp; AI → Focus questions.</div>`;
+        qs.forEach(q => {
+            const qidJs = esc(JSON.stringify(String(q.id)));
+            h += `<div class="wsp-q">
+                <label class="wsp-chk"><input type="checkbox" ${q.hidden ? "" : "checked"} onchange="admin.wsPrevToggleQuestion(${qidJs}, this.checked)"><span><strong>${esc(q.label)}</strong>${q.lineRef ? ` — lines ${esc(q.lineRef)}` : ""}${q.glueFixed ? `<span class="wsp-badge" title="Joined-up words from the PDF were split for printing">wording tidied</span>` : ""}</span></label>`;
+            if(!q.hidden) {
+                h += `<div class="wsp-note">Printed wording (edit to correct it — changes save to the lesson):</div>
+                <textarea oninput="admin.wsPrevQuestionTextInput(${qidJs}, this.value)" onchange="admin.wsPrevQuestionTextCommit(${qidJs}, this.value)">${esc(q.printed)}</textarea>`;
+                if(q.glueFixed) h += `<button type="button" class="btn btn-outline btn-small wsp-mini" onclick="admin.wsPrevQuestionTextCommit(${qidJs}, ${esc(JSON.stringify(q.printed))})" title="Replace the stored question text with the tidied wording">Save tidied wording to lesson</button>`;
+            }
+            h += `</div>`;
+        });
+        h += `</div></details>`;
+
+        /* --- Quotes --- */
+        const skipped = quotes.filter(q => q.status === "skip");
+        const extras = quotes.filter(q => !q.ticked && q.inPassage);
+        const qLab = (q) => (q.questionIds || []).map(id => app.worksheetQuestionHeadingLabel(id)).join(", ");
+        const quoteRow = (q) => {
+            const cls = q.status === "on" ? "" : " wsp-skip";
+            const num = q.status === "on" ? `${q.num}.` : "";
+            let st = "";
+            if(q.status === "on") st = q.merged ? `Merged with quote ${q.num} (same wording)` : (q.translation || q.point ? `Meaning: ${esc(q.translation || "—")}` : `<span style="color:#b35900;">No meaning or point saved — match rows will be blank</span>`);
+            else if(q.status === "skip") st = `Not printing: ${esc(q.reason)}`;
+            else st = qLab(q) ? `Linked to ${esc(qLab(q))}` : "Not linked to a question";
+            let warn = "";
+            if(q.deviceOff) warn += `<div class="wsp-status" style="font-style:italic;">Note: ${esc(q.device)} focus — ${esc(q.device)} is switched off in Selection devices (in-app game only; it still prints).</div>`;
+            if(q.warnings && q.warnings.length) {
+                const ext = app.worksheetExtendQuoteToSentence(q.text);
+                warn = `<div class="wsp-warn">⚠ Looks cut at a line break: ${esc(q.warnings.join("; "))}</div>`;
+                if(ext && ext.replace(/\s+/g, " ").trim().toLowerCase() !== q.text.replace(/\s+/g, " ").trim().toLowerCase()) {
+                    warn += `<button type="button" class="btn btn-outline btn-small wsp-mini" title="${esc(ext)}" onclick="admin.wsPrevExtendQuote(${q.idx})">Extend to full sentence</button>`;
+                }
+            }
+            return `<div class="wsp-quote${cls}"><input type="checkbox" ${q.ticked ? "checked" : ""} title="Include on worksheet" onchange="admin.wsPrevToggleQuote(${q.idx}, this.checked)">
+                <span class="wsp-num">${num}</span>
+                <div class="wsp-qt">“${esc(q.text)}”${qLab(q) && q.status !== "off" ? ` <span class="wsp-badge">${esc(qLab(q))}</span>` : ""}<div class="wsp-status">${st}</div>${warn}</div></div>`;
+        };
+        h += `<details class="wsp-sec" data-k="quotes" ${isOpen("quotes", true) ? "open" : ""}><summary>Quotes (${printing.filter(q => !q.merged).length} printing)</summary><div class="wsp-sec-body">`;
+        h += `<div class="wsp-note">Ticks here are the same as <strong>Include on worksheet</strong> in the Quote bank.</div>`;
+        if(printing.length) h += printing.map(quoteRow).join("");
+        else h += `<div class="wsp-note">No quotes will print — the sheet will be questions only.</div>`;
+        if(skipped.length) {
+            h += `<div style="font-weight:600;margin:10px 0 2px 0;">Ticked but not printing (${skipped.length})</div>` + skipped.map(quoteRow).join("");
+        }
+        if(extras.length) {
+            h += `<details style="margin-top:10px;" ${isOpen("quotesExtra", false) ? "open" : ""}><summary style="cursor:pointer;font-weight:600;">Add from the quote bank (${extras.length} not ticked)</summary>` + extras.map(quoteRow).join("") + `</details>`;
+        }
+        h += `<div class="wsp-row" style="margin-top:8px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevClearQuotes()">Untick all</button></div>`;
+        h += `</div></details>`;
+        return h;
+    },
+    wsPrevSetSection: function(key, on) {
+        if(!appData.settings) appData.settings = {};
+        const cur = appData.settings.worksheetSections && typeof appData.settings.worksheetSections === "object" ? appData.settings.worksheetSections : {};
+        cur[key] = !!on;
+        appData.settings.worksheetSections = cur;
+        app.save();
+        admin.renderWorksheetPreview();
+    },
+    wsPrevSetOpt: function(key, val) {
+        if(!appData.settings) appData.settings = {};
+        const setEl = (id, prop, v) => { const el = document.getElementById(id); if(el) el[prop] = v; };
+        if(key === "answerKey") { admin.setWorksheetIncludeAnswerKey(!!val); setEl("worksheet-include-answer-key", "checked", !!val); }
+        else if(key === "matchMode") { admin.setWorksheetMatchMode(val); setEl("worksheet-match-mode", "value", appData.settings.worksheetMatchMode); }
+        else if(key === "scaffold") { admin.setWorksheetScaffoldMode(val); setEl("worksheet-scaffold-mode", "value", appData.settings.worksheetScaffoldMode); }
+        else if(key === "maxQuotes") admin.setWorksheetMaxQuotes(val);
+        else if(key === "textSize") { appData.settings.worksheetTextSize = val === "large" ? "large" : "compact"; app.save(); }
+        else if(key === "rubricLevel") {
+            const n = parseInt(val, 10);
+            if(Number.isFinite(n)) appData.settings.worksheetRubricLevel = n; else delete appData.settings.worksheetRubricLevel;
+            app.save();
+        }
+        admin.renderWorksheetPreview();
+    },
+    wsPrevToggleQuestion: function(qid, show) {
+        if(!appData.settings) appData.settings = {};
+        const norm = (id) => app.normalizeQuestionId(id);
+        let hid = Array.isArray(appData.settings.worksheetHiddenQuestionIds) ? appData.settings.worksheetHiddenQuestionIds.slice() : [];
+        hid = hid.filter(id => norm(id) !== norm(qid));
+        if(!show) hid.push(String(qid));
+        appData.settings.worksheetHiddenQuestionIds = hid;
+        app.save();
+        admin.renderWorksheetPreview();
+    },
+    /** Write question wording to the lesson and to the Load & AI row (exportWorksheet re-reads that row first). */
+    _wsPrevWriteQuestionText: function(qid, text) {
+        const t = String(text || "").replace(/\s*\n\s*/g, " ").trim();
+        const norm = (id) => app.normalizeQuestionId(id);
+        const q = (appData.questions || []).find(x => x && norm(x.id) === norm(qid));
+        if(!q || !t) return false;
+        q.prompt = t;
+        if(norm(qid) === norm((appData.questions[0] || {}).id)) appData.question = t;
+        document.querySelectorAll(".questions-list-mount").forEach(m => {
+            Array.from(m.children).forEach(row => {
+                const inp = row.querySelector("input.question-prompt-input") || row.querySelector("input[type='text']");
+                if(inp && norm(inp.dataset.qid || "") === norm(qid)) inp.value = t;
+            });
+        });
+        app.save();
+        return true;
+    },
+    wsPrevQuestionTextInput: function(qid, text) {
+        clearTimeout(admin._wsPrevTextTimer);
+        admin._wsPrevTextTimer = setTimeout(() => {
+            if(!admin._wsPrevWriteQuestionText(qid, text)) return;
+            /* Refresh the page only, so the textarea keeps focus while typing. */
+            const frame = document.getElementById("wsp-frame");
+            if(!frame) return;
+            let y = 0; try { y = frame.contentWindow.scrollY; } catch(e) {}
+            const res = admin.exportWorksheet({ returnHtml: true, seed: admin._wsPrevSeed, report: {} });
+            if(res && res.html) { frame.onload = () => { try { frame.contentWindow.scrollTo(0, y); } catch(e) {} }; frame.srcdoc = admin._wsPrevPageDoc(res.html); }
+        }, 450);
+    },
+    wsPrevQuestionTextCommit: function(qid, text) {
+        clearTimeout(admin._wsPrevTextTimer);
+        admin._wsPrevWriteQuestionText(qid, text);
+        admin.renderWorksheetPreview();
+    },
+    wsPrevToggleQuote: function(idx, on) {
+        admin.updateQuoteItem(idx, "includeInWorksheet", !!on);
+        admin._wsPrevQuoteBankDirty = true;
+        admin.renderWorksheetPreview();
+    },
+    wsPrevClearQuotes: function() {
+        (appData.items || []).forEach(it => { if(it) it.includeInWorksheet = false; });
+        app.save();
+        admin._wsPrevQuoteBankDirty = true;
+        admin.renderWorksheetPreview();
+    },
+    wsPrevExtendQuote: function(idx) {
+        const it = appData.items && appData.items[idx];
+        if(!it) return;
+        const raw = String(it.originalFull || it.original || it.quote || "").trim();
+        const ext = app.worksheetExtendQuoteToSentence(raw);
+        if(!ext) { alert("Couldn't find that quote in the loaded passage to extend it."); return; }
+        if(!confirm("Replace this quote with the full sentence?\n\n“" + ext + "”")) return;
+        it.quote = ext;
+        it.original = ext;
+        it.originalFull = ext;
+        app.save();
+        admin._wsPrevQuoteBankDirty = true;
+        admin.renderWorksheetPreview();
+    },
+    /* ================= /Worksheet preview ================= */
+    exportWorksheet: function(opts) {
+        opts = opts && typeof opts === "object" ? opts : {};
+        const wsReport = opts.report && typeof opts.report === "object" ? opts.report : null;
+        const wsSec = app.getWorksheetSections();
+        const wsRng = typeof opts.seed === "number" ? app.worksheetSeededRng(opts.seed) : Math.random;
         if(typeof admin !== "undefined" && admin.syncQuestionsFromListCore) admin.syncQuestionsFromListCore();
 
         let content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
@@ -40619,7 +41075,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         .ws-item-sep{margin:0;padding:1px 0 0 0;border-top:1px solid #ccc;}
         .teacher-key{margin-top:12px; padding-top:8px; border-top:1px solid #333; page-break-before:auto;}
         .teacher-key .ak{font-size:8.5pt; margin:0 0 5px 0;}
-        .ws-rubric-model{font-size:9.5pt; font-weight:600; background:#e8f4fd; border:1px solid #1565c0; padding:6px 8px; margin:0 0 4px 0; line-height:1.35;}
+        .ws-rubric-model{font-size:9.5pt; font-weight:600; background:#f2f2f2; border:1px solid #333; padding:6px 8px; margin:0 0 4px 0; line-height:1.35;}
         </style>
         </head><body>`;
         const normWsQid = (id) => app.normalizeQuestionId(id);
@@ -40726,15 +41182,29 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
         }
         if(!worksheetHeadingQs.length && !worksheetFocusQs.length && !worksheetQuotesTicked.length) {
-            alert("No worksheet content: no questions with text, and no quotes ticked. Add question text under Load & AI, or tick Include on worksheet on quote bank rows.");
+            const wsEmptyMsg = "No worksheet content: no questions with text, and no quotes ticked. Add question text under Load & AI, or tick Include on worksheet on quote bank rows.";
+            if(opts.returnHtml) return { html: null, message: wsEmptyMsg };
+            alert(wsEmptyMsg);
             return;
         }
         worksheetFocusQs = app.orderWorksheetFocusQuestions(worksheetFocusQs);
+        /* Worksheet preview → Questions: a hidden question drops its heading and the quotes linked only to it. */
+        const wsHiddenQ = new Set((Array.isArray(appData.settings && appData.settings.worksheetHiddenQuestionIds) ? appData.settings.worksheetHiddenQuestionIds : []).map(normWsQid));
+        const worksheetHeadingQsAll = worksheetHeadingQs.slice();
+        if(wsHiddenQ.size) {
+            if(!worksheetQuestionFilterActive) {
+                wsQSet = new Set(allQsWithPrompt.map(q => normWsQid(q.id)));
+                worksheetQuestionFilterActive = true;
+            }
+            wsQSet = new Set(Array.from(wsQSet || []).filter(id => !wsHiddenQ.has(id)));
+            worksheetFocusQs = worksheetFocusQs.filter(q => !wsHiddenQ.has(normWsQid(q.id)));
+            worksheetHeadingQs = worksheetHeadingQs.filter(q => !wsHiddenQ.has(normWsQid(q.id)));
+        }
         const selDevWs = appData.settings && appData.settings.selectionDevices && typeof appData.settings.selectionDevices === "object"
             ? appData.settings.selectionDevices
             : { language: true, tone: false, structure: false };
         const selectionDevicesEnabledCount = (selDevWs.language !== false ? 1 : 0) + (selDevWs.tone === true ? 1 : 0) + (selDevWs.structure === true ? 1 : 0);
-        const showWorksheetFocusDeviceMatch = selectionDevicesEnabledCount >= 2;
+        const showWorksheetFocusDeviceMatch = selectionDevicesEnabledCount >= 2; /* legacy; worksheet now uses wsDeviceMix */
         const itemAllowedBySelectionDevice = (item) => {
             const dev = String(item.device || item.type || "language").toLowerCase();
             if(dev === "tone") return selDevWs.tone === true;
@@ -40754,6 +41224,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(worksheetLevelsFromBank.length === 1) level = worksheetLevelsFromBank[0];
         else if(worksheetLevelsFromBank.includes(effectiveUILevel)) level = effectiveUILevel;
         else if(worksheetLevelsFromBank.length) level = worksheetLevelsFromBank[0];
+        const levelAutoWs = level;
+        {
+            const lvOv = parseInt(appData.settings && appData.settings.worksheetRubricLevel, 10);
+            if(Number.isFinite(lvOv) && lvOv >= 1 && lvOv <= ARCHITECT_MAX_LEVEL) level = lvOv;
+        }
 
         const itemMatchesWorksheetFocus = (item) => {
             if(!item || item.includeInWorksheet !== true) return false;
@@ -40774,7 +41249,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const shuffle = (arr) => {
             const a = arr.slice();
             for(let i = a.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
+                const j = Math.floor(wsRng() * (i + 1));
                 [a[i], a[j]] = [a[j], a[i]];
             }
             return a;
@@ -40838,20 +41313,84 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             });
             return out;
         };
-        const rawWsItems = appData.items.filter(i => itemMatchesWorksheetFocus(i) && itemAllowedBySelectionDevice(i));
+        /* Selection devices (language / tone / structure) shape the in-app game only — a ticked quote always prints; the preview just notes when its focus is switched off. */
+        const rawWsItems = appData.items.filter(i => itemMatchesWorksheetFocus(i));
         const dedupedWsItems = dedupeWorksheetItems(rawWsItems);
         let maxWorksheetQuotes = parseInt(appData.settings && appData.settings.worksheetMaxQuotes, 10);
         if(!Number.isFinite(maxWorksheetQuotes) || maxWorksheetQuotes < 1) maxWorksheetQuotes = 8;
         if(maxWorksheetQuotes > 50) maxWorksheetQuotes = 50;
         const included = dedupedWsItems.slice(0, maxWorksheetQuotes);
         const worksheetHasQuotes = included.length > 0;
+        if(wsReport) {
+            const dedupIndexOf = (raw) => {
+                const dkey = raw ? app.worksheetQuoteDedupeKey(raw) : "";
+                for(let i = 0; i < dedupedWsItems.length; i++) {
+                    const exr = String(dedupedWsItems[i].originalFull || dedupedWsItems[i].original || "").trim();
+                    if(dkey && exr && app.worksheetQuoteDedupeKey(exr) === dkey) return i;
+                    if(raw && exr && app.quoteIsMostlySame(raw, exr)) return i;
+                }
+                return -1;
+            };
+            const diOfItem = new Map();
+            const diClaimed = new Set();
+            rawWsItems.forEach(it => {
+                const di = dedupIndexOf(String(it.originalFull || it.original || "").trim());
+                diOfItem.set(it, { di, merged: diClaimed.has(di) });
+                diClaimed.add(di);
+            });
+            wsReport.quotes = [];
+            (appData.items || []).forEach((it, idx) => {
+                if(!it || it.correct === false) return;
+                const raw = String(it.originalFull || it.original || it.quote || "").trim();
+                if(!raw) return;
+                const ticked = it.includeInWorksheet === true;
+                const inPassage = wsQuoteExistsInPassage(it.quote || raw);
+                const row = { idx, text: raw, ticked, inPassage, status: "off", reason: "", num: 0, merged: false,
+                    warnings: app.worksheetQuoteFragmentWarnings(raw),
+                    deviceOff: !itemAllowedBySelectionDevice(it),
+                    device: String(it.device || it.type || "language").toLowerCase(),
+                    questionIds: Array.isArray(it.questionIds) ? it.questionIds.slice() : [],
+                    translation: String(it.translation || "").trim(), point: String(it.effect || "").trim() };
+                if(ticked) {
+                    row.status = "skip";
+                    if(!inPassage) row.reason = "Not found in the loaded passage (left over from another lesson?)";
+                    else if(!itemMatchesWorksheetFocus(it)) row.reason = wsHiddenQ.size ? "Its question is hidden on this sheet, or it is not linked to a question" : "Not linked to a question on this sheet";
+                    else {
+                        const d = diOfItem.get(it) || { di: -1, merged: false };
+                        if(d.di < 0) row.reason = "Could not be placed";
+                        else if(d.di >= maxWorksheetQuotes) row.reason = "Over the max-quotes limit (" + maxWorksheetQuotes + ")";
+                        else { row.status = "on"; row.num = d.di + 1; row.merged = d.merged; }
+                    }
+                }
+                wsReport.quotes.push(row);
+            });
+            wsReport.level = level;
+            wsReport.levelAuto = levelAutoWs;
+            wsReport.maxQuotes = maxWorksheetQuotes;
+            wsReport.printedQuoteCount = included.length;
+        }
         const wsKeyEl = document.getElementById("worksheet-include-answer-key");
         const includeKeyWs = appData.settings.worksheetIncludeAnswerKey === true && (!wsKeyEl || wsKeyEl.checked);
         let answerKeyHtml = "";
-        content += `<h1>${app.escapeHtml(appData.meta.title || "Worksheet")}</h1>`;
-        content += `<p class="tag" style="margin:0 0 4px 0;">Use your <strong>exam source booklet</strong> for the passage. Write your answers for the question(s) below.</p>`;
+        if(wsSec.intro) {
+            content += `<h1>${app.escapeHtml(appData.meta.title || "Worksheet")}</h1>`;
+            content += `<p class="tag" style="margin:0 0 4px 0;">Use your <strong>exam source booklet</strong> for the passage. Write your answers for the question(s) below.</p>`;
+        }
         const wsQclean = (p) => (app.cleanQuestionPromptForWorksheet ? app.cleanQuestionPromptForWorksheet(p) : String(p || "").trim()) || String(p || "").trim();
-        if(worksheetHeadingQs && worksheetHeadingQs.length) {
+        if(wsReport) {
+            wsReport.questions = worksheetHeadingQsAll.map(q => {
+                const rawP = String(q.prompt || "").trim();
+                const disp = app.cleanQuestionPromptForDisplay ? String(app.cleanQuestionPromptForDisplay(rawP) || "").trim() : rawP;
+                const printed = wsQclean(rawP);
+                const lab = app.worksheetQuestionHeadingLabel(q);
+                return { id: q.id, label: lab, lineRef: q.lineRef ? String(q.lineRef).trim() : "", raw: rawP, printed,
+                    glueFixed: printed.replace(/\s+/g, " ") !== String(disp).replace(/^\s*\d{1,2}\s*[.)]\s*/, "").replace(/\b(\d)\s+(\d)\b/g, " ").replace(/\s+/g, " ").trim(),
+                    hidden: wsHiddenQ.has(normWsQid(q.id)) };
+            });
+        }
+        if(!wsSec.questions) {
+            /* Worksheet preview → Question headings off */
+        } else if(worksheetHeadingQs && worksheetHeadingQs.length) {
             worksheetHeadingQs.forEach((q) => {
                 const p = String(q.prompt || "").trim();
                 if(!p) return;
@@ -40864,15 +41403,15 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 if(lineRef) heading += ` — Read lines ${lineRef}`;
                 if(marks) heading += `   [${marks} marks]`;
                 content += `<h3 style="margin:12px 0 3px 0;font-size:11pt;">${app.escapeHtml(heading)}</h3>`;
-                content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.escapeHtml(wsQclean(p))}</strong></p>`;
+                if(wsSec.questionText) content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.worksheetPromptHtml(wsQclean(p))}</strong></p>`;
                 const guidance = app.buildWorksheetMarkGuidance ? app.buildWorksheetMarkGuidance(msEntry, selDevWs) : null;
-                if(guidance && guidance.bullets && guidance.bullets.length) {
+                if(wsSec.guidance && guidance && guidance.bullets && guidance.bullets.length) {
                     content += `<p style="font-size:9pt;margin:2px 0 2px 0;font-style:italic;">How to get the marks:</p>`;
                     content += `<ul style="margin:0 0 6px 0;padding-left:18px;font-size:9pt;">` +
                         guidance.bullets.map(b => `<li style="margin:0 0 2px 0;">${app.escapeHtml(b)}</li>`).join("") +
                         `</ul>`;
                 }
-                if(guidance && guidance.starterTable) {
+                if(wsSec.starters && guidance && guidance.starterTable) {
                     const t = guidance.starterTable;
                     content += `<p style="font-size:9pt;margin:2px 0 2px 0;font-style:italic;">Sentence starters:</p>`;
                     content += `<table style="border-collapse:collapse;width:100%;font-size:9pt;margin:0 0 6px 0;">`;
@@ -40883,7 +41422,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     content += `</table>`;
                 }
                 const ruleCount = Math.max(4, Math.min(11, marks || 5));
-                content += `<table style="border-collapse:collapse;width:100%;margin:0 0 12px 0;">` +
+                if(wsSec.writingLines) content += `<table style="border-collapse:collapse;width:100%;margin:0 0 12px 0;">` +
                     Array.from({ length: ruleCount }).map(() => `<tr><td style="border-bottom:1px solid #999;height:20px;">&nbsp;</td></tr>`).join("") +
                     `</table>`;
             });
@@ -40896,6 +41435,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const includeKeyInf = appData.settings.worksheetIncludeAnswerKey === true && (!keyElInf || keyElInf.checked);
         (function emitWorksheetQ1InferenceBlock() {
             if(appData.component === 2) return;
+            if(!wsSec.shortAnswer) return;
             const fq0 = Array.isArray(appData.questions) && appData.questions[0] ? appData.questions[0] : null;
             if(!fq0) return;
             const infModel = String(fq0.worksheetInferenceModel || "").trim();
@@ -40925,10 +41465,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
         })();
         content += `<div class="questions-section">`;
+        let wsSecNum = 0;
         if(!worksheetHasQuotes) {
-            content += `<h3>1. Your response <span style="font-size:8.5pt; font-weight:400; opacity:0.85;">(no suggested quotes — booklet only)</span></h3>`;
+            if(wsSec.writingLines) {
+            content += `<h3>${++wsSecNum}. Your response <span style="font-size:8.5pt; font-weight:400; opacity:0.85;">(no suggested quotes — booklet only)</span></h3>`;
             content += `<p style="margin:0 0 8px 0; font-size:8.5pt; opacity:0.9;">This export has <strong>no</strong> pre-chosen quotations or match tasks — use your <strong>exam source booklet</strong> and the question(s) above. Add quotes to the bank and tick <strong>Include on worksheet</strong> when you want the full match / rubric version.</p>`;
             content += `<div class="dotted" style="min-height:200px; line-height:1.35;">&nbsp;</div>`;
+            }
         } else {
         const matchSelect = document.getElementById("worksheet-match-mode");
         const matchMode = (appData.settings && appData.settings.worksheetMatchMode)
@@ -40953,7 +41496,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             } while(!misaligned(perm) && tries < 200);
             return perm;
         };
-        content += `<h3>1. Match each quote to its meaning</h3>`;
+        if(wsSec.matchMeaning) {
+        content += `<h3>${++wsSecNum}. Match each quote to its meaning</h3>`;
         content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Only quotes for the question(s) above are listed. <strong>Meanings are jumbled</strong> — the text beside each line is <em>not</em> in row order; draw lines to match.</p>`;
         if(matchMode === "list") {
             const shuffled = shuffle(meanings.map(m => app.escapeHtml(m)));
@@ -40975,10 +41519,12 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             });
             content += `</table>`;
         }
+        }
         const pointsCol = included.map(i => worksheetPointText(i));
         const hasPointExercise = pointsCol.some(p => String(p || "").trim().length > 0);
-        if(hasPointExercise) {
-            content += `<h3>2. Match each quote to its point / analysis</h3>`;
+        if(wsReport) wsReport.hasPointExercise = hasPointExercise;
+        if(hasPointExercise && wsSec.matchPoint) {
+            content += `<h3>${++wsSecNum}. Match each quote to its point / analysis</h3>`;
             content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Teacher comments for this task are <strong>jumbled</strong> in the right column — match each quote to the correct point.</p>`;
             const rightPoints = shuffleMatchColumnNoRowAlignment(pointsCol.map(p => String(p || "").trim()));
             content += `<table class="match-table"><colgroup><col style="width:40%"><col style="width:14%"><col style="width:46%"></colgroup>`;
@@ -41002,6 +41548,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         };
         const deviceLabels = included.map(deviceLabel);
         const deviceKeySet = new Set(deviceLabels.map(d => d.toLowerCase()));
+        /* Focus labels / focus-match task follow the quotes actually printing, not the Selection devices switches. */
+        const wsDeviceMix = deviceKeySet.size >= 2;
 
         const scaffoldSelect = document.getElementById("worksheet-scaffold-mode");
         const scaffoldMode = (appData.settings && appData.settings.worksheetScaffoldMode)
@@ -41080,9 +41628,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             });
         };
 
-        const rubricSectionNum = hasPointExercise ? 3 : 2;
+        /* Rubric off (Worksheet preview): still walk the loop so the answer key is built, then drop the rubric HTML. */
+        const contentBeforeRubric = content;
+        const rubricSectionNum = wsSec.rubric ? ++wsSecNum : 0;
         content += `<h3>${rubricSectionNum}. Rubric — fill each sentence element (Level ${level})</h3>`;
-        content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Blue boxes show the <strong>full model wording</strong> saved on each quote (same slots as Sentence Structure). Optional chips are that quote’s distractors only. Empty slots are a single line for students to write.</p>`;
+        content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Shaded boxes show the <strong>full model wording</strong> saved on each quote (same slots as Sentence Structure). Optional chips are that quote’s distractors only. Empty slots are a single line for students to write.</p>`;
 
         let wsSeq = 0;
         included.forEach((item) => {
@@ -41090,7 +41640,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const qNum = wsSeq;
             const quoteDisp = worksheetQuote(item);
             const rubW = qNum > 1 ? "ws-item-sep" : "ws-block";
-            const showDevTag = showWorksheetFocusDeviceMatch;
+            const showDevTag = wsDeviceMix;
             content += `<div class="${rubW}"><p style="margin:0; font-size:10pt;"><strong>${qNum}.</strong> ${app.quoteDisplayHtml(quoteDisp)}${showDevTag ? ` <span style="font-size:8.5pt; opacity:0.85;">(${app.escapeHtml(deviceLabel(item))})</span>` : ""}</p>`;
 
             if(itemIsShortAnswerEvidence(item)) {
@@ -41171,15 +41721,14 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
         });
 
-        if(showWorksheetFocusDeviceMatch) {
-            const focusParts = [];
-            if(selDevWs.language !== false) focusParts.push("language");
-            if(selDevWs.tone === true) focusParts.push("tone");
-            if(selDevWs.structure === true) focusParts.push("structure");
+        if(!wsSec.rubric) content = contentBeforeRubric;
+        if(wsReport) wsReport.showDeviceMatch = wsDeviceMix;
+        if(wsDeviceMix && wsSec.deviceMatch) {
+            const focusParts = ["language", "tone", "structure"].filter(f => deviceKeySet.has(f));
             const focusJoin = focusParts.join(", ");
-            const focusSectionNum = hasPointExercise ? 4 : 3;
+            const focusSectionNum = ++wsSecNum;
             content += `<h3>${focusSectionNum}. Match each quote to its focus (${focusParts.map(f => `<strong>${f}</strong>`).join(" / ")})</h3>`;
-            content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Shown only because <strong>two or more</strong> of Language / Tone / Structure are turned on under Editing suite → Selection devices. Labels in the right column are <strong>jumbled</strong>.</p>`;
+            content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Labels in the right column are <strong>jumbled</strong>.</p>`;
             if(deviceKeySet.size < 2) {
                 content += `<p style="margin:0; font-size:9pt;">On this sheet every quote is tagged as <strong>${app.escapeHtml(deviceLabels[0] || "Language")}</strong>. Mix tone/structure quotes in the bank, or turn off extra devices in settings, if you do not need this task.</p>`;
             } else {
@@ -41207,6 +41756,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
 
         content += `</div>`;
         content += `</body></html>`;
+        if(appData.settings && appData.settings.worksheetTextSize === "large") {
+            /* Large print: Calibri, nothing under 14pt (scaled up proportionally so headings stay bigger than body). */
+            content = content.replace(/font-size:\s*(\d+(?:\.\d+)?)pt/g, (m, n) => "font-size:" + Math.max(14, Math.round(parseFloat(n) * 1.34)) + "pt");
+            content = content.replace("font-family:'Aptos','Calibri',sans-serif;", "font-family:'Calibri','Carlito',sans-serif;");
+            content = content.replace(".sentence-table .writing-cell{min-height:28px; height:28px; max-height:40px;", ".sentence-table .writing-cell{min-height:36px; height:36px; max-height:52px;");
+        }
+        if(opts.returnHtml) return { html: content };
         const b = new Blob(['\ufeff'+content], {type:'application/msword'});
         const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download="Worksheet.doc"; a.click();
     },
