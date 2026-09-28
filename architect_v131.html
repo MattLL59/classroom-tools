@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-28T21:30:00">
-<meta name="architect-deploy" content="drop-focus-tags-structure-prompts">
+<meta name="architect-build" content="2026-09-28T22:30:00">
+<meta name="architect-deploy" content="split-sentence-button-rename">
 <meta name="architect-rev" content="removed-dom-dependent-autoreflow-domfree-fragmentation-check-only">
 <title>Answer Architect (v131)</title>
 <style>
@@ -2396,7 +2396,7 @@
                         </div>
                         <div id="selection-editor-list" style="margin-bottom:12px;"></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0 0; align-items:center;">
-                            <button type="button" class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()" title="Build missing modelAnswer lines from banks, split into fields, then merge phrases into banks">Rebuild missing lines &amp; banks</button>
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()" title="For each quote, split its example answer sentence into parts (opening phrase, technique, analysis, link) and fill any empty Sentence Builder fields. Never overwrites a filled field. New parts are also added to the shared banks; duplicates are skipped.">Split sentence into parts for sentence builder</button>
                         </div>
                         <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.resetSelectionProgress()">Reset selection progress (this device)</button>
@@ -30064,6 +30064,14 @@ const admin = {
             }
         } catch(eHyd) { console.warn("hydrateAdminTabPanel:", eHyd); }
     },
+    /** One run per physical click: a button can be reached by its own listener and by the panel delegate (and by pointerup/mouseup/click). */
+    _adminActionShouldRun: function(el) {
+        if(!el) return false;
+        const now = Date.now();
+        if(el.__tsaAdminLastRun && now - el.__tsaAdminLastRun < 400) return false;
+        el.__tsaAdminLastRun = now;
+        return true;
+    },
     /** Compile and attach listeners for Editing Suite buttons (replaces fragile inline onclick). */
     wireAdminPanelButtons: function(root) {
         root = root || document.getElementById("modal-admin");
@@ -30085,6 +30093,7 @@ const admin = {
             const run = function(ev) {
                 if(ev && ev.type === "mouseup" && ev.button !== 0) return;
                 if(ev && ev.type === "pointerup" && ev.button !== 0) return;
+                if(!admin._adminActionShouldRun(el)) return;
                 const exec = function() {
                     const A = window.admin;
                     const U = window.ui;
@@ -30147,6 +30156,7 @@ const admin = {
             }
             if(ev && ev.type === "mouseup" && ev.button !== 0) return false;
             if(ev && ev.type === "pointerup" && ev.button !== 0) return false;
+            if(!admin._adminActionShouldRun(el)) { if(ev) { ev.preventDefault(); ev.stopPropagation(); } return true; }
             if(ev) { ev.preventDefault(); ev.stopPropagation(); }
             try {
                 const A = window.admin || (typeof admin !== "undefined" ? admin : null);
@@ -30168,12 +30178,16 @@ const admin = {
             if(!el || !adm.contains(el)) return;
             runPanelAction(el, ev);
         };
-        adm.addEventListener("click", handlePanelPointer, true);
-        adm.addEventListener("change", function(ev) {
+        if(admin._panelDelegateHandlers) {
+            adm.removeEventListener("click", admin._panelDelegateHandlers.click, true);
+            adm.removeEventListener("change", admin._panelDelegateHandlers.change, true);
+        }
+        const handlePanelChange = function(ev) {
             const el = ev.target;
             if(!el || !adm.contains(el) || el.dataset.adminWired === "1") return;
             const onAttr = el.getAttribute && el.getAttribute("onchange");
             if(!onAttr || !onAttr.trim()) return;
+            if(!admin._adminActionShouldRun(el)) return;
             try {
                 const A = window.admin || (typeof admin !== "undefined" ? admin : null);
                 const U = window.ui || (typeof ui !== "undefined" ? ui : null);
@@ -30183,7 +30197,10 @@ const admin = {
             } catch(eCh) {
                 console.warn("admin panel change:", onAttr, eCh);
             }
-        }, true);
+        };
+        admin._panelDelegateHandlers = { click: handlePanelPointer, change: handlePanelChange };
+        adm.addEventListener("click", handlePanelPointer, true);
+        adm.addEventListener("change", handlePanelChange, true);
     },
     /** Document capture for close + tabs + keyboard — survives overlay/stacking and blocked main thread on save. */
     bindAdminModalChromeOnce: function() {
@@ -34345,13 +34362,37 @@ const admin = {
     generateAndSplitModelAnswers: (opts = {}) => {
         const overwrite = !!opts.overwrite;
         const items = Array.isArray(appData.items) ? appData.items : [];
-        if(!items.length) return alert("No lesson items to update.");
-        const updated = admin.applyModelAnswersFromItems({ overwrite, generate: true });
-        admin.populateAnalysisBanksFromLessonItems({ silent: true });
+        const notify = (html) => {
+            if(app.showPastPaperExtractNotice) app.showPastPaperExtractNotice(html, { autoHideMs: 12000 });
+            else alert(String(html).replace(/<[^>]+>/g, ""));
+        };
+        if(!items.length) return notify("No quotes in this lesson yet, so there is nothing to split.");
+        const keys = ["marker", "starter", "method", "link", "effect"];
+        const before = items.map(it => it ? { model: String(it.modelAnswer || "").trim(), f: keys.map(k => it[k] || "") } : null);
+        admin.applyModelAnswersFromItems({ overwrite, generate: true });
+        const bankRes = admin.populateAnalysisBanksFromLessonItems({ silent: true }) || { added: 0 };
+        let fields = 0, quotes = 0, built = 0;
+        items.forEach((it, i) => {
+            const b = before[i];
+            if(!it || !b) return;
+            if(!b.model && String(it.modelAnswer || "").trim()) built++;
+            const n = keys.filter((k, ki) => (it[k] || "") !== b.f[ki]).length;
+            if(n) { fields += n; quotes++; }
+        });
+        const bankAdded = bankRes.added || 0;
         app.save();
         admin.renderQuoteList();
         ui.init();
-        alert(`Updated ${updated} / ${items.length} quotes; banks refreshed from model lines.`);
+        if(!fields && !bankAdded && !built) {
+            notify("<strong>Nothing to split.</strong> Every quote's Sentence Builder parts are already filled, and the banks already hold them.");
+            return;
+        }
+        const parts = [];
+        if(built) parts.push(`built ${built} example sentence${built === 1 ? "" : "s"} for quotes that had none`);
+        if(fields) parts.push(`filled ${fields} empty part${fields === 1 ? "" : "s"} on ${quotes} quote${quotes === 1 ? "" : "s"}`);
+        if(bankAdded) parts.push(`added ${bankAdded} new phrase${bankAdded === 1 ? "" : "s"} to the banks`);
+        const msg = parts.join("; ");
+        notify("<strong>Done:</strong> " + msg.charAt(0).toUpperCase() + msg.slice(1) + ". Nothing already filled was changed.");
     },
     setWorksheetMatchMode: (v) => {
         if(!appData.settings) appData.settings = {};
