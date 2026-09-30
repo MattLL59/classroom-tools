@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="architect-build" content="2026-09-28T22:30:00">
-<meta name="architect-deploy" content="split-sentence-button-rename">
+<meta name="architect-build" content="2026-09-28T22:50:00">
+<meta name="architect-deploy" content="quote-bank-tags-opt-in">
 <meta name="architect-rev" content="removed-dom-dependent-autoreflow-domfree-fragmentation-check-only">
 <title>Answer Architect (v131)</title>
 <style>
@@ -33490,6 +33490,7 @@ const admin = {
         }
         app.save({ skipRender: true, silent: true });
         if(userState.view === "select" && ui.renderSelection) ui.renderSelection(null, { skipPassage: true });
+        if(admin.renderQuotesBank) admin.renderQuotesBank();
     },
     setFocusQuestion: (v) => {
         if(!appData) return;
@@ -34731,7 +34732,7 @@ const admin = {
         try {
         if(!appData) { wrap.innerHTML = "<div style='opacity:0.7;'>Load a lesson first.</div>"; return; }
         /* Single quote bank: one list per level — include tick + in-place editing + "More…" (replaces the old cards). */
-        if(admin.renderSingleQuoteBank) { wrap.innerHTML = admin.renderSingleQuoteBank(); return; }
+        if(admin.renderSingleQuoteBank) { wrap.innerHTML = admin.renderSingleQuoteBank(); try { admin._qbSyncDefaultDeviceSelects(); } catch(eDev) {} return; }
         if(admin.ensureSelectionData) admin.ensureSelectionData();
         if(admin.quotesBankViewLevel == null) admin.quotesBankViewLevel = app.getEffectiveLevel ? app.getEffectiveLevel() : 1;
         if(app.syncSelectionQuestionFromLevel) app.syncSelectionQuestionFromLevel();
@@ -34918,6 +34919,8 @@ const admin = {
         const tabsHtml = `<div role="tablist" aria-label="Levels" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">${tabs}</div>`;
         const levelOptions = (cur) => active.map(l => `<option value="${l}" ${l === cur ? "selected" : ""}>Level ${l}${qidFor(l) ? " · " + esc(qShort(qidFor(l))) : ""}</option>`).join("");
         const tagNames = { language: "Language", tone: "Tone", structure: "Structure" };
+        /* Tone / Structure tags only when the teacher has ticked them in Quote Select Menu → Selection Devices. Hidden tags stay saved on the quote. */
+        const tagDevices = admin._qbTagDevices();
         const openKey = admin._qbOpen || "";
         const rowHtml = (it, ctx) => {
             const idx = appData.items.indexOf(it);
@@ -34935,7 +34938,7 @@ const admin = {
             } else if(ctx.range) { note = "Inside " + ctx.rangeTxt; }
             const on = !ctx.unlinked && !!q && app.isQuoteInUseForLevel(it, ctx.lvl);
             const devs = app.getItemDevices(it);
-            const chips = ["language", "tone", "structure"].map(d => {
+            const chips = tagDevices.length < 2 ? "" : tagDevices.map(d => {
                 const pressed = devs.includes(d);
                 return `<button type="button" class="btn btn-small ${pressed ? "btn-primary" : "btn-outline"}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Remove" : "Add"} ${tagNames[d]} tag" onclick="admin.toggleQuoteTag(${idx}, '${d}')" style="min-width:38px; min-height:38px; padding:2px 8px; border-radius:999px;">${tagNames[d].charAt(0)}</button>`;
             }).join("");
@@ -34974,7 +34977,7 @@ const admin = {
                     ${note ? `<span style="font-size:0.82rem; color:${noteColor};">${esc(note)}</span>` : ""}
                 </span>
                 <span style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
-                    <span role="group" aria-label="Tags" style="display:flex; gap:4px;">${chips}</span>
+                    ${chips ? `<span role="group" aria-label="Tags" style="display:flex; gap:4px;">${chips}</span>` : ""}
                     <button type="button" class="btn btn-outline btn-small" aria-expanded="${isOpen ? "true" : "false"}" onclick="admin._qbOpen = (admin._qbOpen === '${attr(key)}' ? '' : '${attr(key)}'); admin.renderQuotesBank();">${isOpen ? "Hide details" : "More…"}</button>
                 </span>
                 ${more}
@@ -35028,7 +35031,7 @@ const admin = {
             </div>
             ${range ? `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem;"><input type="checkbox" ${whole ? "checked" : ""} onchange="admin.setQuestionWholePassageForLevel(${lvl}, this.checked)" style="width:18px; height:18px;"> This question covers the whole passage — quotes outside ${esc(rangeTxt)} can be used</label>` : ""}
         </div>`;
-        const legend = `<div style="font-size:0.8rem; opacity:0.8; margin-top:8px;">Only included quotes reach students on this level. Tags L (Language), T (Tone) and S (Structure) can be combined — they label a quote and never hide it. Meanings are shown to students, so keep them short and plain.</div>`;
+        const legend = `<div style="font-size:0.8rem; opacity:0.8; margin-top:8px;">Only included quotes reach students on this level. ${tagDevices.length >= 2 ? "Tags " + tagDevices.map(d => tagNames[d].charAt(0) + " (" + tagNames[d] + ")").join(", ").replace(/, ([^,]*)$/, " and $1") + " can be combined — they label a quote and never hide it. " : ""}Meanings are shown to students, so keep them short and plain.</div>`;
         return tabsHtml + header + `<div style="display:flex; flex-direction:column; gap:6px;">${rows}</div>` + legend;
     },
     /** Edit one field from the quote bank row, then refresh checks and counts. */
@@ -35092,6 +35095,8 @@ const admin = {
         const rows = pool.slice().sort((a, b) => ((Number.isFinite(a.start) ? a.start : 1e9) - (Number.isFinite(b.start) ? b.start : 1e9)) || (a.n - b.n));
         let ticked = 0;
         const tagNames = { language: "Language", tone: "Tone", structure: "Structure" };
+        /* Tone / Structure tags only when the teacher has ticked them in Quote Select Menu → Selection Devices. Hidden tags stay saved on the quote. */
+        const tagDevices = admin._qbTagDevices();
         const rowHtml = rows.map(o => {
             const item = o.item;
             const idx = appData.items.indexOf(item);
@@ -35104,7 +35109,7 @@ const admin = {
             else if(!o.inLines && whole) { note = "Outside " + rangeTxt + " — fine, the question covers the whole passage"; noteColor = "inherit"; }
             else if(!o.inLines) { note = "Outside " + rangeTxt + " — students won’t see it on this level"; noteColor = "var(--error)"; }
             const devs = app.getItemDevices(item);
-            const chips = ["language", "tone", "structure"].map(d => {
+            const chips = tagDevices.length < 2 ? "" : tagDevices.map(d => {
                 const pressed = devs.includes(d);
                 return `<button type="button" class="btn btn-small ${pressed ? "" : "btn-outline"}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Remove" : "Add"} ${tagNames[d]} tag" onclick="admin.toggleQuoteTag(${idx}, '${d}')" style="min-width:34px; padding:2px 8px;">${tagNames[d].charAt(0)}</button>`;
             }).join("");
@@ -35117,7 +35122,7 @@ const admin = {
                     ${item.translation ? `<span style="font-size:0.85rem; opacity:0.75;">${esc(item.translation)}</span>` : ""}
                     ${note ? `<span style="font-size:0.85rem; color:${noteColor};">${esc(note)}</span>` : ""}
                 </span>
-                <span style="display:flex; gap:4px;" role="group" aria-label="Tags">${chips}</span>
+                ${chips ? `<span style="display:flex; gap:4px;" role="group" aria-label="Tags">${chips}</span>` : `<span></span>`}
             </div>`;
         }).join("");
         const status = !pool.length
@@ -35182,6 +35187,23 @@ const admin = {
             }
         });
         admin._afterStudentQuotePicksChange();
+    },
+    /** Devices the teacher has switched on in Quote Select Menu → Selection Devices (Tone/Structure are opt-in). */
+    _qbTagDevices: function() {
+        const d = appData && appData.settings && appData.settings.selectionDevices && typeof appData.settings.selectionDevices === "object" ? appData.settings.selectionDevices : {};
+        return ["language", "tone", "structure"].filter(k => k === "language" ? d.language !== false : d[k] === true);
+    },
+    /** More tools → Global defaults → Device: only offer switched-on devices; hide the control when there is only one. */
+    _qbSyncDefaultDeviceSelects: function() {
+        const on = admin._qbTagDevices();
+        ["quotes-bank-default-device", "quotes-bank-default-device-diff"].forEach(id => {
+            const sel = document.getElementById(id);
+            if(!sel) return;
+            Array.from(sel.options).forEach(o => { o.hidden = !on.includes(o.value); o.disabled = !on.includes(o.value); });
+            if(!on.includes(sel.value) && on.length) sel.value = on[0];
+            const lab = sel.closest("label");
+            if(lab) lab.style.display = on.length < 2 ? "none" : "flex";
+        });
     },
     toggleQuoteTag: function(idx, device) {
         const item = appData.items[idx];
