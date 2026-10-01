@@ -1899,8 +1899,8 @@
         <div class="header-controls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <div id="header-c2-source-bar" class="hidden" style="gap:6px; align-items:center; padding-right:8px; border-right:1px solid var(--border); margin-right:4px;">
                 <span style="font-size:0.8rem; font-weight:600; white-space:nowrap;">Source:</span>
-                <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st')" style="padding:3px 8px; font-size:0.8rem;">21st C</button>
-                <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th')" style="padding:3px 8px; font-size:0.8rem;">19th C</button>
+                <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st', { fromStudent: true })" style="padding:3px 8px; font-size:0.8rem;">21st C</button>
+                <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th', { fromStudent: true })" style="padding:3px 8px; font-size:0.8rem;">19th C</button>
             </div>
             <button type="button" class="icon-btn" id="btn-help" title="Help">❓</button>
             <button type="button" class="icon-btn" id="btn-theme" title="Theme colours">🎨</button>
@@ -2060,8 +2060,8 @@
                     <summary>Source Text (Tap to collapse)</summary>
                     <div id="architect-c2-source-bar" class="hidden" style="gap:6px; align-items:center; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
                         <span style="font-size:0.85rem; font-weight:600;">View:</span>
-                        <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st')" style="padding:4px 10px; font-size:0.85rem;">21st C (Resource)</button>
-                        <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th')" style="padding:4px 10px; font-size:0.85rem;">19th C (Q p3)</button>
+                        <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st', { fromStudent: true })" style="padding:4px 10px; font-size:0.85rem;">21st C (Resource)</button>
+                        <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th', { fromStudent: true })" style="padding:4px 10px; font-size:0.85rem;">19th C (Q p3)</button>
                     </div>
                     <div id="source-lab-wrap" style="position:relative; min-height:0;">
                         <div id="reader-window-lab" class="reader-window hidden"><div class="reader-window-line"></div></div>
@@ -2122,8 +2122,8 @@
         <div id="view-select-body" style="padding:15px; display:flex; flex-direction:column; flex:1; min-height:0;">
             <div id="architect-c2-source-bar-select" class="hidden" style="gap:6px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
                 <span style="font-size:0.85rem; font-weight:600;">Source view:</span>
-                <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st')" style="padding:4px 10px; font-size:0.85rem;">21st C</button>
-                <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th')" style="padding:4px 10px; font-size:0.85rem;">19th C</button>
+                <button type="button" class="btn btn-outline btn-small" data-c2view="21st" onclick="admin.setArchitectC2SourceView('21st', { fromStudent: true })" style="padding:4px 10px; font-size:0.85rem;">21st C</button>
+                <button type="button" class="btn btn-outline btn-small" data-c2view="19th" onclick="admin.setArchitectC2SourceView('19th', { fromStudent: true })" style="padding:4px 10px; font-size:0.85rem;">19th C</button>
             </div>
             <div id="teacher-passage-setup-banner" class="hidden" style="margin-bottom:10px;"></div>
             <div id="teacher-passage-pick-toolbar" class="hidden" style="margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(0,150,136,0.06); font-size:0.8rem;">
@@ -33497,6 +33497,70 @@ const admin = {
             if(typeof ui.refreshSourceDisplay === "function") ui.refreshSourceDisplay(disp);
         }
         if(typeof app.save === "function") app.save();
+        if(opts && opts.fromStudent && prevView !== view && typeof admin.matchQuestionToC2SourceView === "function") admin.matchQuestionToC2SourceView(view);
+    },
+    /** Which C2 passage a level's question is about: Level Bank → C2 when set to one text, else inferred from the question wording. */
+    getC2PassageForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        const bank = app.getLevelBank ? app.getLevelBank() : null;
+        const entry = bank && bank[lvl] ? bank[lvl] : {};
+        if(entry.c2Source === "21st" || entry.c2Source === "19th") return entry.c2Source;
+        let inferred = null;
+        try {
+            const prompt = app.getQuestionForLevel ? app.getQuestionForLevel(lvl) : "";
+            inferred = prompt && admin.inferC2SourceForFocusQuestion ? admin.inferC2SourceForFocusQuestion(prompt) : null;
+        } catch(eInf) {}
+        if(inferred === "21st" || inferred === "19th") return inferred;
+        return "both";
+    },
+    /** Student switched 21st C / 19th C: move to a question about that text when the current one is about the other text. */
+    matchQuestionToC2SourceView: function(view) {
+        try {
+            if(!appData || appData.component !== 2) return;
+            if(!admin.hasC2DualSource || !admin.hasC2DualSource()) return;
+            const label = (v) => v === "19th" ? "19th-century text" : "21st-century text";
+            const cur = (app.getEffectiveLevel && app.getEffectiveLevel()) || userState.level || 1;
+            const curPassage = admin.getC2PassageForLevel(cur);
+            if(curPassage === view || curPassage === "both") return;
+            const levels = (app.getActiveLevels && app.getActiveLevels()) || [];
+            const matches = levels.filter(l => l !== cur && admin.getC2PassageForLevel(l) === view);
+            const before = matches.filter(l => l < cur);
+            const target = matches.find(l => l > cur) || before[before.length - 1];
+            if(!target) {
+                admin.showStudentNotice("There isn't a question about the " + label(view) + " in this lesson yet, so your question is still about the " + label(curPassage) + ".");
+                admin.setArchitectC2SourceView(curPassage, { skipFlush: true });
+                return;
+            }
+            if(!(app.isFreeQuestionNavigation && app.isFreeQuestionNavigation())) {
+                admin.showStudentNotice("You can read the " + label(view) + ", but your current question is about the " + label(curPassage) + ". You'll move on to the " + label(view) + " questions when you finish this one.");
+                return;
+            }
+            const picked = Array.isArray(userState.selectionChosen) ? userState.selectionChosen.length : 0;
+            if(picked && !confirm("Move to the question about the " + label(view) + "?\n\nThe quotes you have picked for this question will be cleared (your written answer is kept).")) {
+                admin.setArchitectC2SourceView(curPassage, { skipFlush: true });
+                return;
+            }
+            app.setLevel(target);
+            admin.showStudentNotice("Now on the question about the " + label(view) + ".");
+        } catch(eMatch) { console.warn("matchQuestionToC2SourceView:", eMatch); }
+    },
+    /** Small self-dismissing notice for the student views (the Settings toast is only visible inside Teacher Settings). */
+    showStudentNotice: function(msg) {
+        try {
+            let el = document.getElementById("architect-student-notice");
+            if(!el) {
+                el = document.createElement("div");
+                el.id = "architect-student-notice";
+                el.setAttribute("role", "status");
+                el.style.cssText = "position:fixed; left:50%; top:calc(12px + env(safe-area-inset-top, 0px)); transform:translateX(-50%); z-index:9999; max-width:min(92vw, 560px); padding:10px 14px; border-radius:8px; background:var(--card, #fff); color:var(--text, inherit); border:1px solid var(--primary, #009688); box-shadow:0 4px 16px rgba(0,0,0,0.18); font-size:0.9rem; line-height:1.4; cursor:pointer;";
+                el.onclick = function() { el.style.display = "none"; };
+                document.body.appendChild(el);
+            }
+            el.textContent = String(msg || "");
+            el.style.display = "block";
+            if(admin._studentNoticeTimer) clearTimeout(admin._studentNoticeTimer);
+            admin._studentNoticeTimer = setTimeout(function() { el.style.display = "none"; }, 6000);
+        } catch(eN) {}
     },
     syncArchitectC2SourceBar: function() {
         const layout = appData && appData.component2Layout ? appData.component2Layout : {};
