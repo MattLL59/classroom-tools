@@ -2389,7 +2389,9 @@
                         <div id="selection-editor-list" style="margin-bottom:12px;"></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0 0; align-items:center;">
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()" title="For each quote, split its example answer sentence into parts (opening phrase, technique, analysis, link) and fill any empty Sentence Builder fields. Never overwrites a filled field. New parts are also added to the shared banks; duplicates are skipped.">Split sentence into parts for sentence builder</button>
+                            <button type="button" class="btn btn-outline btn-small" onclick="admin.toggleSplitPartsPreview()" id="btn-split-parts-preview" title="Show each quote's Sentence Builder parts, with a button to try any quote in the Sentence Builder.">Show parts</button>
                         </div>
+                        <div id="split-parts-preview" class="hidden" style="margin-top:10px;"></div>
                         <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.resetSelectionProgress()">Reset selection progress (this device)</button>
                             <div style="font-size:0.78rem; opacity:0.75; margin-top:6px;">Clears chosen quotes, desk queue, and related session state for Quote Select / desk.</div>
@@ -34394,9 +34396,18 @@ const admin = {
             if(n) { fields += n; quotes++; }
         });
         const bankAdded = bankRes.added || 0;
+        const changed = {};
+        items.forEach((it, i) => {
+            const b = before[i];
+            if(!it || !b) return;
+            const set = keys.filter((k, ki) => (it[k] || "") !== b.f[ki]);
+            if(!b.model && String(it.modelAnswer || "").trim()) set.push("modelAnswer");
+            if(set.length) changed[i] = set;
+        });
         app.save();
         admin.renderQuoteList();
         ui.init();
+        if(admin.renderSplitPartsPreview) admin.renderSplitPartsPreview({ changed, open: true });
         if(!fields && !bankAdded && !built) {
             notify("<strong>Nothing to split.</strong> Every quote's Sentence Builder parts are already filled, and the banks already hold them.");
             return;
@@ -34406,7 +34417,100 @@ const admin = {
         if(fields) parts.push(`filled ${fields} empty part${fields === 1 ? "" : "s"} on ${quotes} quote${quotes === 1 ? "" : "s"}`);
         if(bankAdded) parts.push(`added ${bankAdded} new phrase${bankAdded === 1 ? "" : "s"} to the banks`);
         const msg = parts.join("; ");
-        notify("<strong>Done:</strong> " + msg.charAt(0).toUpperCase() + msg.slice(1) + ". Nothing already filled was changed.");
+        notify("<strong>Done:</strong> " + msg.charAt(0).toUpperCase() + msg.slice(1) + ". Nothing already filled was changed. New parts are highlighted in the list under the button — use <strong>Try in Sentence Builder</strong> on any quote to see it as students will.");
+    },
+    /** Quote select tab: show each quote's Sentence Builder parts (after Split, or on demand). opts.changed = { itemIndex: [fieldKeys] } highlights newly filled cells. */
+    renderSplitPartsPreview: function(opts) {
+        opts = opts || {};
+        const mount = document.getElementById("split-parts-preview");
+        if(!mount) return;
+        if(opts.open) mount.classList.remove("hidden");
+        const btn = document.getElementById("btn-split-parts-preview");
+        if(btn) btn.textContent = mount.classList.contains("hidden") ? "Show parts" : "Hide parts";
+        if(opts.changed) admin._splitPartsChanged = opts.changed;
+        const changed = admin._splitPartsChanged || {};
+        const items = Array.isArray(appData.items) ? appData.items : [];
+        const esc = (t) => app.escapeHtml ? app.escapeHtml(String(t == null ? "" : t)) : String(t == null ? "" : t);
+        const first = (it, one, many) => it[one] || (Array.isArray(it[many]) && it[many].length ? it[many][0] : "") || "";
+        const quoteText = (it) => {
+            const o = it.original;
+            return String((o && typeof o === "object" && "quote" in o ? o.quote : o) || it.quote || "").trim();
+        };
+        const cols = [["marker", "markers", "Marker"], ["starter", "starters", "Starter"], ["method", "methods", "Method"], ["link", "links", "Link"], ["effect", null, "Analysis"]];
+        const rows = [];
+        items.forEach((it, i) => {
+            if(!it || !quoteText(it)) return;
+            const ch = changed[i] || [];
+            const cell = (val, isNew) => `<td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top;${isNew ? " background:rgba(76,175,80,0.16);" : ""}">${val ? esc(val) : '<span style="opacity:0.45;">—</span>'}</td>`;
+            const model = String(it.modelAnswer || "").trim();
+            rows.push(`<tr>
+                <td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top; max-width:16em;">
+                    <div style="font-weight:600;">&ldquo;${esc(quoteText(it))}&rdquo;</div>
+                    ${model ? `<div style="font-size:0.78rem; opacity:0.8; margin-top:3px;${ch.includes("modelAnswer") ? " background:rgba(76,175,80,0.16);" : ""}">${esc(model)}</div>` : ""}
+                    <button type="button" class="btn btn-primary btn-small" style="margin-top:6px;" onclick="admin.previewQuoteInSentenceBuilder(${i})">Try in Sentence Builder</button>
+                </td>
+                ${cols.map(c => cell(c[1] ? first(it, c[0], c[1]) : (it[c[0]] || ""), ch.includes(c[0]))).join("")}
+            </tr>`);
+        });
+        if(!rows.length) {
+            mount.innerHTML = `<div style="font-size:0.82rem; opacity:0.8;">No quotes in this lesson yet.</div>`;
+            return;
+        }
+        const anyNew = Object.keys(changed).length > 0;
+        mount.innerHTML = `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Edit any part in the <strong>Quote bank</strong> tab.</div>
+            <div style="overflow-x:auto; border:1px solid var(--border); border-radius:6px;">
+                <table style="border-collapse:collapse; width:100%; font-size:0.8rem;">
+                    <thead><tr>${["Quote", ...cols.map(c => c[2])].map(h => `<th style="text-align:left; padding:4px 6px; white-space:nowrap;">${h}</th>`).join("")}</tr></thead>
+                    <tbody>${rows.join("")}</tbody>
+                </table>
+            </div>`;
+    },
+    toggleSplitPartsPreview: function() {
+        const mount = document.getElementById("split-parts-preview");
+        if(!mount) return;
+        if(mount.classList.contains("hidden")) admin.renderSplitPartsPreview({ open: true });
+        else {
+            mount.classList.add("hidden");
+            const btn = document.getElementById("btn-split-parts-preview");
+            if(btn) btn.textContent = "Show parts";
+        }
+    },
+    /** Close Settings and open the Writing Desk Sentence Builder on one quote, at the current level (teacher preview — no XP). */
+    previewQuoteInSentenceBuilder: function(idx) {
+        const it = (appData.items || [])[idx];
+        if(!it) return;
+        const o = it.original;
+        const q = String((o && typeof o === "object" && "quote" in o ? o.quote : o) || it.quote || "").trim();
+        if(!q) return;
+        const lvl = (app.getEffectiveLevel && app.getEffectiveLevel()) || userState.level || 1;
+        const noBuilder = (app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl))
+            || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl))
+            || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl))
+            || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl));
+        if(noBuilder) {
+            alert("Level " + lvl + " is a short-answer / own-words level, so students don't use the Sentence Builder there.\n\nSwitch the app to a level that uses quotes and analysis, then try again.");
+            return;
+        }
+        try { if(typeof window.__tsaEmergencyCloseAdmin === "function") window.__tsaEmergencyCloseAdmin(); } catch(eClose) {}
+        setTimeout(function() {
+            const realAward = app.awardXp;
+            try {
+                const item = (ui.ensureQuoteItem && ui.ensureQuoteItem(q)) || it;
+                if(!Array.isArray(userState.deskQueue)) userState.deskQueue = [];
+                if(!userState.deskQueue.some(x => app.quoteTextsMatch ? app.quoteTextsMatch(x, q) : x === q)) userState.deskQueue.push(q);
+                app.save();
+                ui.switchView("desk", true);
+                app.awardXp = function() {};
+                if(ui.runBuilder) ui.runBuilder(item);
+                if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
+                if(ui.setupDeskDragDrop) ui.setupDeskDragDrop();
+            } catch(ePrev) {
+                console.warn("previewQuoteInSentenceBuilder:", ePrev);
+                alert("Could not open the Sentence Builder for that quote. Try again, or refresh the page.");
+            } finally {
+                app.awardXp = realAward;
+            }
+        }, 150);
     },
     setWorksheetMatchMode: (v) => {
         if(!appData.settings) appData.settings = {};
