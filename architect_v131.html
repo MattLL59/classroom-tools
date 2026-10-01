@@ -3264,7 +3264,62 @@ const app = {
      * Must not strip years/ordinals like "19th-century" — require whitespace (or ". " / ") ") after the digits. */
     stripLineNumbersFromQuote: function(text) {
         if(!text || typeof text !== "string") return text || "";
-        return text.split(/\r?\n/).map(line => line.replace(/^\s*\d+(?:\.\s+|\)\s+|\s+)/, "")).join("\n").trim();
+        return text.split(/\r?\n/).map(line => {
+            const m = line.match(/^\s*(\d+)(?:\.\s+|\)\s+|\s+)(.*)$/);
+            if(!m) return line;
+            /* Keep numbers that are really in the passage ("500 metres away") — only strip booklet line-number prefixes. */
+            if(app.quoteLeadingNumberIsPassageText && app.quoteLeadingNumberIsPassageText(m[1], m[2])) return line.replace(/^\s+/, "");
+            return m[2];
+        }).join("\n").trim();
+    },
+    /** Lower-case, whitespace-collapsed, straight-quote form for passage/quote comparison. */
+    _normForPassageMatch: function(t) {
+        return String(t || "").replace(/[\u2018\u2019\u2032]/g, "'").replace(/[\u201c\u201d\u2033]/g, "\"").replace(/[\u2013\u2014]/g, "-").replace(/\u00a0/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
+    },
+    /** Passage reading text with booklet line-number prefixes removed (cached). Used to tell real numbers in a quote from gutter numbers. */
+    getPassageReadingTextNormalized: function() {
+        try {
+            if(typeof appData === "undefined" || !appData) return "";
+            const L = appData.component2Layout || {};
+            const sel = appData.selection && appData.selection.text && appData.selection.text.source;
+            const raws = [sel || "", appData.sourceText || "", L.resourcePaperText || "", L.questionPaperPage3Text || ""].map(String);
+            const key = raws.join("\u0001");
+            if(app._passageReadNormKey === key) return app._passageReadNorm || "";
+            const seen = new Set();
+            const parts = [];
+            raws.forEach(raw => {
+                const t = raw.trim();
+                if(!t || seen.has(t)) return;
+                seen.add(t);
+                if(app.isStructuredPassageSource && app.isStructuredPassageSource(t)) {
+                    const o = app.parseStructuredPassageSource ? app.parseStructuredPassageSource(t) : null;
+                    if(o && Array.isArray(o.lines)) {
+                        parts.push(o.lines.map(Ln => app.htmlFragmentToPlainText ? app.htmlFragmentToPlainText(Ln.html || "") : String(Ln.html || "").replace(/<[^>]*>/g, " ")).join(" "));
+                    }
+                    return;
+                }
+                let plain = app.cleanSourceText ? app.cleanSourceText(t) : t;
+                let lines = String(plain || "").split(/\n/);
+                lines = lines.map(l => l.replace(/^\s*\d{1,4}[.)]\s+/, ""));
+                const nonEmpty = lines.filter(l => l.trim());
+                const bareNumbered = nonEmpty.filter(l => /^\s*\d{1,4}\s+\S/.test(l)).length;
+                if(nonEmpty.length >= 4 && bareNumbered / nonEmpty.length >= 0.5) lines = lines.map(l => l.replace(/^\s*\d{1,4}\s+/, ""));
+                parts.push(lines.join(" "));
+            });
+            app._passageReadNormKey = key;
+            app._passageReadNorm = app._normForPassageMatch(parts.join(" \n "));
+            return app._passageReadNorm;
+        } catch(e) { return ""; }
+    },
+    /** True when "<digits> <rest>" at the start of a quote line also appears in the passage, i.e. the number is part of the text. */
+    quoteLeadingNumberIsPassageText: function(digits, rest) {
+        const passage = app.getPassageReadingTextNormalized ? app.getPassageReadingTextNormalized() : "";
+        if(!passage) return false;
+        const words = app._normForPassageMatch(rest).split(" ").filter(Boolean);
+        if(!words.length) return false;
+        /* Number plus up to the next three words, trailing punctuation trimmed: "500 metres away" */
+        const probe = (digits + " " + words.slice(0, 3).join(" ")).replace(/[.,;:!?)"']+$/, "");
+        return passage.indexOf(probe) >= 0;
     },
     /** Stable key for selectionJustification (strip line prefixes so a tap matches the same quote as the bank). */
     justificationKeyForQuoteText: function(quoteText) {
@@ -30926,9 +30981,30 @@ const admin = {
     /** Strip exam-style "12. " / "12 " line prefixes from PDF layout text before storing C2 passages (avoids double line-number chrome). */
     stripExamLineNumberPrefixes: function(text) {
         if(!text || typeof text !== "string") return "";
-        return text.replace(/\r\n/g, "\n").split("\n").map(function(l) {
-            return l.replace(/^\s*\d{1,3}[.)]\s+/, "").replace(/^\s*\d{1,2}\s+(?=[A-Za-z“"‘'(\[])/, "").trimEnd();
-        }).join("\n").trim();
+        const lines = text.replace(/\r\n/g, "\n").split("\n").map(function(l) { return l.replace(/^\s*\d{1,3}[.)]\s+/, ""); });
+        /* Bare "12 Text" prefixes: only strip numbers that run in sequence with other numbered lines (real line numbers),
+           so a printed line that genuinely starts with a number ("50 metres away…") keeps it. */
+        const bareRe = /^\s*(\d{1,2})\s+(?=[A-Za-z“"‘'(\[])/;
+        const cand = [];
+        let pos = 0;
+        lines.forEach(function(l, i) {
+            if(!l.trim()) return;
+            const m = l.match(bareRe);
+            if(m) cand.push({ i: i, pos: pos, n: parseInt(m[1], 10) });
+            pos++;
+        });
+        const isSeq = function(a) {
+            return cand.some(function(b) {
+                if(b === a) return false;
+                const dPos = b.pos - a.pos;
+                if(Math.abs(dPos) > 12) return false;
+                return Math.abs((b.n - a.n) - dPos) <= 1 && Math.sign(b.n - a.n) === Math.sign(dPos);
+            });
+        };
+        cand.forEach(function(c) {
+            if(isSeq(c)) lines[c.i] = lines[c.i].replace(bareRe, "");
+        });
+        return lines.map(function(l) { return l.trimEnd(); }).join("\n").trim();
     },
     /**
      * C2 / question-paper PDF: drop a line that is *only* a 1-2 digit folio or page number (e.g. "3" in the margin) and
