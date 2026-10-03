@@ -20076,12 +20076,16 @@ const app = {
                 const start = q.passageStartAnchor ? String(q.passageStartAnchor).trim() : "";
                 const end = q.passageEndAnchor ? String(q.passageEndAnchor).trim() : "";
                 const lr = typeof app._effectiveQuestionLineRef === "function" ? app._effectiveQuestionLineRef(q) : (q.lineRef ? String(q.lineRef).trim() : "");
-                return !(start && end) && !lr;
+                if(start && end) return false;
+                if(lr) return false;
+                return !(app.questionCoversWholePassage && app.questionCoversWholePassage(q.id));
             });
         }
+        /* No "excerpts" step any more: extraction already sets line ranges from "Read lines x–y", and a question
+           without one simply shows the whole passage. needsExcerptSetup stays as information only; each such
+           question gets a quiet note on its Questions-tab row, with Pick excerpt beside it. */
         let step = "done";
         if(needsLineLayout) step = "lines";
-        else if(needsExcerptSetup) step = "excerpts";
         return { step: step, hasSource: hasSource, needsLineLayout: needsLineLayout, needsExcerptSetup: needsExcerptSetup, questionCount: focusQs.length };
     },
     getNoPassageNoticeHtml: function() {
@@ -21701,12 +21705,6 @@ const ui = {
                 + "<div style=\"opacity:0.92;margin-bottom:10px;\">" + guide + "</div>"
                 + "<button type=\"button\" class=\"btn btn-primary btn-small\" onclick=\"if(typeof ui.openPassageLineEditorFromSetup==='function')ui.openPassageLineEditorFromSetup();return false;\">Open passage editor</button>"
                 + "</div>";
-        } else if(st.step === "excerpts") {
-            el.innerHTML = "<div style=\"padding:12px 14px;border:2px solid #5c6bc0;border-radius:8px;background:rgba(92,107,192,0.08);font-size:0.88rem;line-height:1.45;\">"
-                + dismiss
-                + "<div style=\"font-weight:700;font-size:0.95rem;margin-bottom:6px;\">Step 2 — Assign each question its passage excerpt (Quote Select / Lab)</div>"
-                + "<div style=\"opacity:0.92;\">Booklet lines are set. Highlight words in the <strong>numbered passage below</strong> (not in Settings), then use <strong>Mark start</strong> / <strong>Mark end</strong> / <strong>Apply excerpt</strong>. Repeat for each focus question.</div>"
-                + "</div>";
         }
         if(typeof ui.syncTeacherPassageLayoutBar === "function") ui.syncTeacherPassageLayoutBar();
     },
@@ -21904,10 +21902,6 @@ const ui = {
         }
         if(userState && userState.view !== "select" && typeof ui.switchView === "function") ui.switchView("select", true);
         if(!dismissed && typeof ui.renderTeacherPassageSetupBanner === "function") ui.renderTeacherPassageSetupBanner(st);
-        if(st.step === "excerpts") {
-            /* Do not auto-enter excerpt pick mode on load — it hid Whole/Question-focused and trapped teachers in a slice. Use the banner / toolbar when ready. */
-            if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
-        }
         if(typeof ui.renderTeacherPassagePickToolbar === "function") ui.renderTeacherPassagePickToolbar();
         if(typeof ui.refreshAllPassageDisplays === "function") ui.refreshAllPassageDisplays();
     },
@@ -22110,7 +22104,7 @@ const ui = {
         const lvl = level || (app.getEffectiveLevel ? app.getEffectiveLevel() : (userState && userState.level) || 1);
         const setupSt = app.getTeacherPassageSetupStatus && app.getTeacherPassageSetupStatus();
         const linesFirst = !!(setupSt && setupSt.step === "lines");
-        const pickOn = !linesFirst && (!!app._teacherLinePickMode || !!(setupSt && setupSt.step === "excerpts"));
+        const pickOn = !linesFirst && !!app._teacherLinePickMode;
         if(linesFirst) {
             bar.classList.add("hidden");
             if(typeof ui.syncTeacherPassageLayoutBar === "function") ui.syncTeacherPassageLayoutBar();
@@ -33841,6 +33835,15 @@ const admin = {
         }
         row.appendChild(removeBtn);
         outer.appendChild(row);
+        if(showLineRef && !String(lineRefShow || "").trim() && !(q && String(q.passageStartAnchor || "").trim() && String(q.passageEndAnchor || "").trim())) {
+            const noLinesNote = document.createElement("div");
+            noLinesNote.className = "question-no-lines-note";
+            noLinesNote.style.cssText = "width:100%; margin-top:4px; font-size:0.78rem; opacity:0.85; line-height:1.35;";
+            noLinesNote.textContent = (app.questionCoversWholePassage && app.questionCoversWholePassage(qid))
+                ? "Whole-passage question — students see the whole passage."
+                : "No line range — students see the whole passage. Type lines or use Pick excerpt if this question is about one part.";
+            outer.appendChild(noLinesNote);
+        }
         if(showLineRef) {
             const anchorRow = document.createElement("div");
             anchorRow.className = "question-passage-anchor-row";
