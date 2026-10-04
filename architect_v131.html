@@ -3790,9 +3790,32 @@ const app = {
      * The level's quote pool with where each quote sits in the passage — used by the teacher's "Students see" list.
      * @returns {Array<{item:Object, found:boolean, start:(number|null), end:(number|null), inLines:boolean}>}
      */
+    /**
+     * Passage text to search when deciding whether a level's quotes are "in the passage" (suggested picks, quote counts).
+     * Component 2 "both texts" levels search BOTH passages — not just the one the student toggled to — so switching the
+     * 21st C / 19th C view no longer makes the other text's quotes vanish (which emptied quote choices and stuck-help
+     * meanings/hints). Other levels use that level's own text rather than whichever level the app is showing.
+     */
+    getQuoteSearchTextForLevel: function(level) {
+        const lvl = parseInt(level, 10) || 1;
+        try {
+            if(typeof admin !== "undefined" && admin.hasC2DualSource && admin.hasC2DualSource()) {
+                const entry = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
+                const mode = (entry.c2Source === "21st" || entry.c2Source === "19th") ? entry.c2Source : "both";
+                if(mode === "both") {
+                    const parts = admin.getC2ResourceParts ? admin.getC2ResourceParts() : {};
+                    const p1 = String((parts && parts.twentyFirst) || "").trim();
+                    const p2 = String((parts && parts.nineteenth) || "").trim();
+                    if(p1 || p2) return [p1, p2].filter(Boolean).join("\n\n");
+                }
+                if(app.getSourceTextForLevel) return app.getSourceTextForLevel(lvl) || "";
+            }
+        } catch(eSrc) {}
+        return app.getSourceText ? app.getSourceText() : (appData.sourceText || "");
+    },
     getQuotePoolForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
-        const src = app.getSourceText ? app.getSourceText() : (appData.sourceText || "");
+        const src = app.getQuoteSearchTextForLevel ? app.getQuoteSearchTextForLevel(lvl) : (app.getSourceText ? app.getSourceText() : (appData.sourceText || ""));
         const hasSrc = !!String(src || "").trim();
         let range = null;
         try { const w = app.resolveQuoteSelectLineWindow(lvl); range = w && w.lineRange; } catch(e) {}
@@ -3808,7 +3831,7 @@ const app = {
     getSuggestedQuotePicksForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
         const items = app._quotePoolItems();
-        const src = app.getSourceText ? app.getSourceText() : (appData.sourceText || "");
+        const src = app.getQuoteSearchTextForLevel ? app.getQuoteSearchTextForLevel(lvl) : (app.getSourceText ? app.getSourceText() : (appData.sourceText || ""));
         const target = app.getQuoteTargetForLevel ? app.getQuoteTargetForLevel(lvl) : 4;
         const whole = app.questionCoversWholePassageForLevel(lvl);
         const key = [target, whole ? 1 : 0, String(src).length, app.shouldLinkQuotesToExamQuestions && app.shouldLinkQuotesToExamQuestions() ? 1 : 0,
