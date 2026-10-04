@@ -34646,24 +34646,38 @@ const admin = {
         const o = it.original;
         const q = String((o && typeof o === "object" && "quote" in o ? o.quote : o) || it.quote || "").trim();
         if(!q) return;
-        const lvl = (app.getEffectiveLevel && app.getEffectiveLevel()) || userState.level || 1;
-        const noBuilder = (app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(lvl))
-            || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(lvl))
-            || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(lvl))
-            || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(lvl));
-        if(noBuilder) {
-            alert("Level " + lvl + " is a short-answer / own-words level, so students don't use the Sentence Builder there.\n\nSwitch the app to a level that uses quotes and analysis, then try again.");
+        const curLvl = parseInt((app.getEffectiveLevel && app.getEffectiveLevel()) || userState.level || 1, 10) || 1;
+        const noBuilderAt = (l) => !!((app.isQuoteOnlyShortAnswerLevel && app.isQuoteOnlyShortAnswerLevel(l))
+            || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(l))
+            || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(l))
+            || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(l)));
+        /* Open at a level this quote is actually on (the parts-table filter level first, then the current level),
+           not just whatever level the app happens to be showing. A quote on no level falls back to the current level. */
+        const active = (app.getActiveLevels && app.getActiveLevels().length) ? app.getActiveLevels() : [curLvl];
+        const onLevels = (it.correct === false) ? [] : active.filter(l => app.quoteItemLinkedToLevel && app.quoteItemLinkedToLevel(it, l));
+        const filterLvl = parseInt(admin._splitPartsLevelFilter, 10) || 0;
+        const order = [];
+        [filterLvl, curLvl].concat(onLevels).forEach(l => { if(l && !order.includes(l) && (!onLevels.length || onLevels.includes(l))) order.push(l); });
+        if(!order.length) order.push(curLvl);
+        const lvl = order.find(l => !noBuilderAt(l));
+        if(lvl == null) {
+            const where = order.length === 1 ? "Level " + order[0] + " is" : "Levels " + order.join(", ") + " are";
+            alert("This quote is only on " + where.replace(/ (is|are)$/, "") + ", and " + (order.length === 1 ? "that is a" : "those are") + " short-answer / own-words level" + (order.length === 1 ? "" : "s") + ", so students don't use the Sentence Builder there.\n\nAdd the quote to a level that uses quotes and analysis (Quote bank tab), then try again.");
             return;
         }
+        const switchLevel = lvl !== curLvl;
         try { if(typeof window.__tsaEmergencyCloseAdmin === "function") window.__tsaEmergencyCloseAdmin(); } catch(eClose) {}
         setTimeout(function() {
             const realAward = app.awardXp;
             try {
+                /* setLevel resets the desk queue, so switch level before queuing the quote. */
+                if(switchLevel && typeof app.setLevel === "function") app.setLevel(lvl);
                 const item = (ui.ensureQuoteItem && ui.ensureQuoteItem(q)) || it;
                 if(!Array.isArray(userState.deskQueue)) userState.deskQueue = [];
                 if(!userState.deskQueue.some(x => app.quoteTextsMatch ? app.quoteTextsMatch(x, q) : x === q)) userState.deskQueue.push(q);
                 app.save();
                 ui.switchView("desk", true);
+                if(switchLevel && typeof admin.showStudentNotice === "function") admin.showStudentNotice("Showing Level " + lvl + " — the level this quote is on.");
                 app.awardXp = function() {};
                 if(ui.runBuilder) ui.runBuilder(item);
                 if(ui.renderDeskSentenceBank) ui.renderDeskSentenceBank();
