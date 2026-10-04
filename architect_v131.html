@@ -34582,9 +34582,24 @@ const admin = {
             return String((o && typeof o === "object" && "quote" in o ? o.quote : o) || it.quote || "").trim();
         };
         const cols = [["marker", "markers", "Marker"], ["starter", "starters", "Starter"], ["method", "methods", "Method"], ["link", "links", "Link"], ["effect", null, "Analysis"]];
+        /* Which levels each quote is on (same linkage as the Quote bank tab). Solid = ticked for students; outline = in that level's bank but not ticked. */
+        const activeLvls = (app.getActiveLevels && app.getActiveLevels().length) ? app.getActiveLevels() : [];
+        const levelsFor = (it) => (it.correct === false) ? [] : activeLvls.filter(l => app.quoteItemLinkedToLevel && app.quoteItemLinkedToLevel(it, l));
+        let lvlFilter = parseInt(admin._splitPartsLevelFilter, 10);
+        if(!activeLvls.includes(lvlFilter)) lvlFilter = 0;
+        const levelCell = (it) => {
+            if(it.correct === false) return '<span style="opacity:0.6;" title="A wrong-quote option, not a quote students should pick.">Wrong quote</span>';
+            const ls = levelsFor(it);
+            if(!ls.length) return '<span style="opacity:0.6;" title="Not linked to any active level — see Not on any level in the Quote bank.">None</span>';
+            return ls.map(l => {
+                const on = app.isQuoteInUseForLevel ? app.isQuoteInUseForLevel(it, l) : true;
+                return `<span title="${on ? "Ticked for students on Level " + l : "In Level " + l + "'s bank but not ticked for students"}" style="display:inline-block; margin:0 3px 3px 0; padding:0 5px; border-radius:9px; font-size:0.74rem; white-space:nowrap; border:1px solid var(--primary, #00897b);${on ? " background:var(--primary, #00897b); color:#fff;" : " opacity:0.75;"}">L${l}</span>`;
+            }).join("");
+        };
         const rows = [];
         items.forEach((it, i) => {
             if(!it || !quoteText(it)) return;
+            if(lvlFilter && !levelsFor(it).includes(lvlFilter)) return;
             const ch = changed[i] || [];
             const cell = (val, isNew) => `<td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top;${isNew ? " background:rgba(76,175,80,0.16);" : ""}">${val ? esc(val) : '<span style="opacity:0.45;">—</span>'}</td>`;
             const model = String(it.modelAnswer || "").trim();
@@ -34594,18 +34609,22 @@ const admin = {
                     ${model ? `<div style="font-size:0.78rem; opacity:0.8; margin-top:3px;${ch.includes("modelAnswer") ? " background:rgba(76,175,80,0.16);" : ""}">${esc(model)}</div>` : ""}
                     <button type="button" class="btn btn-primary btn-small" style="margin-top:6px;" onclick="admin.previewQuoteInSentenceBuilder(${i})">Try in Sentence Builder</button>
                 </td>
+                <td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top; min-width:3.5em;">${levelCell(it)}</td>
                 ${cols.map(c => cell(c[1] ? first(it, c[0], c[1]) : (it[c[0]] || ""), ch.includes(c[0]))).join("")}
             </tr>`);
         });
+        const filterBar = activeLvls.length > 1
+            ? `<div style="font-size:0.8rem; margin-bottom:6px;"><label>Show quotes for <select onchange="admin._splitPartsLevelFilter = this.value; admin.renderSplitPartsPreview();" style="font-size:0.8rem;"><option value="0"${lvlFilter ? "" : " selected"}>All levels</option>${activeLvls.map(l => `<option value="${l}"${lvlFilter === l ? " selected" : ""}>Level ${l}</option>`).join("")}</select></label></div>`
+            : "";
         if(!rows.length) {
-            mount.innerHTML = `<div style="font-size:0.82rem; opacity:0.8;">No quotes in this lesson yet.</div>`;
+            mount.innerHTML = filterBar + `<div style="font-size:0.82rem; opacity:0.8;">${lvlFilter ? "No quotes on Level " + lvlFilter + " yet." : "No quotes in this lesson yet."}</div>`;
             return;
         }
         const anyNew = Object.keys(changed).length > 0;
-        mount.innerHTML = `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Edit any part in the <strong>Quote bank</strong> tab.</div>
+        mount.innerHTML = filterBar + `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts. <strong>Level</strong>: solid = ticked for students on that level, outline = in that level's bank but not ticked.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Edit any part in the <strong>Quote bank</strong> tab.</div>
             <div style="overflow-x:auto; border:1px solid var(--border); border-radius:6px;">
                 <table style="border-collapse:collapse; width:100%; font-size:0.8rem;">
-                    <thead><tr>${["Quote", ...cols.map(c => c[2])].map(h => `<th style="text-align:left; padding:4px 6px; white-space:nowrap;">${h}</th>`).join("")}</tr></thead>
+                    <thead><tr>${["Quote", "Level", ...cols.map(c => c[2])].map(h => `<th style="text-align:left; padding:4px 6px; white-space:nowrap;">${h}</th>`).join("")}</tr></thead>
                     <tbody>${rows.join("")}</tbody>
                 </table>
             </div>`;
