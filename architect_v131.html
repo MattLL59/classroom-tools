@@ -2827,6 +2827,7 @@
                     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 10px 0;">
                         <span style="font-size:0.85rem; opacity:0.85;">Lesson JSON and each quote’s <code style="font-size:0.8em;">modelAnswer</code> slots add <strong>short</strong> scaffold phrases here (duplicates skipped). Prefer hints students combine, not copy-paste paragraphs.</span>
                         <button type="button" class="btn btn-outline btn-small" onclick="admin.populateAnalysisBanksFromLessonItems()">Merge from quotes again</button>
+                        <button type="button" class="btn btn-outline btn-small" onclick="admin.addStandardBankPhrases()" title="Add the app's standard markers, starters, methods and link phrases to this lesson's banks. Your own phrases stay first; duplicates are skipped. Analysis is left alone.">Add standard phrases</button>
                     </div>
                     <div class="bank-btn-grid">
                         <button type="button" class="btn btn-outline" onclick="admin.openAnalysisBankSectionAndEdit('markers')">Markers</button>
@@ -3197,12 +3198,32 @@ const defaultData = {
             { id: "g1", question: "How does the text shift?", correct: "Outside to Inside", distractors: ["Inside to Outside", "No shift"] }
         ]
     },
+    /* Standard sentence-bank phrases. Order matters: the Writing Desk shows only the first 10 markers / 14 starters /
+       10 methods / 10 links, so the most useful come first; the Sentence Builder dropdowns list them all.
+       Analysis (points) stays short on purpose — it also fills each quote's point dropdown and the Q1 fact dropdown,
+       so generic effects there would look like right answers. */
     banks: {
-        markers: ["Furthermore,", "However,"],
-        starters: ["The writer implies", "The text suggests"],
-        methods: ["Metaphor", "Simile"],
+        markers: ["Firstly,", "Furthermore,", "In addition,", "Also,", "Similarly,", "However,", "In contrast,", "Later in the text,", "Finally,", "Overall,",
+            "Moreover,", "Additionally,", "Likewise,", "On the other hand,", "At the start,", "Towards the end,"],
+        starters: ["The writer uses", "The writer describes", "The writer shows", "The writer implies", "The text suggests", "The writer suggests",
+            "For example, the writer says", "This is clear when the writer says", "The writer presents", "The writer emphasises", "The writer creates",
+            "The writer conveys", "The writer highlights", "The narrator describes", "The word", "The phrase"],
+        methods: ["Simile", "Metaphor", "Personification", "Imagery", "Emotive language", "Adjectives", "Verbs", "Alliteration", "Repetition", "Short sentence",
+            "Onomatopoeia", "Hyperbole", "Rhetorical question", "List", "Contrast", "Sensory language", "Adverbs", "Direct speech", "Direct address",
+            "First person", "Facts and statistics", "Humour", "Exclamation", "Superlatives", "Pathetic fallacy", "Semantic field", "Juxtaposition", "Sibilance"],
         points: ["a sense of fear is created", "tension builds for the reader"],
-        links: { l1: ["This shows"], l2: ["This reinforces"], l3: ["This highlights"], l4: [], l5: [], l6: [], l7: [], l8: [], l9: [], l10: [] }
+        links: {
+            l1: ["This shows", "This tells us", "This means"],
+            l2: ["This shows that", "This suggests that", "This reinforces", "This makes the reader feel"],
+            l3: ["This highlights", "This suggests that", "This implies that", "This creates"],
+            l4: ["This implies that", "This emphasises", "This conveys", "This highlights", "This makes the reader"],
+            l5: ["This emphasises", "This conveys", "This reinforces", "This creates a sense of", "This reveals"],
+            l6: ["This reveals", "This reinforces", "This connotes", "This evokes", "This could also suggest"],
+            l7: ["This connotes", "This evokes", "This could also suggest", "This foreshadows", "Perhaps the writer wants the reader to"],
+            l8: ["This connotes", "This evokes", "This foreshadows", "This could also suggest", "Perhaps the writer wants the reader to", "This may reflect"],
+            l9: ["This connotes", "This evokes", "This foreshadows", "This could also suggest", "Perhaps the writer wants the reader to", "This may reflect"],
+            l10: ["This connotes", "This evokes", "This foreshadows", "This could also suggest", "Perhaps the writer wants the reader to", "This may reflect"]
+        }
     },
     sentenceConfig: {
         1: ["starter", "quote", "link_l1", "point"],
@@ -39404,6 +39425,30 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         ).join('');
     },
 
+    /** Top up this lesson's Markers / Starters / Methods / Links from the standard set (Analysis untouched — see defaultData.banks). Lesson phrases keep their place at the front. */
+    addStandardBankPhrases: function() {
+        if(!appData.banks || typeof appData.banks !== "object") appData.banks = {};
+        const std = defaultData.banks;
+        let added = 0;
+        const mergeInto = (target, extra) => {
+            const seen = new Set(target.map(v => String(v || "").trim().toLowerCase()));
+            extra.forEach(v => { const k = String(v || "").trim().toLowerCase(); if(k && !seen.has(k)) { seen.add(k); target.push(v); added++; } });
+        };
+        ["markers", "starters", "methods"].forEach(k => {
+            if(!Array.isArray(appData.banks[k])) appData.banks[k] = [];
+            mergeInto(appData.banks[k], std[k] || []);
+        });
+        if(!appData.banks.links || typeof appData.banks.links !== "object") appData.banks.links = {};
+        Object.keys(std.links || {}).forEach(l => {
+            if(!Array.isArray(appData.banks.links[l])) appData.banks.links[l] = [];
+            mergeInto(appData.banks.links[l], std.links[l] || []);
+        });
+        app.save();
+        if(currentBankKey) admin.editBank(currentBankKey);
+        if(typeof admin.flashBrief === "function") admin.flashBrief(added ? "Added " + added + " standard phrase(s). Your own phrases stay first." : "This lesson already has all the standard phrases.");
+        else alert(added ? "Added " + added + " standard phrase(s)." : "This lesson already has all the standard phrases.");
+        return added;
+    },
     addBankItem: () => {
         const val = document.getElementById('bank-add-input').value;
         if(!val || !currentBankKey) return;
