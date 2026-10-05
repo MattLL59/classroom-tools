@@ -35587,6 +35587,16 @@ const admin = {
     },
     /** Passage string used for mark-scheme ↔ source matching (same rules as {@link admin.suggestQuotesFromMarkScheme}). */
     getSourceTextForMarkSchemeQuoteMatch: function() {
+        /* Component 2: search BOTH texts. The lesson's single source text is usually just one of them, so questions on the
+           other text (or comparing both) could never match their mark-scheme bullets. */
+        try {
+            if(admin.hasC2DualSource && admin.hasC2DualSource()) {
+                const parts = admin.getC2ResourceParts ? admin.getC2ResourceParts() : {};
+                const p1 = String((parts && parts.twentyFirst) || "").trim();
+                const p2 = String((parts && parts.nineteenth) || "").trim();
+                if(p1 || p2) return [p1, p2].filter(Boolean).join("\n\n---\n\n");
+            }
+        } catch(eC2) {}
         let sourceText = (appData.selection && appData.selection.text && appData.selection.text.source) ? appData.selection.text.source : (appData.sourceText || "");
         if(!String(sourceText).trim() && admin.isComponent2SourceEditing && admin.isComponent2SourceEditing()) {
             const r = (appData.component2Layout.resourcePaperText || "").trim();
@@ -35689,16 +35699,27 @@ const admin = {
             ? app.quoteIsMostlySame(a, b)
             : String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
         let added = 0, linked = 0, unlinked = 0, retrievalOnly = 0, noBullets = 0, matchedNothing = 0, alreadyIn = 0;
+        const qLabel = (q) => { const m = String(q.id || "").match(/(\d+)\s*([a-z])?/i); return m ? ("Q" + m[1] + (m[2] ? "(" + m[2].toLowerCase() + ")" : "")) : String(q.id); };
+        const noBulletLabels = [], noMatchLabels = [];
+        /* Kept for Copy PDF debug: which question got which mark-scheme section, and what happened. */
+        const dbgQuestions = [];
         questions.forEach(q => {
             const qid = normQid(q.id);
             /* Q1-style retrieval answers are paraphrased points, not quotable passage text. */
-            if(app.questionUsesRetrievalAnswersFromMarkScheme && app.questionUsesRetrievalAnswersFromMarkScheme(q.id)) { retrievalOnly++; return; }
+            const dq = { id: q.id, label: qLabel(q), marks: app.getExamMarksForQuestionId ? app.getExamMarksForQuestionId(q.id) : null, prompt: String(q.prompt || "").slice(0, 80) };
+            dbgQuestions.push(dq);
+            if(app.questionUsesRetrievalAnswersFromMarkScheme && app.questionUsesRetrievalAnswersFromMarkScheme(q.id)) { retrievalOnly++; dq.result = "retrieval (short answer, skipped)"; return; }
             const msEntry = app.getMarkSchemeEntryForQuestionId ? app.getMarkSchemeEntryForQuestionId(q.id) : null;
-            if(!msEntry || !Array.isArray(msEntry.indicativeContent) || !msEntry.indicativeContent.length) { noBullets++; return; }
+            dq.markSchemeFound = !!msEntry;
+            dq.bulletCount = msEntry && Array.isArray(msEntry.indicativeContent) ? msEntry.indicativeContent.length : 0;
+            if(msEntry && Array.isArray(msEntry.indicativeContent)) dq.firstBullets = msEntry.indicativeContent.slice(0, 3).map(b => String(b || "").slice(0, 120));
+            if(!msEntry || !Array.isArray(msEntry.indicativeContent) || !msEntry.indicativeContent.length) { noBullets++; noBulletLabels.push(dq.label); dq.result = msEntry ? "mark-scheme section has no bullets" : "no mark-scheme section matched to this question"; return; }
             const lvls = levelsForQuestion(qid);
             const lr = isC2 ? null : ((app.parseLineRangeFromQuestion(q.lineRef) || app.parseLineRangeFromQuestion(q.prompt)) || null);
             const cands = app.findQuoteCandidatesFromMarkScheme(q.id, sourceText, ms, lr, lvls[0] || active[0] || 1) || [];
-            if(!cands.length) { matchedNothing++; return; }
+            dq.candidates = cands.length;
+            if(!cands.length) { matchedNothing++; noMatchLabels.push(dq.label); dq.result = "bullets found, but no passage sentence matched"; return; }
+            dq.result = "matched " + cands.length + " passage sentence(s)";
             alreadyIn++;
             cands.forEach(c => {
                 const quoteText = String(c.quote || "").trim();
@@ -35743,6 +35764,20 @@ const admin = {
                 if(!lvls.length) unlinked++;
             });
         });
+        try {
+            const blocks = app.getOrderedMarkSchemeBlocks ? app.getOrderedMarkSchemeBlocks(ms) : [];
+            admin._lastMsFillDebug = {
+                at: new Date().toISOString(),
+                component: appData.component,
+                c2BothTexts: !!(admin.hasC2DualSource && admin.hasC2DualSource()),
+                passageCharsSearched: sourceText.length,
+                passageStart: sourceText.slice(0, 80),
+                markSchemeSections: blocks.map(b => ({ n: b.n, marks: b.entry && b.entry.maxMarks, bullets: b.entry && Array.isArray(b.entry.indicativeContent) ? b.entry.indicativeContent.length : 0, firstBullet: b.entry && Array.isArray(b.entry.indicativeContent) && b.entry.indicativeContent[0] ? String(b.entry.indicativeContent[0]).slice(0, 100) : "" })),
+                markSchemeKeys: Object.keys(ms),
+                questions: dbgQuestions,
+                result: { added, linked, unlinked }
+            };
+        } catch(eDbg) {}
         if(added > 0 || linked > 0) {
             appData.selection.items = appData.items;
             app.save({ skipQuestionPersist: true });
@@ -35758,10 +35793,11 @@ const admin = {
             return { added, linked, unlinked, skippedLevels: 0 };
         }
         let reason;
-        if(alreadyIn) reason = "Every matching quote is already in the Quote bank" + (matchedNothing ? ", and " + matchedNothing + " question(s) had no passage match" : "") + ".";
+        if(alreadyIn) reason = "Every matching quote is already in the Quote bank" + (matchedNothing ? "; no passage match for " + noMatchLabels.join(", ") : "") + (noBullets ? "; no mark-scheme bullets for " + noBulletLabels.join(", ") : "") + ".";
         else if(retrievalOnly && !noBullets && !matchedNothing) reason = "Every question is a 1–2 mark retrieval question — those take short answers, not quotes (use Fill from mark scheme under More tools).";
-        else if(noBullets && !matchedNothing) reason = "The mark scheme has no indicative-content bullets for " + noBullets + " question(s). Re-run Extract text on the mark scheme PDF and check its page range.";
-        else if(matchedNothing) reason = "No passage sentences matched the mark-scheme bullets for " + matchedNothing + " question(s)" + (noBullets ? ", and " + noBullets + " had no mark-scheme bullets" : "") + ".";
+        else if(noBullets && !matchedNothing) reason = "No mark-scheme bullets were found for " + noBulletLabels.join(", ") + ". Check the mark scheme page range, then Re-extract mark scheme.";
+        else if(matchedNothing) reason = "No passage sentences matched the mark-scheme bullets for " + noMatchLabels.join(", ") + (noBullets ? "; no mark-scheme bullets were found for " + noBulletLabels.join(", ") : "") + ".";
+        if(reason && (noBullets || matchedNothing)) reason += " Copy PDF debug now includes the mark-scheme details.";
         else reason = "No quotable questions found.";
         return none(reason);
     },
@@ -36496,8 +36532,9 @@ const admin = {
     copyLastPdfDebugReport: async function() {
         try {
             const dbg = (typeof app !== "undefined") ? app._lastPdfDebug : null;
-            if(!dbg) return alert("No PDF debug report yet. Run Import PDF (C1) or Lobby → Extract text (past paper) first.");
-            const txt = JSON.stringify(dbg, null, 2);
+            const fillDbg = admin._lastMsFillDebug || null;
+            if(!dbg && !fillDbg) return alert("No PDF debug report yet. Run Import PDF (C1) or Lobby → Extract text (past paper) first.");
+            const txt = JSON.stringify(fillDbg ? Object.assign({}, dbg || {}, { markSchemeFill: fillDbg }) : dbg, null, 2);
             try {
                 await navigator.clipboard.writeText(txt);
                 alert("PDF debug report copied to clipboard.");
