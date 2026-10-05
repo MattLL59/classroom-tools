@@ -2402,10 +2402,10 @@
                 </div>
                 <div class="admin-tab hidden" data-tab="questions">
                 <details class="admin-section" open>
-                    <summary class="admin-h">📝 Questions (wording and line ranges)</summary>
+                    <summary class="admin-h" id="questions-tab-heading">📝 Questions (wording and line ranges)</summary>
                     <div class="input-group">
                         <label>Focus questions (add multiple for past papers)</label>
-                        <p style="font-size:0.78rem; opacity:0.85; margin:0 0 4px 0;">The narrow <strong>Lines</strong> box (e.g. <code>1-15</code>) sets the Question-focused excerpt. Use <strong>Pick excerpt</strong> to mark start/end words in the passage, or type <strong>Starts at</strong> / <strong>Ends after</strong> phrases manually. <strong>Worksheet</strong> picks are in <strong>Quote bank → Include on worksheet</strong>.</p>
+                        <p id="questions-lines-help" style="font-size:0.78rem; opacity:0.85; margin:0 0 4px 0;">The narrow <strong>Lines</strong> box (e.g. <code>1-15</code>) sets the Question-focused excerpt. Use <strong>Pick excerpt</strong> to mark start/end words in the passage, or type <strong>Starts at</strong> / <strong>Ends after</strong> phrases manually. <strong>Worksheet</strong> picks are in <strong>Quote bank → Include on worksheet</strong>.</p>
                         <div id="questions-list" class="questions-list-mount"></div>
                         <button type="button" class="btn btn-outline btn-small" onclick="admin.addQuestionRow()" style="margin-top:6px;">+ Add question</button>
                     </div>
@@ -4945,13 +4945,17 @@ const app = {
     /** Dedupe the mark scheme's blocks (parseMarkSchemeFromText stores each block under two keys, "q"+i and "q"+(10+i), pointing at the same object) and return them in their own natural order. */
     getOrderedMarkSchemeBlocks: function(ms) {
         if(!ms || typeof ms !== "object") return [];
+        /* Dedupe by content as well as identity: after a lesson is saved and reloaded, the two keys hold separate
+           copies of the same block, which used to show up as phantom sections 11–16. */
         const byEntry = new Map();
         Object.keys(ms).forEach(function(k) {
             const m = k.match(/^q(\d+)$/i);
             if(!m || !ms[k]) return;
             const n = parseInt(m[1], 10);
-            const existing = byEntry.get(ms[k]);
-            if(!existing || n < existing.n) byEntry.set(ms[k], { n: n, entry: ms[k] });
+            let sig;
+            try { sig = JSON.stringify(ms[k]); } catch(eSig) { sig = ms[k]; }
+            const existing = byEntry.get(sig);
+            if(!existing || n < existing.n) byEntry.set(sig, { n: n, entry: ms[k] });
         });
         return Array.from(byEntry.values()).sort(function(a, b) { return a.n - b.n; });
     },
@@ -4965,6 +4969,14 @@ const app = {
         return candidates.length ? candidates : null;
     },
     /** Align question groups to mark scheme blocks by each question's own number (not list position), so a block missing from extraction is skipped rather than shifting every later question onto its neighbour's content. */
+    /** The exam paper's own question number when a prompt starts with it ("2 How does…", "0 1 Read lines…", "A4 …"); null otherwise. */
+    paperQuestionNumberFromPrompt: function(prompt) {
+        const t = String(prompt || "").replace(/^[\s\u00a0]+/, "");
+        let m = t.match(/^(?:Q(?:uestion)?\s*|A\s*)?0\s?([1-9])(?=[\s.):]|$)/i);
+        if(m) return parseInt(m[1], 10);
+        m = t.match(/^(?:Q(?:uestion)?\s*|A\s*)?([1-9]\d?)(?=[\s.):])(?!\s*(?:marks?\b|lines?\b|[-–]))/i);
+        return m ? parseInt(m[1], 10) : null;
+    },
     buildQuestionToMarkSchemeMap: function() {
         const questions = Array.isArray(appData.questions) ? appData.questions : [];
         const ms = appData && appData.markScheme ? appData.markScheme : {};
@@ -4972,11 +4984,20 @@ const app = {
         const blocks = app.getOrderedMarkSchemeBlocks(ms);
         const blockByNumber = new Map(blocks.map(function(b) { return [b.n, b.entry]; }));
         const map = {};
+        /* When a paper has lettered parts (1(a), 1(b)…), each part gets its own id (q1, q2, q3…), so ids stop matching
+           the paper's question numbers — e.g. the paper's Question 2 became q4 and was paired with mark-scheme section 4.
+           Then use the number printed at the start of the prompt, or count on from the previous question. Papers without
+           lettered parts keep pairing by id number, as before. */
+        const hasLetteredParts = groups.some(function(g) { return g.length > 1 || (g[0] && g[0].letter); });
+        let prevNum = 0;
         groups.forEach(function(group) {
             const first = group && group[0];
             if(!first || !first.q || !first.q.id) return;
             const numM = String(first.q.id).match(/(\d+)/);
-            const qNum = numM ? parseInt(numM[1], 10) : null;
+            const idNum = numM ? parseInt(numM[1], 10) : null;
+            const printed = app.paperQuestionNumberFromPrompt ? app.paperQuestionNumberFromPrompt(first.q.prompt) : null;
+            const qNum = printed != null ? printed : (hasLetteredParts ? prevNum + 1 : idNum);
+            if(qNum != null) prevNum = qNum;
             /** Match by the question's own number, not list position — a missing block (e.g. Q1 never extracted) used to shift every later question onto its neighbour's mark-scheme content instead of being left unmatched. */
             const block = qNum != null ? blockByNumber.get(qNum) : null;
             if(!block) return;
@@ -17260,6 +17281,18 @@ const app = {
      * Passage string for Lab / Quote Select (preserves inline formatting when stored as HTML).
      * @param {number} [levelOverride] When set and the lesson has dual C2 passages, uses {@link app.getSourceTextForLevel}(levelOverride) so Level Bank preview matches that level without changing the header level.
      */
+    /**
+     * Two-text C2 lessons: drop a passage handed in by the caller. Some refresh paths pass the lesson's combined
+     * source text (21st C, "---", 19th C), which made the Lab and Quote Select show both texts one after the other.
+     * Each view then uses {@link getSourceTextForDisplay} — the level's own text, or the toggle's choice on "Both" levels.
+     */
+    c2PassageOverride: function(override) {
+        try {
+            if(override != null && typeof override !== "object" && appData && appData.component === 2
+                && typeof admin !== "undefined" && admin.hasC2DualSource && admin.hasC2DualSource()) return null;
+        } catch(eOv) {}
+        return override;
+    },
     getSourceTextForDisplay: function(levelOverride) {
         const level = (levelOverride != null && levelOverride !== "")
             ? (parseInt(levelOverride, 10) || 1)
@@ -22210,6 +22243,7 @@ const ui = {
             if(typeof app.applyExamPassageInsertWidthCh === "function") app.applyExamPassageInsertWidthCh({ skipDomSync: true });
         } catch(eR) {}
         let src = overrideContent != null ? overrideContent : null;
+        if(app.c2PassageOverride) src = app.c2PassageOverride(src);
         if(src == null) src = app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText();
         let html;
         let bundleForShell = null;
@@ -23038,6 +23072,9 @@ const ui = {
     renderLab: function(overrideCanon, opts) {
         opts = opts || {};
         if(opts.skipPassage == null && app._passageDisplaysDeferred) opts.skipPassage = true;
+        if(app.c2PassageOverride) overrideCanon = app.c2PassageOverride(overrideCanon);
+        /* C2: a level set to one text shows that text in the Lab too (switching re-renders the Lab, so stop here). */
+        if(admin.syncC2ViewToLevel && admin.syncC2ViewToLevel(app.getEffectiveLevel())) return;
         const src = (overrideCanon != null && String(overrideCanon).trim())
             ? String(overrideCanon).trim()
             : (app.getSourceTextForDisplay ? app.getSourceTextForDisplay() : app.getSourceText());
@@ -25087,11 +25124,14 @@ const ui = {
 
     renderSelection: function(overrideCanon, opts) {
         opts = opts || {};
+        if(app.c2PassageOverride) overrideCanon = app.c2PassageOverride(overrideCanon);
         if(opts.skipPassage == null && app._passageDisplaysDeferred) opts.skipPassage = true;
         const cont = document.getElementById("selection-area");
         const passageCanonOverride = (overrideCanon != null && String(overrideCanon).trim()) ? String(overrideCanon).trim() : "";
         if(!cont) return;
         admin.ensureSelectionData();
+        /* C2: a level set to one text on the Levels tab always shows that text (switching re-renders, so stop here). */
+        if(admin.syncC2ViewToLevel && admin.syncC2ViewToLevel(app.getEffectiveLevel()) && userState && userState.view === "select") return;
         if(!appData.selection) {
             appData.selection = app.repairSelection({}, { activeLevels: app.getActiveLevels(), lessonItems: appData.items, lessonSourceText: appData.sourceText });
         }
@@ -25245,7 +25285,10 @@ const ui = {
         const passageHintEl = document.getElementById("selection-passage-window-hint");
         if(passageHintEl) {
             const scopeFocusedHint = typeof ui.getEffectivePassageDisplayScopeForLevel === "function" && ui.getEffectivePassageDisplayScopeForLevel(level) === "focused";
-            const wantsPassageWindow = !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
+            /* Component 2 passages are continuous prose with no booklet line numbers, so excerpt / affirm never apply
+               (the Levels tab hides those columns for C2, but old C1 values or defaults can still be stored). */
+            const isC2Passage = !!(appData && appData.component === 2);
+            const wantsPassageWindow = !isC2Passage && !!(scopeFocusedHint || levelEntry.passageExamExcerpt === true || levelEntry.passageExamExcerpt === "true" || levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true");
             const showMissingLineWindowHint = wantsPassageWindow && hasSource && !lineRange;
             const hintDismissed = typeof ui.isPassageWindowHintDismissed === "function" && ui.isPassageWindowHintDismissed(level);
             const dismissHintBtn = app.noticeActionBtn("dismiss-passage-window-hint", { level: level });
@@ -33539,6 +33582,27 @@ const admin = {
         if(typeof app.save === "function") app.save();
         if(opts && opts.fromStudent && prevView !== view && typeof admin.matchQuestionToC2SourceView === "function") admin.matchQuestionToC2SourceView(view);
     },
+    /**
+     * C2 student view: when the Levels tab sets this level to one text (21st or 19th), show that text, not whichever
+     * one the toggle was last on. Levels set to "Both" keep the student's choice. Skipped while Settings is open,
+     * because the Settings passage editor uses the same toggle to choose which text you are editing.
+     * @returns {boolean} true when it switched the view (which re-renders the Lab, and Quote Select when it is showing).
+     */
+    syncC2ViewToLevel: function(level) {
+        try {
+            if(!appData || appData.component !== 2) return false;
+            if(!admin.hasC2DualSource || !admin.hasC2DualSource()) return false;
+            const adm = document.getElementById("modal-admin");
+            if(adm && adm.classList.contains("open")) return false;
+            const entry = (app.getLevelBank && app.getLevelBank()[parseInt(level, 10) || 1]) || {};
+            const want = (entry.c2Source === "21st" || entry.c2Source === "19th") ? entry.c2Source : null;
+            if(!want) return false;
+            const cur = (typeof architectC2SourceView !== "undefined" && architectC2SourceView) || "21st";
+            if(cur === want) return false;
+            admin.setArchitectC2SourceView(want, { skipFlush: true });
+            return true;
+        } catch(eSync) { return false; }
+    },
     /** Which C2 passage a level's question is about: Level Bank → C2 when set to one text, else inferred from the question wording. */
     getC2PassageForLevel: function(level) {
         const lvl = parseInt(level, 10) || 1;
@@ -33572,7 +33636,8 @@ const admin = {
                 return;
             }
             if(!(app.isFreeQuestionNavigation && app.isFreeQuestionNavigation())) {
-                admin.showStudentNotice("You can read the " + label(view) + ", but your current question is about the " + label(curPassage) + ". You'll move on to the " + label(view) + " questions when you finish this one.");
+                admin.showStudentNotice("Your current question is about the " + label(curPassage) + ". You'll move on to the " + label(view) + " questions when you finish this one.");
+                admin.setArchitectC2SourceView(curPassage, { skipFlush: true });
                 return;
             }
             const picked = Array.isArray(userState.selectionChosen) ? userState.selectionChosen.length : 0;
@@ -33873,6 +33938,13 @@ const admin = {
         row.appendChild(moveWrap);
         row.appendChild(input);
         const showLineRef = !!(appData && appData.component !== 2);
+        /* C2 passages have no booklet line numbers: hide the Lines / Pick excerpt help and say so in the heading. */
+        try {
+            const linesHelp = document.getElementById("questions-lines-help");
+            if(linesHelp) linesHelp.style.display = showLineRef ? "" : "none";
+            const qHeading = document.getElementById("questions-tab-heading");
+            if(qHeading) qHeading.textContent = showLineRef ? "📝 Questions (wording and line ranges)" : "📝 Questions (wording)";
+        } catch(eQh) {}
         if(showLineRef) {
             row.appendChild(lineRefInp);
             row.appendChild(pickLinesBtn);
@@ -35676,7 +35748,11 @@ const admin = {
      * @returns {{ added: number, linked: number, unlinked: number, skippedLevels: number, reason?: string, blocked?: string }}
      */
     autoPopulateQuoteBankFromMarkScheme: function() {
-        const none = (reason) => ({ added: 0, linked: 0, unlinked: 0, skippedLevels: 0, reason: reason });
+        /* Every early stop is recorded for Copy PDF debug too, so the report always shows why Fill stopped. */
+        const none = (reason) => {
+            try { admin._lastMsFillDebug = { at: new Date().toISOString(), fillVersion: "2026-10-05-c2", component: appData.component, stoppedEarly: reason }; } catch(eD) {}
+            return { added: 0, linked: 0, unlinked: 0, skippedLevels: 0, reason: reason };
+        };
         if(admin.ensureSelectionData) admin.ensureSelectionData();
         if(!Array.isArray(appData.items)) appData.items = [];
         const ms = admin.ensureMarkSchemeParsedFromLayout ? admin.ensureMarkSchemeParsedFromLayout() : appData.markScheme;
@@ -35684,7 +35760,7 @@ const admin = {
         const sourceText = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || "";
         if(!sourceText.trim()) return none("No passage loaded yet, so there is nothing to match the mark scheme against.");
         const mismatch = app.checkMarkSchemeMatchesPassage ? app.checkMarkSchemeMatchesPassage() : null;
-        if(mismatch) return Object.assign(none(""), { blocked: mismatch });
+        if(mismatch) return Object.assign(none("Blocked by the mark-scheme / passage mismatch check: " + mismatch), { reason: "", blocked: mismatch });
         const questions = (Array.isArray(appData.questions) ? appData.questions : []).filter(q => q && q.id);
         if(!questions.length) return none("No focus questions in the lesson yet. Run Extract questions first.");
         const normQid = app.normQuestionId;
@@ -35768,6 +35844,7 @@ const admin = {
             const blocks = app.getOrderedMarkSchemeBlocks ? app.getOrderedMarkSchemeBlocks(ms) : [];
             admin._lastMsFillDebug = {
                 at: new Date().toISOString(),
+                fillVersion: "2026-10-05-c2",
                 component: appData.component,
                 c2BothTexts: !!(admin.hasC2DualSource && admin.hasC2DualSource()),
                 passageCharsSearched: sourceText.length,
