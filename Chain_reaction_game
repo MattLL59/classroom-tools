@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pull one thread – Chain reaction game</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #E6E9E7; --panel: #F4F6F5; --ink: #24302C; --soft: #5E6B66; --line: #CBD2CE; --card: #FFFFFF;
+    --link-fill: #D4E7D1; --link-ink: #2F5A38; --link-edge: #9FC59B;
+    --join: #2E4D6E; --join-fill: #D3E0EE;
+    --say-fill: #F3E6CF; --say-ink: #7A5418;
+    --font: "Lexend", Calibri, "Segoe UI", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: clamp(16px, 1.55vw, 25px); line-height: 1.35;
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+  button { font-family: inherit; font-size: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--join); outline-offset: 3px; }
+  .screen { display: none; min-height: 100%; padding: 2.2vh 4vw 3vh; flex-direction: column; }
+  .screen.active { display: flex; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; color: var(--soft); font-size: 0.85em; }
+  .ghost { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 0.35em 0.8em; color: var(--soft); }
+  .ghost:hover { background: var(--panel); }
+  .primary { background: var(--ink); color: #fff; border: none; border-radius: 12px; padding: 0.65em 1.5em; font-weight: 500; font-size: 1.05em; }
+  .primary:hover { background: #34433E; }
+
+  /* setup */
+  .setup { max-width: 1100px; margin: auto; width: 100%; }
+  h1 { font-size: 2.4em; line-height: 1.1; margin: 0 0 0.4em; font-weight: 700; }
+  .lede { margin: 0 0 1.4em; max-width: 46em; }
+  .label { font-weight: 500; margin: 0 0 0.5em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5em; margin-bottom: 1.6em; }
+  .chip { background: var(--card); border: 2px solid var(--line); border-radius: 999px; padding: 0.4em 1em; }
+  .chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+  .joins { display: flex; flex-wrap: wrap; gap: 0.5em; margin-top: 1.4em; color: var(--soft); font-size: 0.9em; align-items: center; }
+  .pill { background: var(--join-fill); color: var(--join); border-radius: 999px; padding: 0.2em 0.8em; font-weight: 500; }
+
+  /* play */
+  .prompt { text-align: center; color: var(--soft); margin: 1vh 0 1.4vh; }
+  .board { max-width: 1150px; width: 100%; margin: 0 auto; flex: 1; display: flex; flex-direction: column; gap: 0.55em; }
+  .start { background: var(--card); border: 1px solid var(--line); box-shadow: 0 2px 0 var(--line); border-radius: 16px;
+    padding: 0.7em 1.1em; font-size: 1.5em; font-weight: 700; line-height: 1.2; }
+  .start small { display: block; font-size: 0.5em; font-weight: 500; color: var(--soft); margin-bottom: 0.15em; }
+  .row { display: grid; grid-template-columns: 9.5em 1fr; gap: 0.8em; align-items: center; }
+  .join { justify-self: end; background: var(--join-fill); color: var(--join); border-radius: 999px; padding: 0.25em 0.9em; font-weight: 500; font-size: 0.9em; white-space: nowrap; }
+  .link { background: var(--link-fill); border: 2px solid var(--link-edge); color: var(--link-ink); border-radius: 12px; padding: 0.5em 0.9em; font-size: 1.15em; font-weight: 500; }
+  .link.but { background: var(--say-fill); border-color: #E2C894; color: var(--say-ink); }
+  .row.hidden .link { background: transparent; border: 2px dashed var(--line); color: var(--soft); font-weight: 400; }
+  .row.hidden .join { opacity: 0.45; }
+  .row.new .link { animation: pop 0.35s ease; }
+  @keyframes pop { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .say { background: var(--say-fill); color: var(--say-ink); border-radius: 12px; padding: 0.6em 1em; text-align: center; font-weight: 500; visibility: hidden; }
+  .say.show { visibility: visible; }
+  .controls { display: flex; justify-content: center; gap: 0.8em; margin-top: 1.4vh; flex-wrap: wrap; }
+
+  @media (max-width: 760px) {
+    .row { grid-template-columns: 1fr; gap: 0.2em; }
+    .join { justify-self: start; }
+    h1 { font-size: 1.9em; }
+  }
+  @media (prefers-reduced-motion: reduce) { .row.new .link { animation: none; } }
+</style>
+</head>
+<body>
+
+<section class="screen active" id="setup">
+  <div class="setup">
+    <h1>Pull one thread</h1>
+    <p class="lede">Change one thing, and everything connected to it changes too. Predict each link before it's revealed.</p>
+    <p class="label">Choose your course</p>
+    <div class="chips" id="chips" role="group" aria-label="Choose a course"></div>
+    <button class="primary" id="startBtn">Start the first chain</button>
+    <div class="joins"><span>Linking words to use:</span>
+      <span class="pill">This would lead to…</span><span class="pill">As a result…</span><span class="pill">This means…</span><span class="pill">In the end…</span><span class="pill">But…</span>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="play">
+  <div class="topbar">
+    <span id="progress">Chain 1 of 3</span>
+    <span><button class="ghost" id="fsBtn">Full screen</button> <button class="ghost" id="homeBtn">Change course</button></span>
+  </div>
+  <p class="prompt" id="prompt">What happens next? Tell your partner, or write it on your whiteboard.</p>
+  <div class="board" id="board"></div>
+  <div class="controls">
+    <button class="primary" id="revealBtn">Reveal the next link</button>
+    <button class="primary" id="nextBtn" hidden>Next chain</button>
+  </div>
+</section>
+
+<script>
+// Each chain: start event, then links. "but" marks a trade-off link.
+const GENERAL = [
+  { start: "Wolves return to Yellowstone National Park", note: "From the film",
+    links: [["This would lead to…", "Deer stop grazing in the open valleys"],
+            ["As a result…", "Trees and plants grow back"],
+            ["This means…", "Roots hold the riverbanks together"],
+            ["In the end…", "Birds, beavers and fish return to the rivers"]] },
+  { start: "Bees disappear",
+    links: [["This would lead to…", "Many fruit and vegetable crops are not pollinated"],
+            ["As a result…", "Farmers harvest much less food"],
+            ["This means…", "Food prices go up in the shops"],
+            ["In the end…", "Families struggle to afford healthy food"]] }
+];
+const COURSES = {
+  "No course": [],
+  "Business": [
+    { start: "An online shop switches to plastic-free packaging",
+      links: [["This would lead to…", "Packaging costs go up"],
+              ["As a result…", "The shop raises its prices a little"],
+              ["This means…", "Some customers shop somewhere cheaper"],
+              ["But…", "Other customers choose the shop because it is greener", true]] },
+    { start: "Everyone chooses next-day delivery",
+      links: [["This would lead to…", "More half-empty vans drive around every day"],
+              ["As a result…", "There is more traffic on local roads"],
+              ["This means…", "The air in towns gets dirtier"],
+              ["In the end…", "More people suffer from breathing problems"]] }
+  ],
+  "Sport": [
+    { start: "A club flies to an away game only an hour away",
+      links: [["This would lead to…", "Far more CO2 than going by coach"],
+              ["As a result…", "Players post photos of the flight online"],
+              ["This means…", "Fans complain the club doesn't care about the planet"],
+              ["In the end…", "The club's reputation suffers"]] },
+    { start: "Summers get much hotter and drier",
+      links: [["This would lead to…", "Pitches dry out and need more watering"],
+              ["As a result…", "Local clubs' water bills go up"],
+              ["This means…", "Some matches are cancelled in heatwaves"],
+              ["In the end…", "Fewer young people get to play"]] }
+  ],
+  "Uniformed Public Services": [
+    { start: "Heavy rain floods a town",
+      links: [["This would lead to…", "Roads close and homes are cut off"],
+              ["As a result…", "Emergency calls go up"],
+              ["This means…", "Fire and rescue crews are stretched"],
+              ["In the end…", "Help for other emergencies arrives more slowly"]] },
+    { start: "A police force switches its cars to electric",
+      links: [["This would lead to…", "No exhaust fumes from patrol cars"],
+              ["As a result…", "Cleaner air in town centres"],
+              ["But…", "Cars must stop to charge during shifts", true],
+              ["In the end…", "The force needs more chargers or more cars"]] }
+  ],
+  "Catering and Hospitality": [
+    { start: "A restaurant serves huge portions",
+      links: [["This would lead to…", "Customers leave food on their plates"],
+              ["As a result…", "The bins fill up with food waste"],
+              ["This means…", "The restaurant pays for food nobody eats"],
+              ["In the end…", "Profits fall"]] },
+    { start: "A drought hits farms that grow tomatoes and coffee",
+      links: [["This would lead to…", "Smaller harvests"],
+              ["As a result…", "Ingredient prices go up"],
+              ["This means…", "Menu prices go up too"],
+              ["In the end…", "Fewer people can afford to eat out"]] }
+  ],
+  "Art and Design": [
+    { start: "A brand sells new cheap designs every week",
+      links: [["This would lead to…", "People buy more clothes than they need"],
+              ["As a result…", "Clothes are worn only a few times"],
+              ["This means…", "Lots of clothes go in the general bin"],
+              ["In the end…", "They are burned or sent to landfill"]] },
+    { start: "A designer makes clothes from reused fabric",
+      links: [["This would lead to…", "Less new cotton needs to be grown"],
+              ["As a result…", "Less water is used on farms"],
+              ["But…", "Each design takes longer to make", true],
+              ["In the end…", "The clothes cost more to buy"]] }
+  ]
+};
+
+let course = "No course", chains = [], c = 0, shown = 0;
+const $ = id => document.getElementById(id);
+const show = id => document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
+
+const chips = $("chips");
+Object.keys(COURSES).forEach(name => {
+  const b = document.createElement("button");
+  b.className = "chip"; b.textContent = name; b.setAttribute("aria-pressed", name === course);
+  b.onclick = () => { course = name; chips.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", "false")); b.setAttribute("aria-pressed", "true"); };
+  chips.appendChild(b);
+});
+
+function begin() {
+  // film recap first, then the course chains, then bees
+  chains = [GENERAL[0], ...COURSES[course], GENERAL[1]];
+  c = 0; show("play"); draw();
+}
+
+function draw() {
+  const ch = chains[c]; shown = 0;
+  $("progress").textContent = `Chain ${c + 1} of ${chains.length}`;
+  const board = $("board"); board.innerHTML = "";
+  const st = document.createElement("div"); st.className = "start";
+  st.innerHTML = `<small>${ch.note ? ch.note + " – what would happen if…" : "What would happen if…"}</small>`;
+  st.appendChild(document.createTextNode(ch.start + "?"));
+  board.appendChild(st);
+  ch.links.forEach((l, k) => {
+    const row = document.createElement("div"); row.className = "row hidden"; row.id = "r" + k;
+    const j = document.createElement("span"); j.className = "join"; j.textContent = l[0];
+    const t = document.createElement("div"); t.className = "link" + (l[2] ? " but" : ""); t.textContent = "?";
+    row.append(j, t); board.appendChild(row);
+  });
+  const say = document.createElement("div"); say.className = "say"; say.id = "say";
+  say.textContent = "Now say the whole chain out loud, using the linking words.";
+  board.appendChild(say);
+  $("prompt").textContent = "What happens next? Tell your partner, or write it on your whiteboard.";
+  $("revealBtn").hidden = false; $("nextBtn").hidden = true;
+  $("revealBtn").focus({ preventScroll: true });
+}
+
+function reveal() {
+  const ch = chains[c];
+  if (shown >= ch.links.length) return;
+  const row = $("r" + shown);
+  row.classList.remove("hidden"); row.classList.add("new");
+  row.querySelector(".link").textContent = ch.links[shown][1];
+  shown++;
+  if (shown === ch.links.length) {
+    $("say").classList.add("show");
+    $("prompt").textContent = "Planet or profit: who wins in this chain?";
+    $("revealBtn").hidden = true;
+    const last = c === chains.length - 1;
+    $("nextBtn").textContent = last ? "Play again" : "Next chain";
+    $("nextBtn").hidden = false; $("nextBtn").focus({ preventScroll: true });
+  }
+}
+
+function next() {
+  if (c < chains.length - 1) { c++; draw(); } else { c = 0; draw(); }
+}
+
+$("startBtn").onclick = begin;
+$("revealBtn").onclick = reveal;
+$("nextBtn").onclick = next;
+$("homeBtn").onclick = () => show("setup");
+$("fsBtn").onclick = () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); };
+document.addEventListener("keydown", e => {
+  if (!$("play").classList.contains("active")) return;
+  if (["ArrowRight", "ArrowDown", " ", "Enter", "PageDown"].includes(e.key)) {
+    e.preventDefault();
+    if (!$("revealBtn").hidden) reveal(); else next();
+  }
+});
+</script>
+</body>
+</html>
