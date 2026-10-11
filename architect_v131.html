@@ -42046,11 +42046,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         h += `</div></details>`;
 
         /* --- Order of sections --- */
-        const ordW = app.getWorksheetSectionOrder();
+        const byQEarly = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
+        /* Per-question mode: the list is the running order inside each question — the question itself plus its games. */
+        const ordW = byQEarly ? app.getWorksheetSectionOrder().filter(k => k !== "shortAnswer") : app.getWorksheetSectionOrder();
         h += `<details class="wsp-sec" data-k="order" ${isOpen("order", false) ? "open" : ""}><summary>Order of sections</summary><div class="wsp-sec-body">`;
         const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
         h += byQ
-            ? `<div class="wsp-note"><strong>Games are attached to questions</strong> (Levels tab → Worksheet). The sheet follows the levels: each question, then its own games. This list sets the order of the games <em>within</em> each question.</div>`
+            ? `<div class="wsp-note"><strong>Games are attached to questions</strong> (Levels tab → Worksheet says which games go with each question). This list is the running order <em>inside each question</em>: move <strong>The question</strong> above or below its games. Question 1's short answer practice stays with it.</div>`
             : `<div class="wsp-note">Move activities up or down — e.g. put the rubric and match games first. The title stays at the top and the answer key at the end; section numbers follow the new order. To attach games to particular questions, tick them per level on the Levels tab (Worksheet column).</div>`;
         /* Number only the sections that will actually print, so the list matches the sheet; the rest are dimmed. */
         const secOn = app.getWorksheetSections();
@@ -42066,12 +42068,12 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             /* Question by question: questions follow the levels; a game prints if any level ticks it (and it's switched on). */
             const actLv = app.getActiveLevels ? app.getActiveLevels() : [];
             app.WORKSHEET_GAMES.forEach(g => { printsW[g.key] = !!secOn[g.key] && actLv.some(l => app.getWorksheetGamesForLevel(l).includes(g.key)); });
-            printsW.questions = false; printsW.shortAnswer = false;
+            printsW.questions = !!secOn.questions; printsW.shortAnswer = false;
         }
         let ordNum = 0;
         h += ordW.map((k, i) => `<div class="wsp-row" style="display:flex;align-items:center;gap:6px;margin:2px 0;${printsW[k] ? "" : "opacity:0.5;"}">
                 <span style="min-width:1.4em;text-align:right;opacity:0.7;">${printsW[k] ? (++ordNum) + "." : "–"}</span>
-                <span style="flex:1;">${esc(app.WORKSHEET_ORDER_LABELS[k] || k)}${printsW[k] ? "" : ` <em style="font-size:0.85em;">— ${byQ && (k === "questions" || k === "shortAnswer") ? "follows the Levels tab" : (byQ ? "not ticked on any level" : "not on this sheet")}</em>`}</span>
+                <span style="flex:1;">${esc(byQ && k === "questions" ? "The question (with its answer lines)" : (app.WORKSHEET_ORDER_LABELS[k] || k))}${printsW[k] ? "" : ` <em style="font-size:0.85em;">— ${byQ ? "not ticked on any level" : "not on this sheet"}</em>`}</span>
                 <button type="button" class="btn btn-outline btn-small" ${i === 0 ? "disabled" : ""} title="Move up" onclick="admin.wsPrevMoveSection('${k}', -1)">↑</button>
                 <button type="button" class="btn btn-outline btn-small" ${i === ordW.length - 1 ? "disabled" : ""} title="Move down" onclick="admin.wsPrevMoveSection('${k}', 1)">↓</button>
             </div>`).join("");
@@ -42159,10 +42161,14 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     },
     wsPrevMoveSection: function(key, dir) {
         if(!appData.settings) appData.settings = {};
-        const ord = app.getWorksheetSectionOrder();
+        const full = app.getWorksheetSectionOrder();
+        /* In per-question mode the list hides "shortAnswer" — move among the visible entries, keep it in place. */
+        const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
+        const ord = byQ ? full.filter(k => k !== "shortAnswer") : full;
         const i = ord.indexOf(key), j = i + (dir < 0 ? -1 : 1);
         if(i < 0 || j < 0 || j >= ord.length) return;
         const t = ord[i]; ord[i] = ord[j]; ord[j] = t;
+        if(byQ) { const saAt = full.indexOf("shortAnswer"); if(saAt >= 0) ord.splice(Math.min(saAt, ord.length), 0, "shortAnswer"); }
         appData.settings.worksheetSectionOrder = ord;
         app.save();
         admin.renderWorksheetPreview();
@@ -43012,7 +43018,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 const qStarts = (wsMark.qStarts || []).slice();
                 if(app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive() && wsSec.questions && qStarts.length) {
                     const gameKeys = app.WORKSHEET_GAMES.map(g => g.key);
-                    const gameOrder = order.filter(k => gameKeys.includes(k));
+                    /* Running order inside each question: the "questions" entry marks where the question itself goes. */
+                    const groupOrder = order.filter(k => k === "questions" || gameKeys.includes(k));
                     const levelForQ = (qid) => {
                         const nq = normWsQid(qid);
                         return (app.getActiveLevels ? app.getActiveLevels() : []).find(l => ((app.resolveQuestionIdsForLevel && app.resolveQuestionIdsForLevel(l)) || []).some(id => normWsQid(id) === nq));
@@ -43021,15 +43028,17 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     let groupedKey = "";
                     qStarts.forEach((qs, qi) => {
                         const end = qi + 1 < qStarts.length ? qStarts[qi + 1].at : wsMark.shortAnswer;
-                        grouped += content.slice(qs.at, end);
-                        if(qi === 0) grouped += blocks.shortAnswer || "";
+                        /* The question block (Question 1 keeps its short answer practice with it). */
+                        const qHtml = content.slice(qs.at, end) + (qi === 0 ? (blocks.shortAnswer || "") : "");
                         const lvlG = levelForQ(qs.qid);
                         const games = lvlG != null ? app.getWorksheetGamesForLevel(lvlG) : [];
-                        if(!games.length) return;
                         let inner = null;
-                        try { inner = admin.exportWorksheet({ _inner: true, returnHtml: true, seed: (typeof opts.seed === "number" ? opts.seed + qi + 1 : undefined), onlyQid: qs.qid, onlyGames: games, rubricLevel: lvlG }); } catch(eInner) { inner = null; }
+                        if(games.length) {
+                            try { inner = admin.exportWorksheet({ _inner: true, returnHtml: true, seed: (typeof opts.seed === "number" ? opts.seed + qi + 1 : undefined), onlyQid: qs.qid, onlyGames: games, rubricLevel: lvlG }); } catch(eInner) { inner = null; }
+                        }
+                        const innerBlocks = (inner && inner.blocks) || {};
+                        grouped += groupOrder.map(k => k === "questions" ? qHtml : (games.includes(k) ? (innerBlocks[k] || "") : "")).join("");
                         if(!inner || !inner.blocks) return;
-                        grouped += gameOrder.filter(k => games.includes(k)).map(k => inner.blocks[k] || "").join("");
                         const ak = String(inner.answerKeyHtml || "").trim();
                         if(ak) groupedKey += `<p class="ak" style="font-weight:700;margin-top:6px;">${app.escapeHtml(app.worksheetQuestionHeadingLabel ? app.worksheetQuestionHeadingLabel(qs.q) : String(qs.qid))}</p>` + ak;
                     });
