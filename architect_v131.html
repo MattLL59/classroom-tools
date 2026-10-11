@@ -7682,6 +7682,14 @@ const app = {
         }
         if(app.isLevelsOfResponseLevel(lvl)) return false;
         const ids = app.resolveQuestionIdsForLevel(lvl);
+        /* Automatic move to the next level (after a quote reaches the answer, or on returning to Quote Select): on past papers
+           this happened after the FIRST quote, which is right for 1–3 mark questions but cut a 10-mark answer off after one
+           quote. Longer questions now wait until the level's goal is met; students can still move on themselves. */
+        {
+            const entryAdv = (app.getLevelBank && app.getLevelBank()[lvl]) || {};
+            const marksAdv = parseInt(entryAdv.pointsRequired, 10) || (ids[0] && app.getExamMarksForQuestionId ? (parseInt(app.getExamMarksForQuestionId(ids[0]), 10) || 0) : 0);
+            if(marksAdv >= 4 && !(app.isLevelSelectionGoalMet && app.isLevelSelectionGoalMet(lvl))) return false;
+        }
         if(ids.length > 1) {
             const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number")
                 ? userState.currentQuestionIndexByLevel[lvl] : 0;
@@ -26842,11 +26850,28 @@ const ui = {
                             userState.selectionChosen.push(quoteToAdd);
                         }
                         if(useJustifyStage) {
+                            /* Save this quote + reason to the answer, then go back to the choices so the student can pick
+                               more (a 10-mark question needs several quotes). Only open the Writing Desk automatically once
+                               the level's goal is met — before, every justified quote went straight to the desk. */
+                            const ptsBefore = app.countSelectionEvidencePoints ? app.countSelectionEvidencePoints(level) : 0;
+                            const goalMetAfter = (ptsBefore + 1) >= evidenceGoalForUi;
+                            if(goalMetAfter || !studentWantsQuoteList) {
+                                app.save();
+                                ui.sendSelectionQuotesDirectToAnswer({
+                                    openDeskAfterSave: true,
+                                    onlyQuotes: quoteToAdd ? [quoteToAdd] : null
+                                });
+                                return;
+                            }
+                            userState.selectionStage = 1;
                             app.save();
                             ui.sendSelectionQuotesDirectToAnswer({
-                                openDeskAfterSave: true,
+                                stayOnQuoteSelect: true,
                                 onlyQuotes: quoteToAdd ? [quoteToAdd] : null
                             });
+                            const ptsSaved = app.countSelectionEvidencePoints ? app.countSelectionEvidencePoints(level) : (ptsBefore + 1);
+                            if(ui.showSelectionMessage) ui.showSelectionMessage("Quote saved", "Quote saved to your answer (" + ptsSaved + " so far). Pick your next quote, or open the Writing Desk when you're ready.");
+                            if(ui.scrollToQuoteChoices) ui.scrollToQuoteChoices();
                             return;
                         }
                         const ptsNow = app.countSelectionEvidencePoints(level);
@@ -26909,11 +26934,28 @@ const ui = {
                             userState.selectionChosen.push(quoteToAdd);
                         }
                         if(useJustifyStage) {
+                            /* Save this quote + reason to the answer, then go back to the choices so the student can pick
+                               more (a 10-mark question needs several quotes). Only open the Writing Desk automatically once
+                               the level's goal is met — before, every justified quote went straight to the desk. */
+                            const ptsBefore = app.countSelectionEvidencePoints ? app.countSelectionEvidencePoints(level) : 0;
+                            const goalMetAfter = (ptsBefore + 1) >= evidenceGoalForUi;
+                            if(goalMetAfter || !studentWantsQuoteList) {
+                                app.save();
+                                ui.sendSelectionQuotesDirectToAnswer({
+                                    openDeskAfterSave: true,
+                                    onlyQuotes: quoteToAdd ? [quoteToAdd] : null
+                                });
+                                return;
+                            }
+                            userState.selectionStage = 1;
                             app.save();
                             ui.sendSelectionQuotesDirectToAnswer({
-                                openDeskAfterSave: true,
+                                stayOnQuoteSelect: true,
                                 onlyQuotes: quoteToAdd ? [quoteToAdd] : null
                             });
+                            const ptsSaved = app.countSelectionEvidencePoints ? app.countSelectionEvidencePoints(level) : (ptsBefore + 1);
+                            if(ui.showSelectionMessage) ui.showSelectionMessage("Quote saved", "Quote saved to your answer (" + ptsSaved + " so far). Pick your next quote, or open the Writing Desk when you're ready.");
+                            if(ui.scrollToQuoteChoices) ui.scrollToQuoteChoices();
                             return;
                         }
                         const ptsNow = app.countSelectionEvidencePoints(level);
