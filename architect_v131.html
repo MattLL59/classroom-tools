@@ -5947,6 +5947,29 @@ const app = {
         const keys = app.WORKSHEET_GAMES.map(g => g.key);
         return Array.isArray(e.worksheetGames) ? e.worksheetGames.filter(k => keys.includes(k)) : [];
     },
+    /** Active level whose focus question is this one (first match), or null. */
+    getLevelForQuestionId: function(qid) {
+        const n = app.normQuestionId || ((x) => String(x || "").toLowerCase());
+        const nq = n(qid);
+        return (app.getActiveLevels ? app.getActiveLevels() : []).find(l => ((app.resolveQuestionIdsForLevel && app.resolveQuestionIdsForLevel(l)) || []).some(id => n(id) === nq)) || null;
+    },
+    /** Where a ticked game prints for a level: "before" or "after" the question (default after). */
+    getWorksheetGamePlacement: function(level, key) {
+        const e = (app.getLevelBank && app.getLevelBank()[parseInt(level, 10) || 1]) || {};
+        return Array.isArray(e.worksheetGamesBefore) && e.worksheetGamesBefore.includes(key) ? "before" : "after";
+    },
+    /** Set a game for a level to "off", "before" or "after" its question. */
+    setWorksheetGamePlacement: function(level, key, where) {
+        const lvl = parseInt(level, 10) || 1;
+        if(!appData.settings.levelBank) appData.settings.levelBank = {};
+        const e = appData.settings.levelBank[lvl] || (appData.settings.levelBank[lvl] = {});
+        const on = Array.isArray(e.worksheetGames) ? e.worksheetGames.filter(k => k !== key) : [];
+        const bef = Array.isArray(e.worksheetGamesBefore) ? e.worksheetGamesBefore.filter(k => k !== key) : [];
+        if(where === "before" || where === "after") on.push(key);
+        if(where === "before") bef.push(key);
+        e.worksheetGames = on;
+        e.worksheetGamesBefore = bef;
+    },
     /** True when any active level has worksheet games ticked — the worksheet is then laid out question by question. */
     worksheetGamesByQuestionActive: function() {
         const act = app.getActiveLevels ? app.getActiveLevels() : [];
@@ -41791,6 +41814,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 if(src[k] !== undefined) entry[k] = src[k];
             }
             if(Array.isArray(src.worksheetGames)) entry.worksheetGames = src.worksheetGames.slice();
+            if(Array.isArray(src.worksheetGamesBefore)) entry.worksheetGamesBefore = src.worksheetGamesBefore.slice();
             entry.questionIds = keepQuestionIds;
         }
         app.save();
@@ -41806,9 +41830,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(!appData.settings.levelBank[lvl]) appData.settings.levelBank[lvl] = {};
         if(key === "wsGame") {
             const g = String(el.dataset.game || "");
-            const cur = Array.isArray(appData.settings.levelBank[lvl].worksheetGames) ? appData.settings.levelBank[lvl].worksheetGames.filter(x => x !== g) : [];
-            if(el.checked) cur.push(g);
-            appData.settings.levelBank[lvl].worksheetGames = cur;
+            const wasBefore = app.getWorksheetGamePlacement(lvl, g) === "before";
+            app.setWorksheetGamePlacement(lvl, g, el.checked ? (wasBefore ? "before" : "after") : "off");
             app.save();
             return;
         }
@@ -42048,11 +42071,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         /* --- Order of sections --- */
         const byQEarly = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
         /* Per-question mode: the list is the running order inside each question — the question itself plus its games. */
-        const ordW = byQEarly ? app.getWorksheetSectionOrder().filter(k => k !== "shortAnswer") : app.getWorksheetSectionOrder();
+        const ordW = byQEarly ? app.getWorksheetSectionOrder().filter(k => k !== "shortAnswer" && k !== "questions") : app.getWorksheetSectionOrder();
         h += `<details class="wsp-sec" data-k="order" ${isOpen("order", false) ? "open" : ""}><summary>Order of sections</summary><div class="wsp-sec-body">`;
         const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
         h += byQ
-            ? `<div class="wsp-note"><strong>Games are attached to questions</strong> (Levels tab → Worksheet says which games go with each question). This list is the running order <em>inside each question</em>: move <strong>The question</strong> above or below its games. Question 1's short answer practice stays with it.</div>`
+            ? `<div class="wsp-note"><strong>Games are attached to questions.</strong> Choose for each question which games it has and whether they go <strong>before</strong> or <strong>after</strong> it under <strong>Questions</strong> below (or tick them on the Levels tab). This list only sets the order when a question has more than one game on the same side.</div>`
             : `<div class="wsp-note">Move activities up or down — e.g. put the rubric and match games first. The title stays at the top and the answer key at the end; section numbers follow the new order. To attach games to particular questions, tick them per level on the Levels tab (Worksheet column).</div>`;
         /* Number only the sections that will actually print, so the list matches the sheet; the rest are dimmed. */
         const secOn = app.getWorksheetSections();
@@ -42115,6 +42138,21 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             if(!q.hidden) {
                 h += `<div class="wsp-note">Printed wording (edit to correct it — changes save to the lesson):</div>
                 <textarea oninput="admin.wsPrevQuestionTextInput(${qidJs}, this.value)" onchange="admin.wsPrevQuestionTextCommit(${qidJs}, this.value)">${esc(q.printed)}</textarea>`;
+                /* Games for this question: Off / Before / After (same settings as the Levels tab → Worksheet column). */
+                const lvlQ = app.getLevelForQuestionId(q.id);
+                if(lvlQ != null) {
+                    const tickedQ = app.getWorksheetGamesForLevel(lvlQ);
+                    h += `<div class="wsp-note" style="margin-top:6px;">Games with this question (Level ${lvlQ}):</div><div class="wsp-games" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 6px;align-items:center;font-size:0.85em;">`
+                        + app.WORKSHEET_GAMES.map(g => {
+                            const cur = tickedQ.includes(g.key) ? app.getWorksheetGamePlacement(lvlQ, g.key) : "off";
+                            return `<span>${esc(g.label)}</span><select onchange="admin.wsPrevSetGamePlacement(${lvlQ}, '${g.key}', this.value)">
+                                <option value="off" ${cur === "off" ? "selected" : ""}>Off</option>
+                                <option value="before" ${cur === "before" ? "selected" : ""}>Before the question</option>
+                                <option value="after" ${cur === "after" ? "selected" : ""}>After the question</option></select>`;
+                        }).join("") + `</div>`;
+                } else {
+                    h += `<div class="wsp-note" style="margin-top:6px;">Not on any level — assign it on the Levels tab to attach games to it.</div>`;
+                }
                 if(q.glueFixed) h += `<button type="button" class="btn btn-outline btn-small wsp-mini" onclick="admin.wsPrevQuestionTextCommit(${qidJs}, ${app.escapeHtmlAttr(JSON.stringify(q.printed))})" title="Replace the stored question text with the tidied wording">Save tidied wording to lesson</button>`;
             }
             h += `</div>`;
@@ -42159,16 +42197,22 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         h += `</div></details>`;
         return h;
     },
+    wsPrevSetGamePlacement: function(level, key, where) {
+        app.setWorksheetGamePlacement(level, key, where);
+        app.save();
+        if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
+        admin.renderWorksheetPreview();
+    },
     wsPrevMoveSection: function(key, dir) {
         if(!appData.settings) appData.settings = {};
         const full = app.getWorksheetSectionOrder();
         /* In per-question mode the list hides "shortAnswer" — move among the visible entries, keep it in place. */
         const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
-        const ord = byQ ? full.filter(k => k !== "shortAnswer") : full;
+        const ord = byQ ? full.filter(k => k !== "shortAnswer" && k !== "questions") : full;
         const i = ord.indexOf(key), j = i + (dir < 0 ? -1 : 1);
         if(i < 0 || j < 0 || j >= ord.length) return;
         const t = ord[i]; ord[i] = ord[j]; ord[j] = t;
-        if(byQ) { const saAt = full.indexOf("shortAnswer"); if(saAt >= 0) ord.splice(Math.min(saAt, ord.length), 0, "shortAnswer"); }
+        if(byQ) { ["questions", "shortAnswer"].forEach(fk => { const at = full.indexOf(fk); if(at >= 0) ord.splice(Math.min(at, ord.length), 0, fk); }); }
         appData.settings.worksheetSectionOrder = ord;
         app.save();
         admin.renderWorksheetPreview();
@@ -43019,7 +43063,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 if(app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive() && wsSec.questions && qStarts.length) {
                     const gameKeys = app.WORKSHEET_GAMES.map(g => g.key);
                     /* Running order inside each question: the "questions" entry marks where the question itself goes. */
-                    const groupOrder = order.filter(k => k === "questions" || gameKeys.includes(k));
+                    const gameOrderG = order.filter(k => gameKeys.includes(k));
                     const levelForQ = (qid) => {
                         const nq = normWsQid(qid);
                         return (app.getActiveLevels ? app.getActiveLevels() : []).find(l => ((app.resolveQuestionIdsForLevel && app.resolveQuestionIdsForLevel(l)) || []).some(id => normWsQid(id) === nq));
@@ -43037,7 +43081,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                             try { inner = admin.exportWorksheet({ _inner: true, returnHtml: true, seed: (typeof opts.seed === "number" ? opts.seed + qi + 1 : undefined), onlyQid: qs.qid, onlyGames: games, rubricLevel: lvlG }); } catch(eInner) { inner = null; }
                         }
                         const innerBlocks = (inner && inner.blocks) || {};
-                        grouped += groupOrder.map(k => k === "questions" ? qHtml : (games.includes(k) ? (innerBlocks[k] || "") : "")).join("");
+                        /* Each question's own arrangement: games set to "before" print above it, the rest below
+                           (Worksheet preview → Questions, or Levels tab tick = after). The order list orders games within each side. */
+                        const gBefore = gameOrderG.filter(k => games.includes(k) && app.getWorksheetGamePlacement(lvlG, k) === "before");
+                        const gAfter = gameOrderG.filter(k => games.includes(k) && app.getWorksheetGamePlacement(lvlG, k) !== "before");
+                        grouped += gBefore.map(k => innerBlocks[k] || "").join("") + qHtml + gAfter.map(k => innerBlocks[k] || "").join("");
                         if(!inner || !inner.blocks) return;
                         const ak = String(inner.answerKeyHtml || "").trim();
                         if(ak) groupedKey += `<p class="ak" style="font-weight:700;margin-top:6px;">${app.escapeHtml(app.worksheetQuestionHeadingLabel ? app.worksheetQuestionHeadingLabel(qs.q) : String(qs.qid))}</p>` + ak;
