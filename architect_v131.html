@@ -23087,6 +23087,51 @@ const ui = {
             }
         }
     },
+    /**
+     * Quotes to offer on a level that has none of its own ticked: first any quote linked to this level's question (on another
+     * level, unticked or "Not on any level"); then — only when the student asks for quote choices — bank quotes that sit in
+     * this question's part of the passage (its line range, or its text in C2), even if collected for another question.
+     * Collected quotes should get used rather than wasted. @returns {{ items: object[], source: "question"|"passage"|"none" }}
+     */
+    getQuoteChoiceFallbackForLevel: function(level, opts) {
+        opts = opts || {};
+        const lvl = parseInt(level, 10) || 1;
+        const all = (appData.selection && Array.isArray(appData.selection.items)) ? appData.selection.items : (Array.isArray(appData.items) ? appData.items : []);
+        const getQ = (i) => String((i && (i.quote || i.original)) || "").trim();
+        const good = all.filter(i => i && i.correct !== false && getQ(i));
+        const norm = app.normQuestionId || ((x) => String(x || "").toLowerCase());
+        const qidRaw = opts.questionId || ((app.resolveQuestionIdsForLevel && app.resolveQuestionIdsForLevel(lvl)) || [])[0] || null;
+        const qid = qidRaw ? norm(qidRaw) : null;
+        const search = app.getQuoteSearchTextForLevel ? app.getQuoteSearchTextForLevel(lvl) : "";
+        const inPassage = (q) => !String(search || "").trim() || app.quoteInSource(q, search);
+        const inLines = (q) => !opts.lineRange || !opts.sourceText || app.quoteInLineRange(q, opts.sourceText, opts.lineRange);
+        const fits = (i) => { const q = getQ(i); return inPassage(q) && inLines(q); };
+        const dedupe = (arr) => arr.filter((i, idx) => arr.findIndex(x => app.quoteKey(getQ(x)) === app.quoteKey(getQ(i))) === idx);
+        if(qid) {
+            const forQuestion = dedupe(good.filter(i => Array.isArray(i.questionIds) && i.questionIds.some(id => norm(id) === qid) && fits(i)));
+            if(forQuestion.length) return { items: forQuestion, source: "question" };
+        }
+        if(opts.includePassage) {
+            const fromPassage = dedupe(good.filter(fits));
+            if(fromPassage.length) {
+                /* Borrowed quotes were collected for other questions, so put the ones that fit THIS question first: words shared
+                   with the question and with its mark-scheme answer (e.g. "Sunday" for "On which day of the week…"). */
+                const stop = new Set(["which","what","when","where","does","with","that","this","from","they","their","there","have","were","about","these","those","your","into","than","then","them","will","would","could","should","writer","text","lines","read","word","words","show","shows","answer","mark","marks","award","correct","response","each","give"]);
+                const toks = (t) => String(t || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(w => w.length >= 4 && !stop.has(w));
+                let target = "";
+                try {
+                    target += " " + (qidRaw && app.getQuestionPromptForQuestionId ? app.getQuestionPromptForQuestionId(qidRaw) : "");
+                    const msE = qidRaw && app.getMarkSchemeEntryForQuestionId ? app.getMarkSchemeEntryForQuestionId(qidRaw) : null;
+                    if(msE && Array.isArray(msE.indicativeContent)) target += " " + msE.indicativeContent.join(" ");
+                } catch(eT) {}
+                const tset = new Set(toks(target));
+                const score = (i) => { const seen = new Set(); toks(getQ(i)).forEach(w => { if(tset.has(w)) seen.add(w); }); return seen.size; };
+                const ranked = fromPassage.map((i, idx) => ({ i, idx, sc: score(i) })).sort((x, y) => (y.sc - x.sc) || (x.idx - y.idx)).map(x => x.i);
+                return { items: ranked, source: "passage" };
+            }
+        }
+        return { items: [], source: "none" };
+    },
     /** Passage-tap diagnostics: silent unless window.__tsaQsDebug = true is set in the console (they fired on every click). */
     _qsDebug: function() {
         try { if(window.__tsaQsDebug) console.log.apply(console, arguments); } catch(eDbg) {}
@@ -25383,11 +25428,7 @@ const ui = {
         if(helpWrap) {
             helpWrap.classList.add("hidden");
             helpWrap.innerHTML = "";
-            const quoteChoicesEarly = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
-            if(quoteChoicesEarly < 2 && userState.studentQuoteListHelp) {
-                userState.studentQuoteListHelp = false;
-                app.save();
-            }
+            /* (The quote-choices option is now switched off further down only when there are no usable quotes at all, fallbacks included.) */
         }
         const tapSelectOnly = !!(app.getEffectiveTapText(level) || app.isStudentSynonymsHelp() || quoteOnlyShort || app.isTeacherTapRecordPassageMode() || levelEntry.shortAnswersOnly === true || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)));
         const pendingQuoteEarly = String(ui._freeSelectPendingQuote || "").trim();
@@ -25584,20 +25625,39 @@ const ui = {
         const uniqueChosenCount = chosenList.length;
         const deskQueueLen = Array.isArray(userState.deskQueue) ? userState.deskQueue.length : 0;
         const levelCorrectKeysBase = correctItemsAll.filter(i => hasLevelMatch(i) || (!hasLevelMatch(i) && quoteInRangeForLevel(i)));
-        const levelCorrectKeysFiltered = (examQuoteFilter
+        let levelCorrectKeysFiltered = (examQuoteFilter
             ? levelCorrectKeysBase.filter(i => app.quoteItemVisibleForSelectionLevel(i, level))
             : (usePerQuestionGoal && currentQId ? levelCorrectKeysBase.filter(i => {
                 const qids = Array.isArray(i.questionIds) ? i.questionIds : [];
                 if(qids.length === 0) return true;
                 return qids.some(qid => normId(qid) === normId(currentQId));
             }) : levelCorrectKeysBase)).filter(i => !quoteLineRange || !hasSource || app.quoteInLineRange(getQuote(i), sourceText, quoteLineRange));
+        /* No quotes ticked for this level: use the quotes already collected — this question's own first, then (when the student
+           asks for quote choices) bank quotes from this part of the passage. Own-words (Q1-style) levels keep mark-scheme points. */
+        let quoteChoiceSource = levelCorrectKeysFiltered.length ? "level" : "none";
+        if(!levelCorrectKeysFiltered.length && !(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) && ui.getQuoteChoiceFallbackForLevel) {
+            const fbQuote = ui.getQuoteChoiceFallbackForLevel(level, {
+                questionId: currentQId, lineRange: quoteLineRange, sourceText: hasSource ? sourceText : "",
+                includePassage: userState && userState.studentQuoteListHelp === true
+            });
+            if(fbQuote.items.length) {
+                levelCorrectKeysFiltered = fbQuote.items;
+                quoteChoiceSource = fbQuote.source;
+                if(!correctItems.length) correctItems = fbQuote.items.slice();
+            }
+        }
         if(helpWrap) {
             const prevHelpDetails = helpWrap.querySelector("details");
             if(prevHelpDetails && prevHelpDetails.open) userState.studentHelpPanelOpen = true;
-            const quoteChoicesForLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : (sel.items || []).length;
-            const quotesOnOtherLevels = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
             const noQuotesHelpLevel = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
-            const canOfferQuoteList = quoteChoicesForLevel >= 2 && !noQuotesHelpLevel;
+            /* Any usable quote is enough: the level's own, this question's from other levels, or bank quotes from this part of the passage. */
+            const quoteChoicesForLevel = levelCorrectKeysFiltered.length
+                || ((!noQuotesHelpLevel && ui.getQuoteChoiceFallbackForLevel)
+                    ? ui.getQuoteChoiceFallbackForLevel(level, { questionId: currentQId, lineRange: quoteLineRange, sourceText: hasSource ? sourceText : "", includePassage: true }).items.length
+                    : 0);
+            const quotesOnOtherLevels = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
+            const canOfferQuoteList = quoteChoicesForLevel >= 1 && !noQuotesHelpLevel;
+            if(!canOfferQuoteList && userState.studentQuoteListHelp) { userState.studentQuoteListHelp = false; app.save(); }
             const canOfferWorksheetPractice = worksheetPracticeOffered && !noQuotesHelpLevel && app.hasWorksheetPracticeItemsForLevel && app.hasWorksheetPracticeItemsForLevel(level);
             if(noQuotesHelpLevel) {
                 /* Stale from a previous (quote-based) level — force off so the tap/paraphrase hint card renders instead of a leftover quote-picking UI. */
@@ -25673,8 +25733,8 @@ const ui = {
                 : "";
             const helpDetailsOpen = userState.studentHelpPanelOpen === true ? " open" : "";
             const quoteListNeedLabel = !canOfferQuoteList
-                ? ` (need ≥2 quotes on Level ${level}${quotesOnOtherLevels > 0 ? "; " + quotesOnOtherLevels + " on other levels" : ""})`
-                : "";
+                ? ` (no quotes for this question or this part of the passage yet)`
+                : (quoteChoiceSource === "passage" ? " — quotes from this part of the passage" : "");
             const wsPracticeLabel = canOfferWorksheetPractice
                 ? `<label class="student-help-check-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="student-help-worksheet-practice" ${userState.worksheetPracticeMode ? "checked" : ""}> <strong>Worksheet practice</strong> — pick a quotation, then justify (uses teacher worksheet quotes)</label>`
                 : "";
@@ -26174,7 +26234,7 @@ const ui = {
                 });
             }
         }
-        if(options.length < 2) {
+        if(options.length < (studentWantsQuoteList ? 1 : 2)) {
             const qOnLevel = app.countQuoteChoicesForSelectionLevel ? app.countQuoteChoicesForSelectionLevel(level) : 0;
             const qOther = app.countGoodQuotesOnOtherLevels ? app.countGoodQuotesOnOtherLevels(level) : 0;
             let levelHint = "";
@@ -26202,7 +26262,13 @@ const ui = {
                 ? Math.min(Math.max(2, pointsGoal), correctItemsInRangeMain.length)
                 : Math.min(pointsGoal, correctItemsInRangeMain.length);
             const incorrectToShow = Math.min(distractorTarget || optionCount - correctToShow, incorrectPool.length);
-            const correctOpts = app.shuffle(correctItemsInRangeMain.map(i => ({ quote: getQuote(i), correct: true, item: i })).filter(o => o.quote)).slice(0, correctToShow);
+            /* Borrowed passage quotes (no quotes of the level's own) arrive ranked by fit to this question: take the best few
+               rather than a random two. The cards are still shown in shuffled order below. */
+            const rankedBorrowed = quoteChoiceSource === "passage";
+            const correctBaseOpts = correctItemsInRangeMain.map(i => ({ quote: getQuote(i), correct: true, item: i })).filter(o => o.quote);
+            const correctOpts = rankedBorrowed
+                ? correctBaseOpts.slice(0, Math.max(correctToShow, Math.min(3, correctBaseOpts.length)))
+                : app.shuffle(correctBaseOpts).slice(0, correctToShow);
             const incorrectOpts = app.shuffle(incorrectPool).slice(0, incorrectToShow);
             const alreadyRejected = userState.selectionProgress.discriminate || {};
             const seenPoolKeys = new Set();
