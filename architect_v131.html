@@ -5931,6 +5931,16 @@ const app = {
     },
     /** Which blocks the Word worksheet prints (Worksheet preview → On the sheet). Missing keys default to on. */
     WORKSHEET_SECTION_KEYS: ["intro", "questions", "questionText", "guidance", "starters", "writingLines", "shortAnswer", "matchMeaning", "matchPoint", "rubric", "deviceMatch"],
+    /** Worksheet section order (Worksheet preview → Order of sections). Unknown/missing keys fall back to the default order. */
+    WORKSHEET_ORDER_KEYS: ["questions", "shortAnswer", "matchMeaning", "matchPoint", "rubric", "deviceMatch"],
+    WORKSHEET_ORDER_LABELS: { questions: "Question(s) and answer lines", shortAnswer: "Short answer practice (Q1)", matchMeaning: "Match quote → meaning", matchPoint: "Match quote → point / analysis", rubric: "Rubric (sentence elements)", deviceMatch: "Match quote → focus" },
+    getWorksheetSectionOrder: function() {
+        const raw = appData && appData.settings && Array.isArray(appData.settings.worksheetSectionOrder) ? appData.settings.worksheetSectionOrder : [];
+        const keys = app.WORKSHEET_ORDER_KEYS;
+        const out = raw.filter((k, i) => keys.includes(k) && raw.indexOf(k) === i);
+        keys.forEach(k => { if(!out.includes(k)) out.push(k); });
+        return out;
+    },
     getWorksheetSections: function() {
         const raw = appData && appData.settings && appData.settings.worksheetSections && typeof appData.settings.worksheetSections === "object"
             ? appData.settings.worksheetSections : {};
@@ -38093,6 +38103,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
         if(prevSettings.worksheetMatchMode) target.settings.worksheetMatchMode = prevSettings.worksheetMatchMode;
         if(prevSettings.worksheetScaffoldMode) target.settings.worksheetScaffoldMode = prevSettings.worksheetScaffoldMode;
         if(prevSettings.worksheetSections && typeof prevSettings.worksheetSections === "object") target.settings.worksheetSections = Object.assign({}, prevSettings.worksheetSections);
+        if(Array.isArray(prevSettings.worksheetSectionOrder)) target.settings.worksheetSectionOrder = prevSettings.worksheetSectionOrder.slice();
         if(prevSettings.worksheetTextSize === "large" || prevSettings.worksheetTextSize === "compact") target.settings.worksheetTextSize = prevSettings.worksheetTextSize;
         if(typeof prevSettings.worksheetIncludeAnswerKey === "boolean") target.settings.worksheetIncludeAnswerKey = prevSettings.worksheetIncludeAnswerKey;
         if(prevSettings.worksheetMaxQuotes != null) {
@@ -38521,6 +38532,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             if(typeof s.worksheetMatchMode === "string") appData.settings.worksheetMatchMode = s.worksheetMatchMode;
             if(typeof s.worksheetScaffoldMode === "string") appData.settings.worksheetScaffoldMode = s.worksheetScaffoldMode;
             if(s.worksheetSections && typeof s.worksheetSections === "object") appData.settings.worksheetSections = Object.assign({}, s.worksheetSections);
+            if(Array.isArray(s.worksheetSectionOrder)) appData.settings.worksheetSectionOrder = s.worksheetSectionOrder.slice();
             if(s.worksheetTextSize === "large" || s.worksheetTextSize === "compact") appData.settings.worksheetTextSize = s.worksheetTextSize;
             if(typeof s.worksheetIncludeAnswerKey === "boolean") appData.settings.worksheetIncludeAnswerKey = s.worksheetIncludeAnswerKey;
             if(s.worksheetMaxQuotes != null) {
@@ -38563,6 +38575,7 @@ Reply with raw JSON only. First character {, last character }. No lesson plan, n
             worksheetMatchMode: settings.worksheetMatchMode || "jumbled",
             worksheetScaffoldMode: settings.worksheetScaffoldMode || "guided",
             worksheetSections: Object.assign({}, settings.worksheetSections || {}),
+            worksheetSectionOrder: Array.isArray(settings.worksheetSectionOrder) ? settings.worksheetSectionOrder.slice() : undefined,
             worksheetTextSize: settings.worksheetTextSize === "large" ? "large" : "compact",
             worksheetIncludeAnswerKey: settings.worksheetIncludeAnswerKey === true,
             worksheetMaxQuotes: (() => {
@@ -41998,6 +42011,30 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         h += `<label class="wsp-chk"><input type="checkbox" ${set.worksheetIncludeAnswerKey === true ? "checked" : ""} onchange="admin.wsPrevSetOpt('answerKey', this.checked)"><span>Teacher answer key at the end</span></label>`;
         h += `</div></details>`;
 
+        /* --- Order of sections --- */
+        const ordW = app.getWorksheetSectionOrder();
+        h += `<details class="wsp-sec" data-k="order" ${isOpen("order", false) ? "open" : ""}><summary>Order of sections</summary><div class="wsp-sec-body">`;
+        h += `<div class="wsp-note">Move activities up or down — e.g. put the rubric and match games first. The title stays at the top and the answer key at the end; section numbers follow the new order.</div>`;
+        /* Number only the sections that will actually print, so the list matches the sheet; the rest are dimmed. */
+        const secOn = app.getWorksheetSections();
+        const printsW = {
+            questions: !!secOn.questions,
+            shortAnswer: !!(secOn.shortAnswer && hasShortModel),
+            matchMeaning: !!(secOn.matchMeaning && !noQuotes),
+            matchPoint: !!(secOn.matchPoint && !noQuotes && r.hasPointExercise),
+            rubric: !!(secOn.rubric && !noQuotes),
+            deviceMatch: !!(secOn.deviceMatch && r.showDeviceMatch)
+        };
+        let ordNum = 0;
+        h += ordW.map((k, i) => `<div class="wsp-row" style="display:flex;align-items:center;gap:6px;margin:2px 0;${printsW[k] ? "" : "opacity:0.5;"}">
+                <span style="min-width:1.4em;text-align:right;opacity:0.7;">${printsW[k] ? (++ordNum) + "." : "–"}</span>
+                <span style="flex:1;">${esc(app.WORKSHEET_ORDER_LABELS[k] || k)}${printsW[k] ? "" : ` <em style="font-size:0.85em;">— not on this sheet</em>`}</span>
+                <button type="button" class="btn btn-outline btn-small" ${i === 0 ? "disabled" : ""} title="Move up" onclick="admin.wsPrevMoveSection('${k}', -1)">↑</button>
+                <button type="button" class="btn btn-outline btn-small" ${i === ordW.length - 1 ? "disabled" : ""} title="Move down" onclick="admin.wsPrevMoveSection('${k}', 1)">↓</button>
+            </div>`).join("");
+        h += `<div class="wsp-row" style="margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevResetSectionOrder()">Reset order</button></div>`;
+        h += `</div></details>`;
+
         /* --- Layout --- */
         const mm = set.worksheetMatchMode || "jumbled";
         const sm = set.worksheetScaffoldMode || "guided";
@@ -42075,6 +42112,21 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         h += `<div class="wsp-row" style="margin-top:8px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevClearQuotes()">Untick all</button></div>`;
         h += `</div></details>`;
         return h;
+    },
+    wsPrevMoveSection: function(key, dir) {
+        if(!appData.settings) appData.settings = {};
+        const ord = app.getWorksheetSectionOrder();
+        const i = ord.indexOf(key), j = i + (dir < 0 ? -1 : 1);
+        if(i < 0 || j < 0 || j >= ord.length) return;
+        const t = ord[i]; ord[i] = ord[j]; ord[j] = t;
+        appData.settings.worksheetSectionOrder = ord;
+        app.save();
+        admin.renderWorksheetPreview();
+    },
+    wsPrevResetSectionOrder: function() {
+        if(appData.settings) delete appData.settings.worksheetSectionOrder;
+        app.save();
+        admin.renderWorksheetPreview();
     },
     wsPrevSetSection: function(key, on) {
         if(!appData.settings) appData.settings = {};
@@ -42511,6 +42563,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     hidden: wsHiddenQ.has(normWsQid(q.id)) };
             });
         }
+        /* Section markers: each block is cut out afterwards and reassembled in the teacher's chosen order. */
+        const wsMark = {};
+        wsMark.questions = content.length;
         if(!wsSec.questions) {
             /* Worksheet preview → Question headings off */
         } else if(worksheetHeadingQs && worksheetHeadingQs.length) {
@@ -42556,6 +42611,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         let worksheetInferenceKeyHtml = "";
         const keyElInf = document.getElementById("worksheet-include-answer-key");
         const includeKeyInf = appData.settings.worksheetIncludeAnswerKey === true && (!keyElInf || keyElInf.checked);
+        wsMark.shortAnswer = content.length;
         (function emitWorksheetQ1InferenceBlock() {
             if(appData.component === 2) return;
             if(!wsSec.shortAnswer) return;
@@ -42587,6 +42643,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 if(includeKeyInf) worksheetInferenceKeyHtml = `<p class="ak"><strong>Q1 short answer (worksheet).</strong> Model: ${app.escapeHtml(infModel)}</p>`;
             }
         })();
+        wsMark._divOpen = content.length;
         content += `<div class="questions-section">`;
         let wsSecNum = 0;
         if(!worksheetHasQuotes) {
@@ -42619,6 +42676,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             } while(!misaligned(perm) && tries < 200);
             return perm;
         };
+        wsMark.matchMeaning = content.length;
         if(wsSec.matchMeaning) {
         content += `<h3>${++wsSecNum}. Match each quote to its meaning</h3>`;
         content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Only quotes for the question(s) above are listed. <strong>Meanings are jumbled</strong> — the text beside each line is <em>not</em> in row order; draw lines to match.</p>`;
@@ -42646,6 +42704,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const pointsCol = included.map(i => worksheetPointText(i));
         const hasPointExercise = pointsCol.some(p => String(p || "").trim().length > 0);
         if(wsReport) wsReport.hasPointExercise = hasPointExercise;
+        wsMark.matchPoint = content.length;
         if(hasPointExercise && wsSec.matchPoint) {
             content += `<h3>${++wsSecNum}. Match each quote to its point / analysis</h3>`;
             content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Teacher comments for this task are <strong>jumbled</strong> in the right column — match each quote to the correct point.</p>`;
@@ -42753,6 +42812,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
 
         /* Rubric off (Worksheet preview): still walk the loop so the answer key is built, then drop the rubric HTML. */
         const contentBeforeRubric = content;
+        wsMark.rubric = content.length;
         const rubricSectionNum = wsSec.rubric ? ++wsSecNum : 0;
         content += `<h3>${rubricSectionNum}. Rubric — fill each sentence element (Level ${level})</h3>`;
         content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Shaded boxes show the <strong>full model wording</strong> saved on each quote (same slots as Sentence Structure). Optional chips are that quote’s distractors only. Empty slots are a single line for students to write.</p>`;
@@ -42846,6 +42906,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
 
         if(!wsSec.rubric) content = contentBeforeRubric;
         if(wsReport) wsReport.showDeviceMatch = wsDeviceMix;
+        wsMark.deviceMatch = content.length;
         if(wsDeviceMix && wsSec.deviceMatch) {
             const focusParts = ["language", "tone", "structure"].filter(f => deviceKeySet.has(f));
             const focusJoin = focusParts.join(", ");
@@ -42871,6 +42932,30 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         }
         }
 
+        /* Reassemble the sections in the teacher's order (Worksheet preview → Order of sections), then renumber the
+           "N." headings so they run 1, 2, 3… down the sheet. Title/instructions stay first; the answer key stays last. */
+        try {
+            wsMark._end = content.length;
+            const mk = ["questions", "shortAnswer", "_divOpen", "matchMeaning", "matchPoint", "rubric", "deviceMatch", "_end"];
+            const ok = mk.every((k, i) => typeof wsMark[k] === "number" && (i === 0 || wsMark[k] >= wsMark[mk[i - 1]]));
+            if(ok) {
+                const piece = (a, b) => content.slice(wsMark[a], wsMark[b]);
+                const blocks = {
+                    questions: piece("questions", "shortAnswer"),
+                    shortAnswer: piece("shortAnswer", "_divOpen"),
+                    matchMeaning: piece("matchMeaning", "matchPoint"),
+                    matchPoint: piece("matchPoint", "rubric"),
+                    rubric: piece("rubric", "deviceMatch"),
+                    deviceMatch: piece("deviceMatch", "_end")
+                };
+                const divOpen = piece("_divOpen", "matchMeaning");
+                const order = app.getWorksheetSectionOrder ? app.getWorksheetSectionOrder() : Object.keys(blocks);
+                let body = divOpen + order.map(k => blocks[k] || "").join("");
+                let n = 0;
+                body = body.replace(/<h3>\d+\. /g, () => "<h3>" + (++n) + ". ");
+                content = content.slice(0, wsMark.questions) + body;
+            }
+        } catch(eOrder) {}
         const worksheetAnswerKeyPlainLen = (html) => String(html || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim().length;
         const mergedAnswerKey = worksheetInferenceKeyHtml + answerKeyHtml;
         if(includeKeyWs && (worksheetAnswerKeyPlainLen(mergedAnswerKey) >= 12 || worksheetInferenceKeyHtml)) {
