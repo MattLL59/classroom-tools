@@ -2956,7 +2956,7 @@
                     </div>
                     <button type="button" class="btn btn-outline" id="past-paper-extract-btn" onclick="admin.extractPastPaperText({ questions: false })" disabled title="Cache PDFs, pull resource + questions-PDF passages (C2 layout), and mark scheme. Does not change the question bank — use Extract questions next.">Extract text</button>
                     <button type="button" class="btn btn-primary" id="past-paper-reextract-btn" onclick="admin.reExtractQuestionsFromPages()" style="margin-left:8px;" disabled title="Split Section A reading tasks from the Questions PDF into the question bank (same engine as before; uses Section A reading page(s) only)">Extract questions</button>
-                    <button type="button" class="btn btn-outline" style="margin-left:8px;" onclick="const r = admin.autoPopulateQuoteBankFromMarkScheme(); admin.renderQuotesBank(); if(admin.renderLevelBank) admin.renderLevelBank(); app.showPastPaperExtractNotice(r.blocked ? ('<strong>Not filled.</strong> ' + app.escapeHtml(r.blocked)) : (r.added || r.linked) ? ((r.added ? '<strong>' + r.added + ' quote(s)</strong> added to the Quote Bank from the mark scheme.' : '') + (r.linked ? ' ' + r.linked + ' earlier mark-scheme quote(s) linked to more questions or levels.' : '') + (r.unlinked ? ' ' + r.unlinked + ' are for questions not on any level yet \u2014 see Not on any level in the Quote bank.' : '')) : ('<strong>No quotes added.</strong> ' + app.escapeHtml(r.reason || 'No mark-scheme match was found.') + ' Quotes you added yourself are never changed.'), { autoHideMs: 15000 });" title="Fill the Quote Bank from the mark scheme now, for every 4+ mark focus question — works whatever the Levels tab says. Each quote is linked to its question and to any level using that question. Same local matching as Fill from mark scheme — no AI call. Never changes quotes you added yourself. Safe to re-run.">Fill Quote Bank from mark scheme now</button>
+                    <button type="button" class="btn btn-outline" style="margin-left:8px;" onclick="const r = admin.autoPopulateQuoteBankFromMarkScheme(); admin.renderQuotesBank(); if(admin.renderLevelBank) admin.renderLevelBank(); app.showPastPaperExtractNotice(r.blocked ? ('<strong>Not filled.</strong> ' + app.escapeHtml(r.blocked)) : (r.added || r.linked) ? ((r.added ? '<strong>' + r.added + ' quote(s)</strong> added to the Quote Bank from the mark scheme.' : '') + (r.linked ? ' ' + r.linked + ' earlier mark-scheme quote(s) linked to more questions or levels.' : '') + (r.unlinked ? ' ' + r.unlinked + ' are for questions not on any level yet \u2014 see Not on any level in the Quote bank.' : '') + (r.warning ? ' <strong>Note:</strong> ' + app.escapeHtml(r.warning) : '')) : ('<strong>No quotes added.</strong> ' + app.escapeHtml(r.reason || 'No mark-scheme match was found.') + ' Quotes you added yourself are never changed.'), { autoHideMs: 15000 });" title="Fill the Quote Bank from the mark scheme now, for every 4+ mark focus question — works whatever the Levels tab says. Each quote is linked to its question and to any level using that question. Same local matching as Fill from mark scheme — no AI call. Never changes quotes you added yourself. Safe to re-run.">Fill Quote Bank from mark scheme now</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.copyLastPdfDebugReport && admin.copyLastPdfDebugReport()" style="margin-left:8px;" title="After Extract text/questions, copy the last PDF debug report (strategy decisions, line counts, insert width estimate).">Copy PDF debug</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-19th-btn" onclick="admin.reExtract19thFromPages()" style="margin-left:8px;" title="Re-extract 19th C passage from Questions PDF (C2 only)">Re-extract 19th C</button>
                     <button type="button" class="btn btn-outline btn-small" id="past-paper-reextract-resource-btn" onclick="admin.reExtractResourceFromPages()" style="margin-left:8px;" title="Re-extract 21st C resource passage from Resource PDF">Re-extract resource</button>
@@ -36374,6 +36374,9 @@ const admin = {
         if(!questions.length) return none("No focus questions in the lesson yet. Run Extract questions first.");
         const normQid = app.normQuestionId;
         const isC2 = admin.isComponent2SourceEditing && admin.isComponent2SourceEditing();
+        /* Component 2 with only one text loaded: questions on the other text can never match — say so plainly. */
+        const c2OneText = !!(appData && appData.component === 2 && !(admin.hasC2DualSource && admin.hasC2DualSource()));
+        const c2Warning = c2OneText ? "Only one Component 2 text is loaded, so questions on the other text can't be matched. In the Lobby, check the 19th C passage page and click Re-extract 19th C, then fill again." : "";
         const active = (app.getActiveLevels && app.getActiveLevels().length) ? app.getActiveLevels() : [1];
         /* Levels that currently show this question (assigned on the Levels tab, or the app's default pairing). */
         const levelsForQuestion = (qid) => active.filter(l => {
@@ -36385,7 +36388,7 @@ const admin = {
             : String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
         let added = 0, linked = 0, unlinked = 0, retrievalOnly = 0, noBullets = 0, matchedNothing = 0, alreadyIn = 0;
         const qLabel = (q) => { const m = String(q.id || "").match(/(\d+)\s*([a-z])?/i); return m ? ("Q" + m[1] + (m[2] ? "(" + m[2].toLowerCase() + ")" : "")) : String(q.id); };
-        const noBulletLabels = [], noMatchLabels = [];
+        const noBulletLabels = [], noMatchLabels = [], answerNotFoundLabels = [];
         /* Kept for Copy PDF debug: which question got which mark-scheme section, and what happened. */
         const dbgQuestions = [];
         questions.forEach(q => {
@@ -36399,7 +36402,12 @@ const admin = {
                    correct quote of their own instead of borrowing unrelated ones. */
                 const altsR = app.getMarkSchemeAnswerAlternatives ? app.getMarkSchemeAnswerAlternatives(q.id) : [];
                 const foundR = altsR.length && app.findAnswerSentencesInPassage ? app.findAnswerSentencesInPassage(sourceText, altsR) : [];
-                if(!foundR.length) { retrievalOnly++; dq.result = altsR.length ? "retrieval: answer not found in the passage" : "retrieval (short answer, skipped)"; return; }
+                if(!foundR.length) {
+                    retrievalOnly++;
+                    if(altsR.length) { answerNotFoundLabels.push(dq.label); dq.result = "retrieval: answer not found in the passage"; }
+                    else dq.result = "retrieval (short answer, skipped)";
+                    return;
+                }
                 const lvlsR = levelsForQuestion(qid);
                 let addedR = 0;
                 foundR.forEach(function(fr) {
@@ -36516,7 +36524,7 @@ const admin = {
             if(typeof admin.renderQuotesBank === "function") admin.renderQuotesBank();
             if(typeof admin.renderLevelBank === "function") admin.renderLevelBank();
             if(added > 0 && typeof admin.goAdminTab === "function") admin.goAdminTab("quotes");
-            return { added, linked, unlinked, skippedLevels: 0 };
+            return { added, linked, unlinked, skippedLevels: 0, warning: [c2Warning, answerNotFoundLabels.length ? "Mark-scheme answers not found in the passage for " + answerNotFoundLabels.join(", ") + "." : ""].filter(Boolean).join(" ") };
         }
         let reason;
         if(alreadyIn) reason = "Every matching quote is already in the Quote bank" + (matchedNothing ? "; no passage match for " + noMatchLabels.join(", ") : "") + (noBullets ? "; no mark-scheme bullets for " + noBulletLabels.join(", ") : "") + ".";
@@ -36524,6 +36532,8 @@ const admin = {
         else if(noBullets && !matchedNothing) reason = "No mark-scheme bullets were found for " + noBulletLabels.join(", ") + ". Check the mark scheme page range, then Re-extract mark scheme.";
         else if(matchedNothing) reason = "No passage sentences matched the mark-scheme bullets for " + noMatchLabels.join(", ") + (noBullets ? "; no mark-scheme bullets were found for " + noBulletLabels.join(", ") : "") + ".";
         else reason = "No quotable questions found.";
+        if(answerNotFoundLabels.length) reason += " Mark-scheme answers not found in the passage for " + answerNotFoundLabels.join(", ") + ".";
+        if(c2Warning) reason = c2Warning + " " + reason;
         if(noBullets || matchedNothing) reason += " Copy PDF debug now includes the mark-scheme details.";
         return none(reason);
     },
