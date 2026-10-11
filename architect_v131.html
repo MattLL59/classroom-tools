@@ -24758,9 +24758,7 @@ const ui = {
             start = ui._deskEssaySavedCaret.start;
             end = ui._deskEssaySavedCaret.end != null ? ui._deskEssaySavedCaret.end : start;
         }
-        const before = ta.value.slice(0, start);
-        const needsSpace = before.length > 0 && !/\s$/.test(before);
-        const mid = (needsSpace ? " " : "") + insertion + (/[.!?,;:"')\]]\s*$/.test(insertion) ? "" : " ");
+        const mid = ui._spaceChipForInsert(ta.value.slice(0, start), ta.value.slice(end), insertion);
         ui._applyTextareaEdit(ta, start, end, mid);
         try {
             const ns = typeof ta.selectionStart === "number" ? ta.selectionStart : start + mid.length;
@@ -24846,73 +24844,87 @@ const ui = {
         app.updateEssay(ta.value);
     },
     _getTextareaCaretIndexFromPoint: function(ta, clientX, clientY) {
-        // Approximate caret position in a textarea using a mirror div.
-        // (Needed because caretPositionFromPoint doesn't work on textarea content.)
-        if(!ta) return (typeof ta.selectionStart === "number" ? ta.selectionStart : (ta.value || "").length);
-        const rect = ta.getBoundingClientRect();
-        const x = clientX - rect.left;
-        const y = clientY - rect.top;
-        const cs = window.getComputedStyle(ta);
-        const div = document.createElement("div");
-        div.style.position = "fixed";
-        div.style.left = "-99999px";
-        div.style.top = "0";
-        div.style.whiteSpace = "pre-wrap";
-        div.style.wordWrap = "break-word";
-        div.style.visibility = "hidden";
-        div.style.fontFamily = cs.fontFamily;
-        div.style.fontSize = cs.fontSize;
-        div.style.fontWeight = cs.fontWeight;
-        div.style.letterSpacing = cs.letterSpacing;
-        div.style.lineHeight = cs.lineHeight;
-        div.style.padding = cs.padding;
-        div.style.border = cs.border;
-        div.style.boxSizing = cs.boxSizing;
-        div.style.width = cs.width;
-        div.style.height = cs.height;
-        div.style.overflow = "auto";
-        div.scrollTop = ta.scrollTop;
-        div.scrollLeft = ta.scrollLeft;
+        /* Character index under the pointer in a textarea (caretPositionFromPoint doesn't work inside textareas).
+           A hidden copy is laid out exactly like the box's text area — same width (scrollbar excluded), padding, font and
+           wrapping — and the pointer is converted to that copy's coordinates INCLUDING the box's scroll. The old version
+           ignored scrolling, so in a long answer chips landed far above the pointer (often in the question heading). */
+        if(!ta) return 0;
         const value = ta.value || "";
-        // Binary search for closest character index to the point.
-        const marker = document.createElement("span");
-        marker.textContent = "\u200b";
-        const setAt = (idx) => {
-            div.textContent = value.slice(0, idx);
-            div.appendChild(marker);
-            div.appendChild(document.createTextNode(value.slice(idx)));
+        if(!value.length) return 0;
+        const cs = window.getComputedStyle(ta);
+        const rect = ta.getBoundingClientRect();
+        const bl = parseFloat(cs.borderLeftWidth) || 0, bt = parseFloat(cs.borderTopWidth) || 0;
+        const x = clientX - rect.left - bl + ta.scrollLeft;
+        const y = clientY - rect.top - bt + ta.scrollTop;
+        const div = ui._taMirrorDiv || (ui._taMirrorDiv = document.createElement("div"));
+        const st = div.style;
+        st.position = "absolute"; st.left = "-99999px"; st.top = "0"; st.visibility = "hidden"; st.pointerEvents = "none";
+        st.whiteSpace = "pre-wrap"; st.overflowWrap = "break-word"; st.wordBreak = cs.wordBreak; st.boxSizing = "border-box";
+        st.width = ta.clientWidth + "px"; st.height = "auto"; st.overflow = "hidden"; st.border = "0";
+        ["paddingTop","paddingRight","paddingBottom","paddingLeft","fontFamily","fontSize","fontWeight","fontStyle","letterSpacing","wordSpacing","lineHeight","textTransform","textIndent","tabSize","fontVariant"].forEach(function(k) { st[k] = cs[k]; });
+        if(!div.parentNode) document.body.appendChild(div);
+        div.textContent = value + "\u200b";
+        const node = div.firstChild;
+        const dr = div.getBoundingClientRect();
+        const range = document.createRange();
+        /* Box of character i in the copy's coordinates (null for characters with no box, e.g. a newline). */
+        const charBox = function(i) {
+            try {
+                range.setStart(node, i); range.setEnd(node, i + 1);
+                const rs = range.getClientRects();
+                const b = rs.length ? rs[rs.length - 1] : null;
+                if(!b || (!b.width && !b.height)) return null;
+                return { top: b.top - dr.top, bottom: b.bottom - dr.top, left: b.left - dr.left, right: b.right - dr.left };
+            } catch(e) { return null; }
         };
-        document.body.appendChild(div);
+        const lineTopOf = function(i) {
+            for(let k = i; k >= 0; k--) { const b = charBox(k); if(b) return b.top; }
+            return 0;
+        };
+        /* 1) the line: last character whose line starts at or above the pointer */
         let lo = 0, hi = value.length;
-        let best = 0;
-        // Coarse pass: find line by y using binary search on index.
-        for(let iter = 0; iter < 18; iter++) {
-            const mid = Math.floor((lo + hi) / 2);
-            setAt(mid);
-            const m = marker.getBoundingClientRect();
-            const my = (m.top - div.getBoundingClientRect().top) + m.height * 0.5;
-            if(my < y) { lo = mid + 1; best = mid; }
-            else { hi = mid - 1; best = mid; }
+        while(lo < hi) {
+            const mid = Math.ceil((lo + hi) / 2);
+            if(lineTopOf(mid) <= y) lo = mid; else hi = mid - 1;
         }
-        // Fine scan around best to match x on that line.
-        const start = Math.max(0, best - 200);
-        const end = Math.min(value.length, best + 200);
-        let bestIdx = best;
-        let bestDist = Infinity;
-        for(let i = start; i <= end; i += 1) {
-            setAt(i);
-            const m = marker.getBoundingClientRect();
-            const mr = div.getBoundingClientRect();
-            const mx = (m.left - mr.left);
-            const my = (m.top - mr.top);
-            const dy = Math.abs(my - y);
-            if(dy > 24) continue;
-            const dx = Math.abs(mx - x);
-            const d = dy * 1000 + dx;
-            if(d < bestDist) { bestDist = d; bestIdx = i; }
+        const lineTop = lineTopOf(lo);
+        let ls = lo; while(ls > 0) { const b = charBox(ls - 1); if(b ? b.top !== lineTop : value.charAt(ls - 1) === "\n") break; ls--; }
+        let le = lo; while(le < value.length) { const b = charBox(le); if(!b || b.top !== lineTop) break; le++; }
+        /* 2) within the line: the gap between characters nearest the pointer's x */
+        let best = le, bestDist = Infinity;
+        for(let k = ls; k <= le; k++) {
+            const b = k < le ? charBox(k) : charBox(Math.max(ls, le - 1));
+            if(!b) continue;
+            const gx = k < le ? b.left : b.right;
+            const d = Math.abs(gx - x);
+            if(d < bestDist) { bestDist = d; best = k; }
         }
-        div.remove();
-        return bestIdx;
+        div.textContent = "";
+        return Math.max(0, Math.min(value.length, best));
+    },
+    /** Sentence-bank chip spacing (drag or click): a space before unless after a space / opening bracket / quote mark,
+        and a space after unless the next character is already a space or punctuation ("Firstly,Line" → "Firstly, Line"). */
+    _spaceChipForInsert: function(before, after, text) {
+        const t = String(text || "").trim();
+        if(!t) return "";
+        const b = String(before || ""), a = String(after || "");
+        const lead = (b.length && !/[\s(\[\u201C\u2018"']$/.test(b)) ? " " : "";
+        let trail;
+        if(!a.length || /^\s/.test(a)) trail = (!a.length && /[A-Za-z0-9,;:]$/.test(t)) ? " " : "";
+        else trail = /^[.,;:!?)\]\u201D\u2019]/.test(a) ? "" : " ";
+        return lead + t + trail;
+    },
+    /** Never drop a chip inside a "Question N" heading line — move it to the start of that answer, after the heading's blank line. */
+    _deskDropIndexOutsideHeading: function(value, idx) {
+        const v = String(value || "");
+        const ls = v.lastIndexOf("\n", Math.max(0, idx - 1)) + 1;
+        let le = v.indexOf("\n", idx); if(le < 0) le = v.length;
+        const line = v.slice(ls, le);
+        if(!/^\s*\uFEFF?\s*Question\s+\d+\s*$/i.test(line)) return idx;
+        let after = le;
+        if(v.charAt(after) === "\n") after++;
+        if(v.charAt(after) === "\n") after++;
+        return Math.min(v.length, after);
     },
     setupDeskDragDrop: function() {
         const ta = document.getElementById("essay-area");
@@ -24940,8 +24952,11 @@ const ui = {
             const isInternal = !!(ui._essayDrag && ui._essayDrag.text);
             e.dataTransfer.dropEffect = (isInternal && !e.ctrlKey) ? "move" : "copy";
             ta.classList.add("desk-drop-hover");
-            // Drop at hovered caret (not at end).
-            const idx = ui._getTextareaCaretIndexFromPoint(ta, e.clientX, e.clientY);
+            // Show the drop point as the caret while hovering (throttled: dragover fires many times a second).
+            const nowT = Date.now();
+            if(ui._deskDragOverAt && nowT - ui._deskDragOverAt < 40) return;
+            ui._deskDragOverAt = nowT;
+            const idx = ui._deskDropIndexOutsideHeading(ta.value, ui._getTextareaCaretIndexFromPoint(ta, e.clientX, e.clientY));
             try { ta.setSelectionRange(idx, idx); } catch(_) {}
         });
         ta.addEventListener("dragleave", function(e) {
@@ -24958,14 +24973,17 @@ const ui = {
                 const fromPoint = ui._getTextareaCaretIndexFromPoint(ta, e.clientX, e.clientY);
                 if(typeof fromPoint === "number" && fromPoint >= 0) insertAt = fromPoint;
             } catch(_) {}
-            ui._applyTextareaEdit(ta, insertAt, insertAt, String(t));
+            if(!ui._essayDrag) insertAt = ui._deskDropIndexOutsideHeading(ta.value, insertAt);
+            /* Chips get the same spacing as clicking one; text moved within the answer goes in as it was. */
+            const dropText = ui._essayDrag ? String(t) : ui._spaceChipForInsert(ta.value.slice(0, insertAt), ta.value.slice(insertAt), String(t));
+            ui._applyTextareaEdit(ta, insertAt, insertAt, dropText);
             // If this was an internal drag and we intended "move", delete original selection.
             const isMove = ui._essayDrag && ui._essayDrag.text && !e.ctrlKey;
             if(isMove) {
                 const d = ui._essayDrag;
                 ui._essayDrag = null;
                 // If insertion happened before the original range, original indices shift right by inserted length.
-                const insLen = String(t).length;
+                const insLen = dropText.length;
                 let ds = d.start, de = d.end;
                 if(insertAt <= d.start) { ds += insLen; de += insLen; }
                 // If we dropped inside the dragged range, treat as no-op.
@@ -25084,8 +25102,12 @@ const ui = {
                 e.dataTransfer.setData("text/plain", p);
                 e.dataTransfer.effectAllowed = "copy";
                 const ta = document.getElementById("essay-area");
+                /* Only bring the answer box into view if it isn't visible — scrolling while it's on screen moved the
+                   target out from under the pointer mid-drag. */
                 if(ta && ta.scrollIntoView) {
-                    try { ta.scrollIntoView({ block: "center", behavior: "smooth" }); } catch(_) { ta.scrollIntoView(); }
+                    const tr = ta.getBoundingClientRect();
+                    const visible = tr.bottom > 40 && tr.top < (window.innerHeight - 40);
+                    if(!visible) { try { ta.scrollIntoView({ block: "center", behavior: "smooth" }); } catch(_) { ta.scrollIntoView(); } }
                 }
             });
             span.addEventListener("dragend", function() {
