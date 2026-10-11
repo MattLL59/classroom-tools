@@ -5947,6 +5947,29 @@ const app = {
         const keys = app.WORKSHEET_GAMES.map(g => g.key);
         return Array.isArray(e.worksheetGames) ? e.worksheetGames.filter(k => keys.includes(k)) : [];
     },
+    /**
+     * Edit one field of a quote-bank item from anywhere it is shown (Worksheet preview, Quote select parts table…).
+     * field: "quote" | "translation" (meaning) | "effect" (point / analysis) | "marker" | "starter" | "method" | "link".
+     * Keeps the companion copies in step so every view (and the worksheet, which prints the full-length version) shows the edit.
+     */
+    setQuoteItemField: function(item, field, value) {
+        if(!item) return false;
+        const v = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+        if(field === "quote") {
+            if(!v) return false;
+            item.quote = v; item.original = v; item.originalFull = v;
+            return true;
+        }
+        const plural = { marker: "markers", starter: "starters", method: "methods", link: "links" }[field];
+        if(field === "translation" || field === "effect" || plural) {
+            item[field] = v;
+            if(field === "effect" && Array.isArray(item.reasons)) { if(item.reasons.length) item.reasons[0] = v; else if(v) item.reasons.push(v); }
+            if(plural && Array.isArray(item[plural])) { if(item[plural].length) item[plural][0] = v; else if(v) item[plural].push(v); }
+            if(field === "link") { Object.keys(item).forEach(k => { if(/^link_l\d+$/.test(k)) item[k] = v; }); }
+            return true;
+        }
+        return false;
+    },
     /** Active level whose focus question is this one (first match), or null. */
     getLevelForQuestionId: function(qid) {
         const n = app.normQuestionId || ((x) => String(x || "").toLowerCase());
@@ -5963,12 +5986,27 @@ const app = {
         const lvl = parseInt(level, 10) || 1;
         if(!appData.settings.levelBank) appData.settings.levelBank = {};
         const e = appData.settings.levelBank[lvl] || (appData.settings.levelBank[lvl] = {});
-        const on = Array.isArray(e.worksheetGames) ? e.worksheetGames.filter(k => k !== key) : [];
+        /* worksheetGames is also this question's print order — keep a game's place when only its side changes. */
+        let on = Array.isArray(e.worksheetGames) ? e.worksheetGames.slice() : [];
         const bef = Array.isArray(e.worksheetGamesBefore) ? e.worksheetGamesBefore.filter(k => k !== key) : [];
-        if(where === "before" || where === "after") on.push(key);
+        if(where === "before" || where === "after") { if(!on.includes(key)) on.push(key); }
+        else on = on.filter(k => k !== key);
         if(where === "before") bef.push(key);
         e.worksheetGames = on;
         e.worksheetGamesBefore = bef;
+    },
+    /** Move a game up/down among the games on the same side (before / after) of this level's question. */
+    moveWorksheetGameForLevel: function(level, key, dir) {
+        const lvl = parseInt(level, 10) || 1;
+        const e = (appData.settings.levelBank || {})[lvl];
+        if(!e || !Array.isArray(e.worksheetGames)) return false;
+        const side = app.getWorksheetGamePlacement(lvl, key);
+        const same = e.worksheetGames.filter(k => app.getWorksheetGamePlacement(lvl, k) === side);
+        const i = same.indexOf(key), j = i + (dir < 0 ? -1 : 1);
+        if(i < 0 || j < 0 || j >= same.length) return false;
+        const a = e.worksheetGames.indexOf(same[i]), b2 = e.worksheetGames.indexOf(same[j]);
+        const t = e.worksheetGames[a]; e.worksheetGames[a] = e.worksheetGames[b2]; e.worksheetGames[b2] = t;
+        return true;
     },
     /** True when any active level has worksheet games ticked — the worksheet is then laid out question by question. */
     worksheetGamesByQuestionActive: function() {
@@ -35380,7 +35418,8 @@ const admin = {
             if(!it || !quoteText(it)) return;
             if(lvlFilter && !levelsFor(it).includes(lvlFilter)) return;
             const ch = changed[i] || [];
-            const cell = (val, isNew) => `<td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top;${isNew ? " background:rgba(76,175,80,0.16);" : ""}">${val ? esc(val) : '<span style="opacity:0.45;">—</span>'}</td>`;
+            /* Cells are editable in place (click, type, then click away) — same data as the Quote bank and Worksheet preview. */
+        const cell = (val, isNew, idxE, fieldE) => `<td ${idxE != null ? `contenteditable="true" data-ed-idx="${idxE}" data-ed-field="${fieldE}" title="Click to edit" onblur="admin.saveSplitPartsCell(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"` : ""} style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top; cursor:text;${isNew ? " background:rgba(76,175,80,0.16);" : ""}">${val ? esc(val) : ""}</td>`;
             const model = String(it.modelAnswer || "").trim();
             rows.push(`<tr>
                 <td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top; max-width:16em;">
@@ -35389,7 +35428,7 @@ const admin = {
                     <button type="button" class="btn btn-primary btn-small" style="margin-top:6px;" onclick="admin.previewQuoteInSentenceBuilder(${i})">Try in Sentence Builder</button>
                 </td>
                 <td style="padding:4px 6px; border-top:1px solid var(--border); vertical-align:top; min-width:3.5em;">${levelCell(it)}</td>
-                ${cols.map(c => cell(c[1] ? first(it, c[0], c[1]) : (it[c[0]] || ""), ch.includes(c[0]))).join("")}
+                ${cols.map(c => cell(c[1] ? first(it, c[0], c[1]) : (it[c[0]] || ""), ch.includes(c[0]), i, c[0])).join("")}
             </tr>`);
         });
         const filterBar = activeLvls.length > 1
@@ -35400,7 +35439,7 @@ const admin = {
             return;
         }
         const anyNew = Object.keys(changed).length > 0;
-        mount.innerHTML = filterBar + `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts. <strong>Level</strong>: solid = ticked for students on that level, outline = in that level's bank but not ticked.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Edit any part in the <strong>Quote bank</strong> tab.</div>
+        mount.innerHTML = filterBar + `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts. <strong>Level</strong>: solid = ticked for students on that level, outline = in that level's bank but not ticked.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Click any part to edit it here (or in the <strong>Quote bank</strong> / Worksheet preview).</div>
             <div style="overflow-x:auto; border:1px solid var(--border); border-radius:6px;">
                 <table style="border-collapse:collapse; width:100%; font-size:0.8rem;">
                     <thead><tr>${["Quote", "Level", ...cols.map(c => c[2])].map(h => `<th style="text-align:left; padding:4px 6px; white-space:nowrap;">${h}</th>`).join("")}</tr></thead>
@@ -42026,7 +42065,22 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         catch(err) { res = { html: null, message: "Preview failed: " + (err && err.message ? err.message : err) }; }
         const html = res && res.html ? admin._wsPrevPageDoc(res.html)
             : `<html><body style="font-family:sans-serif;padding:24px;background:#fff;">${app.escapeHtml((res && res.message) || "Nothing to show yet.")}</body></html>`;
-        frame.onload = () => { try { frame.contentWindow.scrollTo(0, frameScroll); } catch(e) {} };
+        frame.onload = () => {
+            try { frame.contentWindow.scrollTo(0, frameScroll); } catch(e) {}
+            /* About how many A4 pages: the sheet's height scaled to A4 print width (Word sets the exact breaks). */
+            try {
+                const d = frame.contentDocument, bd = d && d.body;
+                if(bd) {
+                    const cs = frame.contentWindow.getComputedStyle(bd);
+                    const w = bd.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+                    const h = bd.scrollHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+                    const cm = 37.8, pageW = 18.6 * cm, pageH = 26.3 * cm;
+                    const pages = w > 0 ? Math.max(1, Math.ceil((h * pageW / w) / pageH)) : 0;
+                    const sumEl = document.getElementById("wsp-summary");
+                    if(sumEl && pages) sumEl.textContent = sumEl.textContent.replace(/ · about \d+ pages?$/, "") + ` · about ${pages} page${pages === 1 ? "" : "s"}`;
+                }
+            } catch(e) {}
+        };
         frame.srcdoc = html;
         side.innerHTML = admin._wsPrevSideHtml(report, openSecs);
         side.scrollTop = sideScroll;
@@ -42068,39 +42122,61 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         h += `<label class="wsp-chk"><input type="checkbox" ${set.worksheetIncludeAnswerKey === true ? "checked" : ""} onchange="admin.wsPrevSetOpt('answerKey', this.checked)"><span>Teacher answer key at the end</span></label>`;
         h += `</div></details>`;
 
-        /* --- Order of sections --- */
-        const byQEarly = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
-        /* Per-question mode: the list is the running order inside each question — the question itself plus its games. */
-        const ordW = byQEarly ? app.getWorksheetSectionOrder().filter(k => k !== "shortAnswer" && k !== "questions") : app.getWorksheetSectionOrder();
-        h += `<details class="wsp-sec" data-k="order" ${isOpen("order", false) ? "open" : ""}><summary>Order of sections</summary><div class="wsp-sec-body">`;
+        /* --- Running order: always shows the sheet as it will print, and is where it is rearranged --- */
         const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
-        h += byQ
-            ? `<div class="wsp-note"><strong>Games are attached to questions.</strong> Choose for each question which games it has and whether they go <strong>before</strong> or <strong>after</strong> it under <strong>Questions</strong> below (or tick them on the Levels tab). This list only sets the order when a question has more than one game on the same side.</div>`
-            : `<div class="wsp-note">Move activities up or down — e.g. put the rubric and match games first. The title stays at the top and the answer key at the end; section numbers follow the new order. To attach games to particular questions, tick them per level on the Levels tab (Worksheet column).</div>`;
-        /* Number only the sections that will actually print, so the list matches the sheet; the rest are dimmed. */
         const secOn = app.getWorksheetSections();
-        const printsW = {
-            questions: !!secOn.questions,
-            shortAnswer: !!(secOn.shortAnswer && hasShortModel),
-            matchMeaning: !!(secOn.matchMeaning && !noQuotes),
-            matchPoint: !!(secOn.matchPoint && !noQuotes && r.hasPointExercise),
-            rubric: !!(secOn.rubric && !noQuotes),
-            deviceMatch: !!(secOn.deviceMatch && r.showDeviceMatch)
-        };
+        h += `<details class="wsp-sec" data-k="order" ${isOpen("order", true) ? "open" : ""}><summary>Running order</summary><div class="wsp-sec-body">`;
         if(byQ) {
-            /* Question by question: questions follow the levels; a game prints if any level ticks it (and it's switched on). */
-            const actLv = app.getActiveLevels ? app.getActiveLevels() : [];
-            app.WORKSHEET_GAMES.forEach(g => { printsW[g.key] = !!secOn[g.key] && actLv.some(l => app.getWorksheetGamesForLevel(l).includes(g.key)); });
-            printsW.questions = !!secOn.questions; printsW.shortAnswer = false;
-        }
-        let ordNum = 0;
-        h += ordW.map((k, i) => `<div class="wsp-row" style="display:flex;align-items:center;gap:6px;margin:2px 0;${printsW[k] ? "" : "opacity:0.5;"}">
+            /* Games attached to questions: every question in turn, with its own games above / below it. */
+            h += `<div class="wsp-note">The sheet, top to bottom. For each question choose which games go <strong>before</strong> or <strong>after</strong> it and use ↑ ↓ to order them — each question keeps its own arrangement. The same settings show under <strong>Questions</strong> below and in the Levels tab’s Worksheet column. Setting every game to Off on every question returns to one block of games after all the questions.</div>`;
+            const gLabel = (k) => (app.WORKSHEET_GAMES.find(g => g.key === k) || {}).label || k;
+            const qsRO = (r.questions || []).filter(q => !q.hidden);
+            const sel = (lvl, k, cur) => `<select style="font-size:0.85em;" onchange="admin.wsPrevSetGamePlacement(${lvl}, '${k}', this.value)">
+                    <option value="before" ${cur === "before" ? "selected" : ""}>Before</option><option value="after" ${cur === "after" ? "selected" : ""}>After</option><option value="off">Off (remove)</option></select>`;
+            const gameRow = (lvl, k, side, i, n) => `<div class="wsp-row" style="display:flex;align-items:center;gap:4px;margin:1px 0 1px 14px;${secOn[k] ? "" : "opacity:0.5;"}">
+                    <span style="flex:1;font-size:0.9em;">${side === "before" ? "▲" : "▼"} ${esc(gLabel(k))}${secOn[k] ? "" : " <em>(switched off above)</em>"}</span>
+                    <button type="button" class="btn btn-outline btn-small" ${i === 0 ? "disabled" : ""} title="Move up" onclick="admin.wsPrevMoveGame(${lvl}, '${k}', -1)">↑</button>
+                    <button type="button" class="btn btn-outline btn-small" ${i === n - 1 ? "disabled" : ""} title="Move down" onclick="admin.wsPrevMoveGame(${lvl}, '${k}', 1)">↓</button>
+                    ${sel(lvl, k, side)}</div>`;
+            qsRO.forEach(q => {
+                const lvl = app.getLevelForQuestionId(q.id);
+                const games = lvl != null ? app.getWorksheetGamesForLevel(lvl) : [];
+                const bef = games.filter(k => app.getWorksheetGamePlacement(lvl, k) === "before");
+                const aft = games.filter(k => app.getWorksheetGamePlacement(lvl, k) !== "before");
+                h += `<div style="border-top:1px solid var(--border);padding:4px 0 2px 0;margin-top:2px;">`;
+                bef.forEach((k, i) => { h += gameRow(lvl, k, "before", i, bef.length); });
+                h += `<div style="font-weight:700;font-size:0.92em;">${esc(q.label)}${lvl != null ? ` <span style="font-weight:400;opacity:0.7;">(Level ${lvl})</span>` : ` <span style="font-weight:400;opacity:0.7;">— not on any level</span>`}</div>`;
+                aft.forEach((k, i) => { h += gameRow(lvl, k, "after", i, aft.length); });
+                const spare = lvl != null ? app.WORKSHEET_GAMES.filter(g => !games.includes(g.key)) : [];
+                if(spare.length) {
+                    h += `<div style="margin:2px 0 0 14px;"><select style="font-size:0.85em;" onchange="if(this.value){ const v=this.value.split('|'); admin.wsPrevSetGamePlacement(${lvl}, v[0], v[1]); }">
+                        <option value="">+ Add a game…</option>
+                        ${spare.map(g => `<option value="${g.key}|before">${esc(g.label)} — before</option><option value="${g.key}|after">${esc(g.label)} — after</option>`).join("")}
+                    </select></div>`;
+                }
+                h += `</div>`;
+            });
+        } else {
+            /* One block of games for the whole sheet: move the questions block and the games as before. */
+            const ordW = app.getWorksheetSectionOrder();
+            h += `<div class="wsp-note">The sheet, top to bottom: all the questions together and the games as blocks — move them ↑ ↓ (e.g. games first). To put games between particular questions instead, set <strong>Games with this question</strong> to Before or After under <strong>Questions</strong> below (or tick the Levels tab’s Worksheet column); this list then shows each question with its own games.</div>`;
+            const printsW = {
+                questions: !!secOn.questions,
+                shortAnswer: !!(secOn.shortAnswer && hasShortModel),
+                matchMeaning: !!(secOn.matchMeaning && !noQuotes),
+                matchPoint: !!(secOn.matchPoint && !noQuotes && r.hasPointExercise),
+                rubric: !!(secOn.rubric && !noQuotes),
+                deviceMatch: !!(secOn.deviceMatch && r.showDeviceMatch)
+            };
+            let ordNum = 0;
+            h += ordW.map((k, i) => `<div class="wsp-row" style="display:flex;align-items:center;gap:6px;margin:2px 0;${printsW[k] ? "" : "opacity:0.5;"}">
                 <span style="min-width:1.4em;text-align:right;opacity:0.7;">${printsW[k] ? (++ordNum) + "." : "–"}</span>
-                <span style="flex:1;">${esc(byQ && k === "questions" ? "The question (with its answer lines)" : (app.WORKSHEET_ORDER_LABELS[k] || k))}${printsW[k] ? "" : ` <em style="font-size:0.85em;">— ${byQ ? "not ticked on any level" : "not on this sheet"}</em>`}</span>
+                <span style="flex:1;">${esc(k === "questions" ? "All the questions (with answer lines)" : (app.WORKSHEET_ORDER_LABELS[k] || k))}${printsW[k] ? "" : ` <em style="font-size:0.85em;">— not on this sheet</em>`}</span>
                 <button type="button" class="btn btn-outline btn-small" ${i === 0 ? "disabled" : ""} title="Move up" onclick="admin.wsPrevMoveSection('${k}', -1)">↑</button>
                 <button type="button" class="btn btn-outline btn-small" ${i === ordW.length - 1 ? "disabled" : ""} title="Move down" onclick="admin.wsPrevMoveSection('${k}', 1)">↓</button>
             </div>`).join("");
-        h += `<div class="wsp-row" style="margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevResetSectionOrder()">Reset order</button></div>`;
+            h += `<div class="wsp-row" style="margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevResetSectionOrder()">Reset order</button></div>`;
+        }
         h += `</div></details>`;
 
         /* --- Layout --- */
@@ -42124,6 +42200,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 ${act.map(lv => `<option value="${lv}" ${lvOv === lv ? "selected" : ""}>Level ${lv}</option>`).join("")}</select></div>`;
         h += `<div class="wsp-note">The rubric rows come from that level’s Sentence Structure.</div>`;
         h += `<div class="wsp-row">Max unique quotes <input type="number" min="1" max="50" value="${esc(r.maxQuotes || 8)}" style="width:56px;" onchange="admin.wsPrevSetOpt('maxQuotes', this.value)"></div>`;
+        /* Quotes per game: each game can use fewer quotes than the sheet has (blank = all of them). */
+        const gqc = (appData.settings && appData.settings.worksheetGameQuoteCounts) || {};
+        h += `<div class="wsp-note" style="margin-top:6px;">Quotes per game (blank = all the sheet's quotes${app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive() ? ", per question" : ""}):</div>`;
+        h += `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 6px;align-items:center;">` + app.WORKSHEET_GAMES.map(g =>
+            `<span style="font-size:0.9em;">${esc(g.label)}</span><input type="number" min="1" max="50" placeholder="all" value="${esc(gqc[g.key] || "")}" style="width:56px;" onchange="admin.wsPrevSetGameCount('${g.key}', this.value)">`).join("") + `</div>`;
         h += `</div></details>`;
 
         /* --- Questions --- */
@@ -42179,9 +42260,35 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     warn += `<button type="button" class="btn btn-outline btn-small wsp-mini" title="${esc(ext)}" onclick="admin.wsPrevExtendQuote(${q.idx})">Extend to full sentence</button>`;
                 }
             }
+            /* ✏️ Edit: the same fields as the Quote bank — changes save to the lesson and the sheet updates. */
+            const itE = (appData.items || [])[q.idx] || {};
+            /* Show what the sheet prints: the field itself, else its list's first entry, else the saved model-answer line. */
+            let smE = {};
+            try { smE = admin.parseModelAnswer(itE.modelAnswer || "") || {}; } catch(eSm) {}
+            const fv = (k) => {
+                let v;
+                if(k === "quote") v = itE.originalFull || itE.original || itE.quote || "";
+                else if(k === "translation") v = itE.translation || "";
+                else if(k === "effect") v = itE.effect || smE.point || smE.analysis || smE.effect || "";
+                else {
+                    const pl = { marker: "markers", starter: "starters", method: "methods", link: "links" }[k];
+                    v = itE[k] || (pl && Array.isArray(itE[pl]) && itE[pl][0]) || smE[k] || "";
+                }
+                return esc(String(v));
+            };
+            const fieldRow = (k, label, big) => `<label class="wsp-ed-row" style="display:block;margin:3px 0;"><span style="display:block;font-size:0.8em;opacity:0.8;">${label}</span>${big
+                ? `<textarea rows="2" style="width:100%;box-sizing:border-box;" onchange="admin.wsPrevEditQuoteField(${q.idx}, '${k}', this.value)">${fv(k)}</textarea>`
+                : `<input type="text" style="width:100%;box-sizing:border-box;" value="${fv(k)}" onchange="admin.wsPrevEditQuoteField(${q.idx}, '${k}', this.value)">`}</label>`;
+            const edOpen = admin._wsPrevOpenEditors && admin._wsPrevOpenEditors.has(q.idx);
+            const editor = `<details class="wsp-ed" ${edOpen ? "open" : ""} ontoggle="admin.wsPrevNoteEditorOpen(${q.idx}, this.open)" style="margin-top:4px;"><summary style="cursor:pointer;font-size:0.85em;">✏️ Edit</summary>
+                ${fieldRow("quote", "Quote wording (fill in any “…” gap)", true)}
+                ${fieldRow("translation", "Meaning (match game)", false)}
+                ${fieldRow("effect", "Point / analysis (match game and rubric)", true)}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 6px;">${fieldRow("marker", "Marker", false)}${fieldRow("starter", "Starter", false)}${fieldRow("method", "Method", false)}${fieldRow("link", "Link", false)}</div>
+            </details>`;
             return `<div class="wsp-quote${cls}"><input type="checkbox" ${q.ticked ? "checked" : ""} title="Include on worksheet" onchange="admin.wsPrevToggleQuote(${q.idx}, this.checked)">
                 <span class="wsp-num">${num}</span>
-                <div class="wsp-qt">“${esc(q.text)}”${qLab(q) && q.status !== "off" ? ` <span class="wsp-badge">${esc(qLab(q))}</span>` : ""}<div class="wsp-status">${st}</div>${warn}</div></div>`;
+                <div class="wsp-qt">“${esc(q.text)}”${qLab(q) && q.status !== "off" ? ` <span class="wsp-badge">${esc(qLab(q))}</span>` : ""}<div class="wsp-status">${st}</div>${warn}${editor}</div></div>`;
         };
         h += `<details class="wsp-sec" data-k="quotes" ${isOpen("quotes", true) ? "open" : ""}><summary>Quotes (${printing.filter(q => !q.merged).length} printing)</summary><div class="wsp-sec-body">`;
         h += `<div class="wsp-note">Ticks here are the same as <strong>Include on worksheet</strong> in the Quote bank.</div>`;
@@ -42196,6 +42303,49 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         h += `<div class="wsp-row" style="margin-top:8px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevClearQuotes()">Untick all</button></div>`;
         h += `</div></details>`;
         return h;
+    },
+    saveSplitPartsCell: function(td) {
+        if(!td) return;
+        const idx = parseInt(td.getAttribute("data-ed-idx"), 10);
+        const field = td.getAttribute("data-ed-field");
+        const items = Array.isArray(appData.items) ? appData.items : [];
+        const it = items[idx];
+        if(!it) return;
+        const v = String(td.innerText || "").replace(/\s+/g, " ").trim();
+        const before = field === "effect" ? String(it.effect || "") : String(it[field] || "");
+        if(v === before.trim()) return;
+        if(app.setQuoteItemField(it, field, v)) {
+            app.save();
+            if(typeof admin.renderQuotesBank === "function") { try { admin.renderQuotesBank(); } catch(e) {} }
+            if(admin.flashBrief) admin.flashBrief("Saved");
+        }
+    },
+    wsPrevEditQuoteField: function(idx, field, value) {
+        const it = (appData.items || [])[idx];
+        if(!it || !app.setQuoteItemField(it, field, value)) return;
+        if(appData.selection) appData.selection.items = appData.items;
+        app.save();
+        if(typeof admin.renderQuotesBank === "function") { try { admin.renderQuotesBank(); } catch(e) {} }
+        admin.renderWorksheetPreview();
+    },
+    wsPrevNoteEditorOpen: function(idx, open) {
+        if(!admin._wsPrevOpenEditors) admin._wsPrevOpenEditors = new Set();
+        if(open) admin._wsPrevOpenEditors.add(idx); else admin._wsPrevOpenEditors.delete(idx);
+    },
+    wsPrevSetGameCount: function(key, value) {
+        if(!appData.settings) appData.settings = {};
+        const cur = Object.assign({}, appData.settings.worksheetGameQuoteCounts || {});
+        const n = parseInt(value, 10);
+        if(Number.isFinite(n) && n > 0) cur[key] = n; else delete cur[key];
+        appData.settings.worksheetGameQuoteCounts = cur;
+        app.save();
+        admin.renderWorksheetPreview();
+    },
+    wsPrevMoveGame: function(level, key, dir) {
+        if(!app.moveWorksheetGameForLevel(level, key, dir)) return;
+        app.save();
+        if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
+        admin.renderWorksheetPreview();
     },
     wsPrevSetGamePlacement: function(level, key, where) {
         app.setWorksheetGamePlacement(level, key, where);
@@ -42598,6 +42748,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(!Number.isFinite(maxWorksheetQuotes) || maxWorksheetQuotes < 1) maxWorksheetQuotes = 8;
         if(maxWorksheetQuotes > 50) maxWorksheetQuotes = 50;
         const included = dedupedWsItems.slice(0, maxWorksheetQuotes);
+        /* Number of quotes per game (Worksheet preview → Layout → Quotes per game): each game uses the first n of the sheet's quotes. */
+        const wsGameCap = (key) => {
+            const n = parseInt(((appData.settings || {}).worksheetGameQuoteCounts || {})[key], 10);
+            return Number.isFinite(n) && n > 0 ? included.slice(0, n) : included;
+        };
         const worksheetHasQuotes = included.length > 0;
         if(wsReport) {
             const dedupIndexOf = (raw) => {
@@ -42760,7 +42915,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const matchSelect = document.getElementById("worksheet-match-mode");
         const matchMode = (appData.settings && appData.settings.worksheetMatchMode)
             || (matchSelect ? matchSelect.value : "jumbled");
-        const meanings = included.map(i => String(i.translation || "").trim());
+        const incMM = wsGameCap("matchMeaning");
+        const meanings = incMM.map(i => String(i.translation || "").trim());
         const shuffleMatchColumnNoRowAlignment = (column) => {
             const arr = column.map(c => String(c == null ? "" : c));
             const n = arr.length;
@@ -42787,14 +42943,14 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(matchMode === "list") {
             const shuffled = shuffle(meanings.map(m => app.escapeHtml(m)));
             content += `<p style="margin:0 0 2px 0; font-size:9pt;"><em>Possible meanings (jumbled):</em> ${shuffled.join(" · ")}</p>`;
-            included.forEach((item, idx) => {
+            incMM.forEach((item, idx) => {
                 content += `<p style="margin:0; font-size:10pt;">${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))} → __________________</p>`;
             });
         } else {
             const rightMeanings = shuffleMatchColumnNoRowAlignment(meanings);
             content += `<table class="match-table"><colgroup><col style="width:40%"><col style="width:14%"><col style="width:46%"></colgroup>`;
             content += `<tr><th style="text-align:left;">Quote</th><th style="text-align:center;"> </th><th style="text-align:left;">Meaning (jumbled)</th></tr>`;
-            included.forEach((item, idx) => {
+            incMM.forEach((item, idx) => {
                 const right = app.escapeHtml(String(rightMeanings[idx] || ""));
                 content += `<tr>
                     <td>${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))}</td>
@@ -42805,7 +42961,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             content += `</table>`;
         }
         }
-        const pointsCol = included.map(i => worksheetPointText(i));
+        const incMP = wsGameCap("matchPoint");
+        const pointsCol = incMP.map(i => worksheetPointText(i));
         const hasPointExercise = pointsCol.some(p => String(p || "").trim().length > 0);
         if(wsReport) wsReport.hasPointExercise = hasPointExercise;
         wsMark.matchPoint = content.length;
@@ -42815,7 +42972,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const rightPoints = shuffleMatchColumnNoRowAlignment(pointsCol.map(p => String(p || "").trim()));
             content += `<table class="match-table"><colgroup><col style="width:40%"><col style="width:14%"><col style="width:46%"></colgroup>`;
             content += `<tr><th style="text-align:left;">Quote</th><th style="text-align:center;"> </th><th style="text-align:left;">Point / analysis (jumbled)</th></tr>`;
-            included.forEach((item, idx) => {
+            incMP.forEach((item, idx) => {
                 const right = app.escapeHtml(String(rightPoints[idx] || ""));
                 content += `<tr>
                     <td>${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))}</td>
@@ -42832,7 +42989,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             if(t === "structure") return "Structure";
             return item.type || "Language";
         };
-        const deviceLabels = included.map(deviceLabel);
+        const incDM = wsGameCap("deviceMatch");
+        const deviceLabels = incDM.map(deviceLabel);
         const deviceKeySet = new Set(deviceLabels.map(d => d.toLowerCase()));
         /* Focus labels / focus-match task follow the quotes actually printing, not the Selection devices switches. */
         const wsDeviceMix = deviceKeySet.size >= 2;
@@ -42922,7 +43080,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content += `<p style="margin:0 0 2px 0; font-size:8.5pt; opacity:0.9;">Shaded boxes show the <strong>full model wording</strong> saved on each quote (same slots as Sentence Structure). Optional chips are that quote’s distractors only. Empty slots are a single line for students to write.</p>`;
 
         let wsSeq = 0;
-        included.forEach((item) => {
+        wsGameCap("rubric").forEach((item) => {
             wsSeq++;
             const qNum = wsSeq;
             const quoteDisp = worksheetQuote(item);
@@ -43023,7 +43181,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 const rightDev = shuffleMatchColumnNoRowAlignment(deviceLabels.slice());
                 content += `<table class="match-table"><colgroup><col style="width:40%"><col style="width:14%"><col style="width:46%"></colgroup>`;
                 content += `<tr><th style="text-align:left;">Quote</th><th style="text-align:center;"> </th><th style="text-align:left;">Focus (jumbled)</th></tr>`;
-                included.forEach((item, idx) => {
+                incDM.forEach((item, idx) => {
                     const right = app.escapeHtml(String(rightDev[idx] || ""));
                     content += `<tr>
                         <td>${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))}</td>
@@ -43083,8 +43241,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                         const innerBlocks = (inner && inner.blocks) || {};
                         /* Each question's own arrangement: games set to "before" print above it, the rest below
                            (Worksheet preview → Questions, or Levels tab tick = after). The order list orders games within each side. */
-                        const gBefore = gameOrderG.filter(k => games.includes(k) && app.getWorksheetGamePlacement(lvlG, k) === "before");
-                        const gAfter = gameOrderG.filter(k => games.includes(k) && app.getWorksheetGamePlacement(lvlG, k) !== "before");
+                        /* Each question's own order (Running order / Levels tab): the level's list is the print order. */
+                        const gBefore = games.filter(k => app.getWorksheetGamePlacement(lvlG, k) === "before");
+                        const gAfter = games.filter(k => app.getWorksheetGamePlacement(lvlG, k) !== "before");
                         grouped += gBefore.map(k => innerBlocks[k] || "").join("") + qHtml + gAfter.map(k => innerBlocks[k] || "").join("");
                         if(!inner || !inner.blocks) return;
                         const ak = String(inner.answerKeyHtml || "").trim();
@@ -43113,6 +43272,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             content = content.replace(".sentence-table .writing-cell{min-height:28px; height:28px; max-height:40px;", ".sentence-table .writing-cell{min-height:36px; height:36px; max-height:52px;");
         }
         if(opts.returnHtml) return { html: content };
+        /* Page counter: a Word footer with live PAGE / NUMPAGES fields ("Page 2 of 4" on every page). The footer sits in a table pushed
+           far off the page, so programs that don't read Word footers (LibreOffice, Google Docs) don't print it in the body. */
+        content = content.replace("@page{margin:1cm 1.2cm;}", "@page{margin:1cm 1.2cm;} @page WsSection1{margin:1cm 1.2cm 1.4cm 1.2cm; mso-footer:wsf1; mso-footer-margin:0.45cm;} div.WsSection1{page:WsSection1;} p.MsoFooter{margin:0; text-align:center; font-size:9pt;}");
+        content = content.replace("</head><body>", "</head><body><div class=\"WsSection1\">");
+        content = content.replace("</body></html>", "<table style=\"margin-left:50in;\" border=\"0\" cellspacing=\"0\" cellpadding=\"0\"><tr><td><div style=\"mso-element:footer\" id=\"wsf1\"><p class=\"MsoFooter\">Page <span style='mso-field-code:\" PAGE \"'><span style='mso-no-proof:yes'>1</span></span> of <span style='mso-field-code:\" NUMPAGES \"'><span style='mso-no-proof:yes'>1</span></span></p></div></td></tr></table></div></body></html>");
         const b = new Blob(['\ufeff'+content], {type:'application/msword'});
         const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download="Worksheet.doc"; a.click();
     },
