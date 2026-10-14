@@ -7660,7 +7660,9 @@ const app = {
                     if (!safe.questions.some(qq => qq && qq.id === nextId)) safe.questions.push({ id: nextId, prompt: "" });
                     else break;
                 }
-            } else if (prev && Array.isArray(prev.questions) && prev.questions.length >= 2) {
+            } else if (prev && Array.isArray(prev.questions) && prev.questions.length >= 2
+                /** v132: a lesson-pack file with no questions yet is a blank lesson to design, not a broken import — don't borrow the previous lesson's. */
+                && !(safe.meta && safe.meta.lessonFile && typeof safe.meta.lessonFile === "object")) {
                 const prevReal = prev.questions.filter(q => q && q.prompt && String(q.prompt).trim()).length;
                 if (prevReal >= 2) {
                     safe.questions = copy(prev.questions);
@@ -11963,6 +11965,14 @@ const app = {
         const L = appData.component2Layout;
         return app.c2LayoutTextIsNumbered(L.resourcePaperText) || app.c2LayoutTextIsNumbered(L.questionPaperPage3Text);
     },
+    /** v132: lesson built by the lesson-pack tools (meta.lessonFile) — its text is copied from Word, so it is already clean. */
+    isLessonFileLesson: function() {
+        return !!(appData && appData.meta && appData.meta.lessonFile && typeof appData.meta.lessonFile === "object");
+    },
+    /** v132: skip the PDF glued-word repair (it splits real words: Himalayas → “Him a lay as”) for numbered C2 lessons and lesson-file lessons. */
+    skipPassageGlueRepair: function() {
+        return app.isC2NumberedLesson() || app.isLessonFileLesson();
+    },
     /** v132 numbered C2: teacher has switched line numbers off for this lesson (Passage tab). */
     c2LineNumbersHidden: function() {
         return !!(appData && appData.meta && appData.meta.c2LineNumbers === "hide");
@@ -12190,7 +12200,7 @@ const app = {
         if(!o || !Array.isArray(o.lines)) return "";
         const base = app.getPassageBookletFirstLine ? app.getPassageBookletFirstLine() : 1;
         /** v132 numbered C2: skip the PDF glue repair (it split “helpless” → “help less”, so quotes stopped matching). */
-        const skipGlue = typeof app.isC2NumberedLesson === "function" && app.isC2NumberedLesson();
+        const skipGlue = typeof app.skipPassageGlueRepair === "function" && app.skipPassageGlueRepair();
         return o.lines.map(function(L) {
             const bookN = base + L.n - 1;
             return bookN + " " + (skipGlue ? app._c2PlainNoGlueRepair(L.html || "") : app.htmlFragmentToPlainText(L.html || ""));
@@ -13732,7 +13742,7 @@ const app = {
         opts = opts || {};
         if(!o || !Array.isArray(o.lines) || !o.lines.length) return [];
         /** v132 numbered C2: lesson-pack text is already clean — the PDF glue repair split real words (Himalayas → “Him a lay as”). */
-        const skipGlueRepair = typeof app.isC2NumberedLesson === "function" && app.isC2NumberedLesson();
+        const skipGlueRepair = typeof app.skipPassageGlueRepair === "function" && app.skipPassageGlueRepair();
         const entries = o.lines.map(function(L, i) {
             const rawH = (L.html && String(L.html).trim()) ? String(L.html) : "";
             let html = rawH
@@ -34485,8 +34495,10 @@ const admin = {
         const bar1 = document.getElementById("architect-c2-source-bar");
         const bar2 = document.getElementById("architect-c2-source-bar-select");
         const barHeader = document.getElementById("header-c2-source-bar");
+        /** v132: a one-text lesson file has nothing to switch to — hide the student Modern text / 19th C buttons (the Passage tab still lets you add a second text). */
+        const oneTextLessonFile = !!(app.isLessonFileLesson && app.isLessonFileLesson()) && (!!String(layout.resourcePaperText || "").trim() !== !!String(layout.questionPaperPage3Text || "").trim());
         [bar1, bar2, barHeader].filter(Boolean).forEach(bar => {
-            bar.classList.toggle("hidden", !isC2);
+            bar.classList.toggle("hidden", !isC2 || oneTextLessonFile);
         });
         if(typeof ui.syncPassageScopeControls === "function") ui.syncPassageScopeControls();
         [bar1, bar2, barHeader].filter(Boolean).forEach(bar => {
