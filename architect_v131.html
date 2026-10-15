@@ -3170,7 +3170,7 @@
             window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
         }
     </script>
-    <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+    <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <script>
 /** ARCHITECT v5.1 (Safety First) — build v131: editor/reader passage split (see PASSAGE_V131_CHECKLIST.md) **/
 
@@ -24032,6 +24032,24 @@ const ui = {
             modal.setAttribute("aria-hidden", "false");
         }
         if(id === "modal-source") { /* modal removed – no-op */ }
+        /** v132: show the current colours in the Theme Colours pickers (they opened as black). */
+        if(id === "modal-theme") {
+            try {
+                const cs = getComputedStyle(document.documentElement);
+                const toHex = function(v) {
+                    v = String(v || "").trim();
+                    if(/^#[0-9a-f]{6}$/i.test(v)) return v;
+                    if(/^#[0-9a-f]{3}$/i.test(v)) return "#" + v.slice(1).split("").map(function(c) { return c + c; }).join("");
+                    const m = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+                    return m ? "#" + [m[1], m[2], m[3]].map(function(n) { return ("0" + parseInt(n, 10).toString(16)).slice(-2); }).join("") : "";
+                };
+                [["col-bg", "--bg"], ["col-text", "--text"], ["col-card", "--card"]].forEach(function(p) {
+                    const inp = document.getElementById(p[0]);
+                    const hex = toHex(cs.getPropertyValue(p[1]));
+                    if(inp && hex) inp.value = hex;
+                });
+            } catch(eTheme) {}
+        }
         if(id !== "modal-admin") return;
         try {
             if(typeof app !== "undefined") window.app = app;
@@ -43713,6 +43731,13 @@ ${rowsHtml}
         if (adminBtn) adminBtn.remove();
         const adminModal = cloneDoc.querySelector('#modal-admin');
         if (adminModal) adminModal.remove();
+        /** v132: event listeners never travel in the saved HTML, but the "already wired" data-*bound* flags did —
+            so the Student App skipped wiring 🎨 Theme colours, ❓ Help and other controls. Clear every such flag. */
+        cloneDoc.querySelectorAll('*').forEach(function(el) {
+            Array.prototype.slice.call(el.attributes).forEach(function(at) {
+                if(/^data-[a-z0-9-]*bound[a-z0-9-]*$/i.test(at.name)) el.removeAttribute(at.name);
+            });
+        });
 
         // 4. Inject standalone data at start of body
         const dataScript = cloneDoc.createElement('script');
@@ -43784,6 +43809,64 @@ ${rowsHtml}
         r.readAsText(f);
         input.value = "";
     },
+    /** v132: Word (mammoth HTML) -> a blank Component 2 lesson object, shaped like a Save all file. One or two texts:
+        a second text starts at a bold line beginning "Source", "Text" or "Extract". Bold opening lines become bold first paragraphs.
+        Marked meta.lessonFile so it keeps its words intact, keeps an empty question bank and loads in Differentiated mode. */
+    buildLessonFromWordHtml: function(html, fileName) {
+        const doc = new DOMParser().parseFromString("<div>" + String(html || "") + "</div>", "text/html");
+        const paras = [];
+        doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li").forEach(function(el) {
+            if(el.closest("li") && el.tagName !== "LI") return;
+            const text = String(el.textContent || "").replace(/\s+/g, " ").trim();
+            if(!text) return;
+            const strongText = Array.prototype.map.call(el.querySelectorAll("strong, b"), function(x) { return x.textContent; }).join("").replace(/\s+/g, " ").trim();
+            paras.push({ text: text, bold: /^H[1-6]$/.test(el.tagName) || (strongText.length > 0 && strongText.length >= text.length - 1) });
+        });
+        if(!paras.length) return null;
+        const starts = [];
+        paras.forEach(function(p, i) { if(p.bold && /^(source|text|extract)\b/i.test(p.text)) starts.push(i); });
+        let groups = [paras];
+        if(starts.length >= 2) groups = starts.map(function(s, k) { return paras.slice(s, k + 1 < starts.length ? starts[k + 1] : paras.length); });
+        if(groups.length > 2) { alert("This document seems to have " + groups.length + " texts. Answer Architect shows two, so the first two have been used."); groups = groups.slice(0, 2); }
+        const esc = function(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+        const toHtml = function(g) {
+            let i = 0; let out = "";
+            while(i < g.length - 1 && g[i].bold) { out += '<p style="margin:0 0 16px 0;"><strong>' + esc(g[i].text) + "</strong></p>"; i++; }
+            for(; i < g.length; i++) out += '<p style="margin:0 0 16px 0;">' + esc(g[i].text) + "</p>";
+            return out;
+        };
+        const t1 = toHtml(groups[0]);
+        const t2 = groups[1] ? toHtml(groups[1]) : "";
+        const base = JSON.parse(JSON.stringify(appData || app.repair(defaultData)));
+        const L = base.component2Layout && typeof base.component2Layout === "object" ? base.component2Layout : {};
+        Object.keys(L).forEach(function(k) { if(typeof L[k] === "string") L[k] = ""; });
+        L.resourcePaperText = t1;
+        L.questionPaperPage3Text = t2;
+        base.component2Layout = L;
+        base.component = 2;
+        base.sourceText = t1;
+        if(!base.selection || typeof base.selection !== "object") base.selection = {};
+        base.selection.text = Object.assign({}, base.selection.text || {}, { source: t1 });
+        base.selection.items = [];
+        base.selection.question = Object.assign({}, base.selection.question || {}, { prompt: "" });
+        base.items = []; base.questions = []; base.question = "";
+        base.markScheme = typeof base.markScheme === "string" ? "" : {};
+        base.markSchemeSourceFingerprint = "";
+        if(base.banks && Array.isArray(base.banks.points)) base.banks.points = [];
+        base.globalStructure = { enabled: false, items: [] };
+        const S = base.settings || (base.settings = {});
+        delete S.pastPaperPdfMeta;
+        S.examTrainingMode = false;
+        S.activeLevels = [1];
+        S.architectC2SourceView = "21st";
+        if(S.levelBank && typeof S.levelBank === "object") Object.keys(S.levelBank).forEach(function(k) { if(S.levelBank[k] && typeof S.levelBank[k] === "object") S.levelBank[k].questionIds = []; });
+        if(S.levelBank && S.levelBank[1]) S.levelBank[1].c2Source = t2 ? "both" : "21st";
+        const title = String(fileName || "Word document").replace(/\.docx$/i, "").replace(/[_]+/g, " ");
+        base.meta = { title: title, version: (base.meta && base.meta.version) || "5.1",
+            lessonFile: { source: String(fileName || ""), builtAt: new Date().toISOString().slice(0, 10), by: "Load JSON (Word)" } };
+        delete base.isStandalone;
+        return base;
+    },
     loadFile: (input) => {
         const f = input.files[0]; if(!f) return;
         const name = (f.name || "").toLowerCase();
@@ -43799,36 +43882,18 @@ ${rowsHtml}
             const reader = new FileReader();
             reader.onload = async () => {
                 try {
-                    if(!window.mammoth) throw new Error("Word import library not loaded.");
-                    const result = await window.mammoth.extractRawText({ arrayBuffer: reader.result });
-                    const cleaned = app.cleanSourceText(result && result.value ? result.value : "");
-                    if(!cleaned) throw new Error("No readable text found.");
-                    if(!appData) appData = app.repair(defaultData);
-                    appData.sourceText = cleaned;
-                    if(typeof admin.applyLobbyLoadModeToCurrent === "function") admin.applyLobbyLoadModeToCurrent();
-                    if(appData.meta) {
-                        delete appData.meta.sourceLineBasis;
-                        delete appData.meta.pdfInsertWidthCh;
-                        delete appData.meta.pdfParagraphFromGeometry;
-                        delete appData.meta.pdfStrictPhysicalLines;
-                    }
-                    app.save();
-                    app._suppressAdminInputFlushOnce = true;
-                    try {
-                        ui.init();
-                    } finally {
-                        app._suppressAdminInputFlushOnce = false;
-                    }
-                    app.setAiInputValue(app.formatSourceHtmlForEditor(cleaned));
-                    if(true) {
-                        const adminModal = document.getElementById("modal-admin");
-                        if(adminModal && !adminModal.classList.contains("open")) {
-                            ui.openModal("modal-admin");
-                        }
-                    }
-                    alert("Word document loaded. Use AI → Generate Prompt to build a unified lesson JSON prompt.");
+                    if(!window.mammoth) throw new Error("the Word reader did not load. Check the internet connection (and that unpkg.com is not blocked), then refresh the page.");
+                    /** v132: open the Word document as a new blank lesson (one or two texts, paragraphs and bold headings kept),
+                        instead of only swapping the passage — which did nothing visible in a Component 2 lesson. */
+                    const conv = await window.mammoth.convertToHtml({ arrayBuffer: reader.result });
+                    const lesson = admin.buildLessonFromWordHtml(conv && conv.value ? conv.value : "", f.name || "Word document");
+                    if(!lesson) throw new Error("no readable text was found in the document.");
+                    const nTexts = lesson.component2Layout.questionPaperPage3Text ? 2 : 1;
+                    if(!confirm("Open \u201C" + (f.name || "this document") + "\u201D as a new lesson (" + nTexts + " text" + (nTexts > 1 ? "s" : "") + ", no questions or quotes yet)?\n\nThis replaces the lesson that is open now \u2014 press Cancel and use Save all first if you want to keep it.")) return;
+                    const fileJson = new File([JSON.stringify(lesson)], (f.name || "word").replace(/\.docx$/i, "") + ".json", { type: "application/json" });
+                    admin.loadFile({ files: [fileJson], value: "" });
                 } catch(err) {
-                    alert("Word import failed. Please save as .txt and try again.");
+                    alert("Word import failed: " + (err && err.message ? err.message : "unknown error") + "\n\nYou can also save the document as .txt and load that.");
                 } finally {
                     input.value = "";
                 }
