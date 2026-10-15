@@ -3050,6 +3050,15 @@
                         <label class="btn btn-outline" style="cursor:pointer;">Import template<input type="file" id="templates-up" class="hidden" accept=".json" onchange="admin.importTemplate(this)"></label>
                         <label class="btn btn-outline" style="cursor:pointer;">📂 Load JSON<input type="file" id="file-up" class="hidden" onchange="admin.loadFile(this)"></label>
                     </div>
+                    <div id="lobby-load-mode" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 0 0; font-size:0.9rem;" title="Exam mode: one level per question. Differentiated mode: levels are support tiers and a quote can sit on several levels. File decides: each lesson keeps the mode saved in it. Resets to File decides when the page reloads.">
+                        <label for="lobby-load-mode-select" style="font-weight:600; margin:0;">Load as</label>
+                        <select id="lobby-load-mode-select" onchange="admin.setLobbyLoadMode(this.value)" style="padding:3px 6px; width:auto;">
+                            <option value="file">File decides</option>
+                            <option value="exam">Exam mode</option>
+                            <option value="diff">Differentiated mode</option>
+                        </select>
+                        <span id="lobby-current-mode" style="opacity:0.85;"></span>
+                    </div>
                     <p id="template-current" style="margin:8px 0 0 0; font-size:0.9rem; font-weight:500;"></p>
                 </details>
 
@@ -28665,6 +28674,36 @@ const admin = {
         admin.quotesBankViewLevel = n;
         if(app.setLevel) app.setLevel(n);
     },
+    /** v132 Lobby: mode for the next file loaded from the Lobby ("file" | "exam" | "diff"). Session only — resets to File decides on reload. */
+    lobbyLoadMode: "file",
+    setLobbyLoadMode: function(v) {
+        admin.lobbyLoadMode = (v === "exam" || v === "diff") ? v : "file";
+        admin.syncLobbyModeLabel();
+    },
+    /** Apply a forced Lobby mode to a parsed lesson before it is repaired/merged (so load-time level handling follows it). */
+    applyLobbyLoadModeToParsed: function(parsed) {
+        if(!parsed || typeof parsed !== "object" || admin.lobbyLoadMode === "file") return;
+        if(!parsed.settings || typeof parsed.settings !== "object") parsed.settings = {};
+        parsed.settings.examTrainingMode = admin.lobbyLoadMode === "exam";
+    },
+    /** Apply a forced Lobby mode to the open lesson after a text/Word/PDF passage load. */
+    applyLobbyLoadModeToCurrent: function() {
+        if(!appData || admin.lobbyLoadMode === "file") return;
+        if(!appData.settings) appData.settings = {};
+        appData.settings.examTrainingMode = admin.lobbyLoadMode === "exam";
+        admin.syncLobbyModeLabel();
+    },
+    syncLobbyModeLabel: function() {
+        try {
+            const sel = document.getElementById("lobby-load-mode-select");
+            if(sel && sel.value !== admin.lobbyLoadMode) sel.value = admin.lobbyLoadMode;
+            const lab = document.getElementById("lobby-current-mode");
+            if(!lab || !appData) return;
+            const raw = appData.settings ? appData.settings.examTrainingMode : null;
+            const exam = typeof app.isExamTrainingMode === "function" ? app.isExamTrainingMode() : raw !== false;
+            lab.textContent = "This lesson: " + (exam ? "Exam mode" : "Differentiated mode") + (raw === true || raw === false ? "" : " (automatic)");
+        } catch(e) {}
+    },
     setExamTrainingMode: function(on) {
         if(!appData.settings) appData.settings = {};
         appData.settings.examTrainingMode = !!on;
@@ -28674,6 +28713,7 @@ const admin = {
         if(admin.renderLevelBank) admin.renderLevelBank();
         if(ui.renderSelection) ui.renderSelection();
         admin.flashBrief(on ? "Exam mode: one level → one question (linked)" : "Differentiated mode: levels as support tiers");
+        if(typeof admin.syncLobbyModeLabel === "function") admin.syncLobbyModeLabel();
     },
     syncAllQuoteQuestionIdsFromLevels: function() {
         admin.ensureSelectionData();
@@ -31512,6 +31552,7 @@ const admin = {
     },
     renderAll: function(opts) {
         opts = opts || {};
+        if(typeof admin.syncLobbyModeLabel === "function") admin.syncLobbyModeLabel();
         const deferHeavy = !!(opts.lite || opts.skipLevelBank);
         const tabOpts = {
             skipPassageHydrate: !!(opts.lite || opts.skipSourceSync) && !app._passageExtractHydratePending && !app._forceAdminPassageHydrateForSetup,
@@ -43764,6 +43805,7 @@ ${rowsHtml}
                     if(!cleaned) throw new Error("No readable text found.");
                     if(!appData) appData = app.repair(defaultData);
                     appData.sourceText = cleaned;
+                    if(typeof admin.applyLobbyLoadModeToCurrent === "function") admin.applyLobbyLoadModeToCurrent();
                     if(appData.meta) {
                         delete appData.meta.sourceLineBasis;
                         delete appData.meta.pdfInsertWidthCh;
@@ -43827,6 +43869,7 @@ ${rowsHtml}
                     if(!cleaned) throw new Error("No readable text found.");
                     if(!appData) appData = app.repair(defaultData);
                     appData.sourceText = cleaned;
+                    if(typeof admin.applyLobbyLoadModeToCurrent === "function") admin.applyLobbyLoadModeToCurrent();
                     if(appData.meta) {
                         delete appData.meta.sourceLineBasis;
                         delete appData.meta.pdfInsertWidthCh;
@@ -43874,6 +43917,7 @@ ${rowsHtml}
                 return;
             }
             let parsed = result.parsed;
+            if(typeof admin.applyLobbyLoadModeToParsed === "function") admin.applyLobbyLoadModeToParsed(parsed);
             if(parsed && !parsed.sourceText && parsed.texts && Array.isArray(parsed.texts) && parsed.texts.length) {
                 parsed = app.convertPastPaperToLesson(parsed);
             }
@@ -43914,6 +43958,7 @@ ${rowsHtml}
                 }
                 if(!appData) appData = app.repair(defaultData);
                 appData.sourceText = cleaned;
+                if(typeof admin.applyLobbyLoadModeToCurrent === "function") admin.applyLobbyLoadModeToCurrent();
                 if(appData.meta) {
                     delete appData.meta.sourceLineBasis;
                     delete appData.meta.pdfInsertWidthCh;
