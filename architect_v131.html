@@ -2659,6 +2659,8 @@
                                 <button type="button" class="btn btn-outline btn-small" data-c2adminview="21st" onclick="admin.setArchitectC2SourceView('21st')" style="padding:3px 10px;">Modern text (resource)</button>
                                 <button type="button" class="btn btn-outline btn-small" data-c2adminview="19th" onclick="admin.setArchitectC2SourceView('19th')" style="padding:3px 10px;">19th C (Q paper)</button>
                                 <label id="c2-line-numbers-toggle-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer; margin-left:8px;" title="This lesson's texts were loaded with line numbers that match the printed sheet. Untick to show them as ordinary paragraphs (for skimming without numbers). Applies to this lesson only."><input type="checkbox" id="c2-line-numbers-toggle" onchange="admin.setC2LineNumbersShown(this.checked)"> Show line numbers</label>
+                                <button type="button" id="c2-number-lines-btn" class="btn btn-outline btn-small hidden" style="padding:3px 10px; margin-left:8px;" onclick="admin.numberC2Lines()" title="Break both texts into numbered lines that stay the same whatever the screen or reader settings. For screen reading; for a printed sheet, number it in Word instead.">🔢 Number lines</button>
+                                <button type="button" id="c2-unnumber-lines-btn" class="btn btn-outline btn-small hidden" style="padding:3px 10px; margin-left:4px;" onclick="admin.unnumberC2Lines()" title="Turn numbered texts back into ordinary paragraphs so you can edit them here.">↩ Back to paragraphs</button>
                             </div>
                             <div class="source-toolbar" style="display:flex; gap:4px; margin-bottom:4px; flex-wrap:wrap;">
                                 <button type="button" tabindex="-1" class="btn btn-outline btn-small" onpointerdown="admin.preserveSourceToolbarSelection(event);" onmousedown="event.preventDefault();" onclick="admin.sourceFormat('bold')" title="Bold">B</button>
@@ -11523,11 +11525,13 @@ const app = {
     /** PDF import often preserves booklet indices (1, 6, 12…) on merged rows; renumber to 1…N and strip stray leading refs in plain bodies. */
     normalizeStructuredPassageV2Sequential: function(o) {
         if(!o || !Array.isArray(o.lines)) return o;
+        /** v132: clean lesson-pack / numbered C2 text — keep a line that starts “1877. The…” as written. */
+        const keepLeadingNumbers = typeof app.skipPassageGlueRepair === "function" && app.skipPassageGlueRepair();
         const lines = o.lines.map(function(L, i) {
             let html = String(L.html || "");
             if(!/<[a-z!?]/i.test(html)) {
                 const t = app.htmlFragmentToPlainText(html);
-                const stripped = t.replace(/^\s*\d{1,4}[.)]\s+/, "").trim();
+                const stripped = keepLeadingNumbers ? t : t.replace(/^\s*\d{1,4}[.)]\s+/, "").trim();
                 if(stripped !== t) html = app.escapeHtml(stripped);
             }
             const line = { n: i + 1, html: html };
@@ -11550,7 +11554,8 @@ const app = {
             const L = o.lines[i];
             /** Paragraph-only spacing / blank &lt;p&gt; rows must not count as a booklet line. */
             const plain = app.htmlFragmentToPlainText(L.html || "").replace(/\s+/g, " ").trim();
-            const onlyMarginEcho = /^\d{1,4}[.)]?\s*$/.test(plain);
+            /** v132: in clean lesson-pack / numbered C2 text a line that is just “1877.” is real text — dropping it would shift every later line number. */
+            const onlyMarginEcho = /^\d{1,4}[.)]?\s*$/.test(plain) && !(typeof app.skipPassageGlueRepair === "function" && app.skipPassageGlueRepair());
             const empty = plain.length === 0;
             if(empty || onlyMarginEcho) {
                 if(out.length) continue;
@@ -14548,6 +14553,8 @@ const app = {
      */
     repairExamMarginDigitArtifacts: function(text) {
         if(!text || typeof text !== "string") return "";
+        /** v132: clean lesson-pack / numbered C2 text has no PDF margin numbers — don't delete real numbers (“80 to 100 kilometres” lost both). */
+        if(typeof app.skipPassageGlueRepair === "function" && app.skipPassageGlueRepair()) return text;
         /** CRLF / PS / LS so “…Rhyl.\\r\\n5\\r\\nMaureen” still matches orphan-gutter rules (patterns use \\n only). */
         let t = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n");
         /** If every real line already starts with its own line number (the shape strictPhysicalLines extraction produces), the text is already well-formed. Every heuristic below assumes a genuine artifact — a margin digit that leaked INTO running prose with no real line break around it — and strips it by joining across whatever whitespace separates the surrounding words. But `\s+` also matches a genuine newline, so these same heuristics silently eat correctly-placed line numbers that start a real new line, merging that line into the one before it. Skip the whole repair pass in that case rather than risk it. */
@@ -16516,6 +16523,8 @@ const app = {
      * @param {{examMarginMultiplesOf5Only?: boolean, bookletIndependentStrip?: boolean}} [buildOpts]
      */
     _stripDuplicateLineRefsFromLineCellPlain: function(rawPlain, n, showInMargin, buildOpts) {
+        /** v132: clean lesson-pack / numbered C2 text: a line that is just “1877.” is text, not a stray line number. */
+        if(typeof app.skipPassageGlueRepair === "function" && app.skipPassageGlueRepair()) return String(rawPlain == null ? "" : rawPlain).replace(/\s+/g, " ").trim();
         let cellText = String(rawPlain == null ? "" : rawPlain).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+/g, " ");
         cellText = app.repairExamMarginDigitArtifacts(cellText).replace(/\s+/g, " ").trim();
         const escN = String(n).replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
@@ -34036,6 +34045,12 @@ const admin = {
         const cb = document.getElementById("c2-line-numbers-toggle");
         const lessonNumbered = typeof app.isC2NumberedLesson === "function" && app.isC2NumberedLesson();
         if(wrapT) wrapT.classList.toggle("hidden", !lessonNumbered);
+        const Lx = appData && appData.component2Layout ? appData.component2Layout : {};
+        const hasPlainText = [Lx.resourcePaperText, Lx.questionPaperPage3Text].some(function(t) { return String(t || "").trim() && !app.c2LayoutTextIsNumbered(t); });
+        const bNum = document.getElementById("c2-number-lines-btn");
+        const bUn = document.getElementById("c2-unnumber-lines-btn");
+        if(bNum) bNum.classList.toggle("hidden", !hasPlainText);
+        if(bUn) bUn.classList.toggle("hidden", !lessonNumbered);
         if(cb) cb.checked = !(app.c2LineNumbersHidden && app.c2LineNumbersHidden());
         if(numbered) {
             [el].concat(ids.map(function(id) { return document.getElementById(id); })).forEach(function(x) {
@@ -34049,6 +34064,89 @@ const admin = {
             if(x && x.dataset.c2NumberedLocked === "1") { x.setAttribute("contenteditable", "true"); delete x.dataset.c2NumberedLocked; }
         });
         return false;
+    },
+    /** v132: Passage tab \u201CNumber lines\u201D — break each Component 2 paragraph text into fixed numbered lines (numbering restarts at 1 per text).
+        Lines are a set number of characters, so the numbers don't move with screen size or reader zoom. Headings (bold opening paragraphs
+        and the two intro-line boxes) become the text's heading and are not numbered. Text is taken as it is shown now. */
+    numberC2Lines: function() {
+        if(!appData || appData.component !== 2 || !appData.component2Layout) return;
+        if(typeof admin.flushC2PooledEditorToLayout === "function") admin.flushC2PooledEditorToLayout();
+        const ans = prompt("Characters per line?\n\nShorter lines are easier to track: 60\u201375 suits many dyslexic readers. Most printed A4 sheets are about 90.", "70");
+        if(ans == null) return;
+        const width = Math.max(30, Math.min(95, parseInt(ans, 10) || 70));
+        const L = appData.component2Layout;
+        const clean = app.isLessonFileLesson() ? app._c2PlainNoGlueRepair : function(h) { return app.htmlFragmentToPlainText(h); };
+        const esc = function(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+        const wrap = function(text) {
+            const out = []; let cur = "";
+            String(text).split(/\s+/).filter(Boolean).forEach(function(w) {
+                if(cur && (cur.length + 1 + w.length) > width) { out.push(cur); cur = w; }
+                else cur = cur ? cur + " " + w : w;
+            });
+            if(cur) out.push(cur);
+            return out;
+        };
+        let done = 0;
+        [["resourcePaperText", "resourceHeadLine1", "resourceHeadLine2"], ["questionPaperPage3Text", "nineteenthHeadLine1", "nineteenthHeadLine2"]].forEach(function(k) {
+            const raw = String(L[k[0]] || "");
+            if(!raw.trim() || app.c2LayoutTextIsNumbered(raw)) return;
+            const d = document.createElement("div");
+            d.innerHTML = raw;
+            const blocks = [];
+            const kids = d.querySelectorAll("p, div, li, h1, h2, h3, h4, h5, h6");
+            if(kids.length) kids.forEach(function(el) { if(!el.querySelector("p, div, li")) blocks.push(el); });
+            else blocks.push(d);
+            const heads = [];
+            [L[k[1]], L[k[2]]].forEach(function(h) { const t = clean(h || ""); if(t) heads.push(t); });
+            const paras = [];
+            blocks.forEach(function(el) {
+                const t = clean(el.innerHTML);
+                if(!t) return;
+                const strong = Array.prototype.map.call(el.querySelectorAll("strong, b"), function(x) { return x.textContent; }).join("").replace(/\s+/g, " ").trim();
+                /* Heading: bold, a heading tag, or a short title-like line (the passage editor drops bold, so length + no end punctuation also counts). */
+                const bold = /^H[1-6]$/.test(el.tagName) || (strong && strong.length >= t.length - 1) || (t.length <= 60 && !/[.?!:;,\u201D"']$/.test(t));
+                if(bold && !paras.length) heads.push(t); else paras.push(t);
+            });
+            if(!paras.length) return;
+            const lines = [];
+            paras.forEach(function(t) {
+                wrap(t).forEach(function(ln, i) {
+                    const row = { n: lines.length + 1, html: esc(ln) };
+                    if(i === 0 && lines.length) row.paragraphStart = true;
+                    lines.push(row);
+                });
+            });
+            const headHtml = heads.length ? "<strong>" + esc(heads[0]) + "</strong>" + heads.slice(1).map(function(h) { return "<br>" + esc(h); }).join("") : "";
+            L[k[0]] = JSON.stringify({ v: 2, headHtml: headHtml, lines: lines });
+            L[k[1]] = ""; L[k[2]] = "";
+            done++;
+        });
+        if(!done) { alert("No paragraph text to number."); return; }
+        if(!appData.meta) appData.meta = {};
+        appData.meta.c2LineNumbers = "show";
+        if(typeof app.save === "function") app.save({ skipQuestionPersist: true });
+        if(typeof admin.fillC2PooledEditorFromLayout === "function") admin.fillC2PooledEditorFromLayout();
+        if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+        if(typeof admin.flashBrief === "function") admin.flashBrief("Numbered " + done + " text" + (done > 1 ? "s" : "") + " at " + width + " characters per line");
+    },
+    /** v132: Passage tab \u201CBack to paragraphs\u201D — numbered texts become ordinary editable paragraphs again (heading kept as bold first paragraphs). */
+    unnumberC2Lines: function() {
+        if(!appData || !appData.component2Layout) return;
+        if(!confirm("Turn the numbered texts back into ordinary paragraphs? You can number them again afterwards.")) return;
+        const L = appData.component2Layout;
+        ["resourcePaperText", "questionPaperPage3Text"].forEach(function(k) {
+            if(!app.c2LayoutTextIsNumbered(L[k])) return;
+            const o = app.parseStructuredPassageSource(String(L[k]).trim());
+            if(!o) return;
+            const heads = String(o.headHtml || "").split(/<br\s*\/?>/i).map(function(h) { return h.trim(); }).filter(Boolean)
+                .map(function(h) { return '<p style="margin:0 0 16px 0;">' + (/<strong>/i.test(h) ? h : "<strong>" + h + "</strong>") + "</p>"; }).join("");
+            const body = app.c2NumberedToProseHtml({ v: 2, headHtml: "", lines: o.lines || [] });
+            L[k] = heads + body;
+        });
+        if(appData.meta) delete appData.meta.c2LineNumbers;
+        if(typeof app.save === "function") app.save({ skipQuestionPersist: true });
+        if(typeof admin.fillC2PooledEditorFromLayout === "function") admin.fillC2PooledEditorFromLayout();
+        if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
     },
     /** v132 numbered C2: Passage tab checkbox — show or hide line numbers for this lesson. */
     setC2LineNumbersShown: function(on) {
