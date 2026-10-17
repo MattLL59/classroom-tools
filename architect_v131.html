@@ -2909,6 +2909,14 @@
                     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
                         <label class="btn btn-outline" style="cursor:pointer; width:auto; margin:0;" title="Opens a .docx as a new lesson: one or two texts, paragraphs and bold headings kept, no questions or quotes yet.">📄 Word document<input type="file" id="file-up-word" class="hidden" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="admin.loadFile(this)"></label>
                         <label class="btn btn-outline" style="cursor:pointer; width:auto; margin:0;" title="A lesson saved with Save all, or made by the lesson-pack tools.">📂 Lesson file (JSON)<input type="file" id="file-up-json" class="hidden" accept=".json,application/json" onchange="admin.loadFile(this)"></label>
+                        <button type="button" class="btn btn-outline" style="width:auto; margin:0; font-family:inherit;" onclick="admin.toggleWordPdfPanel()" title="For a paper with printed line numbers: opens it with the lines and numbers exactly as Word prints them.">📄 Word paper + its PDF</button>
+                    </div>
+                    <div id="lobby-word-pdf" class="hidden" style="margin:10px 0 0 0; padding:10px; border:1px solid var(--border); border-radius:6px;">
+                        <div style="font-size:0.85rem; margin-bottom:8px; line-height:1.4;">For a paper with printed line numbers (5, 10, 15 …). Choose the Word document, then a PDF saved from it in Word (<strong>File → Save As → PDF</strong>). The lines and numbers will match the printed paper; questions with marks such as [5 marks] become one level each.</div>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px;"><label class="btn btn-outline btn-small" style="cursor:pointer; width:auto; margin:0;">1. Word document<input type="file" class="hidden" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="admin.wordPdfPick('docx', this)"></label><span id="wp-docx-name" style="font-size:0.85rem; opacity:0.85;"></span></div>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px;"><label class="btn btn-outline btn-small" style="cursor:pointer; width:auto; margin:0;">2. PDF saved from Word<input type="file" class="hidden" accept=".pdf,application/pdf" onchange="admin.wordPdfPick('pdf', this)"></label><span id="wp-pdf-name" style="font-size:0.85rem; opacity:0.85;"></span></div>
+                        <button type="button" id="wp-open" class="btn btn-primary btn-small" style="width:auto;" disabled onclick="admin.openWordWithPdf()">Open lesson</button>
+                        <div id="wp-msg" style="display:none; margin-top:8px; font-size:0.85rem; line-height:1.4;"></div>
                     </div>
                     <div id="lobby-load-mode" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 0 0; font-size:0.9rem;" title="Exam mode: one level per question. Differentiated mode: levels are support tiers and a quote can sit on several levels. File decides: each lesson keeps the mode saved in it. Resets to File decides when the page reloads.">
                         <label for="lobby-load-mode-select" style="font-weight:600; margin:0;">Load as</label>
@@ -43949,9 +43957,223 @@ ${rowsHtml}
     /** v132: Word (mammoth HTML) -> a blank Component 2 lesson object, shaped like a Save all file. One or two texts:
         a second text starts at a bold line beginning "Source", "Text" or "Extract". Bold opening lines become bold first paragraphs.
         Marked meta.lessonFile so it keeps its words intact, keeps an empty question bank and loads in Differentiated mode. */
-    buildLessonFromWordHtml: function(html, fileName) {
+    /**
+     * v133: "Word paper + its PDF" (Lobby → Open a lesson). Words come from the Word document; only the line breaks and the
+     * printed margin numbers (5, 10, 15 … — Word's numbering or hand-placed text boxes) come from the PDF saved from Word.
+     * Every printed line from 1 to the last must match the Word text word for word and every margin number must sit on the
+     * line the count gives it, or nothing is built. Same rules as word_to_architect.py --layout in the lesson-pack skill.
+     */
+    _wordPdf: { docx: null, pdf: null },
+    toggleWordPdfPanel: function() {
+        const p = document.getElementById("lobby-word-pdf");
+        if(p) p.classList.toggle("hidden");
+    },
+    wordPdfPick: function(kind, input) {
+        const f = input && input.files ? input.files[0] : null;
+        try { input.value = ""; } catch(e) {}
+        if(!f) return;
+        const isPdf = /\.pdf$/i.test(f.name || "") || f.type === "application/pdf";
+        const isDocx = /\.docx$/i.test(f.name || "");
+        if(kind === "docx" && !isDocx) { admin._wordPdfSay("That isn\u2019t a Word document (.docx). Choose the paper\u2019s .docx file in box 1.", true); return; }
+        if(kind === "pdf" && !isPdf) { admin._wordPdfSay("That isn\u2019t a PDF. In Word use File \u2192 Save As and choose PDF, then choose that file in box 2.", true); return; }
+        admin._wordPdf[kind] = f;
+        const span = document.getElementById(kind === "docx" ? "wp-docx-name" : "wp-pdf-name");
+        if(span) span.textContent = f.name;
+        const btn = document.getElementById("wp-open");
+        if(btn) btn.disabled = !(admin._wordPdf.docx && admin._wordPdf.pdf);
+        admin._wordPdfSay("", false);
+    },
+    _wordPdfSay: function(html, isError) {
+        const m = document.getElementById("wp-msg");
+        if(!m) return;
+        m.innerHTML = html;
+        m.style.color = isError ? "var(--error)" : "";
+        m.style.display = html ? "" : "none";
+    },
+    _wordPdfTokens: function(t) {
+        return String(t || "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\u00A0/g, " ").replace(/\u00AD/g, "")
+            .replace(/\uFB01/g, "fi").replace(/\uFB02/g, "fl").replace(/[\u2013\u2014]/g, "-").split(/\s+/).filter(Boolean);
+    },
+    /** Printed lines of a PDF in reading order: { tokens, anchor, page }. Margin numbers are 1–3 digit items left of the page's text edge. */
+    pdfLayoutLines: async function(pdf) {
+        const out = [];
+        for(let pn = 1; pn <= pdf.numPages; pn++) {
+            const page = await pdf.getPage(pn);
+            const tc = await page.getTextContent();
+            const items = (tc.items || []).filter(function(it) { return it && typeof it.str === "string" && it.str.trim(); }).map(function(it) {
+                return { str: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0, h: Math.abs(it.transform[3]) || it.height || 10 };
+            });
+            if(!items.length) continue;
+            const rows = [];
+            items.sort(function(a, b) { return b.y - a.y || a.x - b.x; }).forEach(function(it) {
+                const r = rows.find(function(r) { return Math.abs(r.y - it.y) < 3; });
+                if(r) r.items.push(it); else rows.push({ y: it.y, items: [it] });
+            });
+            const isNum = function(it) { return /^\d{1,3}$/.test(it.str.trim()); };
+            const counts = {};
+            rows.forEach(function(r) {
+                const textItems = r.items.filter(function(it) { return !isNum(it); });
+                if(!textItems.length) return;
+                const k = Math.round(Math.min.apply(null, textItems.map(function(it) { return it.x; })));
+                counts[k] = (counts[k] || 0) + 1;
+            });
+            const edge = Number(Object.keys(counts).sort(function(a, b) { return counts[b] - counts[a]; })[0]);
+            const lines = [], nums = [];
+            rows.sort(function(a, b) { return b.y - a.y; }).forEach(function(r) {
+                const its = r.items.sort(function(a, b) { return a.x - b.x; });
+                const margin = its.filter(function(it) { return isNum(it) && it.x + it.w <= edge - 1; });
+                const text = its.filter(function(it) { return margin.indexOf(it) < 0; });
+                margin.forEach(function(it) { nums.push({ val: parseInt(it.str.trim(), 10), y: it.y + it.h / 2 }); });
+                if(!text.length) return;
+                let s = "";
+                text.forEach(function(it, i) {
+                    if(i > 0) {
+                        const prev = text[i - 1];
+                        const gap = it.x - (prev.x + prev.w);
+                        if(!/\s$/.test(s) && !/^\s/.test(it.str) && gap > 0.15 * it.h) s += " ";
+                    }
+                    s += it.str;
+                });
+                lines.push({ tokens: admin._wordPdfTokens(s), y: text[0].y + text[0].h / 2, anchor: null, page: pn });
+            });
+            nums.forEach(function(n) {
+                let best = null;
+                lines.forEach(function(l) { if(!best || Math.abs(l.y - n.y) < Math.abs(best.y - n.y)) best = l; });
+                if(best && Math.abs(best.y - n.y) < 8) best.anchor = n.val;
+            });
+            lines.forEach(function(l) { out.push(l); });
+        }
+        return out;
+    },
+    /** Number the passage paragraphs (from Word) by the PDF's lines. Returns { json, last, problems, report }. */
+    layoutPassageFromPdf: function(paras, lines) {
+        const esc = function(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+        const same = function(a, b) { if(a.length !== b.length) return false; for(let i = 0; i < a.length; i++) if(a[i] !== b[i]) return false; return true; };
+        const problems = [];
+        const placed = [];
+        let cur = 0;
+        paras.forEach(function(p, pi) {
+            const target = admin._wordPdfTokens(p.text);
+            if(!target.length) return;
+            let found = null;
+            for(let i = cur; i < lines.length && !found; i++) {
+                const tk = lines[i].tokens;
+                if(!tk.length || !same(target.slice(0, tk.length), tk)) continue;
+                let got = [], j = i;
+                while(j < lines.length && got.length < target.length) { got = got.concat(lines[j].tokens); j++; }
+                if(same(got, target)) { found = []; for(let k = i; k < j; k++) found.push(k); }
+            }
+            placed.push({ pi: pi, lines: found });
+            if(found) cur = found[found.length - 1] + 1;
+        });
+        const anchors = [];
+        placed.forEach(function(pl) { if(pl.lines) pl.lines.forEach(function(li) { if(lines[li].anchor) anchors.push({ li: li, val: lines[li].anchor }); }); });
+        const matched = placed.filter(function(pl) { return pl.lines && pl.lines.length; }).length;
+        if(matched < 2) return { kind: "none", problems: ["None of the passage in the Word document was found in this PDF."] };
+        if(!anchors.length) return { kind: "nonumbers", problems: ["No printed line numbers (5, 10, 15 \u2026) were found beside the passage in the PDF."] };
+        const offset = anchors[0].val - anchors[0].li;
+        let numbersOff = false;
+        anchors.forEach(function(a) {
+            if(a.val !== a.li + offset) numbersOff = true;
+            if(a.val !== a.li + offset) problems.push("The number " + a.val + " is printed beside the line the count makes line " + (a.li + offset) + ": \u201C" + lines[a.li].tokens.join(" ").slice(0, 60) + "\u201D");
+        });
+        const head = [], rows = [];
+        let started = false;
+        placed.forEach(function(pl) {
+            const p = paras[pl.pi];
+            if(!pl.lines) {
+                if(started) problems.push("This paragraph in the Word document isn\u2019t in the PDF line for line: \u201C" + p.text.slice(0, 60) + "\u2026\u201D");
+                else head.push(p);
+                return;
+            }
+            const first = pl.lines[0] + offset, last = pl.lines[pl.lines.length - 1] + offset;
+            if(first < 1 && last >= 1) problems.push("Line 1 falls in the middle of a paragraph: \u201C" + p.text.slice(0, 60) + "\u2026\u201D");
+            if(last < 1 && !started) { head.push(p); return; }
+            started = true;
+            const words = p.text.replace(/\s+/g, " ").trim().split(" ");
+            let k = 0;
+            pl.lines.forEach(function(li, n) {
+                const cnt = lines[li].tokens.length;
+                const row = { n: li + offset, html: esc(words.slice(k, k + cnt).join(" ")) };
+                if(n === 0 && li + offset !== 1) row.paragraphStart = true;
+                rows.push(row);
+                k += cnt;
+            });
+        });
+        const used = {};
+        placed.forEach(function(pl) { if(pl.lines) pl.lines.forEach(function(li) { used[li] = true; }); });
+        const lastN = rows.length ? rows[rows.length - 1].n : 0;
+        lines.forEach(function(l, li) {
+            if(li + offset >= 1 && li + offset <= lastN && !used[li]) problems.push("Printed line " + (li + offset) + " doesn\u2019t match the Word document: \u201C" + l.tokens.join(" ").slice(0, 60) + "\u201D");
+        });
+        if(rows.length && rows[0].n !== 1) problems.push("The passage starts at line " + rows[0].n + " instead of line 1.");
+        for(let i = 1; i < rows.length; i++) if(rows[i].n !== rows[i - 1].n + 1) { problems.push("The line count jumps after line " + rows[i - 1].n + "."); break; }
+        const headHtml = head.map(function(p) { return p.bold ? "<strong>" + esc(p.text) + "</strong>" : esc(p.text); }).join("<br>");
+        return { json: JSON.stringify({ v: 2, headHtml: headHtml, lines: rows }), last: lastN, problems: problems, kind: numbersOff ? "numbers" : "lines",
+                 report: anchors.map(function(a) { return a.val + " \u2192 \u201C" + lines[a.li].tokens.slice(0, 6).join(" ") + "\u2026\u201D"; }) };
+    },
+    openWordWithPdf: async function() {
+        const d = admin._wordPdf.docx, pf = admin._wordPdf.pdf;
+        if(!d || !pf) { admin._wordPdfSay("Choose both files first: 1. the Word document, 2. the PDF saved from it.", true); return; }
+        const btn = document.getElementById("wp-open");
+        if(btn) btn.disabled = true;
+        admin._wordPdfSay("\u23F3 Reading both files and checking every line\u2026", false);
+        try {
+            if(!window.mammoth) throw new Error("the Word reader did not load. Check the internet connection (and that unpkg.com is not blocked), then refresh the page.");
+            if(!window.pdfjsLib) await app.ensurePdfJsLoaded();
+            const read = function(f) { return new Promise(function(res, rej) { const r = new FileReader(); r.onload = function() { res(r.result); }; r.onerror = rej; r.readAsArrayBuffer(f); }); };
+            const conv = await window.mammoth.convertToHtml({ arrayBuffer: await read(d) });
+            const html = conv && conv.value ? conv.value : "";
+            const paras = admin.wordHtmlParagraphs(html);
+            if(!paras.length) throw new Error("no readable text was found in the Word document.");
+            const split = admin.splitWordQuestions(paras);
+            const passage = split ? split.passage : paras;
+            const textStarts = passage.filter(function(p) { return p.bold && /^(source|text|extract)\b/i.test(p.text); }).length;
+            if(textStarts >= 2) throw new Error("this document has two texts. \u201CWord paper + its PDF\u201D works with one numbered text for now \u2014 use \u201C\uD83D\uDCC4 Word document\u201D instead.");
+            const pdf = await app._pdfTryGetDocumentFromBuffer(await read(pf));
+            const res = admin.layoutPassageFromPdf(passage, await admin.pdfLayoutLines(pdf));
+            if(res.problems && res.problems.length) {
+                const list = res.problems.slice(0, 6).map(function(t) { return "<li>" + app.escapeHtml(t) + "</li>"; }).join("") + (res.problems.length > 6 ? "<li>\u2026 and " + (res.problems.length - 6) + " more</li>" : "");
+                const advice = res.kind === "none"
+                    ? "Check that box 2 is the PDF of <strong>this</strong> paper (saved from this Word document with <strong>File \u2192 Save As \u2192 PDF</strong>)."
+                    : res.kind === "nonumbers"
+                    ? "This option is for papers with printed line numbers in the margin. For a paper without them, use <strong>\uD83D\uDCC4 Word document</strong> instead."
+                    : res.kind === "numbers"
+                    ? "The numbers printed in the margin don\u2019t count the passage from line 1. If Word\u2019s own line numbering is switched on, it counts every line from the cover page: switch it off (<strong>Layout \u2192 Line Numbers \u2192 None</strong>) when the paper has its own margin numbers, then save the PDF again."
+                    : "Usually this means the PDF was saved from a different version of the document. Open the Word document, use <strong>File \u2192 Save As \u2192 PDF</strong> again, and choose the new PDF in box 2.";
+                admin._wordPdfSay("<strong>Not opened \u2014 the PDF and the Word document don\u2019t match.</strong><ul style=\"margin:6px 0 6px 18px;\">" + list + "</ul>" + advice, true);
+                return;
+            }
+            const lesson = admin.buildLessonFromWordHtml(html, d.name);
+            if(!lesson) throw new Error("no readable text was found in the Word document.");
+            const L = lesson.component2Layout;
+            L.resourcePaperText = res.json;
+            L.questionPaperPage3Text = "";
+            lesson.sourceText = res.json;
+            lesson.selection.text.source = res.json;
+            lesson.meta.c2LineNumbers = "show";
+            lesson.meta.lessonFile.layoutPdf = pf.name;
+            lesson.meta.lessonFile.by = "Word paper + its PDF";
+            const nQ = lesson.meta.lessonFile.questionsFound || 0;
+            const wOut = lesson.meta.lessonFile.writingTasksLeftOut || 0;
+            if(!confirm("Every line matched. Open \u201C" + d.name + "\u201D as a new lesson?\n\nPassage: lines 1\u2013" + res.last + ", numbered as printed.\n" +
+                (nQ ? nQ + " question" + (nQ > 1 ? "s" : "") + " found, one level each." : "No questions found (add them on the Questions tab).") +
+                (wOut ? "\n" + wOut + " writing task" + (wOut > 1 ? "s were" : " was") + " left out." : "") +
+                "\n\nThis replaces the lesson that is open now \u2014 press Cancel and use Save all first if you want to keep it.")) { admin._wordPdfSay("", false); return; }
+            admin._wordPdfSay("", false);
+            const fileJson = new File([JSON.stringify(lesson)], d.name.replace(/\.docx$/i, "") + ".json", { type: "application/json" });
+            admin.loadFile({ files: [fileJson], value: "" });
+        } catch(err) {
+            admin._wordPdfSay("<strong>Not opened:</strong> " + app.escapeHtml(err && err.message ? err.message : String(err)), true);
+        } finally {
+            if(btn) btn.disabled = !(admin._wordPdf.docx && admin._wordPdf.pdf);
+        }
+    },
+    /** v133: the paragraphs of a Word document (from the Word reader's HTML): { text, bold }. Shared by both Word buttons. */
+    wordHtmlParagraphs: function(html) {
         const doc = new DOMParser().parseFromString("<div>" + String(html || "") + "</div>", "text/html");
         const paras = [];
+
         doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li").forEach(function(el) {
             if(el.closest("li") && el.tagName !== "LI") return;
             const elText = el.cloneNode(true); /* v133: a soft line break is a space ("Read lines 1 to 20.<br>List" was read as "20.List") */
@@ -43962,6 +44184,10 @@ ${rowsHtml}
             const strongText = Array.prototype.map.call(el.querySelectorAll("strong, b"), function(x) { return x.textContent; }).join("").replace(/\s+/g, " ").trim();
             paras.push({ text: text, bold: /^H[1-6]$/.test(el.tagName) || (strongText.length > 0 && strongText.length >= text.length - 1) });
         });
+        return paras;
+    },
+    buildLessonFromWordHtml: function(html, fileName) {
+        const paras = admin.wordHtmlParagraphs(html);
         if(!paras.length) return null;
         /* v133: a paper with its questions in the same document — take the reading questions out of the passage (writing tasks are left out). */
         const split = admin.splitWordQuestions(paras);
