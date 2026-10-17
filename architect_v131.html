@@ -30478,6 +30478,14 @@ const admin = {
             if(reExtractBtnEl) { if(typeof admin.syncPastPaperExtractButtons === "function") admin.syncPastPaperExtractButtons(); else reExtractBtnEl.disabled = false; }
         }
     },
+    /** v133: true when at least one extracted prompt looks like an exam question — a mark such as [5], (5 marks) or "5 marks", or a short prompt with a question mark. Passage text has neither. */
+    extractedPromptsLookLikeQuestions: function(parsed) {
+        return (parsed || []).some(function(x) {
+            const t = String(x && typeof x === "object" ? (x.prompt || "") : (x || ""));
+            if(/\[\s*\d{1,2}\s*(marks?)?\s*\]/i.test(t) || /\(\s*\d{1,2}\s*marks?\s*\)/i.test(t) || /\b\d{1,2}\s+marks\b/i.test(t)) return true;
+            return t.length < 600 && t.indexOf("?") >= 0;
+        });
+    },
     reExtractQuestionsFromPages: async function() {
         if(admin._reExtractQuestionsInFlight) return;
         const f = admin.pastPaperFiles && admin.pastPaperFiles.questions;
@@ -30558,6 +30566,11 @@ const admin = {
                     }
                 };
             } catch(eDbg) {}
+            /* v133: a PDF with no exam questions in it (e.g. a passage sheet put in the Questions box) used to fill the questions with passage text. Leave the questions alone and say why. */
+            if(parsed.length && !admin.extractedPromptsLookLikeQuestions(parsed)) {
+                app.showPastPaperExtractNotice("<span style=\"color:var(--error)\"><strong>No exam questions found in this PDF</strong> (nothing with marks such as [5] and no short questions ending in ?), so your questions were left as they were.</span> If this PDF is the passage, put it in <strong>2. Resource paper</strong> instead. To add questions, type or paste them in <strong>Settings → Questions</strong>.", { autoHideMs: 30000 });
+                return;
+            }
             if(!appData) appData = app.repair(defaultData);
             appData.questions = admin.buildQuestionsFromFinalizedPrompts(parsed);
             if(typeof admin.maybeSplitConflatedExamNumberQuestionRow === "function") admin.maybeSplitConflatedExamNumberQuestionRow(appData);
@@ -34924,8 +34937,9 @@ const admin = {
             if(appData.questions.length === 0) appData.questions = [{ id: "q1", prompt: "", includeInWorksheet: false }];
             appData.question = appData.questions[0].prompt || "";
             if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
-            app.save();
+            /* v133: redraw the list before saving — saving re-reads the on-screen rows, so saving first put the removed question back. */
             admin.refreshQuestionsList();
+            app.save();
         };
         row.appendChild(moveWrap);
         row.appendChild(input);
@@ -35071,6 +35085,14 @@ const admin = {
                 questionsRepaired = true;
             }
         });
+        const questions = appData.questions;
+        mounts.forEach(m => { m.innerHTML = ""; });
+        mounts.forEach(m => {
+            questions.forEach((q, i) => {
+                m.appendChild(admin._createQuestionRowElement(q, i, questions));
+            });
+        });
+        /* v133: save repairs only after the rows are redrawn — saving re-reads the on-screen rows, so saving before the redraw brought old rows back. */
         if(questionsRepaired) {
             appData.question = (appData.questions[0] && appData.questions[0].prompt) || appData.question || "";
             if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question;
@@ -35079,13 +35101,6 @@ const admin = {
             if(appData.component === 2 && appData.questions.length >= 2 && typeof admin.syncLevelBankC2TextsFromFocusQuestions === "function")
                 admin.syncLevelBankC2TextsFromFocusQuestions();
         }
-        const questions = appData.questions;
-        mounts.forEach(m => { m.innerHTML = ""; });
-        mounts.forEach(m => {
-            questions.forEach((q, i) => {
-                m.appendChild(admin._createQuestionRowElement(q, i, questions));
-            });
-        });
         if(!opts.skipLevelBank && document.getElementById("level-bank-editor")) {
             const renderLb = () => { try { admin._renderLevelBankDOM(); } catch(eLb) {} };
             if(typeof requestIdleCallback === "function") requestIdleCallback(renderLb, { timeout: 800 });
@@ -35128,8 +35143,9 @@ const admin = {
         arr[j] = t;
         appData.question = arr[0] && typeof arr[0].prompt === "string" ? arr[0].prompt : appData.question;
         if(appData.selection && appData.selection.question) appData.selection.question.prompt = appData.question || "";
-        app.save();
+        /* v133: redraw first (see Remove) — saving re-reads the on-screen rows and undid the move. */
         admin.refreshQuestionsList();
+        app.save();
     },
     /** Copy question row field values from the mount that was edited to any other .questions-list-mount (same row index). */
     _mirrorQuestionRowsToSiblingMounts: (readFromList) => {
