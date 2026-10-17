@@ -29563,7 +29563,7 @@ const admin = {
         safe.questions.forEach(function(q) {
             if(!q || typeof q.prompt !== "string") return;
             let p = q.prompt.trim();
-            if(!p) return;
+            if(!p) { if(q._justAdded) kept.push(q); return; } /* v133: keep a row just added with + Add question until it is typed in */
             if(typeof admin.peelLeadingC2InstructionRubricFromChunk === "function") {
                 const peeled = admin.peelLeadingC2InstructionRubricFromChunk(p);
                 if(peeled.rubric) {
@@ -30994,6 +30994,8 @@ const admin = {
             if(typeof app.forceC1PassageEditorChromeVisible === "function") app.forceC1PassageEditorChromeVisible();
         }
         admin.activateAdminTab(k, { skipPassageHydrate: true, skipC2Fill: true, skipSync: true });
+        /* v133: draw the Questions list from the open lesson — after opening a Word document it could still show the previous lesson's rows. */
+        if(k === "questions" && typeof admin.refreshQuestionsList === "function") admin.refreshQuestionsList({ skipLevelBank: true });
         if(k === "export") {
             const modal = document.getElementById("modal-admin");
             const body = modal && modal.querySelector(".modal-body");
@@ -35226,7 +35228,10 @@ const admin = {
             };
         });
         if(rows.every(r => !r.prompt) && memHasPrompts) return;
-        const filtered = rows.filter((r, i) => r.prompt || i === 0);
+        /* v133: also keep an empty row just added with + Add question (dropping it made the button do nothing). */
+        const justAdded = {};
+        (appData.questions || []).forEach(function(q) { if(q && q._justAdded && q.id) justAdded[q.id] = true; });
+        const filtered = rows.filter((r, i) => r.prompt || i === 0 || justAdded[r.qid]);
         if(filtered.length === 0) filtered.push({ prompt: "", qid: rows[0] ? rows[0].qid : "", hasWsCb: false, includeWS: false });
         const prev = Array.isArray(appData.questions) ? appData.questions : [];
         appData.questions = filtered.map((r, i) => {
@@ -35234,6 +35239,7 @@ const admin = {
             if(!id || !/^q[\w-]+$/i.test(id)) id = "q" + (i + 1);
             const old = prev.find(q => q && String(q.id) === id);
             const o = { id, prompt: r.prompt };
+            if(!r.prompt && old && old._justAdded) o._justAdded = true; /* v133 */
             if(old && typeof old.wholePassage === "boolean") o.wholePassage = old.wholePassage;
             let lrTrim = r.lineRefRaw != null ? String(r.lineRefRaw).trim() : "";
             if(!lrTrim && appData && appData.component !== 2 && typeof app.inferLineRefFromQuestionPrompt === "function") {
@@ -35314,9 +35320,10 @@ const admin = {
         if(!Array.isArray(appData.questions)) appData.questions = [{ id: "q1", prompt: appData.question || "" }];
         let n = appData.questions.length + 1;
         while(appData.questions.some(q => q && String(q.id) === "q" + n)) n++;
-        appData.questions.push({ id: "q" + n, prompt: "", includeInWorksheet: false });
-        app.save();
+        appData.questions.push({ id: "q" + n, prompt: "", includeInWorksheet: false, _justAdded: true });
+        /* v133: redraw before saving (see Remove) so the new empty row is on screen when the save re-reads the list. */
         admin.refreshQuestionsList();
+        app.save();
     },
     updateActiveLevels: () => {
         const activeWrap = document.getElementById("active-levels");
@@ -43947,16 +43954,22 @@ ${rowsHtml}
         const paras = [];
         doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li").forEach(function(el) {
             if(el.closest("li") && el.tagName !== "LI") return;
-            const text = String(el.textContent || "").replace(/\s+/g, " ").trim();
+            const elText = el.cloneNode(true); /* v133: a soft line break is a space ("Read lines 1 to 20.<br>List" was read as "20.List") */
+            elText.querySelectorAll("br").forEach(function(br) { br.replaceWith(" "); });
+            const text = String(elText.textContent || "").replace(/\s+/g, " ").trim();
             if(!text) return;
+            if(/^\d{1,3}$/.test(text)) return; /* v133: a bare number is a hand-placed margin line number (text box), not part of the text */
             const strongText = Array.prototype.map.call(el.querySelectorAll("strong, b"), function(x) { return x.textContent; }).join("").replace(/\s+/g, " ").trim();
             paras.push({ text: text, bold: /^H[1-6]$/.test(el.tagName) || (strongText.length > 0 && strongText.length >= text.length - 1) });
         });
         if(!paras.length) return null;
+        /* v133: a paper with its questions in the same document — take the reading questions out of the passage (writing tasks are left out). */
+        const split = admin.splitWordQuestions(paras);
+        const textParas = split ? split.passage : paras;
         const starts = [];
-        paras.forEach(function(p, i) { if(p.bold && /^(source|text|extract)\b/i.test(p.text)) starts.push(i); });
-        let groups = [paras];
-        if(starts.length >= 2) groups = starts.map(function(s, k) { return paras.slice(s, k + 1 < starts.length ? starts[k + 1] : paras.length); });
+        textParas.forEach(function(p, i) { if(p.bold && /^(source|text|extract)\b/i.test(p.text)) starts.push(i); });
+        let groups = [textParas];
+        if(starts.length >= 2) groups = starts.map(function(s, k) { return textParas.slice(s, k + 1 < starts.length ? starts[k + 1] : textParas.length); });
         if(groups.length > 2) { alert("This document seems to have " + groups.length + " texts. Answer Architect shows two, so the first two have been used."); groups = groups.slice(0, 2); }
         const esc = function(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
         const toHtml = function(g) {
@@ -43994,8 +44007,68 @@ ${rowsHtml}
         const title = String(fileName || "Word document").replace(/\.docx$/i, "").replace(/[_]+/g, " ");
         base.meta = { title: title, version: (base.meta && base.meta.version) || "5.1",
             lessonFile: { source: String(fileName || ""), builtAt: new Date().toISOString().slice(0, 10), by: "Load JSON (Word)" } };
+        if(split && split.questions.length) {
+            /* v133: one level per question (Exam mode), as the past-paper import does. Line ranges stay in the question wording only: the app's own line count would not match the printed paper. */
+            base.questions = split.questions.map(function(q, i) { return { id: "q" + (i + 1), prompt: q, includeInWorksheet: false }; });
+            base.question = base.questions[0].prompt;
+            base.selection.question.prompt = base.question;
+            S.examTrainingMode = true;
+            S.activeLevels = base.questions.map(function(q, i) { return i + 1; });
+            S.levelsNeeded = base.questions.length; /* "Levels needed for this lesson" — stops the empty question slots switching on more levels */
+            S.levelBank = S.levelBank && typeof S.levelBank === "object" ? S.levelBank : {};
+            base.questions.forEach(function(q, i) {
+                const lv = String(i + 1);
+                S.levelBank[lv] = Object.assign({}, S.levelBank[lv] || {}, { questionIds: [q.id], c2Source: t2 ? "both" : "21st" });
+            });
+            base.meta.lessonFile.questionsFound = base.questions.length;
+            if(split.writingLeftOut) base.meta.lessonFile.writingTasksLeftOut = split.writingLeftOut;
+        }
         delete base.isStandalone;
         return base;
+    },
+    /**
+     * v133: find the questions in a Word paper that has the passage and the questions in one document.
+     * A question ends at a mark such as [5] or [5 marks]; it starts at the first line in front of it that reads like a question
+     * ("Read lines…", "What…", "(a)", "A1"…). Guidance after the mark ("You must refer to…") belongs to the question above.
+     * Writing tasks ("Write a letter…") are left out. Returns null when the document has no marked questions.
+     * Same rules as word_to_architect.py in the lesson-pack skill — keep the two in step.
+     */
+    splitWordQuestions: function(paras) {
+        const MARKS = /\[\s*\d{1,2}\s*(marks?)?\s*\]\s*$/i;
+        const QSTART = /^(read (lines?|again|the (whole|first|second|extract|passage|text|source))\b|\(?[a-h]\)\s|(q(uestion)?\s*)?[a-c]?\d{1,2}(\.\d+)?[.)]?\s+\S|(what|how|why|which|who|where|when|list|give|explain|identify|name|describe|compare|write|using|choose|find|look at|to what extent|in (this|these|lines?))\b)/i;
+        const GUIDE = /^(you (must|should|may|need to)|remember to|in your answer|use (evidence|quotations)|refer to)\b/i;
+        const RUBRIC = /^(section [a-d]\b|read (carefully )?the (passage|extract|text|source)s?\b|read carefully\b|answer (all|the following|every)\b|the (passage|extract|text|source)s? in the separate\b|you should spend\b|(the )?separate resource|resource material\b)/i;
+        const WRITING = /\bwrite (a|an) (letter|article|speech|story|review|report|leaflet|essay|blog|description|narrative|account|text|talk|guide|diary)\b/i;
+        const marks = [];
+        paras.forEach(function(p, i) { if(MARKS.test(p.text)) marks.push(i); });
+        if(!marks.length) return null;
+        const qs = [];
+        let prevEnd = -1;
+        let sectionStart = -1;
+        marks.forEach(function(m, k) {
+            const from = prevEnd + 1;
+            let s = -1;
+            for(let i = from; i <= m; i++) { if(QSTART.test(paras[i].text) && !RUBRIC.test(paras[i].text)) { s = i; break; } }
+            if(s < 0) s = (paras[m].text.replace(MARKS, "").trim() || m === from) ? m : m - 1;
+            const lead = [];
+            for(let i = from; i < s; i++) {
+                const t = paras[i].text;
+                if(k > 0 && GUIDE.test(t) && !lead.length) { qs[k - 1].parts.push(t); continue; }
+                if(k > 0 && !RUBRIC.test(t)) lead.push(t);
+            }
+            if(k === 0) {
+                sectionStart = s;
+                while(sectionStart > 0 && (RUBRIC.test(paras[sectionStart - 1].text) || /\bmarks?\b/i.test(paras[sectionStart - 1].text) && paras[sectionStart - 1].text.length < 40)) sectionStart--;
+            }
+            const parts = lead.concat(paras.slice(s, m + 1).map(function(p) { return p.text; }));
+            qs.push({ parts: parts });
+            prevEnd = m;
+        });
+        for(let i = prevEnd + 1; i < paras.length && GUIDE.test(paras[i].text); i++) qs[qs.length - 1].parts.push(paras[i].text);
+        const all = qs.map(function(q) { return q.parts.join(" ").replace(/\s+/g, " ").trim(); });
+        const reading = all.filter(function(t) { return !WRITING.test(t); });
+        if(sectionStart < 1) return null;
+        return { passage: paras.slice(0, sectionStart), questions: reading, writingLeftOut: all.length - reading.length };
     },
     loadFile: (input) => {
         const f = input.files[0]; if(!f) return;
@@ -44019,7 +44092,7 @@ ${rowsHtml}
                     const lesson = admin.buildLessonFromWordHtml(conv && conv.value ? conv.value : "", f.name || "Word document");
                     if(!lesson) throw new Error("no readable text was found in the document.");
                     const nTexts = lesson.component2Layout.questionPaperPage3Text ? 2 : 1;
-                    if(!confirm("Open \u201C" + (f.name || "this document") + "\u201D as a new lesson (" + nTexts + " text" + (nTexts > 1 ? "s" : "") + ", no questions or quotes yet)?\n\nThis replaces the lesson that is open now \u2014 press Cancel and use Save all first if you want to keep it.")) return;
+                    if(!confirm("Open \u201C" + (f.name || "this document") + "\u201D as a new lesson (" + nTexts + " text" + (nTexts > 1 ? "s" : "") + (lesson.meta.lessonFile.questionsFound ? ", " + lesson.meta.lessonFile.questionsFound + " question" + (lesson.meta.lessonFile.questionsFound > 1 ? "s" : "") + " found, no quotes yet" : ", no questions or quotes yet") + ")?" + (lesson.meta.lessonFile.writingTasksLeftOut ? "\n\n" + lesson.meta.lessonFile.writingTasksLeftOut + " writing task" + (lesson.meta.lessonFile.writingTasksLeftOut > 1 ? "s were" : " was") + " left out." : "") + "\n\nThis replaces the lesson that is open now \u2014 press Cancel and use Save all first if you want to keep it.")) return;
                     const fileJson = new File([JSON.stringify(lesson)], (f.name || "word").replace(/\.docx$/i, "") + ".json", { type: "application/json" });
                     admin.loadFile({ files: [fileJson], value: "" });
                 } catch(err) {
