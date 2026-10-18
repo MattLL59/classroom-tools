@@ -23238,9 +23238,9 @@ const ui = {
                 document.body.dataset.freeSelectMouseBound = "true";
                 const captureSelection = () => {
                     const selObj = window.getSelection ? window.getSelection() : null;
-                    if(!selObj || selObj.isCollapsed) { ui._lastCapturedSelection = null; return; }
+                    if(!selObj || selObj.isCollapsed) { ui._lastCapturedSelection = null; ui._syncUseQuoteButton(); return; }
                     const txt = selObj.toString().trim();
-                    if(txt.length < 3) { ui._lastCapturedSelection = null; return; }
+                    if(txt.length < 3) { ui._lastCapturedSelection = null; ui._syncUseQuoteButton(); return; }
                     const anc = selObj.anchorNode;
                     const foc = selObj.focusNode;
                     const ancEl = anc && anc.nodeType === 3 ? anc.parentNode : anc;
@@ -23259,9 +23259,14 @@ const ui = {
                     } else {
                         ui._lastCapturedSelection = null;
                     }
+                    ui._syncUseQuoteButton();
                 };
                 document.addEventListener("selectionchange", captureSelection, true);
                 const docSelectHandler = (e) => {
+                    /* v133: on a touch screen, lifting the finger after a long-press is not "finished" — the student still has to drag the
+                       selection handles. Wait for the ➕ Use this quote button instead (ui.useSelectedQuote). Mouse selection is unchanged. */
+                    if(e && e.type === "touchend") { ui._touchMode = true; ui._lastTouchEndAt = Date.now(); ui._syncUseQuoteButton(); return; }
+                    if(e && e.type === "mouseup" && Date.now() - (ui._lastTouchEndAt || 0) < 1000) return;
                     if(ui._freeSelectProcessLock) return;
                     if(app._teacherLinePickMode) return;
                     const sel = appData.selection;
@@ -23330,8 +23335,40 @@ const ui = {
                 };
                 document.addEventListener("mouseup", docSelectHandler, true);
                 document.addEventListener("touchend", docSelectHandler, { capture: true, passive: true });
+                ui._docSelectHandler = docSelectHandler;
             }
         }
+    },
+    /** v133: phones — show ➕ Use this quote while a passage highlight exists (touch screens only). */
+    _syncUseQuoteButton: function() {
+        let btn = document.getElementById("qs-use-quote-btn");
+        const selectView = document.getElementById("view-select");
+        const show = !!(ui._touchMode && ui._lastCapturedSelection && selectView && selectView.classList.contains("active"));
+        if(!btn && !show) return;
+        if(!btn) {
+            btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = "qs-use-quote-btn";
+            btn.className = "btn btn-primary no-print";
+            btn.textContent = "\u2795 Use this quote";
+            btn.setAttribute("aria-label", "Use the highlighted text as a quote");
+            btn.style.cssText = "position:fixed; left:50%; transform:translateX(-50%); bottom:calc(78px + env(safe-area-inset-bottom, 0px)); z-index:950; width:auto; min-height:48px; padding:10px 22px; font-size:1.05rem; font-family:inherit; border-radius:24px; box-shadow:0 4px 14px rgba(0,0,0,0.25); display:none;";
+            /* pointerdown + preventDefault: act before the tap clears the highlight */
+            btn.addEventListener("pointerdown", function(ev) { ev.preventDefault(); ui.useSelectedQuote(); });
+            document.body.appendChild(btn);
+        }
+        btn.style.display = show ? "" : "none";
+    },
+    /** v133: how to highlight — phones need press-and-hold, the handles, then the button. */
+    _selectHint: function() {
+        const touch = ui._touchMode || (window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
+        return touch ? "Press and hold a word, drag the handles to cover your quote, then tap \u2795 Use this quote." : "Tap and drag in the source text above to highlight.";
+    },
+    useSelectedQuote: function() {
+        if(!ui._lastCapturedSelection || typeof ui._docSelectHandler !== "function") { ui._syncUseQuoteButton(); return; }
+        ui._docSelectHandler({ type: "use-quote-button" });
+        ui._lastCapturedSelection = null;
+        ui._syncUseQuoteButton();
     },
     positionReaderWindow: function() {
         const place = (winId, wrapId, contentId) => {
@@ -26449,7 +26486,7 @@ const ui = {
             }
             const targetMetLine = pointsMade >= evidenceGoalForUi
                 ? (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0 0 8px 0;">You have logged enough highlights for this task. Send to Answer when ready, or add another.</p>`)
-                : (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Each selection will be added directly to your answer.</p>`                 : (noQuotesFlow ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. Paraphrase each selection in the box that appears — it goes into your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">Tap and drag in the source text above to highlight. You will build each quote in the Sentence Builder.</p>`));
+                : (quoteOnlyShort ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">${ui._selectHint()} Each selection will be added directly to your answer.</p>`                 : (noQuotesFlow ? `<p style="font-size:0.9rem; opacity:0.9; margin:0;">${ui._selectHint()} Paraphrase each selection in the box that appears — it goes into your answer.</p>` : `<p style="font-size:0.9rem; opacity:0.9; margin:0;">${ui._selectHint()} You will build each quote in the Sentence Builder.</p>`));
             const sendLabel = quoteOnlyShort ? "Send to Answer" : (noQuotesFlow ? "Send to Answer" : "Send quotes to Sentence Builder");
             const sendAction = quoteOnlyShort
                 ? "ui.sendChosenQuotesFromTapPanel()"
