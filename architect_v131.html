@@ -23408,10 +23408,16 @@ const ui = {
             btn.setAttribute("aria-label", "Use the highlighted text as a quote");
             btn.style.cssText = "position:fixed; left:50%; transform:translateX(-50%); bottom:calc(78px + env(safe-area-inset-bottom, 0px)); z-index:950; width:auto; min-height:48px; padding:10px 22px; font-size:1.05rem; font-family:inherit; border-radius:24px; box-shadow:0 4px 14px rgba(0,0,0,0.25); display:none;";
             /* pointerdown + preventDefault: act before the tap clears the highlight */
-            btn.addEventListener("pointerdown", function(ev) { ev.preventDefault(); ui.useSelectedQuote(); });
+            btn.addEventListener("pointerdown", function(ev) {
+                ev.preventDefault();
+                /* the rest of this tap (pointerup / click) would land on the passage once the button hides — ignore it */
+                ui._ignorePassageTapsUntil = Date.now() + 800;
+                ui.useSelectedQuote();
+            });
             document.body.appendChild(btn);
         }
-        btn.textContent = waiting ? "Now tap the last word" : "\u2795 Use this quote";
+        btn.textContent = waiting ? "Now tap the last word \u00B7 \u2715" : "\u2795 Use this quote";
+        btn.setAttribute("aria-label", waiting ? "Waiting for the last word of your quote. Tap to cancel." : "Use the highlighted text as a quote");
         btn.style.opacity = waiting ? "0.85" : "1";
         btn.style.display = show ? "" : "none";
     },
@@ -23421,7 +23427,7 @@ const ui = {
         return touch ? "Tap the first word of your quote, then the last word, then tap \u2795 Use this quote." : "Tap and drag in the source text above to highlight.";
     },
     useSelectedQuote: function() {
-        if(ui._tapFirst && !ui._tapCaptured) return; /* still waiting for the last word */
+        if(ui._tapFirst && !ui._tapCaptured) { ui._clearTapQuote(); ui._syncUseQuoteButton(); return; } /* "Now tap the last word · ✕" — cancel */
         if(ui._tapCaptured) ui._lastCapturedSelection = ui._tapCaptured;
         if(!ui._lastCapturedSelection || typeof ui._docSelectHandler !== "function") { ui._clearTapQuote(); ui._syncUseQuoteButton(); return; }
         ui._docSelectHandler({ type: "use-quote-button" });
@@ -23497,6 +23503,8 @@ const ui = {
         return false;
     },
     _onPassageTap: function(x, y) {
+        if(Date.now() < (ui._ignorePassageTapsUntil || 0)) return;
+        if(ui._freeSelectPendingQuote) return; /* the Examine your quote panel is open */
         if(!ui._tapQuoteAllowed()) return;
         const w = ui._wordRangeAtPoint(x, y);
         if(!w) return;
@@ -24136,6 +24144,9 @@ const ui = {
         return false;
     },
     switchView: function(v, force) {
+        /* v133: a new screen — forget half-made taps and update the floating quote button after the switch */
+        if(ui._clearTapQuote) ui._clearTapQuote();
+        setTimeout(function() { if(ui._syncUseQuoteButton) ui._syncUseQuoteButton(); }, 0);
         /** Legacy Evidence Lab → Quote Select (passage + tap text); not Writing Desk. */
         if(v === "lab") v = "select";
         let redirectedToDesk = false;
@@ -25971,9 +25982,11 @@ const ui = {
                 </div>`
             : "";
         const q1TapParaphrase = !!(app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || c1OwnWordsShort || !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
-        const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Optional: briefly say why this fits the question");
         const requireReasonExamine = !!(appData.selection && appData.selection.modes && appData.selection.modes.requireReason);
-        const showJustifyBox = !quoteOnlyShort && (tr || q1TapParaphrase || !isShortAnswerMode || requireReasonExamine);
+        /* v133: the hint matches the teacher's setting — and with Require Justification off (Quote select tab) there is no justification box at all.
+           Own-words retrieval levels keep their box: there it holds the answer itself, not a justification. */
+        const whyPlaceholder = tr ? "Analysis / comment (saved to lesson worksheet & banks)" : (q1TapParaphrase ? "Put the fact in your own words (do not copy the passage)..." : "Say briefly how this quote helps to answer the question (needed before you continue)");
+        const showJustifyBox = !quoteOnlyShort && (tr || q1TapParaphrase || requireReasonExamine);
         const whyHeading = tr
             ? "Comment / analysis (saved to lesson)"
             : (c1OwnWordsShort
