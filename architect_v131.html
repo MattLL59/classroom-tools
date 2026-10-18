@@ -1077,6 +1077,10 @@
     /* z-index 2: band can span gutter + text; WJEC tick digits are z-index:3 and stay on top. */
     .reader-window { position: absolute; left: 8px; right: 8px; top: 8px; height: var(--reader-window-height); border: 2px solid var(--reader-highlight-border); border-radius: 8px; background: var(--reader-highlight); pointer-events: none; z-index: 2; }
     .reader-window-line { display:none; }
+    /* v133: quote highlight drawn by the app (tap first word, tap last word) — the same in every colour scheme */
+    ::highlight(aa-tap-quote) { background-color: #ffd54f; color: #000; }
+    ::highlight(aa-tap-first) { background-color: #ffb300; color: #000; text-decoration: underline; text-decoration-thickness: 3px; }
+    #source-inline-select ::selection { background: #ffd54f; color: #000; }
     .stage-tag { background: rgba(0,0,0,0.04); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
     .stage-tag.clickable { cursor: pointer; }
     .question-banner { background: rgba(0, 150, 136, 0.08); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 10px 0; font-size: 14px; position: sticky; top: 0; z-index: 2; }
@@ -1932,6 +1936,7 @@
             <span id="arch-build-stamp" style="font-size:0.65rem;font-weight:600;opacity:0.55;margin-left:6px;white-space:nowrap;" title="Bump meta architect-build when you save this file; if the stamp does not match, the browser may be showing an old copy.">v131 · …</span>
             <span class="score-badge" id="score-display" title="">—</span>
             <span class="score-badge" id="level-display">Lvl 1</span>
+            <span class="score-badge hidden" id="exam-conditions-badge" title="Exam conditions: no I'm stuck help, no answer reveals, no spell-check" style="background:#37474f; color:#fff;">Exam conditions</span>
         </h1>
         <div class="header-controls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <div id="header-c2-source-bar" class="hidden" style="gap:6px; align-items:center; padding-right:8px; border-right:1px solid var(--border); margin-right:4px;">
@@ -2929,6 +2934,9 @@
                     </div>
                     <div style="font-size:0.8rem; opacity:0.8; margin-top:6px;">Past-paper PDFs go in <strong>Import past paper</strong> below.</div>
                 </div>
+                <div class="admin-section" id="lobby-exam-conditions-box" style="padding:10px 12px;">
+                    <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; margin:0;"><input type="checkbox" id="lobby-exam-conditions" style="margin-top:3px; width:auto;" onchange="ui.setExamConditions(this.checked)"> <span><strong>Exam conditions</strong> — for students using the app in an exam (e.g. access arrangements). Hides <strong>I&apos;m stuck</strong> (quote choices, mark-scheme points, synonyms, sentence-bank chips, meanings, labels and hints) and <strong>Reveal best quote</strong>, and turns off spell-check in the answer boxes. Colours, the reading window, Auto-Scroll and line numbers stay. Saved with the lesson: export the <strong>Student App</strong> with this on, so students can&apos;t switch it off.</span></label>
+                </div>
                 <details class="admin-section" id="admin-import-past-paper-details" open>
                     <summary class="admin-h">📄 Import past paper</summary>
                     <details class="lobby-help-details">
@@ -3637,8 +3645,20 @@ const app = {
             return false;
         }
     },
+    /** v133: Exam conditions (Teacher Settings → Lobby) — no help that could give answers away; saved in the lesson file. */
+    isExamConditions: function() {
+        return !!(typeof appData !== "undefined" && appData && appData.settings && appData.settings.examConditions === true);
+    },
+    /** v133: switch off every I'm stuck option a student may have ticked before (quote choices, worksheet practice, mark-scheme points, synonyms, chips, meanings, labels, hints). */
+    enforceExamConditions: function() {
+        if(!app.isExamConditions() || typeof userState === "undefined" || !userState) return;
+        ["studentQuoteListHelp", "worksheetPracticeMode", "studentSynonymsHelp", "studentHelpDeskSentenceBank",
+         "studentHelpAiMeanings", "studentHelpAiDeviceFocus", "studentHelpAiRubricHints", "studentHelpPanelOpen"].forEach(function(k) { userState[k] = false; });
+        userState.studentMarkSchemePointsHelp = false;
+    },
     /** Synonym suggestions (I'm stuck) — must not be confused with Q1 / tap-only flows (formerly leaked via misnamed getEffectiveNoQuotes). */
     isStudentSynonymsHelp: function() {
+        if(app.isExamConditions()) return false;
         return !!(userState && userState.studentSynonymsHelp === true);
     },
     /** Legacy name: was synonym-help only and hid paraphrase inputs. Keep returning false; use {@link isStudentSynonymsHelp} or {@link isLevelUsingFirstQuestion} instead. */
@@ -3660,6 +3680,7 @@ const app = {
     /** Writing Desk draggable chips from Analysis Banks: on for teacher builds; standalone students only when they tick I'm stuck → sentence bank. */
     isDeskSentenceBankChipsEnabled: function() {
         if(typeof appData === "undefined" || !appData) return true;
+        if(app.isExamConditions()) return false; /* v133 */
         if(!appData.isStandalone) return true;
         return !!(userState && userState.studentHelpDeskSentenceBank === true);
     },
@@ -23251,6 +23272,7 @@ const ui = {
                     const previewEl = document.getElementById("teacher-passage-preview-output");
                     const inPassageHost = (host) => host && ancEl && focEl && (host.contains(ancEl) || host.contains(focEl));
                     if(inPassageHost(inlineEl) || inPassageHost(inlineScroll)) {
+                        if(ui._tapFirst && ui._tapFirst.toString() !== txt) ui._clearTapQuote(); /* v133: a long-press selection replaces the taps */
                         ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
                     } else if(inPassageHost(labEl)) {
                         ui._lastCapturedSelection = { text: txt, anchorNode: anc, focusNode: foc };
@@ -23262,6 +23284,7 @@ const ui = {
                     ui._syncUseQuoteButton();
                 };
                 document.addEventListener("selectionchange", captureSelection, true);
+                ui._bindPassageTaps();
                 const docSelectHandler = (e) => {
                     /* v133: on a touch screen, lifting the finger after a long-press is not "finished" — the student still has to drag the
                        selection handles. Wait for the ➕ Use this quote button instead (ui.useSelectedQuote). Mouse selection is unchanged. */
@@ -23339,11 +23362,42 @@ const ui = {
             }
         }
     },
+    /** v133: Exam conditions — header label, and spell-check / autocorrect off in every box the student types in. */
+    syncExamConditionsBadge: function() {
+        const on = app.isExamConditions();
+        const b = document.getElementById("exam-conditions-badge");
+        if(b) b.classList.toggle("hidden", !on);
+        const cb = document.getElementById("lobby-exam-conditions");
+        if(cb) cb.checked = on;
+        if(!ui._examSpellBound) {
+            ui._examSpellBound = true;
+            document.addEventListener("focusin", function(ev) {
+                const t = ev.target;
+                if(!t || !app.isExamConditions()) return;
+                const typing = t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && /^(text|search|)$/i.test(t.type || "")) || t.isContentEditable;
+                if(!typing || (t.closest && t.closest("#modal-admin"))) return;
+                t.setAttribute("spellcheck", "false");
+                t.setAttribute("autocorrect", "off");
+                t.setAttribute("autocapitalize", "off");
+                t.setAttribute("autocomplete", "off");
+            }, true);
+        }
+    },
+    setExamConditions: function(on) {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.examConditions = !!on;
+        app.enforceExamConditions();
+        app.save();
+        ui.syncExamConditionsBadge();
+        if(typeof ui.renderSelection === "function") ui.renderSelection();
+    },
     /** v133: phones — show ➕ Use this quote while a passage highlight exists (touch screens only). */
     _syncUseQuoteButton: function() {
         let btn = document.getElementById("qs-use-quote-btn");
         const selectView = document.getElementById("view-select");
-        const show = !!(ui._touchMode && ui._lastCapturedSelection && selectView && selectView.classList.contains("active"));
+        const inSelect = !!(selectView && selectView.classList.contains("active"));
+        const waiting = !!(inSelect && ui._tapFirst && !ui._tapCaptured);
+        const show = !!(inSelect && (ui._tapCaptured || (ui._touchMode && ui._lastCapturedSelection))) || waiting;
         if(!btn && !show) return;
         if(!btn) {
             btn = document.createElement("button");
@@ -23357,18 +23411,134 @@ const ui = {
             btn.addEventListener("pointerdown", function(ev) { ev.preventDefault(); ui.useSelectedQuote(); });
             document.body.appendChild(btn);
         }
+        btn.textContent = waiting ? "Now tap the last word" : "\u2795 Use this quote";
+        btn.style.opacity = waiting ? "0.85" : "1";
         btn.style.display = show ? "" : "none";
     },
     /** v133: how to highlight — phones need press-and-hold, the handles, then the button. */
     _selectHint: function() {
         const touch = ui._touchMode || (window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
-        return touch ? "Press and hold a word, drag the handles to cover your quote, then tap \u2795 Use this quote." : "Tap and drag in the source text above to highlight.";
+        return touch ? "Tap the first word of your quote, then the last word, then tap \u2795 Use this quote." : "Tap and drag in the source text above to highlight.";
     },
     useSelectedQuote: function() {
-        if(!ui._lastCapturedSelection || typeof ui._docSelectHandler !== "function") { ui._syncUseQuoteButton(); return; }
+        if(ui._tapFirst && !ui._tapCaptured) return; /* still waiting for the last word */
+        if(ui._tapCaptured) ui._lastCapturedSelection = ui._tapCaptured;
+        if(!ui._lastCapturedSelection || typeof ui._docSelectHandler !== "function") { ui._clearTapQuote(); ui._syncUseQuoteButton(); return; }
         ui._docSelectHandler({ type: "use-quote-button" });
         ui._lastCapturedSelection = null;
+        ui._clearTapQuote();
         ui._syncUseQuoteButton();
+    },
+    /**
+     * v133: touch screens — tap the first word of the quote, then the last word. Does not use the phone's text selection
+     * (handles, OS highlight colours), so it works on any phone, tablet or touch laptop and in any colour scheme.
+     */
+    _clearTapQuote: function() {
+        ui._tapFirst = null;
+        ui._tapCaptured = null;
+        try { if(window.CSS && CSS.highlights) { CSS.highlights.delete("aa-tap-quote"); CSS.highlights.delete("aa-tap-first"); } } catch(e) {}
+    },
+    _tapQuoteAllowed: function() {
+        try {
+            const sel = appData.selection;
+            if(!sel || !sel.enabled || app.getModulesActive().selection === false) return false;
+            if(typeof ui.isPassageQuoteTapHostActive === "function" && !ui.isPassageQuoteTapHostActive()) return false;
+            /* the same rule the passage selection handler uses (docSelectHandler) */
+            const level = app.getEffectiveLevel();
+            const teacherTapOn = !appData.isStandalone && appData.settings && appData.settings.teacherTapToAddQuotes;
+            const teacherRecordOn = !appData.isStandalone && appData.settings && appData.settings.teacherRecordStudentFlow;
+            const adminModal = document.getElementById("modal-admin");
+            const allowTeacherPassageCapture = !!(teacherTapOn && adminModal && adminModal.classList.contains("open"));
+            const allowShortAnsOrQ1PassageTap = !!(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) || (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || (app.isLevelUsingFirstQuestion && app.isLevelUsingFirstQuestion(level)) || (app.sendsOwnWordsParaphraseFromQuoteSelect && app.sendsOwnWordsParaphraseFromQuoteSelect(level)) || (app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level)) || (app.quoteSelectParaphraseRoutesToDesk && app.quoteSelectParaphraseRoutesToDesk(level)) || (app.getEffectiveTapText && app.getEffectiveTapText(level));
+            return !!(app.getEffectiveTapText(level) || teacherRecordOn || allowTeacherPassageCapture || allowShortAnsOrQ1PassageTap);
+        } catch(e) { return false; }
+    },
+    _wordRangeAtPoint: function(x, y) {
+        const host = document.getElementById("source-inline-select");
+        let node = null, off = 0;
+        if(document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); if(r) { node = r.startContainer; off = r.startOffset; } }
+        else if(document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); if(p) { node = p.offsetNode; off = p.offset; } }
+        if(!node || node.nodeType !== 3 || !host || !host.contains(node)) return null;
+        if(node.parentElement && node.parentElement.closest(".source-line-num")) return null;
+        const t = node.nodeValue || "";
+        const isW = function(ch) { return !!ch && /[\p{L}\p{N}'\u2019\-]/u.test(ch); };
+        let a = Math.min(off, t.length), b = a;
+        if(!isW(t[a]) && isW(t[a - 1])) a--;
+        if(!isW(t[a])) return null;
+        while(a > 0 && isW(t[a - 1])) a--;
+        b = a;
+        while(b < t.length && isW(t[b])) b++;
+        const r = document.createRange();
+        r.setStart(node, a);
+        r.setEnd(node, b);
+        return r;
+    },
+    /** The quote's words: a space between printed lines, margin line numbers left out. */
+    _tapRangeText: function(r) {
+        const root = r.commonAncestorContainer.nodeType === 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
+        const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let out = "", lastRow = null, n;
+        while((n = tw.nextNode())) {
+            if(!r.intersectsNode(n)) continue;
+            const pe = n.parentElement;
+            if(pe && pe.closest(".source-line-num")) continue;
+            let t = n.nodeValue || "";
+            if(n === r.endContainer) t = t.slice(0, r.endOffset);
+            if(n === r.startContainer) t = t.slice(r.startOffset);
+            const row = pe ? (pe.closest(".source-line-row, p, div") || pe) : null;
+            if(lastRow && row !== lastRow) out += " ";
+            out += t;
+            lastRow = row;
+        }
+        return out.replace(/\s+/g, " ").trim();
+    },
+    _paintTap: function(name, range) {
+        try { if(window.CSS && CSS.highlights && window.Highlight) { CSS.highlights.set(name, new Highlight(range)); return true; } } catch(e) {}
+        return false;
+    },
+    _onPassageTap: function(x, y) {
+        if(!ui._tapQuoteAllowed()) return;
+        const w = ui._wordRangeAtPoint(x, y);
+        if(!w) return;
+        ui._touchMode = true;
+        ui._lastCapturedSelection = null;
+        if(!ui._tapFirst || ui._tapCaptured) {
+            ui._clearTapQuote();
+            ui._tapFirst = w;
+            if(!ui._paintTap("aa-tap-first", w)) { const s = getSelection(); s.removeAllRanges(); s.addRange(w.cloneRange()); }
+            ui._syncUseQuoteButton();
+            return;
+        }
+        const f = ui._tapFirst;
+        if(f.compareBoundaryPoints(Range.START_TO_START, w) === 0) { ui._clearTapQuote(); ui._syncUseQuoteButton(); return; } /* same word again: start over */
+        const startFirst = f.compareBoundaryPoints(Range.START_TO_START, w) < 0;
+        const r = document.createRange();
+        if(startFirst) { r.setStart(f.startContainer, f.startOffset); r.setEnd(w.endContainer, w.endOffset); }
+        else { r.setStart(w.startContainer, w.startOffset); r.setEnd(f.endContainer, f.endOffset); }
+        const text = ui._tapRangeText(r);
+        if(text.length < 3) { ui._clearTapQuote(); ui._syncUseQuoteButton(); return; }
+        try { if(window.CSS && CSS.highlights) CSS.highlights.delete("aa-tap-first"); } catch(e) {}
+        if(!ui._paintTap("aa-tap-quote", r)) { const s = getSelection(); s.removeAllRanges(); s.addRange(r.cloneRange()); }
+        ui._tapCaptured = { text: text, anchorNode: r.startContainer, focusNode: r.endContainer };
+        ui._syncUseQuoteButton();
+    },
+    _bindPassageTaps: function() {
+        if(ui._passageTapsBound) return;
+        ui._passageTapsBound = true;
+        let down = null;
+        document.addEventListener("pointerdown", function(e) {
+            down = (e.pointerType === "touch" || e.pointerType === "pen") ? { x: e.clientX, y: e.clientY, t: Date.now(), id: e.pointerId } : null;
+        }, true);
+        document.addEventListener("pointercancel", function() { down = null; }, true);
+        document.addEventListener("pointerup", function(e) {
+            const d = down; down = null;
+            if(!d || d.id !== e.pointerId) return;
+            if(Date.now() - d.t > 500) return; /* a long-press: leave it to the phone's own selection */
+            if(Math.abs(e.clientX - d.x) > 10 || Math.abs(e.clientY - d.y) > 10) return; /* a scroll or drag */
+            const host = document.getElementById("source-inline-select");
+            if(!host || !e.target || !host.contains(e.target)) return;
+            ui._onPassageTap(e.clientX, e.clientY);
+        }, true);
     },
     positionReaderWindow: function() {
         const place = (winId, wrapId, contentId) => {
@@ -25887,6 +26057,9 @@ const ui = {
 
     renderSelection: function(overrideCanon, opts) {
         opts = opts || {};
+        if(app.isExamConditions()) app.enforceExamConditions(); /* v133 */
+        if(ui._clearTapQuote) { ui._clearTapQuote(); if(ui._syncUseQuoteButton) ui._syncUseQuoteButton(); } /* the passage is redrawn: old taps no longer point at it */
+        if(ui.syncExamConditionsBadge) ui.syncExamConditionsBadge();
         if(app.c2PassageOverride) overrideCanon = app.c2PassageOverride(overrideCanon);
         if(opts.skipPassage == null && app._passageDisplaysDeferred) opts.skipPassage = true;
         const cont = document.getElementById("selection-area");
@@ -26163,7 +26336,11 @@ const ui = {
                 if(!correctItems.length) correctItems = fbQuote.items.slice();
             }
         }
-        if(helpWrap) {
+        if(helpWrap && app.isExamConditions()) {
+            /* v133: Exam conditions — no I'm stuck bar at all */
+            helpWrap.innerHTML = "";
+            helpWrap.classList.add("hidden");
+        } else if(helpWrap) {
             const prevHelpDetails = helpWrap.querySelector("details");
             if(prevHelpDetails && prevHelpDetails.open) userState.studentHelpPanelOpen = true;
             const noQuotesHelpLevel = !!(app.isOwnWordsRetrievalLevel && app.isOwnWordsRetrievalLevel(level));
@@ -27229,7 +27406,7 @@ const ui = {
         if(stageKey === "recognize") {
             body.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">Pick the best quote.</div>
                 <div class="grid" id="selection-quotes"></div>
-                <button class="btn btn-outline" id="selection-reveal">Reveal best quote</button>`;
+                ${app.isExamConditions() ? "" : `<button class="btn btn-outline" id="selection-reveal">Reveal best quote</button>`}`;
             const grid = body.querySelector("#selection-quotes");
             const recogOptions = app.shuffle(options).slice(0, optionCount);
             recogOptions.forEach(o => {
@@ -27243,7 +27420,7 @@ const ui = {
                 };
                 grid.appendChild(btn);
             });
-            body.querySelector("#selection-reveal").onclick = () => {
+            if(body.querySelector("#selection-reveal")) body.querySelector("#selection-reveal").onclick = () => {
                 ui._selectionQuote = primaryQuoteText;
                 ui._selectionCorrectItem = primaryCorrect;
                 userState.selectionStage = stageIndex + 1;
