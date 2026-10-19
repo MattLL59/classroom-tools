@@ -8118,6 +8118,12 @@ const app = {
     tryParseJson: function(text) {
         if (typeof text !== "string") return { parsed: undefined, error: "Input is not a string." };
         let s = text.replace(/^\uFEFF/, ""); // BOM
+        /* v134: a file that is already valid JSON (Save all, lesson-pack and Word lessons) is used exactly as written. The repairs below
+           are for pasted AI output; they used to run on every file and turned the passage's curly apostrophes (\u2019) into straight ones. */
+        try {
+            const strict = JSON.parse(s);
+            if(strict && typeof strict === "object" && !Array.isArray(strict) && !Array.isArray(strict.lesson)) return { parsed: strict };
+        } catch(eStrict) {}
         s = s.replace(/^[\s\S]*?```(?:json)?\s*/i, "").replace(/\s*```[\s\S]*$/i, ""); // strip markdown code blocks
         /* Do NOT convert curly double quotes (U+201C/U+201D) to ASCII " before JSON.parse.
            Dialogue inside sourceText / prompts often uses “ ”; turning them into " breaks the JSON
@@ -34332,21 +34338,16 @@ const admin = {
     numberC2Lines: function() {
         if(!appData || appData.component !== 2 || !appData.component2Layout) return;
         if(typeof admin.flushC2PooledEditorToLayout === "function") admin.flushC2PooledEditorToLayout();
-        const ans = prompt("Characters per line?\n\nShorter lines are easier to track: 60\u201375 suits many dyslexic readers. Most printed A4 sheets are about 90.", "70");
+        /* v134: start from the width the Word page gave on import, else 90 (typical A4), not a fixed 70. */
+        const knownW = Number(appData.meta && appData.meta.wordCharsPerLine); /* not Insert width: that is 96 by default, not a measurement */
+        const startW = Number.isFinite(knownW) && knownW >= 30 ? Math.min(95, Math.round(knownW)) : 90;
+        const ans = prompt("Characters per line?\n\nFilled in from the Word page when it was known, otherwise 90 (typical A4). Shorter lines are easier to track: 60\u201375 suits many dyslexic readers.", String(startW));
         if(ans == null) return;
         const width = Math.max(30, Math.min(95, parseInt(ans, 10) || 70));
         const L = appData.component2Layout;
         const clean = app.isLessonFileLesson() ? app._c2PlainNoGlueRepair : function(h) { return app.htmlFragmentToPlainText(h); };
         const esc = function(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
-        const wrap = function(text) {
-            const out = []; let cur = "";
-            String(text).split(/\s+/).filter(Boolean).forEach(function(w) {
-                if(cur && (cur.length + 1 + w.length) > width) { out.push(cur); cur = w; }
-                else cur = cur ? cur + " " + w : w;
-            });
-            if(cur) out.push(cur);
-            return out;
-        };
+        const wrap = function(text) { return admin.wrapWordsToWidth(text, width); };
         let done = 0;
         [["resourcePaperText", "resourceHeadLine1", "resourceHeadLine2"], ["questionPaperPage3Text", "nineteenthHeadLine1", "nineteenthHeadLine2"]].forEach(function(k) {
             const raw = String(L[k[0]] || "");
@@ -44384,12 +44385,13 @@ ${rowsHtml}
             }
             const lesson = admin.buildLessonFromWordHtml(html, d.name);
             if(!lesson) throw new Error("no readable text was found in the Word document.");
-            const L = lesson.component2Layout;
-            L.resourcePaperText = res.json;
-            L.questionPaperPage3Text = "";
-            lesson.sourceText = res.json;
-            lesson.selection.text.source = res.json;
-            lesson.meta.c2LineNumbers = "show";
+            /* v134: a numbered paper is a Component 1 passage, with the lines exactly as the PDF prints them. */
+            let maxLine = 0;
+            try { (JSON.parse(res.json).lines || []).forEach(function(r) { maxLine = Math.max(maxLine, app.htmlFragmentToPlainText(r.html || "").length); }); } catch(eW) {}
+            admin._wordLessonToComponent1(lesson, res.json, maxLine || 90);
+            delete lesson.meta.wordCharsPerLine;
+            delete lesson.meta.wordCharsPerLineEstimated;
+            lesson.meta.wordPdfExactLines = true;
             lesson.meta.lessonFile.layoutPdf = pf.name;
             lesson.meta.lessonFile.by = "Word paper + its PDF";
             const nQ = lesson.meta.lessonFile.questionsFound || 0;
@@ -44424,7 +44426,106 @@ ${rowsHtml}
         });
         return paras;
     },
-    buildLessonFromWordHtml: function(html, fileName) {
+    /** v134: break plain text into lines of at most `width` characters, at spaces (shared by Number lines and Word documents). */
+    wrapWordsToWidth: function(text, width) {
+        const out = []; let cur = "";
+        String(text).split(/\s+/).filter(Boolean).forEach(function(w) {
+            if(cur && (cur.length + 1 + w.length) > width) { out.push(cur); cur = w; }
+            else cur = cur ? cur + " " + w : w;
+        });
+        if(cur) out.push(cur);
+        return out;
+    },
+    /** v134: read one file out of a .docx (a zip). Returns its text, or "" if it isn't there. */
+    _docxReadPart: async function(buf, partName) {
+        try {
+            const u8 = new Uint8Array(buf); const dv = new DataView(buf);
+            let eocd = -1;
+            for(let i = u8.length - 22; i >= Math.max(0, u8.length - 70000); i--) { if(dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+            if(eocd < 0) return "";
+            const count = dv.getUint16(eocd + 10, true); let p = dv.getUint32(eocd + 16, true);
+            for(let k = 0; k < count; k++) {
+                if(dv.getUint32(p, true) !== 0x02014b50) return "";
+                const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+                const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), loc = dv.getUint32(p + 42, true);
+                const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nlen));
+                if(name === partName) {
+                    const start = loc + 30 + dv.getUint16(loc + 26, true) + dv.getUint16(loc + 28, true);
+                    const data = u8.slice(start, start + csize);
+                    if(method === 0) return new TextDecoder().decode(data);
+                    if(method !== 8 || typeof DecompressionStream !== "function") return "";
+                    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+                    return await new Response(stream).text();
+                }
+                p += 46 + nlen + xlen + clen;
+            }
+        } catch(e) {}
+        return "";
+    },
+    /** v134: how many characters fit on one line of this Word document, from its page width, margins and body font size.
+        An estimate (Word measures letter widths; this counts characters). Null when the file doesn't say. */
+    estimateDocxCharsPerLine: async function(buf) {
+        try {
+            const doc = await admin._docxReadPart(buf, "word/document.xml");
+            const sects = doc.match(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g);
+            if(!sects) return null;
+            const sect = sects[sects.length - 1];
+            const num = function(re, str) { const m = String(str || "").match(re); return m ? Number(m[1]) : NaN; };
+            const pageW = num(/<w:pgSz\b[^>]*\bw:w="(\d+)"/, sect);
+            const left = num(/<w:pgMar\b[^>]*\bw:left="(-?\d+)"/, sect), right = num(/<w:pgMar\b[^>]*\bw:right="(-?\d+)"/, sect);
+            if(!(pageW > 0) || !Number.isFinite(left) || !Number.isFinite(right)) return null;
+            const styles = await admin._docxReadPart(buf, "word/styles.xml");
+            const normal = (styles.match(/<w:style\b[^>]*w:styleId="Normal"[\s\S]*?<\/w:style>/) || [""])[0];
+            const defaults = (styles.match(/<w:rPrDefault>[\s\S]*?<\/w:rPrDefault>/) || [""])[0];
+            let half = num(/<w:sz\b[^>]*\bw:val="(\d+)"/, normal);
+            if(!(half > 0)) half = num(/<w:sz\b[^>]*\bw:val="(\d+)"/, defaults);
+            if(!(half > 0)) half = 22;
+            const textPt = (pageW - left - right) / 20;
+            const n = Math.floor(textPt / ((half / 2) * 0.42));
+            return Number.isFinite(n) ? Math.max(40, Math.min(120, n)) : null;
+        } catch(e) { return null; }
+    },
+    /** v134: one Word text as a numbered Component 1 passage: bold opening paragraphs become the intro (not numbered),
+        a short last line with no closing punctuation (an author name) becomes the tail, the rest is cut into lines of `width` characters. */
+    wordParasToNumberedPassage: function(paras, width) {
+        const esc = function(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+        let i = 0; const heads = [];
+        while(i < paras.length - 1 && paras[i].bold) { heads.push(paras[i].text); i++; }
+        let end = paras.length;
+        let tail = "";
+        const lastP = paras[end - 1];
+        if(end - i >= 2 && lastP && !lastP.bold && lastP.text.length <= 60 && !/[.?!:;,\u2019\u201D"')\u2026]$/.test(lastP.text)) { tail = lastP.text; end--; }
+        const lines = [];
+        for(let k = i; k < end; k++) {
+            admin.wrapWordsToWidth(paras[k].text, width).forEach(function(ln, j) {
+                const row = { n: lines.length + 1, html: esc(ln) };
+                if(j === 0 && lines.length) row.paragraphStart = true;
+                lines.push(row);
+            });
+        }
+        const o = { v: 2, lines: lines };
+        if(heads.length) o.headHtml = heads.map(function(h) { return "<strong>" + esc(h) + "</strong>"; }).join("<br>");
+        if(tail) o.tailHtml = esc(tail);
+        return o;
+    },
+    /** v134: turn a lesson built by buildLessonFromWordHtml into Component 1 with this numbered passage (JSON string). */
+    _wordLessonToComponent1: function(base, passageJson, width) {
+        const L = base.component2Layout || {};
+        Object.keys(L).forEach(function(k) { if(typeof L[k] === "string") L[k] = ""; });
+        base.component2Layout = L;
+        base.component = 1;
+        base.sourceText = passageJson;
+        base.selection.text = Object.assign({}, base.selection.text || {}, { source: passageJson });
+        base.meta.sourceLineBasis = "pdfImport"; /* one stored row = one printed line: the app must not re-wrap or merge them */
+        base.meta.passageBookletFirstLine = 1;
+        if(width) base.meta.pdfInsertWidthCh = Math.max(36, Math.min(150, Math.round(width) + 4));
+        const S = base.settings || {};
+        if(S.levelBank && typeof S.levelBank === "object") Object.keys(S.levelBank).forEach(function(k) { if(S.levelBank[k] && typeof S.levelBank[k] === "object") delete S.levelBank[k].c2Source; });
+        delete S.architectC2SourceView;
+        return base;
+    },
+    buildLessonFromWordHtml: function(html, fileName, opts) {
+        opts = opts || {};
         const paras = admin.wordHtmlParagraphs(html);
         if(!paras.length) return null;
         /* v133: a paper with its questions in the same document — take the reading questions out of the passage (writing tasks are left out). */
@@ -44488,6 +44589,16 @@ ${rowsHtml}
             if(split.writingLeftOut) base.meta.lessonFile.writingTasksLeftOut = split.writingLeftOut;
         }
         delete base.isStandalone;
+        /* v134: Eduqas puts one text in a Word document, and only Component 1 passages carry line numbers — so one text opens as numbered Component 1. Two texts stay Component 2. */
+        if(groups.length === 1 && !opts.keepComponent2) {
+            const width = Number(opts.charsPerLine) >= 30 ? Math.round(Number(opts.charsPerLine)) : 90;
+            const passage = admin.wordParasToNumberedPassage(groups[0], width);
+            if(passage.lines.length) {
+                admin._wordLessonToComponent1(base, JSON.stringify(passage), width);
+                base.meta.wordCharsPerLine = width;
+                base.meta.wordCharsPerLineEstimated = !!opts.charsPerLineEstimated;
+            }
+        } else if(Number(opts.charsPerLine) >= 30) base.meta.wordCharsPerLine = Math.round(Number(opts.charsPerLine));
         return base;
     },
     /**
@@ -44552,11 +44663,12 @@ ${rowsHtml}
                     if(!window.mammoth) throw new Error("the Word reader did not load. Check the internet connection (and that unpkg.com is not blocked), then refresh the page.");
                     /** v132: open the Word document as a new blank lesson (one or two texts, paragraphs and bold headings kept),
                         instead of only swapping the passage — which did nothing visible in a Component 2 lesson. */
+                    const est = await admin.estimateDocxCharsPerLine(reader.result.slice(0));
                     const conv = await window.mammoth.convertToHtml({ arrayBuffer: reader.result });
-                    const lesson = admin.buildLessonFromWordHtml(conv && conv.value ? conv.value : "", f.name || "Word document");
+                    const lesson = admin.buildLessonFromWordHtml(conv && conv.value ? conv.value : "", f.name || "Word document", { charsPerLine: est || 90, charsPerLineEstimated: !!est });
                     if(!lesson) throw new Error("no readable text was found in the document.");
-                    const nTexts = lesson.component2Layout.questionPaperPage3Text ? 2 : 1;
-                    if(!confirm("Open \u201C" + (f.name || "this document") + "\u201D as a new lesson (" + nTexts + " text" + (nTexts > 1 ? "s" : "") + (lesson.meta.lessonFile.questionsFound ? ", " + lesson.meta.lessonFile.questionsFound + " question" + (lesson.meta.lessonFile.questionsFound > 1 ? "s" : "") + " found, no quotes yet" : ", no questions or quotes yet") + ")?" + (lesson.meta.lessonFile.writingTasksLeftOut ? "\n\n" + lesson.meta.lessonFile.writingTasksLeftOut + " writing task" + (lesson.meta.lessonFile.writingTasksLeftOut > 1 ? "s were" : " was") + " left out." : "") + "\n\nThis replaces the lesson that is open now \u2014 press Cancel and use Save all first if you want to keep it.")) return;
+                    const nTexts = lesson.component === 1 ? 1 : (lesson.component2Layout.questionPaperPage3Text ? 2 : 1);
+                    if(!confirm("Open \u201C" + (f.name || "this document") + "\u201D as a new lesson (" + nTexts + " text" + (nTexts > 1 ? "s" : "") + (lesson.meta.lessonFile.questionsFound ? ", " + lesson.meta.lessonFile.questionsFound + " question" + (lesson.meta.lessonFile.questionsFound > 1 ? "s" : "") + " found, no quotes yet" : ", no questions or quotes yet") + ")?" + (lesson.meta.lessonFile.writingTasksLeftOut ? "\n\n" + lesson.meta.lessonFile.writingTasksLeftOut + " writing task" + (lesson.meta.lessonFile.writingTasksLeftOut > 1 ? "s were" : " was") + " left out." : "") + (lesson.component === 1 ? "\n\nComponent 1, with numbered lines of about " + lesson.meta.wordCharsPerLine + " characters (" + (lesson.meta.wordCharsPerLineEstimated ? "estimated from the Word page" : "the Word page size couldn\u2019t be read, so a standard width was used") + "). The app\u2019s line numbers may not match a printed copy line for line \u2014 for a paper with printed margin numbers, use \u201CWord paper + its PDF\u201D." : "") + "\n\nThis replaces the lesson that is open now \u2014 press Cancel and use Save all first if you want to keep it.")) return;
                     const fileJson = new File([JSON.stringify(lesson)], (f.name || "word").replace(/\.docx$/i, "") + ".json", { type: "application/json" });
                     admin.loadFile({ files: [fileJson], value: "" });
                 } catch(err) {
