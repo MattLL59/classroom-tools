@@ -10860,7 +10860,9 @@ const app = {
                     const punctGlue = nb && fb && /[.!?\u2026]/.test(nb) && LET.test(fb);
                     const glue = nb && fb && LET.test(nb) && LET.test(fb);
                     const hyphenBound = nb === "-" || nb === "\u00ad";
-                    if(!hyphenBound && !subtreeHasTrailingSpace(prev) && (punctGlue || glue))
+                    /* v134: also skip when the next node already starts with a space ("<b>sagging</b> with" got a second space). */
+                    const nextLeadSpace = /^\s/.test(next.nodeType === 3 ? String(next.nodeValue || "") : String(next.textContent || ""));
+                    if(!hyphenBound && !subtreeHasTrailingSpace(prev) && !nextLeadSpace && (punctGlue || glue))
                         parent.insertBefore(document.createTextNode(" "), next);
                     i++;
                 }
@@ -14477,7 +14479,9 @@ const app = {
         out = domNormalize(out);
         out = app.collapseEmptyParagraphsInAdminSource(out);
         out = domNormalize(out);
-        out = out.replace(/<\/?(?!p\b|br\b|b\b|strong\b|i\b|em\b|u\b|mark\b|small\b|sup\b|sub\b)[^>]+>/gi, "");
+        /* v134: the lookahead now covers the slash too. Before, "</b>" could match with the "/" taken as tag text, so every closing
+           </b> </i> </u> was deleted and the browser closed them at the end of the line — bold or italics ran on to the line's end. */
+        out = out.replace(/<(?!\/?(?:p|br|b|strong|i|em|u|mark|small|sup|sub)\b)\/?[^>]+>/gi, "");
         out = domNormalize(out);
         /* Drop attributes so <p style="font-weight:700"> or styled spans converted to p cannot bold a whole paragraph in the game. */
         out = out.replace(/<p\b[^>]*>/gi, "<p>");
@@ -43974,51 +43978,121 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
      * A live on-page size slider lets the teacher pick the right size per student, then print (Ctrl+P).
      */
     exportEnlargedFullText: function() {
-        const sourceText = (admin.getSourceTextForMarkSchemeQuoteMatch ? admin.getSourceTextForMarkSchemeQuoteMatch() : "") || appData.sourceText || "";
-        if(!String(sourceText).trim()) { alert("No passage loaded to export. Load a passage from the Lobby or Passage tab first."); return; }
-        let lines = [];
-        const parsed = app.isStructuredPassageSource && app.isStructuredPassageSource(sourceText) ? app.parseStructuredPassageSource(sourceText) : null;
-        if(parsed && Array.isArray(parsed.lines) && parsed.lines.length) {
-            lines = parsed.lines.map(L => ({
-                n: L.n,
-                text: (app.htmlFragmentToPlainText ? app.htmlFragmentToPlainText(L.html || "") : String(L.html || "").replace(/<[^>]+>/g, "")).trim()
-            })).filter(l => l.text);
+        /* v134: keeps bold / italic / underline from the edited passage, prints the intro and author line, uses Calibri,
+           gives each Component 2 text its own heading and numbering, and counts the A3 (or A4) sheets the print will take. */
+        if(typeof app.flushAiInputToLessonSourceIfEditable === "function") { try { app.flushAiInputToLessonSourceIfEditable(); } catch(eFl) {} }
+        const keepRich = function(h) {
+            let t = String(h || "");
+            t = t.replace(/<\s*(\/?)\s*(strong|b)\b[^>]*>/gi, "<$1b>").replace(/<\s*(\/?)\s*(em|i)\b[^>]*>/gi, "<$1i>").replace(/<\s*(\/?)\s*u\b[^>]*>/gi, "<$1u>")
+                 .replace(/<\s*br\b[^>]*>/gi, "<br>").replace(/<\s*\/\s*(p|div)\s*>/gi, "<br>");
+            t = t.replace(/<(?!\/?(b|i|u)>|br>)[^>]*>/gi, "");
+            return t.replace(/(<br>\s*)+$/i, "").replace(/^(\s*<br>)+/i, "").trim();
+        };
+        const fromStructured = function(o) {
+            return { head: keepRich(o.headHtml), tail: keepRich(o.tailHtml), lines: (o.lines || []).map(function(L) { return { n: L.n, html: keepRich(L.html), para: !!L.paragraphStart }; }).filter(function(l) { return l.html.replace(/<[^>]+>/g, "").trim(); }) };
+        };
+        const fromProse = function(raw) {
+            const t = String(raw || "").trim();
+            if(!t) return null;
+            if(app.isStructuredPassageSource && app.isStructuredPassageSource(t)) { const o = app.parseStructuredPassageSource(t); if(o && o.lines && o.lines.length) return fromStructured(o); }
+            const paras = /<\s*(p|div|br)\b/i.test(t)
+                ? t.split(/<\s*\/\s*(?:p|div)\s*>|<\s*br\s*\/?>\s*<\s*br\s*\/?>/i).map(keepRich).filter(function(x) { return x.replace(/<[^>]+>/g, "").trim(); })
+                : t.split(/\n\s*\n+/).map(function(x) { return app.escapeHtml(x.trim()).replace(/\n/g, "<br>"); }).filter(Boolean);
+            return paras.length ? { head: "", tail: "", paras: paras } : null;
+        };
+        const sections = [];
+        if(appData && appData.component === 2 && appData.component2Layout) {
+            const L = appData.component2Layout;
+            [["resourcePaperText", "resourceHeadLine1", "resourceHeadLine2"], ["questionPaperPage3Text", "nineteenthHeadLine1", "nineteenthHeadLine2"]].forEach(function(k) {
+                const sec = fromProse(L[k[0]]);
+                if(!sec) return;
+                const extra = [L[k[1]], L[k[2]]].map(keepRich).filter(Boolean).join("<br>");
+                if(extra) sec.head = sec.head ? extra + "<br>" + sec.head : extra;
+                sections.push(sec);
+            });
+        } else {
+            const st = appData && typeof appData.sourceText === "string" ? appData.sourceText : "";
+            const sec = fromProse(st);
+            if(sec) sections.push(sec);
         }
-        if(!lines.length) {
-            lines = String(sourceText).replace(/\r\n/g, "\n").split(/\n+/).map((t, i) => ({ n: i + 1, text: t.trim() })).filter(l => l.text);
-        }
-        if(!lines.length) { alert("Could not read any lines from the current passage."); return; }
-        const title = (appData.title || appData.lessonTitle || "Full Text") + " — Large Print";
-        const rowsHtml = lines.map(l => {
-            const showNum = (l.n % 5 === 0);
-            return `<div class="line-row"><span class="line-num">${showNum ? l.n : ""}</span><span class="line-text">${app.escapeHtml(l.text)}</span></div>`;
+        if(!sections.length) { alert("No passage loaded to export. Load a passage from the Lobby or Passage tab first."); return; }
+        const title = ((appData.meta && appData.meta.title && appData.meta.title !== "Demo Lesson") ? appData.meta.title : (appData.title || appData.lessonTitle || "Full Text")) + " \u2014 Large Print";
+        const body = sections.map(function(sec, si) {
+            let h = '<section class="text' + (si ? " next" : "") + '">';
+            if(sec.head) h += '<div class="intro">' + sec.head + "</div>";
+            if(sec.lines) h += sec.lines.map(function(l) {
+                return '<div class="line-row' + (l.para ? " para" : "") + '"><span class="line-num">' + (l.n % 5 === 0 ? l.n : "") + '</span><span class="line-text">' + l.html + "</span></div>";
+            }).join("\n");
+            else h += sec.paras.map(function(p) { return '<p class="prose">' + p + "</p>"; }).join("\n");
+            if(sec.tail) h += '<div class="author">' + sec.tail + "</div>";
+            return h + "</section>";
         }).join("\n");
         const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${app.escapeHtml(title)}</title>
+<style id="page-size">@page { size: A3 portrait; margin: 15mm; }</style>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 16pt; line-height: 1.75; color: #111; background: #fff; margin: 0; padding: 0; }
-  .controls { padding: 10px 16px; background: #f0f0f0; border-bottom: 2px solid #333; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: Arial, sans-serif; }
-  .controls label { font-size: 14px; }
-  .controls button { font-size: 14px; padding: 6px 14px; cursor: pointer; }
-  @media print { .controls { display: none; } body { font-size: inherit; } }
+  body { font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 16pt; line-height: 1.6; color: #000; background: #fff; margin: 0; padding: 0; }
+  .controls { padding: 10px 16px; background: #eee; border-bottom: 2px solid #000; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-family: Calibri, Arial, sans-serif; font-size: 14px; }
+  .controls button, .controls select { font-size: 14px; padding: 5px 12px; cursor: pointer; }
+  #sheets { font-weight: 700; }
   .passage { padding: 0.6cm 1cm 1.5cm 1cm; }
-  .line-row { display: flex; align-items: baseline; }
-  .line-num { width: 2.6em; flex: 0 0 auto; text-align: right; padding-right: 0.7em; color: #333; font-weight: 700; font-size: 0.8em; user-select: none; }
-  .line-text { flex: 1 1 auto; white-space: pre-wrap; word-wrap: break-word; }
+  .intro { margin: 0 0 0.6em 3.3em; }
+  .author { margin: 0.6em 0 0 3.3em; }
+  .text.next { margin-top: 1.4em; padding-top: 1em; border-top: 1px solid #000; }
+  .line-row { display: flex; align-items: baseline; break-inside: avoid; }
+  .line-num { width: 2.6em; flex: 0 0 auto; text-align: right; padding-right: 0.7em; font-weight: 700; font-size: 0.8em; user-select: none; }
+  .line-text { flex: 1 1 auto; white-space: pre-wrap; overflow-wrap: break-word; }
+  .prose { margin: 0 0 0.6em 3.3em; }
+  @media print { .controls { display: none; } .passage { padding: 0; } .text.next { break-before: page; border-top: 0; margin-top: 0; padding-top: 0; } }
 </style>
 </head>
 <body>
 <div class="controls">
-  <label>Text size: <input type="range" id="fs" min="12" max="32" value="16" oninput="document.body.style.fontSize=this.value+'pt'; document.getElementById('fsval').textContent=this.value+'pt';"></label>
-  <span id="fsval">16pt</span>
+  <label>Text size: <input type="range" id="fs" min="12" max="40" value="16"></label> <span id="fsval">16pt</span>
+  <label>Paper: <select id="paper"><option value="A3 portrait">A3 portrait</option><option value="A3 landscape">A3 landscape</option><option value="A4 portrait">A4 portrait</option></select></label>
+  <span id="sheets"></span>
   <button onclick="window.print()">Print</button>
-  <span style="opacity:0.75;">Line numbers stay against their line at any size — set the size first, then print.</span>
+  <span style="opacity:0.8;">Print at 100% scale with margins on Default, so the count matches.</span>
 </div>
-<div class="passage">
-${rowsHtml}
+<div class="passage" id="passage">
+${body}
 </div>
+<script>
+(function() {
+  var mm = 96 / 25.4, sizes = { "A3 portrait": [297, 420], "A3 landscape": [420, 297], "A4 portrait": [210, 297] };
+  var fs = document.getElementById("fs"), paper = document.getElementById("paper");
+  function count() {
+    var sz = sizes[paper.value], w = (sz[0] - 30) * mm, hPage = (sz[1] - 30) * mm;
+    var probe = document.getElementById("passage").cloneNode(true);
+    probe.style.cssText = "position:absolute; left:-99999px; top:0; padding:0; width:" + w + "px; font-size:" + fs.value + "pt;";
+    document.body.appendChild(probe);
+    var pages = 0;
+    probe.querySelectorAll(".text").forEach(function(sec) {
+      var used = 0; pages++;
+      Array.prototype.forEach.call(sec.children, function(el) {
+        var cs = getComputedStyle(el), h = el.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+        if(el.classList.contains("prose")) { used += h; while(used > hPage) { pages++; used -= hPage; } return; }
+        if(used > 0 && used + h > hPage) { pages++; used = 0; }
+        used += h;
+      });
+    });
+    probe.remove();
+    var paperName = paper.value.split(" ")[0];
+    document.getElementById("sheets").textContent = "\u2248 " + pages + " page" + (pages > 1 ? "s" : "") + " = " + pages + " " + paperName + " sheet" + (pages > 1 ? "s" : "") + " single-sided, " + Math.ceil(pages / 2) + " double-sided";
+  }
+  function apply() {
+    document.body.style.fontSize = fs.value + "pt";
+    document.getElementById("fsval").textContent = fs.value + "pt";
+    document.getElementById("page-size").textContent = "@page { size: " + paper.value + "; margin: 15mm; }";
+    count();
+  }
+  fs.addEventListener("input", apply); paper.addEventListener("change", apply);
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(apply); else apply();
+  apply();
+})();
+<\/script>
 </body></html>`;
         const b = new Blob([html], {type: 'text/html'});
         const a = document.createElement("a");
