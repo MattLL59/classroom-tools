@@ -9250,6 +9250,20 @@ const app = {
     /**
      * @param {{ applyShortHeadReflow?: boolean }} [opts] — when **true** only, runs {@link maybeReflowC1CanonicalShortFirstLineAfterHead}, which repacks the body at insert width as **plain** lines and **strips** bold/italic and other inline markup. Must not run on routine blur/Save JSON/export (teachers lost long formatting sessions). Omit or leave false (default).
      */
+    /** v134: the passage editor has no place for the author line (tailHtml), so a passage rebuilt from the editor came back without it
+        and closing Settings or Reflow silently deleted "Helen Simpson". Carry the saved one across when the rebuilt passage has none. */
+    _keepStoredPassageTail: function(canon) {
+        try {
+            if(!canon || !app.isStructuredPassageSource(canon) || !appData || typeof appData.sourceText !== "string" || !app.isStructuredPassageSource(appData.sourceText)) return canon;
+            const prev = app.parseStructuredPassageSource(appData.sourceText);
+            const tail = prev && prev.tailHtml != null ? String(prev.tailHtml).trim() : "";
+            if(!tail) return canon;
+            const o = JSON.parse(canon);
+            if(o.tailHtml != null && String(o.tailHtml).trim()) return canon;
+            o.tailHtml = tail;
+            return JSON.stringify(o);
+        } catch(eTail) { return canon; }
+    },
     flushAiInputToLessonSourceIfEditable: function(opts) {
         opts = opts || {};
         if(!appData || appData.component === 2) return;
@@ -9264,7 +9278,7 @@ const app = {
             if(/source-with-line-numbers|source-line-row/i.test(txt)) app.syncLessonSourceCanonical(txt.trim());
             return;
         }
-        var toSync = canon;
+        var toSync = app._keepStoredPassageTail(canon);
         if(opts.applyShortHeadReflow === true && typeof app.maybeReflowC1CanonicalShortFirstLineAfterHead === "function") {
             const r = app.maybeReflowC1CanonicalShortFirstLineAfterHead(canon);
             if(r) toSync = r;
@@ -13675,7 +13689,7 @@ const app = {
             if(!opts.silent) alert("Could not reflow — try “Reflow body (full pack)” if paragraphs are unclear.");
             return;
         }
-        const stored = app.serializeStructuredPassageV2(w);
+        const stored = app._keepStoredPassageTail(app.serializeStructuredPassageV2(w));
         app.syncLessonSourceCanonical(stored);
         if(appData.meta) {
             appData.meta.passageLayoutSyncedAt = new Date().toISOString();
@@ -29215,6 +29229,94 @@ const admin = {
         if(/^all$/i.test(v)) return false;
         return true;
     },
+    /** v134: line the passage up with the numbers printed in the booklet's margin (1, 5, 10 …), read by pdfLayoutLines.
+        Rows above the printed line 1 go into the intro; rows after the printed last line (or a short closing name) go into the author line;
+        then every printed number is checked against the app's count. Returns { v2, report } — report null when the PDF has no usable numbers. */
+    alignC1PassageToPrintedNumbers: function(v2, pdfLines) {
+        if(!v2 || !Array.isArray(v2.lines) || v2.lines.length < 5 || !Array.isArray(pdfLines) || !pdfLines.length) return { v2: v2, report: null };
+        const nt = function(s) { return String(s || "").toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[^a-z0-9]+/g, ""); };
+        const plain = function(h) { return app.htmlFragmentToPlainText(String(h || "")).replace(/\s+/g, " ").trim(); };
+        const keyWords = function(words) { return nt(words.slice(0, 4).join(" ")); };
+        const sameStart = function(a, b) { if(!a || !b) return false; const m = Math.min(a.length, b.length); return m >= 5 && a.slice(0, m) === b.slice(0, m); };
+        const anchors = [];
+        pdfLines.forEach(function(l, i) { if(l.anchor) anchors.push({ i: i, val: l.anchor }); });
+        if(anchors.length < 3) return { v2: v2, report: null };
+        const votes = {};
+        anchors.forEach(function(a) { const st = a.i - (a.val - 1); votes[st] = (votes[st] || 0) + 1; });
+        let start = Number(Object.keys(votes).sort(function(a, b) { return votes[b] - votes[a]; })[0]);
+        if(!(votes[start] >= 3) || !pdfLines[start]) return { v2: v2, report: null };
+        /* A printed "1" marks line 1 outright (a split or merged line further down can outvote it). */
+        const one = anchors.filter(function(a) { return a.val === 1; })[0];
+        if(one && one.i <= start + 3 && one.i >= start - 3) start = one.i;
+        let rows = v2.lines.slice();
+        const rowKey = function(r) { return keyWords(plain(r.html).split(" ")); };
+        const report = { checked: 0, ok: 0, bad: [], intro: 0, author: "" };
+        /* 1. Start: the row that matches printed line 1 becomes line 1; anything above it is intro. */
+        const k1 = keyWords(pdfLines[start].tokens);
+        let r1 = -1;
+        for(let i = 0; i < Math.min(rows.length, 8); i++) { if(sameStart(rowKey(rows[i]), k1)) { r1 = i; break; } }
+        const headParts = [];
+        if(v2.headHtml && String(v2.headHtml).trim()) headParts.push(String(v2.headHtml).trim());
+        if(r1 > 0) {
+            rows.slice(0, r1).forEach(function(r) { headParts.push(String(r.html || "").trim()); });
+            report.intro = r1;
+            rows = rows.slice(r1);
+        }
+        /* 2. End: rows after the printed last line (a booklet prints the final number, e.g. 89) or a short closing name are the author line. */
+        let tailParts = [];
+        if(v2.tailHtml && String(v2.tailHtml).trim()) tailParts.push(String(v2.tailHtml).trim());
+        const lastA = anchors.filter(function(a) { return a.i - (a.val - 1) === start; }).pop();
+        if(lastA && lastA.val % 5 !== 0) {
+            const kl = keyWords(pdfLines[lastA.i].tokens);
+            let rl = -1;
+            for(let i = rows.length - 1; i >= Math.max(0, rows.length - 8); i--) { if(sameStart(rowKey(rows[i]), kl)) { rl = i; break; } }
+            if(rl >= 0 && rl < rows.length - 1 && rows.length - 1 - rl <= 3) {
+                const extra = rows.slice(rl + 1);
+                if(extra.every(function(r) { return plain(r.html).split(" ").length <= 8; })) {
+                    tailParts = tailParts.concat(extra.map(function(r) { return String(r.html || "").trim(); }));
+                    rows = rows.slice(0, rl + 1);
+                }
+            }
+        }
+        if(!tailParts.length && rows.length > 5) {
+            const lastTxt = plain(rows[rows.length - 1].html);
+            const words = lastTxt.split(" ").filter(Boolean);
+            if(words.length >= 1 && words.length <= 5 && lastTxt.length <= 40 && /^[A-Z]/.test(lastTxt) && !/[.?!:;,\u2019\u201D"')\u2026-]$/.test(lastTxt)) {
+                tailParts.push(String(rows[rows.length - 1].html || "").trim());
+                rows = rows.slice(0, -1);
+            }
+        }
+        if(tailParts.length) report.author = plain(tailParts.join(" "));
+        rows = rows.map(function(r, i) { const o = Object.assign({}, r, { n: i + 1 }); if(i === 0) delete o.paragraphStart; return o; });
+        /* 3. Check every printed number against the app's count. */
+        anchors.forEach(function(a) {
+            if(a.i - (a.val - 1) !== start && votes[a.i - (a.val - 1)] === undefined) return;
+            const k = keyWords(pdfLines[a.i].tokens);
+            if(!k) return;
+            let found = -1;
+            for(let d = 0; d <= 6 && found < 0; d++) {
+                [a.val - 1 - d, a.val - 1 + d].forEach(function(j) { if(found < 0 && j >= 0 && j < rows.length && sameStart(rowKey(rows[j]), k)) found = j; });
+            }
+            if(found < 0) return;
+            report.checked++;
+            if(found + 1 === a.val) report.ok++;
+            else report.bad.push({ printed: a.val, app: found + 1, text: plain(rows[found].html).slice(0, 50) });
+        });
+        const out = Object.assign({}, v2, { lines: rows });
+        if(headParts.length) out.headHtml = headParts.join("<br>"); else delete out.headHtml;
+        if(tailParts.length) out.tailHtml = tailParts.join("<br>"); else delete out.tailHtml;
+        return { v2: out, report: report };
+    },
+    /** v134: one-line summary of the margin-number check for the import notice. */
+    printedNumberCheckNotice: function(rep) {
+        if(!rep) return "";
+        const bits = [];
+        if(rep.intro) bits.push("intro moved above line 1");
+        if(rep.author) bits.push("author line \u201C" + app.escapeHtml(rep.author) + "\u201D set apart");
+        if(!rep.bad.length) return "<br>\u2714 Line numbers checked against the " + rep.checked + " printed in the margin" + (bits.length ? " (" + bits.join(", ") + ")" : "") + ".";
+        const b = rep.bad[0];
+        return "<br><span style=\"color:var(--error)\"><strong>\u26A0 Line numbers don\u2019t match the paper from line " + b.printed + "</strong>: the line printed as " + b.printed + " (\u201C" + app.escapeHtml(b.text) + "\u2026\u201D) is line " + b.app + " here. Check the passage around lines " + Math.max(1, b.printed - 5) + "\u2013" + b.printed + " in the Passage tab.</span>";
+    },
     setPastPaperFile: function(slot, input) {
         /** v132: these boxes read PDFs only. A Word file here was cached as a "PDF" and failed with "Invalid PDF structure" — send it to the Word loader instead. */
         const fPick = input && input.files ? input.files[0] : null;
@@ -30569,6 +30671,8 @@ const admin = {
                     const rs = admin.getResourcePageSpec && admin.getResourcePageSpec();
                     const pFrom = rs && rs.length ? Math.min.apply(null, rs) : null;
                     const pTo = rs && rs.length ? Math.max.apply(null, rs) : null;
+                    let resBufForNumbers = null;
+                    try { resBufForNumbers = resourcePdfBuffer.slice(0); } catch(eCopyRes) {}
                     const numberedPlain = await app.extractNumberedPlainFromPdfBuffer(resourcePdfBuffer, pFrom, pTo, {
                         strictPhysicalLines: true,
                         useMarginOcr: false
@@ -30594,6 +30698,14 @@ const admin = {
                             v2 = app.inferParagraphStartsOnStructuredV2ForPdfImport(v2);
                         if(v2 && typeof app.applyAggressiveImportNormalizationToStructuredV2 === "function")
                             v2 = app.applyAggressiveImportNormalizationToStructuredV2(v2);
+                        admin._lastPrintedNumberCheck = null;
+                        try {
+                            const pdfA = await app._pdfTryGetDocumentFromBuffer(resBufForNumbers);
+                            let pl = await admin.pdfLayoutLines(pdfA);
+                            if(rs && rs.length) pl = pl.filter(function(l) { return rs.indexOf(l.page) >= 0; });
+                            const al = admin.alignC1PassageToPrintedNumbers(v2, pl);
+                            if(al && al.report) { v2 = al.v2; admin._lastPrintedNumberCheck = al.report; }
+                        } catch(eAlign) { console.warn("Printed line-number check:", eAlign); }
                         c1Source = app.serializeStructuredPassageV2(v2);
                         numberedPdfImport = true;
                         if(app.resetBookletLineFirstAfterNumberedPdfExtract) app.resetBookletLineFirstAfterNumberedPdfExtract();
@@ -31065,6 +31177,13 @@ const admin = {
                                 v2 = app.inferParagraphStartsOnStructuredV2ForPdfImport(v2);
                             if(v2 && typeof app.applyAggressiveImportNormalizationToStructuredV2 === "function")
                                 v2 = app.applyAggressiveImportNormalizationToStructuredV2(v2);
+                            admin._lastPrintedNumberCheck = null;
+                            try {
+                                let pl = await admin.pdfLayoutLines(pdf);
+                                if(pagesToUse && pagesToUse.length) pl = pl.filter(function(l) { return pagesToUse.indexOf(l.page) >= 0; });
+                                const al = admin.alignC1PassageToPrintedNumbers(v2, pl);
+                                if(al && al.report) { v2 = al.v2; admin._lastPrintedNumberCheck = al.report; }
+                            } catch(eAlign) { console.warn("Printed line-number check:", eAlign); }
                             c1Out = app.serializeStructuredPassageV2(v2);
                             numberedPdfImport = true;
                             if(app.resetBookletLineFirstAfterNumberedPdfExtract) app.resetBookletLineFirstAfterNumberedPdfExtract();
@@ -31108,7 +31227,7 @@ const admin = {
                 admin._pastPaperAutoDone.resource = true;
                 if(typeof admin.maybeJumpToEditingSuiteAfterPastPaperLoad === "function") admin.maybeJumpToEditingSuiteAfterPastPaperLoad();
             }
-            app.showPastPaperExtractNotice("<strong>Resource passage re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s). Open <strong>Passage → Component 1 — source passage</strong> to set booklet lines.", { autoHideMs: 18000 });
+            app.showPastPaperExtractNotice("<strong>Resource passage re-extracted</strong> from " + (pagesToUse && pagesToUse.length ? pagesToUse.join(", ") : "all") + " page(s)." + (!isC2 && admin._lastPrintedNumberCheck ? admin.printedNumberCheckNotice(admin._lastPrintedNumberCheck) : "") + " Open <strong>Passage → Component 1 — source passage</strong> to set booklet lines.", { autoHideMs: 18000 });
         } catch(e) {
             app.showPastPaperExtractNotice("<span style=\"color:var(--error)\">Could not re-extract resource: " + (e.message || String(e)) + "</span>");
         }
@@ -44019,7 +44138,10 @@ ${rowsHtml}
                 exportData.selection.items = [];
             }
         }
-        const exportSource = app.getSourceTextCombined ? app.getSourceTextCombined() : app.getSourceText();
+        /* v134: a numbered Component 1 passage goes to the Student App as stored (lines, \u00B6 breaks, intro, author line). getSourceTextCombined() returns
+           plain text, so the Student App used to re-wrap it at its own width and its line numbers stopped matching Architect and the paper. */
+        const storedC1 = appData && appData.component !== 2 && typeof appData.sourceText === "string" && app.isStructuredPassageSource && app.isStructuredPassageSource(appData.sourceText) ? appData.sourceText : "";
+        const exportSource = storedC1 || (app.getSourceTextCombined ? app.getSourceTextCombined() : app.getSourceText());
         if(exportSource && exportSource.trim()) {
             exportData.sourceText = exportSource;
         } else if(!exportData.sourceText || !String(exportData.sourceText).trim()) {
