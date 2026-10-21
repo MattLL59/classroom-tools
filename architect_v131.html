@@ -8893,6 +8893,8 @@ const app = {
                     break;
                 }
             }
+            /* v134: a box holding several paragraphs or line breaks (pasted lines) becomes one line of text; nested <p> scrambled the order on reload. */
+            if(/<\/?p\b|<br\b/i.test(h)) h = h.replace(/<\/p>\s*<p\b[^>]*>/gi, " ").replace(/<\/?p\b[^>]*>/gi, "").replace(/\s*<br\s*\/?>\s*/gi, " ").replace(/\s{2,}/g, " ").trim();
             if(typeof app.unwrapSpuriousBoldAroundItalic === "function") {
                 const u = app.unwrapSpuriousBoldAroundItalic(h);
                 if(typeof u === "string" && u.length) h = u;
@@ -9278,13 +9280,17 @@ const app = {
             if(/source-with-line-numbers|source-line-row/i.test(txt)) app.syncLessonSourceCanonical(txt.trim());
             return;
         }
-        var toSync = app._keepStoredPassageTail(canon);
+        var toSync = canon;
         if(opts.applyShortHeadReflow === true && typeof app.maybeReflowC1CanonicalShortFirstLineAfterHead === "function") {
             const r = app.maybeReflowC1CanonicalShortFirstLineAfterHead(canon);
             if(r) toSync = r;
         }
+        /* v134: redraw the editor only when the reflow changed the lines. Carrying the author line across is not a reason to redraw —
+           redrawing on every keystroke put the cursor back at the start of the intro box, so typing came out backwards. */
+        const reflowedHead = toSync !== canon;
+        toSync = app._keepStoredPassageTail(toSync);
         app.syncLessonSourceCanonical(toSync);
-        if(toSync !== canon && typeof app.setAiInputValue === "function") {
+        if(reflowedHead && typeof app.setAiInputValue === "function") {
             try {
                 app.setAiInputValue(toSync);
             } catch(eR) {}
@@ -9325,7 +9331,10 @@ const app = {
                 return;
             }
             const fullHtml = (app.structuredPassageToEditorHtmlForLesson && app.structuredPassageToEditorHtmlForLesson(o)) || app.structuredPassageToEditorHtml(o) || "";
-            if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(fullHtml);
+            /* v134: hand over the stored passage itself, so its intro goes into the Intro Line 1 / Line 2 boxes. The built editor HTML
+               nests the intro inside the booklet wrapper, which the splitter didn't find, so the intro landed in the passage box above line 1
+               and the intro boxes stayed empty — copying it in by hand then doubled it up. */
+            if(typeof app.applyC1PassageSplitEditorsFromInnerHtml === "function") app.applyC1PassageSplitEditorsFromInnerHtml(o.headHtml && String(o.headHtml).trim() ? s : fullHtml);
             else el.innerHTML = fullHtml;
             return;
         }
@@ -20124,6 +20133,15 @@ const app = {
             const plain = (donor.textContent || "").replace(/\s+/g, " ").trim();
             if(donorHtml && (gutter || /source-with-line-numbers|source-line-row/i.test(donorHtml)) && donorHtml.length > 40) {
                 ai.innerHTML = donorHtml;
+                /* v134: the copied reading view carries the intro above line 1. Move it into the Intro Line 1 / Line 2 boxes, where the
+                   teacher edits it, instead of leaving it in the passage box looking like part of the passage. */
+                try {
+                    const hp = ai.querySelector(":scope > .architect-passage-head-prose");
+                    if(hp && typeof app.applyIntroHeadInnerToLineEditors === "function") {
+                        app.applyIntroHeadInnerToLineEditors((hp.innerHTML || "").trim());
+                        hp.remove();
+                    }
+                } catch(eHp) {}
                 if(typeof app.syncEditorPassageLineLayoutShell === "function") app.syncEditorPassageLineLayoutShell();
                 if(typeof app.ensureC1EditorBookletRows === "function") app.ensureC1EditorBookletRows();
                 return true;
@@ -29259,7 +29277,7 @@ const admin = {
         const k1 = keyWords(pdfLines[start].tokens);
         let r1 = -1;
         for(let i = 0; i < Math.min(rows.length, 8); i++) { if(sameStart(rowKey(rows[i]), k1)) { r1 = i; break; } }
-        const headParts = [];
+        let headParts = [];
         if(v2.headHtml && String(v2.headHtml).trim()) headParts.push(String(v2.headHtml).trim());
         if(r1 > 0) {
             rows.slice(0, r1).forEach(function(r) { headParts.push(String(r.html || "").trim()); });
@@ -29306,8 +29324,29 @@ const admin = {
             if(found + 1 === a.val) report.ok++;
             else report.bad.push({ printed: a.val, app: found + 1, text: plain(rows[found].html).slice(0, 50) });
         });
+        /* v134: take the intro from the printed page itself (the lines above printed line 1, minus booklet furniture), not from the
+           extractor's rows — on some machines those arrive split across two rows, half-bold, or with a piece missing. */
+        const furniture = /^\s*(SECTION\s+[AB]\b|Read carefully|Then answer|Turn over|Resource Material|\u00A9|\(C700|C700U|JD\*|\d{1,3}\s*$)/i;
+        const introLines = pdfLines.filter(function(l, i) { return i < start && l.page === pdfLines[start].page && typeof l.text === "string" && l.text.trim() && !furniture.test(l.text.trim()) && !/\[\d+\]\s*$|\bmarks\s*$/i.test(l.text.trim()); });
+        if(introLines.length) {
+            let intro = "";
+            introLines.forEach(function(l) { const t = l.text.replace(/\s+/g, " ").trim(); intro = !intro ? t : (/-$/.test(intro) ? intro + t : intro + " " + t); });
+            if(intro.length >= 15) {
+                const oldAllBold = headParts.length > 0 && headParts.every(function(h) { return /^(<p>)?\s*<(b|strong)>[\s\S]*<\/(b|strong)>\s*(<\/p>)?$/i.test(String(h).trim()); });
+                const m = intro.match(/^([\s\S]+?[.?!][\u2019\u201D'"]?)\s+(\S[\s\S]*)$/);
+                const bits = m && m[2].length >= 12 ? [m[1], m[2]] : [intro];
+                headParts = bits.map(function(t) { const e = app.escapeHtml(t); return oldAllBold ? "<b>" + e + "</b>" : e; });
+                report.introFromPage = true;
+            }
+        }
         const out = Object.assign({}, v2, { lines: rows });
-        if(headParts.length) out.headHtml = headParts.join("<br>"); else delete out.headHtml;
+        /* One part per intro line (title, then intro). A single intro of two or more sentences fills Line 1 and Line 2, one sentence each. */
+        let headPs = headParts.map(function(h) { return String(h).replace(/^<p>([\s\S]*)<\/p>$/i, "$1").trim(); }).filter(Boolean);
+        if(headPs.length === 1) {
+            const m = headPs[0].match(/^([\s\S]+?[.?!][\u2019\u201D'"]?)\s+(\S[\s\S]*)$/);
+            if(m && plain(m[2]).length >= 12) headPs = [m[1], m[2]];
+        }
+        if(headPs.length) out.headHtml = headPs.map(function(h) { return "<p>" + h + "</p>"; }).join(""); else delete out.headHtml;
         if(tailParts.length) out.tailHtml = tailParts.join("<br>"); else delete out.tailHtml;
         return { v2: out, report: report };
     },
@@ -44469,7 +44508,7 @@ ${body}
                     }
                     s += it.str;
                 });
-                lines.push({ tokens: admin._wordPdfTokens(s), y: text[0].y + text[0].h / 2, anchor: null, page: pn });
+                lines.push({ tokens: admin._wordPdfTokens(s), text: s, y: text[0].y + text[0].h / 2, anchor: null, page: pn });
             });
             nums.forEach(function(n) {
                 let best = null;
