@@ -529,6 +529,10 @@
     .builder-area { background: var(--card); padding: 15px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px; }
     .slot-row { margin-bottom: 10px; }
     .slot-label { font-size: 0.75rem; font-weight: 700; color: var(--primary); text-transform: uppercase; display: block; margin-bottom: 3px; }
+.slot-move { float: right; display: inline-flex; gap: 4px; }
+.slot-move-btn { font-size: 0.8rem; line-height: 1; padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--card); color: var(--text); cursor: pointer; }
+.slot-move-btn:focus-visible { outline: 2px solid var(--primary); }
+.slot-order-reset { margin-top: 4px; }
     .slot-select, .slot-input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 1rem; background: var(--bg); color: var(--text); }
     .slot-static { background: rgba(0, 150, 136, 0.1); color: var(--primary); padding: 10px; border-radius: 4px; font-style: italic; border: 1px solid var(--border); }
     .desk-tool-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; }
@@ -3614,6 +3618,34 @@ const app = {
         } catch(eP) {}
         return changed;
     },
+    /** v136: words of 4+ letters that a meaning/point repeats from its own quote (common words ignored). */
+    wsRepeatedQuoteWords: function(quote, text) {
+        const stop = new Set("that this with they them their there then than when what where which while will would could should have has had from were been being into onto upon your yours about after before again also just like more most much only over some such very said says does done each even here its it's i'm she's he's it’s she’s he’s".split(" "));
+        const wordsOf = (t) => (String(t || "").match(/[A-Za-z][A-Za-z’']{3,}/g) || []).map(w => w.replace(/[’']+$/, "").replace(/[’']s$/i, ""));
+        const qset = new Set(wordsOf(quote).map(w => w.toLowerCase()).filter(w => w.length >= 4 && !stop.has(w)));
+        const seen = new Set(), out = [];
+        wordsOf(text).forEach(w => { const k = w.toLowerCase(); if(k.length >= 4 && qset.has(k) && !stop.has(k) && !seen.has(k)) { seen.add(k); out.push(w); } });
+        return out;
+    },
+    /** v136: "she can be sarcastic (‘Congratulations’)" → "she can be sarcastic". Only when the text ENDS with a bracket holding
+        quoted words that all come from the quote; anything else returns null (left for the teacher). */
+    wsStripTrailingBracketQuote: function(quote, text) {
+        const t = String(text || "");
+        const m = t.match(/^([\s\S]*?\S)\s*\(([^()]*)\)\s*[.]?\s*$/);
+        if(!m) return null;
+        const inner = m[2];
+        const quoted = inner.match(/[‘'“"][^‘’'“”"]+[’'”"]/g);
+        if(!quoted || !quoted.length) return null;
+        const rest = inner.replace(/[‘'“"][^‘’'“”"]+[’'”"]/g, " ").replace(/\b(and|or)\b/gi, " ").replace(/[\s,;/&]+/g, "");
+        if(rest) return null;
+        const normW = (w) => w.replace(/’/g, "'").replace(/^'+|'+$/g, "");
+        const wordsIn = (t) => (String(t || "").toLowerCase().match(/[a-z’']+/g) || []).map(normW).filter(Boolean);
+        const qWords = new Set(wordsIn(quote));
+        const allFromQuote = quoted.every(seg => { const ws = wordsIn(seg); return ws.length > 0 && ws.every(w => qWords.has(w)); });
+        if(!allFromQuote) return null;
+        const out = m[1].replace(/[\s,;:–—-]+$/, "").trim();
+        return out && out !== t.trim() ? out : null;
+    },
     getAiDevices: function() {
         const s = appData && appData.settings ? appData.settings : {};
         return {
@@ -5429,6 +5461,7 @@ const app = {
         });
         let joined = parts.join(" ");
         joined = joined.replace(/\bthe\s+the\b/gi, "the ");
+        joined = joined.replace(/^([a-z])/, (m) => m.toUpperCase());
         return joined ? (joined + ".").trim() : "";
     },
     /** Draggable chips grouped by role (Markers, Starters, …) for the Writing Desk — keeps banks visually separate. */
@@ -25268,6 +25301,12 @@ const ui = {
         };
         cfg = cfg.filter(isValidBuilderSlot);
         if(!cfg.length) cfg = app.getDefaultSentenceConfig(level);
+        /* v136: students can reorder the slot rows; keep their order for this level while it has the same slots as the teacher's. */
+        const teacherCfg = cfg.slice();
+        try {
+            const so = userState.deskSlotOrder && userState.deskSlotOrder[level];
+            if(Array.isArray(so) && so.length === cfg.length && so.slice().sort().join("|") === cfg.slice().sort().join("|")) cfg = so.slice();
+        } catch(eSo) {}
         if(false) {
             cfg = app.getPracticeTemplate(level);
         }
@@ -25288,7 +25327,7 @@ const ui = {
         cfg.forEach(slot => {
             const row = document.createElement("div"); row.className = "slot-row";
             if(slot === "quote") {
-                row.innerHTML = `<span class="slot-label">EVIDENCE</span><div class="slot-static" data-v=${JSON.stringify(app.quoteDisplayPlain(item.original || ""))}>${app.quoteDisplayHtml(item.original || "")}</div>`;
+                row.innerHTML = `<span class="slot-label">EVIDENCE</span><div class="slot-static" data-v="${String(app.quoteDisplayPlain(item.original || "")).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}">${app.quoteDisplayHtml(item.original || "")}</div>`;
             } else if(slot.startsWith("manual")) {
                 let lbl = slot.split('_')[1] || "Text";
                 const q1Lbl = (lbl === "point" && noQuotesMode) ? "FACT" : lbl.toUpperCase();
@@ -25363,6 +25402,25 @@ const ui = {
             }
             cont.appendChild(row);
         });
+        /* v136: ▲ ▼ on each row so a student can put, say, the point before or after the quote. The sentence is read top to bottom. */
+        try {
+            const rows = Array.from(cont.querySelectorAll(":scope > .slot-row"));
+            if(rows.length >= 2 && rows.length === cfg.length) {
+                rows.forEach((row, ri) => {
+                    row.dataset.slot = cfg[ri];
+                    const lab = row.querySelector(".slot-label");
+                    const mv = document.createElement("span");
+                    mv.className = "slot-move";
+                    mv.innerHTML = `<button type="button" class="slot-move-btn" aria-label="Move up" title="Move up">▲</button><button type="button" class="slot-move-btn" aria-label="Move down" title="Move down">▼</button>`;
+                    const [up, down] = mv.querySelectorAll("button");
+                    up.onclick = () => ui.moveDeskSlotRow(row, -1, level);
+                    down.onclick = () => ui.moveDeskSlotRow(row, 1, level);
+                    if(lab) lab.appendChild(mv); else row.insertBefore(mv, row.firstChild);
+                });
+                cont.dataset.teacherOrder = teacherCfg.join("|");
+                if(cfg.join("|") !== teacherCfg.join("|")) ui.showDeskSlotOrderReset(cont, level);
+            }
+        } catch(eMove) { console.warn("desk slot order:", eMove); }
         if(cont.querySelector(".slot-row") && !cont.querySelector("textarea#paraphrase-input")) {
             const commitWrap = document.createElement("div");
             commitWrap.style.marginTop = "12px";
@@ -25381,6 +25439,45 @@ const ui = {
         }
     },
 
+    /** v136: move a Writing Desk slot row up/down, remember the order for this level, and refresh the preview. */
+    moveDeskSlotRow: function(row, dir, level) {
+        const cont = row && row.parentNode;
+        if(!cont) return;
+        const rows = Array.from(cont.querySelectorAll(":scope > .slot-row"));
+        const i = rows.indexOf(row), j = i + dir;
+        if(i < 0 || j < 0 || j >= rows.length) return;
+        if(dir < 0) cont.insertBefore(row, rows[j]); else cont.insertBefore(rows[j], row);
+        const order = Array.from(cont.querySelectorAll(":scope > .slot-row")).map(r => r.dataset.slot).filter(Boolean);
+        if(!userState.deskSlotOrder || typeof userState.deskSlotOrder !== "object") userState.deskSlotOrder = {};
+        userState.deskSlotOrder[level] = order;
+        try { app.save({ skipRender: true, silent: true }); } catch(eS) {}
+        ui.showDeskSlotOrderReset(cont, level);
+        ui.updPrev();
+        try { row.querySelector(".slot-move-btn" + (dir < 0 ? "" : ":last-child")).focus(); } catch(eF) {}
+    },
+    /** v136: "↺ Teacher's order" link, shown only while the rows differ from the teacher's order. Reorders in place (keeps picks). */
+    showDeskSlotOrderReset: function(cont, level) {
+        if(!cont) return;
+        const teacher = String(cont.dataset.teacherOrder || "").split("|").filter(Boolean);
+        const now = Array.from(cont.querySelectorAll(":scope > .slot-row")).map(r => r.dataset.slot);
+        let rs = cont.querySelector(":scope > .slot-order-reset");
+        if(!teacher.length || now.join("|") === teacher.join("|")) { if(rs) rs.remove(); return; }
+        if(rs) return;
+        rs = document.createElement("div");
+        rs.className = "slot-order-reset";
+        rs.innerHTML = `<button type="button" class="btn btn-outline btn-small">↺ Teacher's order</button>`;
+        rs.querySelector("button").onclick = () => {
+            const rows = Array.from(cont.querySelectorAll(":scope > .slot-row"));
+            const used = new Set();
+            const anchor = rows.length ? rows[rows.length - 1].nextSibling : null;
+            teacher.forEach(sl => { const r = rows.find(x => x.dataset.slot === sl && !used.has(x)); if(r) { used.add(r); cont.insertBefore(r, anchor); } });
+            try { if(userState.deskSlotOrder) delete userState.deskSlotOrder[level]; app.save({ skipRender: true, silent: true }); } catch(eR) {}
+            rs.remove();
+            ui.updPrev();
+        };
+        const after = Array.from(cont.querySelectorAll(":scope > .slot-row")).pop();
+        if(after && after.nextSibling) cont.insertBefore(rs, after.nextSibling); else cont.appendChild(rs);
+    },
     updPrev: function() {
         let txt = [];
         document.querySelectorAll("#sentence-builder select, #sentence-builder input, #sentence-builder .slot-static").forEach(el => {
@@ -25392,6 +25489,8 @@ const ui = {
         });
         let joined = txt.join(" ");
         joined = joined.replace(/\bthe\s+the\b/gi, "the ");
+        /* v136: rows can be reordered, so make sure the sentence starts with a capital (a quotation is left as written). */
+        joined = joined.replace(/^([a-z])/, (m) => m.toUpperCase());
         const live = document.getElementById("desk-sentence-preview");
         if(live) {
             live.textContent = joined ? joined + "." : "";
@@ -42863,6 +42962,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         ov.innerHTML = `<div class="wsp-panel">
             <div class="wsp-head">
                 <span class="wsp-title">👁 Worksheet preview</span>
+                <span style="font-size:0.8rem;opacity:0.85;">✏️ Click a meaning or point on the page to edit it</span>
                 <span class="wsp-sum" id="wsp-summary"></span>
                 <span class="wsp-actions">
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.worksheetPreviewReshuffle()" title="New jumbled order for the match columns">🔀 Reshuffle</button>
@@ -42896,7 +42996,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
     /** Wrap the Word HTML so it reads like an A4 page on screen (preview only — the download is unchanged). */
     _wsPrevPageDoc: function(html) {
         const pageCss = `<style id="wsp-page-css">html{background:#8a8a8a;}body{background:#fff !important;color:#000;width:21cm;max-width:calc(100% - 20px);box-sizing:border-box;margin:14px auto !important;padding:1cm 1.2cm !important;min-height:29.7cm;box-shadow:0 2px 8px rgba(0,0,0,0.35);}</style>`;
-        return String(html).replace("</head>", pageCss + "</head>");
+        const editCss = `<style id="wsp-edit-css">[data-wsp-field]{cursor:text;outline:1px dashed transparent;outline-offset:2px;border-radius:2px;}[data-wsp-field]:hover{outline-color:#888;}[data-wsp-field][contenteditable=true]{outline:2px solid #2196f3;background:#fff;}mark.wsp-rep{background:#ffe08a;color:inherit;padding:0 1px;}</style>`;
+        return String(html).replace("</head>", pageCss + editCss + "</head>");
     },
     renderWorksheetPreview: function() {
         const side = document.getElementById("wsp-side");
@@ -42908,12 +43009,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const openSecs = Array.from(side.querySelectorAll("details.wsp-sec")).reduce((acc, d) => { acc[d.dataset.k] = d.open; return acc; }, {});
         const report = {};
         let res;
-        try { res = admin.exportWorksheet({ returnHtml: true, seed: admin._wsPrevSeed, report }); }
+        try { res = admin.exportWorksheet({ returnHtml: true, previewEdit: true, seed: admin._wsPrevSeed, report }); }
         catch(err) { res = { html: null, message: "Preview failed: " + (err && err.message ? err.message : err) }; }
         const html = res && res.html ? admin._wsPrevPageDoc(res.html)
             : `<html><body style="font-family:sans-serif;padding:24px;background:#fff;">${app.escapeHtml((res && res.message) || "Nothing to show yet.")}</body></html>`;
         frame.onload = () => {
             try { frame.contentWindow.scrollTo(0, frameScroll); } catch(e) {}
+            try { admin._wsPrevWirePageEdits(frame); } catch(eWire) { console.warn("worksheet preview edit:", eWire); }
             /* About how many A4 pages: the sheet's height scaled to A4 print width (Word sets the exact breaks). */
             try {
                 const d = frame.contentDocument, bd = d && d.body;
@@ -43109,6 +43211,16 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             }
             /* ✏️ Edit: the same fields as the Quote bank — changes save to the lesson and the sheet updates. */
             const itE = (appData.items || [])[q.idx] || {};
+            /* v136: flag a meaning or point that gives away its own quote's words. */
+            if(q.status === "on" && !q.merged) {
+                const qTxt = itE.originalFull || itE.original || itE.quote || "";
+                [["translation", "Meaning", itE.translation || ""], ["effect", "Point", itE.effect || ""]].forEach(([f, lab, val]) => {
+                    const rp = app.wsRepeatedQuoteWords(qTxt, val);
+                    if(!rp.length) return;
+                    const canStrip = !!app.wsStripTrailingBracketQuote(qTxt, val);
+                    warn += `<div class="wsp-warn">⚠ ${lab} repeats the quote: ${esc(rp.join(", "))}${canStrip ? ` <button type="button" class="btn btn-outline btn-small wsp-mini" title="Remove the bracketed quotation at the end" onclick="admin.wsPrevStripBracketQuote(${q.idx}, '${f}')">Remove (‘…’)</button>` : ""}</div>`;
+                });
+            }
             /* Show what the sheet prints: the field itself, else its list's first entry, else the saved model-answer line. */
             let smE = {};
             try { smE = admin.parseModelAnswer(itE.modelAnswer || "") || {}; } catch(eSm) {}
@@ -43138,7 +43250,19 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 <div class="wsp-qt">“${esc(q.text)}”${qLab(q) && q.status !== "off" ? ` <span class="wsp-badge">${esc(qLab(q))}</span>` : ""}<div class="wsp-status">${st}</div>${warn}${editor}</div></div>`;
         };
         h += `<details class="wsp-sec" data-k="quotes" ${isOpen("quotes", true) ? "open" : ""}><summary>Quotes (${printing.filter(q => !q.merged).length} printing)</summary><div class="wsp-sec-body">`;
-        h += `<div class="wsp-note">Ticks here are the same as <strong>Include on worksheet</strong> in the Quote bank.</div>`;
+        h += `<div class="wsp-note">Ticks here are the same as <strong>Include on worksheet</strong> in the Quote bank. Click a meaning or point on the page to edit it.</div>`;
+        /* v136: one button for every safe bracket removal among the quotes printing. */
+        {
+            let nStrip = 0; const stripIds = [];
+            printing.filter(q => !q.merged).forEach(q => {
+                stripIds.push(q.idx);
+                const it = (appData.items || [])[q.idx] || {};
+                const qt = it.originalFull || it.original || it.quote || "";
+                if(app.wsStripTrailingBracketQuote(qt, it.translation || "")) nStrip++;
+                if(app.wsStripTrailingBracketQuote(qt, it.effect || "")) nStrip++;
+            });
+            if(nStrip) h += `<div class="wsp-row"><button type="button" class="btn btn-outline btn-small" title="Remove bracketed quotations at the end of meanings and points, where they repeat the quote" onclick="admin.wsPrevStripBracketQuote([${stripIds.join(",")}])">Remove all (‘…’) (${nStrip})</button></div>`;
+        }
         if(printing.length) h += printing.map(quoteRow).join("");
         else h += `<div class="wsp-note">No quotes will print — the sheet will be questions only.</div>`;
         if(skipped.length) {
@@ -43166,6 +43290,65 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             if(typeof admin.renderQuotesBank === "function") { try { admin.renderQuotesBank(); } catch(e) {} }
             if(admin.flashBrief) admin.flashBrief("Saved");
         }
+    },
+    /** v136: click a meaning or point on the preview page to edit it; Enter or click away saves to that quote, Esc cancels. */
+    _wsPrevWirePageEdits: function(frame) {
+        const doc = frame && frame.contentDocument;
+        if(!doc) return;
+        doc.querySelectorAll("[data-wsp-field]").forEach(el => {
+            el.title = "Click to edit (Enter saves, Esc cancels)";
+            el.addEventListener("click", () => {
+                if(el.isContentEditable) return;
+                el.dataset.wspBefore = el.textContent;
+                el.contentEditable = "true";
+                el.focus();
+                try { const r = doc.createRange(); r.selectNodeContents(el); r.collapse(false); const sel = frame.contentWindow.getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch(e) {}
+            });
+            el.addEventListener("keydown", (e) => {
+                if(e.key === "Enter") { e.preventDefault(); el.blur(); }
+                else if(e.key === "Escape") { e.preventDefault(); el.dataset.wspCancel = "1"; el.textContent = el.dataset.wspBefore || ""; el.blur(); }
+            });
+            el.addEventListener("blur", () => {
+                el.contentEditable = "false";
+                const before = String(el.dataset.wspBefore || "").replace(/\s+/g, " ").trim();
+                const after = String(el.textContent || "").replace(/\s+/g, " ").trim();
+                if(el.dataset.wspCancel === "1") { delete el.dataset.wspCancel; return; }
+                if(after === before) return;
+                admin.wsPrevEditFromPage(el.dataset.wspSrc, el.dataset.wspField, after);
+            });
+        });
+    },
+    wsPrevEditFromPage: function(srcList, field, value) {
+        if(field !== "translation" && field !== "effect") return;
+        const ids = String(srcList || "").split(",").map(n => parseInt(n, 10)).filter(n => Number.isFinite(n) && n >= 0);
+        let changed = 0;
+        ids.forEach(i => { const it = (appData.items || [])[i]; if(it && app.setQuoteItemField(it, field, value)) changed++; });
+        if(!changed) return;
+        if(appData.selection) appData.selection.items = appData.items;
+        app.save();
+        admin._wsPrevQuoteBankDirty = true;
+        admin.renderWorksheetPreview();
+    },
+    /** v136: remove a trailing bracketed quotation from one quote's meaning or point (idx may be a list: the quotes printing). */
+    wsPrevStripBracketQuote: function(idx, field) {
+        const fields = field ? [field] : ["translation", "effect"];
+        const list = Array.isArray(idx) ? idx : [idx];
+        let n = 0;
+        list.forEach(i => {
+            const it = (appData.items || [])[i];
+            if(!it || it.correct === false) return;
+            const q = it.originalFull || it.original || it.quote || "";
+            fields.forEach(f => {
+                const cur = f === "effect" ? (it.effect || "") : (it.translation || "");
+                const out = app.wsStripTrailingBracketQuote(q, cur);
+                if(out && app.setQuoteItemField(it, f, out)) n++;
+            });
+        });
+        if(!n) return;
+        if(appData.selection) appData.selection.items = appData.items;
+        app.save();
+        admin._wsPrevQuoteBankDirty = true;
+        admin.renderWorksheetPreview();
     },
     wsPrevEditQuoteField: function(idx, field, value) {
         const it = (appData.items || [])[idx];
@@ -43320,6 +43503,21 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             app.WORKSHEET_GAMES.forEach(g => { wsSec[g.key] = !!wsSec[g.key] && opts.onlyGames.includes(g.key); });
         }
         const wsRng = typeof opts.seed === "number" ? app.worksheetSeededRng(opts.seed) : Math.random;
+        /* v136: in the preview only, each meaning/point cell is labelled with the quote(s) it belongs to so it can be edited on the page. */
+        const wsEditTags = !!opts.previewEdit;
+        const wsSrcOf = new Map();
+        const wsEditAttr = (item, field) => {
+            if(!wsEditTags || !item) return "";
+            const src = (wsSrcOf.get(item) || []).filter(i => i >= 0);
+            return src.length ? ` data-wsp-field="${field}" data-wsp-src="${src.join(",")}"` : "";
+        };
+        const wsMarkRepeats = (item, escText) => {
+            if(!wsEditTags || !item || !escText) return escText;
+            const words = app.wsRepeatedQuoteWords(item.originalFull || item.original || item.quote || "", escText.replace(/&[a-z#0-9]+;/gi, " "));
+            let out = escText;
+            words.forEach(w => { const re = new RegExp("(^|[^&#A-Za-z])(" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")(?![A-Za-z])", "gi"); out = out.replace(re, "$1<mark class=\"wsp-rep\">$2</mark>"); });
+            return out;
+        };
         if(!opts._inner && typeof admin !== "undefined" && admin.syncQuestionsFromListCore) admin.syncQuestionsFromListCore();
 
         let content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
@@ -43578,8 +43776,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                         break;
                     }
                 }
-                if(hit >= 0) mergeWorksheetItemDup(out[hit], it);
-                else out.push(Object.assign({}, it));
+                if(hit >= 0) { mergeWorksheetItemDup(out[hit], it); const srcArr = wsSrcOf.get(out[hit]); if(srcArr) srcArr.push((appData.items || []).indexOf(it)); }
+                else { const cp = Object.assign({}, it); wsSrcOf.set(cp, [(appData.items || []).indexOf(it)]); out.push(cp); }
             });
             return out;
         };
@@ -43764,21 +43962,23 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             || (matchSelect ? matchSelect.value : "jumbled");
         const incMM = wsGameCap("matchMeaning");
         const meanings = incMM.map(i => String(i.translation || "").trim());
-        const shuffleMatchColumnNoRowAlignment = (column) => {
+        /* v136: shuffles positions (same random draws as shuffling the text), so each jumbled cell still knows its quote. */
+        const shuffleMatchIndexesNoRowAlignment = (column) => {
             const arr = column.map(c => String(c == null ? "" : c));
             const n = arr.length;
-            if(n < 2) return shuffle(arr.slice());
+            const ids = arr.map((_, i) => i);
+            if(n < 2) return shuffle(ids);
             const misaligned = (perm) => {
                 for(let i = 0; i < n; i++) {
                     const a = arr[i].trim();
-                    const b = (perm[i] || "").trim();
+                    const b = (perm[i] != null ? arr[perm[i]] : "").trim();
                     if(a && b && a === b) return false;
                 }
                 return true;
             };
             let perm, tries = 0;
             do {
-                perm = shuffle(arr.slice());
+                perm = shuffle(ids);
                 tries++;
             } while(!misaligned(perm) && tries < 200);
             return perm;
@@ -43788,21 +43988,23 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content += `<h3>${++wsSecNum}. Match each quote to its meaning</h3>`;
         content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Only quotes for the question(s) above are listed. <strong>Meanings are jumbled</strong> — the text beside each line is <em>not</em> in row order; draw lines to match.</p>`;
         if(matchMode === "list") {
-            const shuffled = shuffle(meanings.map(m => app.escapeHtml(m)));
+            const shuffledIdx = shuffle(meanings.map((_, i) => i));
+            const shuffled = shuffledIdx.map(k => wsEditTags ? `<span${wsEditAttr(incMM[k], "translation")}>${wsMarkRepeats(incMM[k], app.escapeHtml(meanings[k]))}</span>` : app.escapeHtml(meanings[k]));
             content += `<p style="margin:0 0 2px 0; font-size:9pt;"><em>Possible meanings (jumbled):</em> ${shuffled.join(" · ")}</p>`;
             incMM.forEach((item, idx) => {
                 content += `<p style="margin:0; font-size:10pt;">${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))} → __________________</p>`;
             });
         } else {
-            const rightMeanings = shuffleMatchColumnNoRowAlignment(meanings);
+            const rightMeaningIdx = shuffleMatchIndexesNoRowAlignment(meanings);
             content += `<table class="match-table"><colgroup><col style="width:40%"><col style="width:14%"><col style="width:46%"></colgroup>`;
             content += `<tr><th style="text-align:left;">Quote</th><th style="text-align:center;"> </th><th style="text-align:left;">Meaning (jumbled)</th></tr>`;
             incMM.forEach((item, idx) => {
-                const right = app.escapeHtml(String(rightMeanings[idx] || ""));
+                const rk = rightMeaningIdx[idx];
+                const right = wsMarkRepeats(incMM[rk], app.escapeHtml(String(meanings[rk] || "")));
                 content += `<tr>
                     <td>${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))}</td>
                     <td style="text-align:center;">&nbsp;</td>
-                    <td>${right}</td>
+                    <td${wsEditAttr(incMM[rk], "translation")}>${right}</td>
                 </tr>`;
             });
             content += `</table>`;
@@ -43816,15 +44018,17 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(hasPointExercise && wsSec.matchPoint) {
             content += `<h3>${++wsSecNum}. Match each quote to its point / analysis</h3>`;
             content += `<p style="margin:0 0 4px 0; font-size:8.5pt; opacity:0.9;">Teacher comments for this task are <strong>jumbled</strong> in the right column — match each quote to the correct point.</p>`;
-            const rightPoints = shuffleMatchColumnNoRowAlignment(pointsCol.map(p => String(p || "").trim()));
+            const pointsTrim = pointsCol.map(p => String(p || "").trim());
+            const rightPointIdx = shuffleMatchIndexesNoRowAlignment(pointsTrim);
             content += `<table class="match-table"><colgroup><col style="width:40%"><col style="width:14%"><col style="width:46%"></colgroup>`;
             content += `<tr><th style="text-align:left;">Quote</th><th style="text-align:center;"> </th><th style="text-align:left;">Point / analysis (jumbled)</th></tr>`;
             incMP.forEach((item, idx) => {
-                const right = app.escapeHtml(String(rightPoints[idx] || ""));
+                const pk = rightPointIdx[idx];
+                const right = wsMarkRepeats(incMP[pk], app.escapeHtml(String(pointsTrim[pk] || "")));
                 content += `<tr>
                     <td>${idx + 1}. ${app.quoteDisplayHtml(worksheetQuote(item))}</td>
                     <td style="text-align:center;">&nbsp;</td>
-                    <td>${right}</td>
+                    <td${wsEditAttr(incMP[pk], "effect")}>${right}</td>
                 </tr>`;
             });
             content += `</table>`;
@@ -44083,7 +44287,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                         const games = lvlG != null ? app.getWorksheetGamesForLevel(lvlG) : [];
                         let inner = null;
                         if(games.length) {
-                            try { inner = admin.exportWorksheet({ _inner: true, returnHtml: true, seed: (typeof opts.seed === "number" ? opts.seed + qi + 1 : undefined), onlyQid: qs.qid, onlyGames: games, rubricLevel: lvlG }); } catch(eInner) { inner = null; }
+                            try { inner = admin.exportWorksheet({ _inner: true, returnHtml: true, seed: (typeof opts.seed === "number" ? opts.seed + qi + 1 : undefined), onlyQid: qs.qid, onlyGames: games, rubricLevel: lvlG, previewEdit: !!opts.previewEdit }); } catch(eInner) { inner = null; }
                         }
                         const innerBlocks = (inner && inner.blocks) || {};
                         /* Each question's own arrangement: games set to "before" print above it, the rest below
