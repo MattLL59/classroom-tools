@@ -2,6 +2,46 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script id="tsa-storage-guard">
+/* v137: opened inside a preview (e.g. a Teams attachment preview) the file is sandboxed and any use of localStorage /
+   sessionStorage throws a SecurityError, which crashed the app at start-up. Use an in-memory stand-in instead and tell
+   the student their work will not be kept once they close it. */
+(function() {
+    function memStore() {
+        var m = {};
+        return {
+            getItem: function(k) { k = String(k); return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+            setItem: function(k, v) { m[String(k)] = String(v); },
+            removeItem: function(k) { delete m[String(k)]; },
+            clear: function() { m = {}; },
+            key: function(i) { var ks = Object.keys(m); return i < ks.length ? ks[i] : null; },
+            get length() { return Object.keys(m).length; }
+        };
+    }
+    var shimmed = false;
+    ["localStorage", "sessionStorage"].forEach(function(name) {
+        var ok = false;
+        try { var st = window[name]; st.setItem("__tsa_probe", "1"); st.removeItem("__tsa_probe"); ok = true; } catch(e) {}
+        if(!ok) {
+            try { Object.defineProperty(window, name, { value: memStore(), configurable: true, writable: true }); shimmed = true; } catch(e2) {}
+        }
+    });
+    window.__tsaStorageShimmed = shimmed;
+    if(!shimmed) return;
+    function showNote() {
+        if(document.getElementById("tsa-storage-note")) return;
+        var d = document.createElement("div");
+        d.id = "tsa-storage-note";
+        d.setAttribute("role", "status");
+        d.style.cssText = "position:relative;z-index:5;background:#fff3cd;color:#222;border-bottom:2px solid #b38f00;padding:10px 44px 10px 14px;font:15px/1.4 Calibri,Arial,sans-serif;";
+        d.innerHTML = "<strong>&#9888; Your work won&#8217;t be saved in this window.</strong> This file is open in a preview (for example inside Teams). Everything works, but your answers are lost when you close it. To keep your work, download the file and open it from your Downloads folder." +
+            "<button type=\"button\" aria-label=\"Close\" style=\"position:absolute;right:8px;top:6px;font-size:20px;line-height:1;background:none;border:0;cursor:pointer;color:#222;\">&#10005;</button>";
+        d.querySelector("button").onclick = function() { d.remove(); };
+        var host = document.body || document.documentElement; host.insertBefore(d, host.firstChild);
+    }
+    if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", showNote); else showNote();
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
