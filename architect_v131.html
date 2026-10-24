@@ -2996,6 +2996,12 @@
                 <div class="admin-section" id="lobby-exam-conditions-box" style="padding:10px 12px;">
                     <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; margin:0;"><input type="checkbox" id="lobby-exam-conditions" style="margin-top:3px; width:auto;" onchange="ui.setExamConditions(this.checked)"> <span><strong>Exam conditions</strong> — for students using the app in an exam (e.g. access arrangements). Hides <strong>I&apos;m stuck</strong> (quote choices, mark-scheme points, synonyms, sentence-bank chips, meanings, labels and hints) and <strong>Reveal best quote</strong>, and turns off spell-check in the answer boxes. Colours, the reading window, Auto-Scroll and line numbers stay. Saved with the lesson: export the <strong>Student App</strong> with this on, so students can&apos;t switch it off.</span></label>
                 </div>
+                <details class="admin-section" id="lobby-network-check">
+                    <summary class="admin-h">🌐 Network check</summary>
+                    <div style="font-size:0.85rem; line-height:1.4; margin:6px 0 8px 0;">Lessons run without the internet. Only the import tools and the synonym button need outside sites. Run this on a new PC or network to see which of them will work there.</div>
+                    <button type="button" id="lobby-network-run" class="btn btn-outline btn-small" style="width:auto;" onclick="app.runNetworkCheck()">Run check</button>
+                    <div id="lobby-network-results" style="margin-top:8px; font-size:0.85rem; line-height:1.4; overflow-x:auto;"></div>
+                </details>
                 <details class="admin-section" id="admin-import-past-paper-details" open>
                     <summary class="admin-h">📄 Import past paper</summary>
                     <details class="lobby-help-details">
@@ -3248,14 +3254,8 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script>
-        /** Do not load pdf.worker.min.js as a &lt;script&gt; — only pdf.min.js; the worker is loaded from workerSrc by PDF.js. */
-        if(window.pdfjsLib) {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        }
-    </script>
-    <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
+    <!-- v135: PDF.js, Mammoth and Tesseract.js are loaded only when an import needs them (app.ensurePdfJsLoaded,
+         app.ensureMammothLoaded, app.ensureTesseractJsLoaded), so a filtered network cannot hold up the page opening. -->
     <script>
 /** ARCHITECT v5.1 (Safety First) — build v131: editor/reader passage split (see PASSAGE_V131_CHECKLIST.md) **/
 
@@ -15386,13 +15386,88 @@ const app = {
                 try {
                     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
                 } catch(eW) {}
+                clearTimeout(tHang);
                 if(typeof pdfjsLib !== "undefined" && pdfjsLib.getDocument) resolve(pdfjsLib);
-                else reject(new Error("PDF.js global missing"));
+                else fail(new Error("PDF.js global missing"));
             };
-            s.onerror = function() { reject(new Error("Could not load PDF.js (network or blocked script)")); };
+            s.onerror = function() { fail(new Error("Could not load PDF.js (network or blocked script)")); };
+            /** v135: a filter that hangs the request instead of refusing it would otherwise leave the import waiting forever. */
+            var tHang = setTimeout(function() { if(typeof pdfjsLib === "undefined") fail(new Error("PDF.js took too long to load (network or blocked script)")); }, 20000);
+            function fail(err) { clearTimeout(tHang); app._pdfjsLoadPromise = null; try { s.remove(); } catch(eR) {} reject(err); }
             document.head.appendChild(s);
         });
         return app._pdfjsLoadPromise;
+    },
+    _mammothLoadPromise: null,
+    /** v135: Load Mammoth (Word .docx reader) from unpkg on demand, for Word imports only. Retries after a failure. */
+    ensureMammothLoaded: function() {
+        if(window.mammoth && window.mammoth.convertToHtml) return Promise.resolve(window.mammoth);
+        if(app._mammothLoadPromise) return app._mammothLoadPromise;
+        app._mammothLoadPromise = new Promise(function(resolve, reject) {
+            var s = document.createElement("script");
+            s.id = "architect-mammoth-script";
+            s.src = "https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js";
+            var tHang = setTimeout(function() { fail(new Error("the Word reader took too long to load. Check the internet connection (and that unpkg.com is not blocked), then try again.")); }, 20000);
+            function fail(err) { clearTimeout(tHang); app._mammothLoadPromise = null; try { s.remove(); } catch(eR) {} reject(err); }
+            s.onload = function() {
+                clearTimeout(tHang);
+                if(window.mammoth && window.mammoth.convertToHtml) resolve(window.mammoth);
+                else fail(new Error("the Word reader did not start properly. Try again, or save the document as .txt and load that."));
+            };
+            s.onerror = function() { fail(new Error("the Word reader could not load. Check the internet connection (and that unpkg.com is not blocked), then try again.")); };
+            document.head.appendChild(s);
+        });
+        return app._mammothLoadPromise;
+    },
+    /** v135: Lobby → Network check. Tests each outside site the app can use, with the same kind of request the app makes.
+        A filter's "blocked" page usually fails here (no CORS header) or lacks the expected text, so it shows as blocked. */
+    _networkCheckTargets: [
+        { label: "Import past paper — PDF reader", site: "cdnjs.cloudflare.com", url: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js", marker: "pdfjsLib" },
+        { label: "Import past paper — PDF worker", site: "cdnjs.cloudflare.com", url: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js", marker: "pdfjs" },
+        { label: "Word document import", site: "unpkg.com", url: "https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js", marker: "mammoth" },
+        { label: "Line-number fallback — text recognition", site: "cdn.jsdelivr.net", url: "https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/tesseract.min.js", marker: "Tesseract" },
+        { label: "Line-number fallback — English language data", site: "tessdata.projectnaptha.com", url: "https://tessdata.projectnaptha.com/4.0.0/eng.traineddata.gz", headersOnly: true },
+        { label: "Synonym button", site: "api.datamuse.com", url: "https://api.datamuse.com/words?rel_syn=happy&max=1", json: true }
+    ],
+    _networkCheckOne: async function(t) {
+        var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+        var timedOut = false;
+        var timer = setTimeout(function() { timedOut = true; if(ctrl) ctrl.abort(); }, 12000);
+        var t0 = Date.now();
+        try {
+            var res = await fetch(t.url, { cache: "no-store", signal: ctrl ? ctrl.signal : undefined });
+            if(!res.ok) return { ok: false, why: "the site answered with error " + res.status };
+            if(t.headersOnly) { if(ctrl) ctrl.abort(); return { ok: true, ms: Date.now() - t0 }; }
+            if(t.json) { var d = await res.json(); return Array.isArray(d) ? { ok: true, ms: Date.now() - t0 } : { ok: false, why: "unexpected reply (possibly a filter page)" }; }
+            var txt = await res.text();
+            return txt.indexOf(t.marker) >= 0 ? { ok: true, ms: Date.now() - t0 } : { ok: false, why: "unexpected reply (possibly a filter page)" };
+        } catch(e) {
+            return { ok: false, why: timedOut ? "no answer after 12 seconds" : "blocked or unreachable" };
+        } finally {
+            clearTimeout(timer);
+        }
+    },
+    runNetworkCheck: async function() {
+        var box = document.getElementById("lobby-network-results");
+        var btn = document.getElementById("lobby-network-run");
+        if(!box) return;
+        var esc = function(x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+        var targets = app._networkCheckTargets;
+        var row = function(t, mark, note) {
+            return "<tr><td style=\"padding:3px 8px 3px 0; white-space:nowrap;\">" + mark + "</td><td style=\"padding:3px 8px 3px 0;\">" + esc(t.label) +
+                "</td><td style=\"padding:3px 0; opacity:0.8;\">" + esc(t.site) + (note ? " \u2014 " + esc(note) : "") + "</td></tr>";
+        };
+        if(btn) btn.disabled = true;
+        box.innerHTML = "<table style=\"border-collapse:collapse;\">" + targets.map(function(t) { return row(t, "\u23F3", "checking\u2026"); }).join("") + "</table>";
+        var results = await Promise.all(targets.map(function(t) { return app._networkCheckOne(t); }));
+        var bad = results.filter(function(r) { return !r.ok; }).length;
+        var when = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        var summary = bad === 0
+            ? "\u2705 All " + targets.length + " sites reachable (checked " + when + "). Imports and the synonym button should work on this network."
+            : "\u26A0\uFE0F " + bad + " of " + targets.length + " sites not reachable (checked " + when + "). Lessons still run; the features marked \u274C won\u2019t work here. To use them, import at home and bring the saved lesson file, or ask IT to allow the sites listed.";
+        box.innerHTML = "<div style=\"margin-bottom:6px;\">" + summary + "</div><table style=\"border-collapse:collapse;\">" +
+            targets.map(function(t, i) { var r = results[i]; return row(t, r.ok ? "\u2705" : "\u274C", r.ok ? "OK" : r.why); }).join("") + "</table>";
+        if(btn) btn.disabled = false;
     },
     /** Opening the app as file:/// blocks PDF.js from using a Web Worker with a CDN worker script — use main-thread parsing. */
     _pdfDisableWorkerForEnv: function() {
@@ -44731,6 +44806,8 @@ ${body}
         if (adminBtn) adminBtn.remove();
         const adminModal = cloneDoc.querySelector('#modal-admin');
         if (adminModal) adminModal.remove();
+        /** v135: import libraries loaded on demand (PDF.js, Mammoth, Tesseract) would otherwise be copied in and fetched every time a student opens the file. */
+        cloneDoc.querySelectorAll('script[src^="http"]').forEach(function(sc) { sc.remove(); });
         /** v132: event listeners never travel in the saved HTML, but the "already wired" data-*bound* flags did —
             so the Student App skipped wiring 🎨 Theme colours, ❓ Help and other controls. Clear every such flag. */
         cloneDoc.querySelectorAll('*').forEach(function(el) {
@@ -44974,7 +45051,7 @@ ${body}
         if(btn) btn.disabled = true;
         admin._wordPdfSay("\u23F3 Reading both files and checking every line\u2026", false);
         try {
-            if(!window.mammoth) throw new Error("the Word reader did not load. Check the internet connection (and that unpkg.com is not blocked), then refresh the page.");
+            if(!window.mammoth) await app.ensureMammothLoaded();
             if(!window.pdfjsLib) await app.ensurePdfJsLoaded();
             const read = function(f) { return new Promise(function(res, rej) { const r = new FileReader(); r.onload = function() { res(r.result); }; r.onerror = rej; r.readAsArrayBuffer(f); }); };
             const conv = await window.mammoth.convertToHtml({ arrayBuffer: await read(d) });
@@ -45276,7 +45353,7 @@ ${body}
             const reader = new FileReader();
             reader.onload = async () => {
                 try {
-                    if(!window.mammoth) throw new Error("the Word reader did not load. Check the internet connection (and that unpkg.com is not blocked), then refresh the page.");
+                    if(!window.mammoth) await app.ensureMammothLoaded();
                     /** v132: open the Word document as a new blank lesson (one or two texts, paragraphs and bold headings kept),
                         instead of only swapping the passage — which did nothing visible in a Component 2 lesson. */
                     const est = await admin.estimateDocxCharsPerLine(reader.result.slice(0));
@@ -45305,7 +45382,7 @@ ${body}
             reader.onload = async () => {
                 app.isImportingPdf = true;
                 try {
-                    if(!window.pdfjsLib) throw new Error("PDF library not loaded.");
+                    if(!window.pdfjsLib) await app.ensurePdfJsLoaded();
                     const loadPdf = async (disableWorker) => {
                         return await window.pdfjsLib.getDocument({
                             data: reader.result,
