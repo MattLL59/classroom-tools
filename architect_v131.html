@@ -1006,6 +1006,32 @@
     .reader-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
     .reader-label { font-size:0.85rem; display:flex; align-items:center; gap:6px; }
     /* v135: colour buttons + shared colour panel. The panel keeps its own fixed colours so it stays readable whatever theme is chosen. */
+    /* v135: Quote Select — when quote cards are showing, put them beside the passage on wide screens (class set in JS, no :has()). */
+    @media (min-width: 1000px) {
+        body:not(.tsa-passage-pick-focus) #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #view-select-body {
+            display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); grid-auto-flow: row dense; column-gap: 16px; align-items: start;
+        }
+        body:not(.tsa-passage-pick-focus) #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #view-select-body > * { grid-column: 1 / -1; }
+        body:not(.tsa-passage-pick-focus) #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #view-select-body > #source-inline-select-wrap {
+            grid-column: 1; max-height: max(320px, calc(100vh - 240px)); min-height: min(320px, 60vh);
+        }
+        body:not(.tsa-passage-pick-focus) #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #view-select-body > #selection-passage-window-hint { grid-column: 1; }
+        body:not(.tsa-passage-pick-focus) #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #view-select-body > #selection-area {
+            grid-column: 2; max-height: max(320px, calc(100vh - 240px)); overflow-y: auto; overscroll-behavior: contain; padding: 0 4px 4px 0;
+        }
+        body:not(.tsa-passage-pick-focus) #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #selection-area .grid { grid-template-columns: 1fr; }
+    }
+    #qs-jump-choices { display: none; }
+    @media (max-width: 999px) {
+        #view-select.tsa-qs-has-choices:not(.tsa-passage-maximized) #qs-jump-choices:not(.qs-jump-hide) {
+            display: inline-flex; position: fixed; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 900; width: auto; box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+        }
+    }
+    .qs-locate-row { margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .qs-locate-btn { width: auto; }
+    .qs-locate-note { font-size: 0.8rem; opacity: 0.85; }
+    ::highlight(tsa-qs-locate) { background-color: rgba(255, 193, 7, 0.6); color: inherit; }
+    .qs-locate-flash { position: absolute; pointer-events: none; background: rgba(255, 193, 7, 0.45); border-radius: 3px; z-index: 3; }
     .cp-hidden-input { display: none !important; }
     .cp-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 12px 4px 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
     .cp-btn:hover { border-color: var(--primary); }
@@ -2313,6 +2339,7 @@
             <div id="selection-passage-window-hint" class="hidden" style="margin-bottom:10px;"></div>
             <div id="selection-area"></div>
         </div>
+        <button type="button" id="qs-jump-choices" class="btn btn-primary btn-small" onclick="ui.scrollToQuoteChoices()">Quote choices ↓</button>
     </div>
 
         <div id="view-desk" class="hub">
@@ -2528,6 +2555,12 @@
                             <label style="font-size:0.85rem; display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
                                 <input type="checkbox" id="setting-free-question-nav" style="margin-top:3px;" onchange="admin.setFreeQuestionNavigation(this.checked)">
                                 <span><strong>Free question navigation</strong> — Students can use <strong>Previous / Next question</strong> on the Writing Desk without reaching the quote/evidence target. Each question keeps its own answer draft so they can go back and revise.</span>
+                            </label>
+                        </div>
+                        <div class="input-group" style="margin-bottom:10px;">
+                            <label style="font-size:0.85rem; display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="setting-qs-show-in-passage" style="margin-top:3px;" onchange="admin.setQuoteChoicesShowInPassage(this.checked)">
+                                <span><strong>Show in passage</strong> — Each <strong>I'm stuck</strong> quote choice gets a 📍 <strong>Show in passage</strong> button that scrolls to the quote and highlights it. Turn this off when finding the quote is part of the task. Wrong choices can come from outside the question's lines, so the button can show that too. (On wide screens the choices always sit beside the passage.)</span>
                             </label>
                         </div>
                         <div style="font-size:0.82rem; opacity:0.78; margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:rgba(103,58,183,0.05); line-height:1.45;"><strong>Quote targets:</strong> <strong>Quotes</strong> and <strong>Dist</strong> in <strong>Level Bank</strong> set good quotes per level and distractors per good quote (e.g. 1 good + 2 distractors). <strong>Quote Count</strong> below sets how many options appear in each multiple-choice round (I&apos;m stuck / MC grid).</div>
@@ -3363,6 +3396,7 @@ const defaultData = {
         rewardMinutes: 0,
         rewardEveryLevels: 0,
         freeQuestionNavigation: true,
+        quoteChoicesShowInPassage: true,
         deskSentenceBankLines: "",
         selectionStages: ["discriminate","align","justify"],
         quotesBankCompact: true,
@@ -19876,6 +19910,7 @@ const app = {
         if(isNaN(safe.settings.rewardEveryLevels) || safe.settings.rewardEveryLevels < 0) safe.settings.rewardEveryLevels = 0;
         if(typeof safe.settings.strictMode !== 'boolean') safe.settings.strictMode = false;
         if(typeof safe.settings.freeQuestionNavigation !== "boolean") safe.settings.freeQuestionNavigation = true;
+        if(typeof safe.settings.quoteChoicesShowInPassage !== "boolean") safe.settings.quoteChoicesShowInPassage = true;
         safe.settings.selectionStages = Array.isArray(safe.settings.selectionStages) && safe.settings.selectionStages.length
             ? safe.settings.selectionStages.filter(v => ["discriminate","boundary","align","justify"].includes(v))
             : ["discriminate","align","justify"];
@@ -24421,6 +24456,157 @@ const ui = {
         ui._cpState = null;
         document.getElementById("cp-panel").classList.remove("open");
         if(st.opener && document.body.contains(st.opener)) { try { st.opener.focus(); } catch(e) {} }
+    },
+    /* ---------- v135: Quote Select — choices beside the passage + Show in passage ---------- */
+    _qsSideInit: function() {
+        if(ui._qsSideReady) return;
+        const area = document.getElementById("selection-area");
+        const view = document.getElementById("view-select");
+        if(!area || !view) return;
+        ui._qsSideReady = true;
+        const refresh = function() {
+            view.classList.toggle("tsa-qs-has-choices", !!area.querySelector(".card-select-quote"));
+            ui._qsDecorateChoices();
+        };
+        let queued = false;
+        new MutationObserver(function() {
+            if(queued) return;
+            queued = true;
+            setTimeout(function() { queued = false; refresh(); }, 0);
+        }).observe(area, { childList: true, subtree: true });
+        if(typeof IntersectionObserver === "function") {
+            const jump = document.getElementById("qs-jump-choices");
+            if(jump) new IntersectionObserver(function(ents) {
+                ents.forEach(function(en) { jump.classList.toggle("qs-jump-hide", en.isIntersecting); });
+            }, { threshold: 0.05 }).observe(area);
+        }
+        refresh();
+    },
+    _qsDecorateChoices: function() {
+        const area = document.getElementById("selection-area");
+        if(!area) return;
+        const on = !(appData && appData.settings && appData.settings.quoteChoicesShowInPassage === false);
+        area.querySelectorAll(".card-select-quote").forEach(function(card) {
+            const row = card.querySelector(".qs-locate-row");
+            if(!on) { if(row) row.remove(); return; }
+            if(row) return;
+            const qt = card.querySelector(".quote-text");
+            if(!qt) return;
+            const r = document.createElement("div");
+            r.className = "qs-locate-row";
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn btn-outline btn-small qs-locate-btn";
+            btn.textContent = "\uD83D\uDCCD Show in passage";
+            btn.title = "Scroll the passage to this quote and highlight it";
+            btn.addEventListener("click", function(ev) {
+                ev.preventDefault(); ev.stopPropagation();
+                ui.showQuoteInPassage(qt.textContent, r);
+            });
+            r.appendChild(btn);
+            qt.insertAdjacentElement("afterend", r);
+        });
+    },
+    /** Find quote text in the Quote Select passage DOM (ignores line numbers, punctuation, case and spacing; "…" splits a quote). Returns a Range or null. */
+    _qsFindQuoteRange: function(quote) {
+        const root = document.getElementById("source-inline-select");
+        if(!root) return null;
+        const chars = [], map = [];
+        let lastSpace = true;
+        const pushSpace = function() { if(!lastSpace) { chars.push(" "); map.push(null); lastSpace = true; } };
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode: function(n) {
+                const p = n.parentElement;
+                if(p && p.closest(".source-line-num, .line-num, script, style, [aria-hidden='true']")) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        let prevRow = null, n;
+        while((n = walker.nextNode())) {
+            const row = n.parentElement && n.parentElement.closest(".source-line-row, p, div");
+            if(row !== prevRow) { pushSpace(); prevRow = row; }
+            const t = n.nodeValue;
+            for(let i = 0; i < t.length; i++) {
+                const c = t[i].toLowerCase();
+                if(/[a-z0-9\u00c0-\u024f]/.test(c)) { chars.push(c); map.push([n, i]); lastSpace = false; }
+                else if(c === "'" || c === "\u2019" || c === "\u2018" || c === "\u00ad") { /* drop apostrophes and soft hyphens */ }
+                else pushSpace();
+            }
+        }
+        const hay = chars.join("");
+        const norm = function(x) { return String(x || "").toLowerCase().replace(/['\u2018\u2019\u00ad]/g, "").replace(/[^a-z0-9\u00c0-\u024f]+/g, " ").trim(); };
+        const parts = String(quote || "").split(/\u2026|\.{3}/).map(norm).filter(function(p) { return p.length > 0; });
+        if(!parts.length) return null;
+        const findAt = function(needle, from) {
+            let i = hay.indexOf(needle, from);
+            while(i > 0 && hay[i - 1] !== " ") i = hay.indexOf(needle, i + 1);   /* start on a word boundary */
+            return i;
+        };
+        const s0 = findAt(parts[0], 0);
+        if(s0 < 0) return null;
+        let endIdx = s0 + parts[0].length - 1;
+        if(parts.length > 1) {
+            const last = parts[parts.length - 1];
+            const sl = findAt(last, endIdx + 1);
+            if(sl >= 0) endIdx = sl + last.length - 1;
+        }
+        let a = s0; while(a <= endIdx && !map[a]) a++;
+        let b = endIdx; while(b >= a && !map[b]) b--;
+        if(a > b) return null;
+        try {
+            const range = document.createRange();
+            range.setStart(map[a][0], map[a][1]);
+            range.setEnd(map[b][0], map[b][1] + 1);
+            return range;
+        } catch(e) { return null; }
+    },
+    showQuoteInPassage: function(quote, rowEl) {
+        const old = rowEl && rowEl.querySelector(".qs-locate-note");
+        if(old) old.remove();
+        const range = ui._qsFindQuoteRange(quote);
+        if(!range) {
+            if(rowEl) {
+                const note = document.createElement("span");
+                note.className = "qs-locate-note";
+                note.textContent = "Not in the part of the passage on screen. Try \u201cWhole passage\u201d.";
+                rowEl.appendChild(note);
+                setTimeout(function() { note.remove(); }, 6000);
+            }
+            return false;
+        }
+        const scroller = document.getElementById("source-inline-select-scroll");
+        const wrap = document.getElementById("source-inline-select-wrap");
+        if(wrap) {
+            const wr = wrap.getBoundingClientRect();
+            if(wr.top < 0 || wr.top > window.innerHeight * 0.6) { try { wrap.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e) { wrap.scrollIntoView(); } }
+        }
+        if(scroller) {
+            const rr = range.getBoundingClientRect(), sr = scroller.getBoundingClientRect();
+            const target = scroller.scrollTop + (rr.top - sr.top) - Math.max(40, sr.height / 3);
+            try { scroller.scrollTo({ top: Math.max(0, target), behavior: "smooth" }); } catch(e) { scroller.scrollTop = Math.max(0, target); }
+        }
+        clearTimeout(ui._qsFlashTimer);
+        document.querySelectorAll(".qs-locate-flash").forEach(function(el) { el.remove(); });
+        if(window.CSS && CSS.highlights && typeof Highlight === "function") {
+            CSS.highlights.set("tsa-qs-locate", new Highlight(range));
+            ui._qsFlashTimer = setTimeout(function() { CSS.highlights.delete("tsa-qs-locate"); }, 4000);
+        } else if(scroller) {
+            /* Older browsers: draw boxes over the text once the scroll has settled. */
+            setTimeout(function() {
+                const sr = scroller.getBoundingClientRect();
+                Array.prototype.forEach.call(range.getClientRects(), function(r) {
+                    const d = document.createElement("div");
+                    d.className = "qs-locate-flash";
+                    d.style.left = (r.left - sr.left + scroller.scrollLeft) + "px";
+                    d.style.top = (r.top - sr.top + scroller.scrollTop) + "px";
+                    d.style.width = r.width + "px"; d.style.height = r.height + "px";
+                    scroller.appendChild(d);
+                });
+                if(getComputedStyle(scroller).position === "static") scroller.style.position = "relative";
+                ui._qsFlashTimer = setTimeout(function() { document.querySelectorAll(".qs-locate-flash").forEach(function(el) { el.remove(); }); }, 4000);
+            }, 450);
+        }
+        return true;
     },
     resetTheme: function() { 
         localStorage.removeItem('tsa_theme_bg'); 
@@ -31942,6 +32128,7 @@ const admin = {
         setVal("reward-every-levels", String(s.rewardEveryLevels || 0));
         setVal("desk-sentence-bank-input", s.deskSentenceBankLines || "");
         setChk("setting-free-question-nav", s.freeQuestionNavigation !== false);
+        setChk("setting-qs-show-in-passage", s.quoteChoicesShowInPassage !== false);
         setChk("ai-include-tone", s.aiIncludeTone !== false);
         setChk("ai-include-structure", s.aiIncludeStructure !== false);
         const loadModeSel = document.getElementById("past-paper-load-mode");
@@ -32641,6 +32828,8 @@ const admin = {
         if(dsbIn) dsbIn.value = appData.settings.deskSentenceBankLines || "";
         const freeQNav = document.getElementById("setting-free-question-nav");
         if(freeQNav) freeQNav.checked = appData.settings.freeQuestionNavigation !== false;
+        const qsShowInPassage = document.getElementById("setting-qs-show-in-passage");
+        if(qsShowInPassage) qsShowInPassage.checked = appData.settings.quoteChoicesShowInPassage !== false;
         const aiTone = document.getElementById("ai-include-tone");
         if(aiTone) aiTone.checked = appData.settings.aiIncludeTone !== false;
         const aiStructure = document.getElementById("ai-include-structure");
@@ -35620,6 +35809,13 @@ const admin = {
         const n = parseInt(v, 10);
         appData.settings.rewardEveryLevels = isNaN(n) || n < 0 ? 0 : n;
         app.save();
+    },
+    /** v135: I'm stuck quote choices get a "Show in passage" button (scrolls to and highlights the quote). */
+    setQuoteChoicesShowInPassage: (checked) => {
+        if(!appData.settings) appData.settings = {};
+        appData.settings.quoteChoicesShowInPassage = !!checked;
+        app.save();
+        if(ui._qsDecorateChoices) ui._qsDecorateChoices();
     },
     setFreeQuestionNavigation: (checked) => {
         if(!appData.settings) appData.settings = {};
@@ -45851,6 +46047,17 @@ window.__tsaBootArchitect = function() {
 window.onload = function() {
     setTimeout(window.__tsaBootArchitect, window.__tsaDeferHeavyLessonGate ? 0 : 60);
 };
+</script>
+<script>
+/* v135: start the Quote Select side-by-side layout and Show in passage once the app has loaded. */
+(function() {
+    var tries = 0;
+    function go() {
+        if(typeof ui !== "undefined" && ui._qsSideInit && document.getElementById("selection-area")) { ui._qsSideInit(); return; }
+        if(++tries < 100) setTimeout(go, 200);
+    }
+    if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", go); else go();
+})();
 </script>
 </body>
 </html>
