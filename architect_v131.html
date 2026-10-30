@@ -5863,7 +5863,17 @@ const app = {
     },
     /** Passage sentences that contain a short-answer alternative (most of its words), best first. */
     findAnswerSentencesInPassage: function(passage, alternatives) {
-        const plain = String(passage || "").replace(/<[^>]+>/g, " ").replace(/\u00a0/g, " ");
+        /* Structured (v2 JSON) passages must be turned into reader text first — splitting the raw JSON string put {"v":2,"lines":… into quote-bank quotes.
+           Stored lines are joined with a space (a new paragraph with a line break) so a sentence that runs across printed lines stays whole. */
+        let src = String(passage || "");
+        const so = (app.parseStructuredPassageSource && src.trim()) ? app.parseStructuredPassageSource(src.trim()) : null;
+        if(so && Array.isArray(so.lines)) {
+            src = so.lines.map(function(L, i) {
+                const t = app.htmlFragmentToPlainText ? app.htmlFragmentToPlainText(L.html || "") : String(L.html || "");
+                return (i > 0 && L.paragraphStart ? "\n" : (i > 0 ? " " : "")) + t;
+            }).join("");
+        }
+        const plain = src.replace(/<[^>]+>/g, " ").replace(/\u00a0/g, " ");
         const sentences = plain.split(/(?<=[.!?])\s+|\n+/).map(x => x.replace(/\s+/g, " ").trim()).filter(x => x.length >= 8 && x !== "---");
         /* Written-out numbers count as digits too ("twenty-five miles" matches "25 miles"). */
         const NUMW = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15, sixteen:16, seventeen:17, eighteen:18, nineteen:19, twenty:20, thirty:30, forty:40, fifty:50, sixty:60, seventy:70, eighty:80, ninety:90, hundred:100 };
@@ -37896,6 +37906,8 @@ const admin = {
                    "500 metres", "clinging to a tree"), with the answer as its meaning — so these levels have a real,
                    correct quote of their own instead of borrowing unrelated ones. */
                 const altsR = app.getMarkSchemeAnswerAlternatives ? app.getMarkSchemeAnswerAlternatives(q.id) : [];
+                /* Clear out answer sentences an earlier version cut from the raw passage JSON, so filling again replaces them. */
+                for(let k = appData.items.length - 1; k >= 0; k--) { const it = appData.items[k]; if(it && it.retrievalAnswer === true && it.fromMarkScheme === true && /"(?:html|lines)"\s*:|^\s*\{\s*"v"\s*:/.test(String(it.quote || it.original || ""))) appData.items.splice(k, 1); }
                 const foundR = altsR.length && app.findAnswerSentencesInPassage ? app.findAnswerSentencesInPassage(sourceText, altsR) : [];
                 if(!foundR.length) {
                     retrievalOnly++;
