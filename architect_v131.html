@@ -2582,7 +2582,6 @@
                         </div>
                         <div id="selection-editor-list" style="margin-bottom:12px;"></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0 0; align-items:center;">
-                            <button type="button" class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()" title="For each quote, split its example answer sentence into parts (opening phrase, technique, analysis, link) and fill any empty Sentence Builder fields. Never overwrites a filled field. New parts are also added to the shared banks; duplicates are skipped.">Split sentence into parts for sentence builder</button>
                             <button type="button" class="btn btn-outline btn-small" onclick="admin.toggleSplitPartsPreview()" id="btn-split-parts-preview" title="Show each quote's Sentence Builder parts, with a button to try any quote in the Sentence Builder.">Show parts</button>
                         </div>
                         <div id="split-parts-preview" class="hidden" style="margin-top:10px;"></div>
@@ -36826,6 +36825,7 @@ const admin = {
             if(set.length) changed[i] = set;
         });
         app.save();
+        admin._splitTriedSig = admin._splitPartsSig ? admin._splitPartsSig() : "";
         admin.renderQuoteList();
         ui.init();
         if(admin.renderSplitPartsPreview) admin.renderSplitPartsPreview({ changed, open: true });
@@ -36838,7 +36838,21 @@ const admin = {
         if(fields) parts.push(`filled ${fields} empty part${fields === 1 ? "" : "s"} on ${quotes} quote${quotes === 1 ? "" : "s"}`);
         if(bankAdded) parts.push(`added ${bankAdded} new phrase${bankAdded === 1 ? "" : "s"} to the banks`);
         const msg = parts.join("; ");
-        notify("<strong>Done:</strong> " + msg.charAt(0).toUpperCase() + msg.slice(1) + ". Nothing already filled was changed. New parts are highlighted in the list under the button — use <strong>Try in Sentence Builder</strong> on any quote to see it as students will.");
+        notify("<strong>Done:</strong> " + msg.charAt(0).toUpperCase() + msg.slice(1) + ". Nothing already filled was changed. New parts are highlighted in the table — use <strong>Try in Sentence Builder</strong> on any quote to see it as students will.");
+    },
+    /** v137: quotes with an empty Sentence Builder part or no example sentence — what "Fill empty parts" (generateAndSplitModelAnswers) works on. */
+    _splitPartsGaps: function() {
+        const items = Array.isArray(appData.items) ? appData.items : [];
+        const has = (it, one, many) => !!String(it[one] || (Array.isArray(it[many]) && it[many].length ? it[many][0] : "") || "").trim();
+        const quoteText = (it) => { const o = it.original; return String((o && typeof o === "object" && "quote" in o ? o.quote : o) || it.quote || "").trim(); };
+        return items.filter(it => it && it.correct !== false && quoteText(it) && (
+            !String(it.modelAnswer || "").trim() || !has(it, "marker", "markers") || !has(it, "starter", "starters") || !has(it, "method", "methods") || !has(it, "link", "links") || !String(it.effect || "").trim()
+        )).length;
+    },
+    /** v137: fingerprint of every quote's parts, so the Fill button doesn't keep offering work it has already tried and couldn't do. */
+    _splitPartsSig: function() {
+        const items = Array.isArray(appData.items) ? appData.items : [];
+        return JSON.stringify(items.map(it => it ? [it.original && typeof it.original === "object" ? it.original.quote : it.original, it.modelAnswer, it.marker, it.markers, it.starter, it.starters, it.method, it.methods, it.link, it.links, it.effect] : null));
     },
     /** Quote select tab: show each quote's Sentence Builder parts (after Split, or on demand). opts.changed = { itemIndex: [fieldKeys] } highlights newly filled cells. */
     renderSplitPartsPreview: function(opts) {
@@ -36898,7 +36912,13 @@ const admin = {
             return;
         }
         const anyNew = Object.keys(changed).length > 0;
-        mount.innerHTML = filterBar + `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts. <strong>Level</strong>: solid = ticked for students on that level, outline = in that level's bank but not ticked.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Click any part to edit it here (or in the <strong>Quote bank</strong> / Worksheet preview).</div>
+        /* v137: the old separate "Split sentence into parts" button now lives here, only when there is something to fill. */
+        const gaps = admin._splitPartsGaps ? admin._splitPartsGaps() : 0;
+        const triedAlready = gaps > 0 && admin._splitTriedSig && admin._splitPartsSig && admin._splitTriedSig === admin._splitPartsSig();
+        const fillBar = !gaps ? "" : (triedAlready
+            ? `<div style="font-size:0.8rem; opacity:0.85; margin-bottom:8px;">${gaps} quote${gaps === 1 ? " still has" : "s still have"} empty parts the app couldn't fill — click a cell below to type it in.</div>`
+            : `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:0.82rem;"><span><strong>${gaps} quote${gaps === 1 ? " has" : "s have"} empty parts.</strong></span><button type="button" class="btn btn-outline btn-small" onclick="admin.generateAndSplitModelAnswers()" title="For each quote, split its example answer sentence into parts (opening phrase, technique, analysis, link) and fill any empty Sentence Builder fields. Never overwrites a filled field. New parts are also added to the shared banks; duplicates are skipped.">Fill empty parts</button></div>`);
+        mount.innerHTML = filterBar + fillBar + `<div style="font-size:0.8rem; opacity:0.8; margin-bottom:6px;">Each quote's Sentence Builder parts. <strong>Level</strong>: solid = ticked for students on that level, outline = in that level's bank but not ticked.${anyNew ? ' <span style="background:rgba(76,175,80,0.16); padding:0 4px; border-radius:3px;">Green</span> = filled by the last split.' : ""} Click any part to edit it here (or in the <strong>Quote bank</strong> / Worksheet preview).</div>
             <div style="overflow-x:auto; border:1px solid var(--border); border-radius:6px;">
                 <table style="border-collapse:collapse; width:100%; font-size:0.8rem;">
                     <thead><tr>${["Quote", "Level", ...cols.map(c => c[2])].map(h => `<th style="text-align:left; padding:4px 6px; white-space:nowrap;">${h}</th>`).join("")}</tr></thead>
