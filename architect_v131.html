@@ -3186,6 +3186,7 @@
                     <div class="btn-group">
                         <button class="btn btn-doc" onclick="admin.openWorksheetPreview()" title="See exactly what will print, switch sections on/off, fix question wording and pick quotes — then download">👁 Preview worksheet</button>
                         <button class="btn btn-doc" onclick="admin.exportWorksheet()">📄 Worksheet (Word)</button>
+                        <button class="btn btn-doc" onclick="admin.exportWorksheetLargePrint()">📖 Worksheet (large print)</button>
                         <button class="btn btn-doc" onclick="admin.exportEnlargedFullText()">📖 Full Text (large print)</button>
                         <button class="btn btn-primary" style="background:#37474f;" onclick="admin.exportStandalone()">📦 Student App</button>
                         <button class="btn btn-outline" onclick="admin.saveConfig()">💾 Save all</button>
@@ -3684,6 +3685,42 @@ const app = {
     },
     getStateKey: function() {
         return app.getStateKeyForMeta(appData && appData.meta ? appData.meta : {});
+    },
+    /** v137: change the lesson title (worksheet heading, Topic label, download names). The title is part of the browser-state key and the
+        extract-cache fingerprint for lessons without an id, so carry both across to the new title rather than losing drafts or cached questions. */
+    setLessonTitle: function(t, opts) {
+        if(!appData) return false;
+        const nt = String(t == null ? "" : t).replace(/\s+/g, " ").trim().slice(0, 120);
+        if(!nt) return false;
+        if(!appData.meta || typeof appData.meta !== "object") appData.meta = {};
+        if(appData.meta.title === nt) return false;
+        let oldKey = "", oldFp = "";
+        try { oldKey = app.getStateKey(); } catch(eK0) {}
+        try { oldFp = app.getLessonCacheFingerprint ? app.getLessonCacheFingerprint(appData) : ""; } catch(eF0) {}
+        appData.meta.title = nt;
+        try {
+            const newKey = app.getStateKey();
+            if(oldKey && newKey !== oldKey) {
+                const v = localStorage.getItem(oldKey);
+                if(v != null && localStorage.getItem(newKey) == null) localStorage.setItem(newKey, v);
+            }
+        } catch(eK1) {}
+        try {
+            const raw = localStorage.getItem("tsa_v5_1_lesson_extract_cache");
+            if(raw && oldFp) {
+                const c = JSON.parse(raw);
+                if(c && c.fingerprint === oldFp) { c.fingerprint = app.getLessonCacheFingerprint(appData); localStorage.setItem("tsa_v5_1_lesson_extract_cache", JSON.stringify(c)); }
+            }
+        } catch(eF1) {}
+        try { if(typeof app.refreshLessonChromeLite === "function") app.refreshLessonChromeLite(); else { const lbl = document.getElementById("lbl-title"); if(lbl) lbl.innerText = nt; } } catch(eL) {}
+        if(!(opts && opts.noSave) && typeof app.save === "function") app.save({ skipRender: true, silent: true });
+        return true;
+    },
+    /** v137: lesson title made safe for a download file name. */
+    lessonFileBaseName: function(fallback) {
+        const t = appData && appData.meta && typeof appData.meta.title === "string" ? appData.meta.title : "";
+        const s = t.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+        return s || fallback || "Lesson";
     },
     /** Clean student/teacher UI state — used for recovery boot so stale desk queues cannot trap navigation. */
     getFreshUserState: function() {
@@ -31507,6 +31544,13 @@ const admin = {
                 appData.selection.question.prompt = "";
             }
         }
+        /* v137: a lesson still called "Demo Lesson" takes its title from the paper's file name (editable in the worksheet preview). */
+        try {
+            const curT = appData.meta && typeof appData.meta.title === "string" ? appData.meta.title.trim() : "";
+            const nf = files.questions || files.resource || files.markscheme;
+            const nt = nf && nf.name ? String(nf.name).replace(/\.pdf$/i, "").replace(/_+/g, " ").replace(/\s+/g, " ").trim() : "";
+            if((!curT || curT === "Demo Lesson") && nt && app.setLessonTitle) app.setLessonTitle(nt, { noSave: true });
+        } catch(eTitle) {}
         app.save({ skipRender: true, silent: true, skipQuestionPersist: !!includeQuestions });
         app.afterPastPaperExtractUi({
             includeQuestions: includeQuestions,
@@ -43499,6 +43543,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 <span class="wsp-actions">
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.worksheetPreviewReshuffle()" title="New jumbled order for the match columns">🔀 Reshuffle</button>
                     <button type="button" class="btn btn-doc btn-small" onclick="admin.worksheetPreviewDownload()" title="Downloads exactly what the preview shows">📄 Download Word</button>
+                    <button type="button" class="btn btn-doc btn-small" onclick="admin.exportWorksheetLargePrint()" title="Print page with a text-size slider, A3/A4 paper and a sheet count — same as Full Text (large print)">📖 Large print</button>
                     <button type="button" class="btn btn-outline btn-small" onclick="admin.closeWorksheetPreview()">✕ Close</button>
                 </span>
             </div>
@@ -43586,6 +43631,9 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const fq0 = Array.isArray(appData.questions) && appData.questions[0] ? appData.questions[0] : null;
         const hasShortModel = !!(fq0 && String(fq0.worksheetInferenceModel || "").trim()) && appData.component !== 2;
         let h = "";
+        /* v137: lesson title — heads the worksheet and names the downloads. */
+        const wsTitleVal = appData.meta && typeof appData.meta.title === "string" ? appData.meta.title : "";
+        h += `<div class="wsp-row" style="margin:0 0 8px 0;"><label for="wsp-title" style="font-weight:600;">Title</label><input type="text" id="wsp-title" value="${app.escapeHtml(wsTitleVal).replace(/"/g, "&quot;")}" style="flex:1;min-width:10em;padding:4px 6px;" onchange="admin.wsPrevSetOpt('title', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" title="Prints at the top of the worksheet and names the downloads"></div>`;
 
         /* --- On the sheet --- */
         h += `<details class="wsp-sec" data-k="sections" ${isOpen("sections", true) ? "open" : ""}><summary>On the sheet</summary><div class="wsp-sec-body">`;
@@ -43949,6 +43997,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         else if(key === "matchMode") { admin.setWorksheetMatchMode(val); setEl("worksheet-match-mode", "value", appData.settings.worksheetMatchMode); }
         else if(key === "scaffold") { admin.setWorksheetScaffoldMode(val); setEl("worksheet-scaffold-mode", "value", appData.settings.worksheetScaffoldMode); }
         else if(key === "maxQuotes") admin.setWorksheetMaxQuotes(val);
+        else if(key === "title") { if(app.setLessonTitle) app.setLessonTitle(val); }
         else if(key === "textSize") { appData.settings.worksheetTextSize = val === "large" ? "large" : "compact"; app.save(); }
         else if(key === "rubricLevel") {
             const n = parseInt(val, 10);
@@ -44861,9 +44910,117 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         content = content.replace("</head><body>", "</head><body><div class=\"WsSection1\">");
         content = content.replace("</body></html>", "<table style=\"margin-left:50in;\" border=\"0\" cellspacing=\"0\" cellpadding=\"0\"><tr><td><div style=\"mso-element:footer\" id=\"wsf1\"><p class=\"MsoFooter\">Page <span style='mso-field-code:\" PAGE \"'><span style='mso-no-proof:yes'>1</span></span> of <span style='mso-field-code:\" NUMPAGES \"'><span style='mso-no-proof:yes'>1</span></span></p></div></td></tr></table></div></body></html>");
         const b = new Blob(['\ufeff'+content], {type:'application/msword'});
-        const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download="Worksheet.doc"; a.click();
+        const a = document.createElement("a"); a.href=URL.createObjectURL(b); a.download=app.lessonFileBaseName("Worksheet") + " - Worksheet.doc"; a.click();
     },
 
+    /**
+     * v137: the worksheet as a print page with the same controls as Full Text (large print): text-size slider, A3/A4 paper,
+     * sheet count and Print. Built from the compact worksheet (same shuffle as the preview); every font size and writing-space
+     * height is tied to the slider, and nothing prints under 14pt (Calibri).
+     */
+    exportWorksheetLargePrint: function() {
+        if(!appData.settings) appData.settings = {};
+        const set = appData.settings;
+        const hadSize = Object.prototype.hasOwnProperty.call(set, "worksheetTextSize");
+        const prevSize = set.worksheetTextSize;
+        set.worksheetTextSize = "compact";
+        let res = null;
+        try { res = admin.exportWorksheet({ returnHtml: true, seed: admin._wsPrevSeed, report: {} }); }
+        catch(eWs) { console.warn("Worksheet large print:", eWs); }
+        finally { if(hadSize) set.worksheetTextSize = prevSize; else delete set.worksheetTextSize; }
+        if(!res || !res.html) { alert((res && res.message) ? res.message : "Nothing to put on the worksheet yet."); return; }
+        const src = String(res.html);
+        const BASE = 10.5;
+        const fsRule = (n) => "max(var(--min), calc(var(--fs) * " + (+(n / BASE).toFixed(4)) + "))";
+        const lenRule = (n) => "calc(var(--fs) * " + (+(n * 0.75 / BASE).toFixed(4)) + ")";
+        const scaleCss = (css) => String(css)
+            .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)pt/gi, (m, n) => "font-size:" + fsRule(parseFloat(n)))
+            .replace(/((?:min-|max-)?height|margin(?:-(?:top|bottom|left|right))?|padding(?:-(?:top|bottom|left|right))?)\s*:\s*([^;}"']*)/gi,
+                (m, prop, val) => prop + ":" + val.replace(/(-?\d+(?:\.\d+)?)px/g, (mm, n) => parseFloat(n) === 0 ? "0" : lenRule(parseFloat(n))));
+        let css = (src.match(/<style[^>]*>[\s\S]*?<\/style>/gi) || []).map(s => s.replace(/<\/?style[^>]*>/gi, "")).join("\n");
+        css = css.replace(/@page[^{]*\{[^}]*\}/gi, "").replace(/font-family\s*:[^;}]*/gi, "font-family:Calibri, Carlito, \"Segoe UI\", Arial, sans-serif");
+        css = scaleCss(css);
+        const bm = src.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+        const bodyHtml = scaleCss(bm ? bm[1] : src);
+        const hasKey = /class="teacher-key"/.test(bodyHtml);
+        const title = app.lessonFileBaseName("Worksheet");
+        const esc = (s) => app.escapeHtml(s).replace(/"/g, "&quot;");
+        const script = [
+            "(function() {",
+            "  var mm = 96 / 25.4, sizes = { \"A3 portrait\": [297, 420], \"A3 landscape\": [420, 297], \"A4 portrait\": [210, 297] };",
+            "  var fs = document.getElementById(\"fs\"), paper = document.getElementById(\"paper\"), key = document.getElementById(\"showkey\");",
+            "  var BLOCK = \":scope > div, :scope > p, :scope > table, :scope > tbody, :scope > thead, :scope > tr, :scope > h1, :scope > h2, :scope > h3, :scope > ul, :scope > ol\";",
+            "  function count() {",
+            "    var sz = sizes[paper.value], w = (sz[0] - 30) * mm, hPage = (sz[1] - 30) * mm;",
+            "    var probe = document.getElementById(\"sheet\").cloneNode(true);",
+            "    probe.removeAttribute(\"id\");",
+            "    probe.style.cssText = \"position:absolute; left:-99999px; top:0; margin:0; padding:0; width:\" + w + \"px;\";",
+            "    document.body.appendChild(probe);",
+            "    var top0 = probe.getBoundingClientRect().top, atoms = [];",
+            "    (function walk(el) {",
+            "      Array.prototype.forEach.call(el.children, function(c) {",
+            "        if(getComputedStyle(c).display === \"none\") return;",
+            "        var t = c.tagName;",
+            "        if(t !== \"TR\" && t !== \"P\" && !/^H[1-6]$/.test(t) && c.querySelector(BLOCK)) walk(c); else atoms.push(c);",
+            "      });",
+            "    })(probe);",
+            "    var pages = 1, start = 0;",
+            "    atoms.forEach(function(a) {",
+            "      var r = a.getBoundingClientRect(), t = r.top - top0, b = r.bottom - top0;",
+            "      if(b - start <= hPage) return;",
+            "      if(b - t <= hPage) { pages++; start = t; return; }",
+            "      while(b - start > hPage) { pages++; start += hPage; }",
+            "    });",
+            "    probe.remove();",
+            "    var paperName = paper.value.split(\" \")[0];",
+            "    document.getElementById(\"sheets\").textContent = \"\\u2248 \" + pages + \" page\" + (pages > 1 ? \"s\" : \"\") + \" = \" + pages + \" \" + paperName + \" sheet\" + (pages > 1 ? \"s\" : \"\") + \" single-sided, \" + Math.ceil(pages / 2) + \" double-sided\";",
+            "  }",
+            "  function apply() {",
+            "    document.documentElement.style.setProperty(\"--fs\", fs.value + \"pt\");",
+            "    document.getElementById(\"fsval\").textContent = fs.value + \"pt\";",
+            "    document.getElementById(\"page-size\").textContent = \"@page { size: \" + paper.value + \"; margin: 15mm; }\";",
+            "    document.body.classList.toggle(\"nokey\", !!key && !key.checked);",
+            "    count();",
+            "  }",
+            "  fs.addEventListener(\"input\", apply); paper.addEventListener(\"change\", apply); if(key) key.addEventListener(\"change\", apply);",
+            "  if(document.fonts && document.fonts.ready) document.fonts.ready.then(apply);",
+            "  apply();",
+            "})();"
+        ].join("\n");
+        const html = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            + "<title>" + esc(title + " \u2014 Worksheet (Large Print)") + "</title>\n"
+            + "<style id=\"page-size\">@page { size: A3 portrait; margin: 15mm; }</style>\n"
+            + "<style>\n" + css + "\n</style>\n"
+            + "<style>\n"
+            + "  :root { --fs: 16pt; --min: 14pt; }\n"
+            + "  html, body { background: #fff; color: #000; }\n"
+            + "  body { margin: 0 !important; padding: 0 !important; max-width: none !important; }\n"
+            + "  .controls { padding: 10px 16px; background: #eee; border-bottom: 2px solid #000; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-family: Calibri, Arial, sans-serif; font-size: 14px !important; line-height: 1.4; }\n"
+            + "  .controls * { font-size: 14px !important; }\n"
+            + "  .controls button, .controls select { padding: 5px 12px; cursor: pointer; }\n"
+            + "  #sheets { font-weight: 700; }\n"
+            + "  #sheet { padding: 0.6cm 1cm 1.5cm 1cm; font-family: Calibri, Carlito, \"Segoe UI\", Arial, sans-serif; font-size: max(var(--min), var(--fs)); }\n"
+            + "  body.nokey .teacher-key { display: none !important; }\n"
+            + "  tr, h1, h2, h3 { break-inside: avoid; }\n"
+            + "  h1, h2, h3 { break-after: avoid; }\n"
+            + "  @media print { .controls { display: none; } #sheet { padding: 0; } }\n"
+            + "</style>\n</head>\n<body>\n"
+            + "<div class=\"controls\">\n"
+            + "  <label>Text size: <input type=\"range\" id=\"fs\" min=\"14\" max=\"40\" value=\"16\"></label> <span id=\"fsval\">16pt</span>\n"
+            + "  <label>Paper: <select id=\"paper\"><option value=\"A3 portrait\">A3 portrait</option><option value=\"A3 landscape\">A3 landscape</option><option value=\"A4 portrait\">A4 portrait</option></select></label>\n"
+            + (hasKey ? "  <label><input type=\"checkbox\" id=\"showkey\" checked> Print teacher answer key</label>\n" : "")
+            + "  <span id=\"sheets\"></span>\n"
+            + "  <button onclick=\"window.print()\">Print</button>\n"
+            + "  <span style=\"opacity:0.8;\">Print at 100% scale with margins on Default, so the count matches.</span>\n"
+            + "</div>\n"
+            + "<div id=\"sheet\">\n" + bodyHtml + "\n</div>\n"
+            + "<script>\n" + script + "\n<\/script>\n</body></html>";
+        const b = new Blob([html], { type: "text/html" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(b);
+        a.download = title + " - Worksheet Large Print.html";
+        a.click();
+    },
     /**
      * Full passage text as a standalone, print-ready HTML page with genuine margin line numbers
      * (every 5th line, matching WJEC's own convention) that stay locked to their line even when the
@@ -45001,7 +45158,7 @@ ${body}
         const b = new Blob([html], {type: 'text/html'});
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b);
-        a.download = "Full-Text-Large-Print.html";
+        a.download = app.lessonFileBaseName("Full Text") + " - Full Text Large Print.html";
         a.click();
     },
 
