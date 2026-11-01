@@ -79,6 +79,9 @@
     /* Baseline-align gutter with first line of wrapped text; flex-start aligns box tops and drifts vs body when font-size differs. */
     /** flex-start: keep gutter digit on the first line of the row; baseline can drift beside tall wrapped cells. */
     .source-with-line-numbers .source-line-row { display: flex; align-items: flex-start; min-height: 1.35em; }
+    /* v137: Passage tab → "Show line numbers" off — blank the margin numbers everywhere students look (Data window keeps them for setting up lines). */
+    html.aa-no-line-numbers .source-line-num { visibility: hidden !important; }
+    html.aa-no-line-numbers #modal-admin .source-line-num { visibility: visible !important; }
     .source-with-line-numbers .source-line-num { flex: 0 0 2.5em; text-align: right; padding-right: 0.75em; color: #78909c; font-size: inherit; line-height: inherit; user-select: none; }
     .source-with-line-numbers .source-line-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; line-height: inherit; }
     /* Reader / intro / admin wrap passages in white-space:pre-wrap — that breaks flex gutters unless reset here. */
@@ -2718,6 +2721,9 @@
                 </div>
 
                 <div class="admin-tab" data-tab="edit">
+                <label id="line-numbers-switch-wrap" style="display:flex; align-items:center; gap:8px; margin:0 0 10px 0; font-size:0.9rem; cursor:pointer;" title="Untick to take every line number off: the passage margin, “lines 1–5” labels students see, worksheet headings and the large-print Full Text. Line ranges keep working behind the scenes. This lesson only.">
+                    <input type="checkbox" id="line-numbers-switch" style="width:auto; margin:0;" onchange="admin.setLineNumbersShown(this.checked)"> <strong>Show line numbers</strong> <span style="font-size:0.8rem; opacity:0.75;">(untick to remove all numbering for students and on printouts)</span>
+                </label>
                 <details class="admin-section" id="admin-c1-source-details">
                     <summary class="admin-h">📄 Component 1 — source passage</summary>
                     <p style="font-size:0.85rem; opacity:0.82; margin:0 0 10px 0;">This is the <strong>same</strong> source text and rich-text toolbar as <strong>AI → Source Text</strong> (one <code>#ai-input</code> — always shown here for Component 1 booklet editing). <strong>Question-focused</strong> excerpt preview is in Lab / Quote Select (header radios), not this full editor. For <strong>Component 2</strong> lessons this block is hidden; use <strong>Component 2 — passages</strong> below.</p>
@@ -3715,6 +3721,19 @@ const app = {
         try { if(typeof app.refreshLessonChromeLite === "function") app.refreshLessonChromeLite(); else { const lbl = document.getElementById("lbl-title"); if(lbl) lbl.innerText = nt; } } catch(eL) {}
         if(!(opts && opts.noSave) && typeof app.save === "function") app.save({ skipRender: true, silent: true });
         return true;
+    },
+    /** v137: teacher switched every line number off for this lesson (Passage tab → Show line numbers). Component 1 only — C2 has its own switch. */
+    lineNumbersOff: function() {
+        return !!(appData && appData.meta && appData.meta.lineNumbers === "hide" && appData.component !== 2);
+    },
+    /** v137: "line 4" / "lines 1–5" for students — or a plain phrase when line numbers are switched off. */
+    lineSpanLabel: function(from, to) {
+        if(app.lineNumbersOff()) return "this part of the text";
+        return from === to ? ("line " + from) : ("lines " + from + "\u2013" + to);
+    },
+    applyLineNumbersVisibility: function() {
+        try { document.documentElement.classList.toggle("aa-no-line-numbers", app.lineNumbersOff()); } catch(e) {}
+        try { const cb = document.getElementById("line-numbers-switch"); if(cb) cb.checked = !app.lineNumbersOff(); const w = document.getElementById("line-numbers-switch-wrap"); if(w) w.style.display = (appData && appData.component === 2) ? "none" : "flex"; } catch(e2) {}
     },
     /** v137: lesson title made safe for a download file name. */
     lessonFileBaseName: function(fallback) {
@@ -6348,6 +6367,10 @@ const app = {
     },
     /** True when any active level has worksheet games ticked — the worksheet is then laid out question by question. */
     worksheetGamesByQuestionActive: function() {
+        /* v137: Running order → Games chooses the layout; each level's games stay as set on the Levels tab either way. */
+        const lay = appData && appData.settings ? appData.settings.worksheetGamesLayout : "";
+        if(lay === "together") return false;
+        if(lay === "perQuestion") return true;
         const act = app.getActiveLevels ? app.getActiveLevels() : [];
         return act.some(l => app.getWorksheetGamesForLevel(l).length > 0);
     },
@@ -18977,7 +19000,7 @@ const app = {
                 useExcerpt = true;
                 const spanLab = anchorWin && (lineWinResolved.anchorStart || lineWinResolved.anchorEnd)
                     ? ((lineWinResolved.anchorStart ? ("“" + app.escapeHtml(lineWinResolved.anchorStart) + "”") : "start of insert") + " → " + (lineWinResolved.anchorEnd ? ("“" + app.escapeHtml(lineWinResolved.anchorEnd) + "”") : "end of insert"))
-                    : (labelRange && labelRange.from === labelRange.to ? `line ${labelRange.from}` : (labelRange ? `lines ${labelRange.from}–${labelRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`)));
+                    : (labelRange ? app.lineSpanLabel(labelRange.from, labelRange.to) : app.lineSpanLabel(lineRange.from, lineRange.to));
                 const bannerNote = anchorWin
                     ? "Phrase anchors"
                     : "Exam-style window";
@@ -23177,6 +23200,7 @@ const ui = {
     },
     init: function() {
         ui._initInProgress = true;
+        try { if(app.applyLineNumbersVisibility) app.applyLineNumbersVisibility(); } catch(eLn) {}
         try { if(ui._bindQuestionKeyWords) ui._bindQuestionKeyWords(); } catch(eQkw) {}
         try {
             /** Neither the dev/build ribbon nor the teacher "Data" (Editing Suite) button belong in front of a student — hide both for standalone/exported lessons. */
@@ -27034,7 +27058,7 @@ const ui = {
         const affirmTeacherPreview = !!(userState && userState.teacherPreviewAffirmStep);
         if((appData.isStandalone || affirmTeacherPreview) && displayLineRange && hasSource && (levelEntry.passageConfirmLinesFirst === true || levelEntry.passageConfirmLinesFirst === "true")) {
             if(!userState.passageExamAckMap || typeof userState.passageExamAckMap !== "object") userState.passageExamAckMap = {};
-            const spanAck = displayLineRange.from === displayLineRange.to ? `line ${displayLineRange.from}` : `lines ${displayLineRange.from}–${displayLineRange.to}`;
+            const spanAck = app.lineSpanLabel(displayLineRange.from, displayLineRange.to);
             const ackKey = `L${level}_q:${normId(currentQId || "")}_affirm:${displayLineRange.from}-${displayLineRange.to}`;
             if(!userState.passageExamAckMap[ackKey]) {
                 const tPanelEarly = document.getElementById("selection-top-panel");
@@ -27618,10 +27642,10 @@ const ui = {
             item: i
         }));
         if(lessonQuotesOutsideExamWindow.length && lineRange && hasSource) {
-            const span = displayLineRange && displayLineRange.from === displayLineRange.to ? `line ${displayLineRange.from}` : (displayLineRange ? `lines ${displayLineRange.from}–${displayLineRange.to}` : (lineRange.from === lineRange.to ? `line ${lineRange.from}` : `lines ${lineRange.from}–${lineRange.to}`));
+            const span = displayLineRange ? app.lineSpanLabel(displayLineRange.from, displayLineRange.to) : app.lineSpanLabel(lineRange.from, lineRange.to);
             lessonQuotesOutsideExamWindow.forEach(i => {
                 const q = getQuote(i);
-                if(q) reasonMap.set(app.quoteKey(q), `Not from the ${span} you were asked to use — mark as Not strong.`);
+                if(q) reasonMap.set(app.quoteKey(q), `Not from ${app.lineNumbersOff() ? "the part of the text" : "the " + span} you were asked to use — mark as Not strong.`);
             });
         }
         let correctItemsInRangeMain = (!lineRange || !hasSource)
@@ -35299,6 +35323,16 @@ const admin = {
         if(typeof app.save === "function") app.save({ skipQuestionPersist: true });
         if(typeof admin.fillC2PooledEditorFromLayout === "function") admin.fillC2PooledEditorFromLayout();
         if(typeof admin.refreshC2LabPassageDisplay === "function") admin.refreshC2LabPassageDisplay();
+    },
+    /** v137: Passage tab → Show line numbers (Component 1). Off = no numbering anywhere students or printouts see it. */
+    setLineNumbersShown: function(on) {
+        if(!appData) return;
+        if(!appData.meta) appData.meta = {};
+        if(on) delete appData.meta.lineNumbers; else appData.meta.lineNumbers = "hide";
+        app.save({ skipRender: false });
+        app.applyLineNumbersVisibility();
+        try { if(typeof ui !== "undefined" && ui.init) ui.init(); } catch(e) {}
+        try { if(admin.renderWorksheetPreview && document.getElementById("ws-preview-overlay") && !document.getElementById("ws-preview-overlay").classList.contains("hidden")) admin.renderWorksheetPreview(); } catch(e2) {}
     },
     /** v132 numbered C2: Passage tab checkbox — show or hide line numbers for this lesson. */
     setC2LineNumbersShown: function(on) {
@@ -43694,7 +43728,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 <option value="together" ${byQ ? "" : "selected"}>All together, after all the questions</option></select></div>`;
         if(byQ) {
             /* Games attached to questions: every question in turn, with its own games above / below it. */
-            h += `<div class="wsp-note">The sheet, top to bottom. For each question choose which games go <strong>before</strong> or <strong>after</strong> it and use ↑ ↓ to order them — each question keeps its own arrangement. The same settings show under <strong>Questions</strong> below and in the Levels tab’s Worksheet column. Setting every game to Off on every question returns to one block of games after all the questions.</div>`;
+            h += `<div class="wsp-note">The sheet, top to bottom. For each question choose which games go <strong>before</strong> or <strong>after</strong> it and use ↑ ↓ to order them — each question keeps its own arrangement. The same settings show under <strong>Questions</strong> below and in the Levels tab’s Worksheet column. Choose <strong>All together</strong> in <strong>Games</strong> above for one block of games after all the questions.</div>`;
             const gLabel = (k) => (app.WORKSHEET_GAMES.find(g => g.key === k) || {}).label || k;
             const qsRO = (r.questions || []).filter(q => !q.hidden);
             const sel = (lvl, k, cur) => `<select style="font-size:0.85em;" onchange="admin.wsPrevSetGamePlacement(${lvl}, '${k}', this.value)">
@@ -43735,11 +43769,13 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 deviceMatch: !!(secOn.deviceMatch && r.showDeviceMatch)
             };
             let ordNum = 0;
-            h += ordW.map((k, i) => `<div class="wsp-row" style="display:flex;align-items:center;gap:6px;margin:2px 0;${printsW[k] ? "" : "opacity:0.5;"}">
+            /* v137: Short answer practice prints with Question 1, so it has no row of its own here. */
+            const ordWShown = secOn.questions ? ordW.filter(k => k !== "shortAnswer") : ordW;
+            h += ordWShown.map((k, i) => `<div class="wsp-row" style="display:flex;align-items:center;gap:6px;margin:2px 0;${printsW[k] ? "" : "opacity:0.5;"}">
                 <span style="min-width:1.4em;text-align:right;opacity:0.7;">${printsW[k] ? (++ordNum) + "." : "–"}</span>
                 <span style="flex:1;">${esc(k === "questions" ? "All the questions (with answer lines)" : (app.WORKSHEET_ORDER_LABELS[k] || k))}${printsW[k] ? "" : ` <em style="font-size:0.85em;">— not on this sheet</em>`}</span>
                 <button type="button" class="btn btn-outline btn-small" ${i === 0 ? "disabled" : ""} title="Move up" onclick="admin.wsPrevMoveSection('${k}', -1)">↑</button>
-                <button type="button" class="btn btn-outline btn-small" ${i === ordW.length - 1 ? "disabled" : ""} title="Move down" onclick="admin.wsPrevMoveSection('${k}', 1)">↓</button>
+                <button type="button" class="btn btn-outline btn-small" ${i === ordWShown.length - 1 ? "disabled" : ""} title="Move down" onclick="admin.wsPrevMoveSection('${k}', 1)">↓</button>
             </div>`).join("");
             h += `<div class="wsp-row" style="margin-top:6px;"><button type="button" class="btn btn-outline btn-small" onclick="admin.wsPrevResetSectionOrder()">Reset order</button></div>`;
         }
@@ -43776,6 +43812,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         /* --- Questions --- */
         const qs = r.questions || [];
         h += `<details class="wsp-sec" data-k="questions" ${isOpen("questions", true) ? "open" : ""}><summary>Questions (${qs.filter(q => !q.hidden).length} of ${qs.length} on the sheet)</summary><div class="wsp-sec-body">`;
+        /* v137: say so when a lesson question has no wording — it can't print, and otherwise just vanishes from this list. */
+        const noWording = (Array.isArray(appData.questions) ? appData.questions : []).filter(q => q && q.id && !String(q.prompt || "").trim() && !qs.some(x => String(x.id) === String(q.id))
+            && (appData.items || []).some(it => it && Array.isArray(it.questionIds) && it.questionIds.some(id => String(id).toLowerCase() === String(q.id).toLowerCase())));
+        if(noWording.length) h += `<div class="wsp-note" style="border-left:3px solid var(--error);padding-left:6px;margin-bottom:6px;">${noWording.map(q => esc(app.worksheetQuestionHeadingLabel ? app.worksheetQuestionHeadingLabel(q) : String(q.id).toUpperCase())).join(", ")} ${noWording.length === 1 ? "has" : "have"} no question wording saved, so ${noWording.length === 1 ? "it doesn’t" : "they don’t"} print. Add the wording on the <strong>Questions</strong> tab.</div>`;
         if(!qs.length) h += `<div class="wsp-note">No focus questions with text. Add them on the Questions tab.</div>`;
         qs.forEach(q => {
             /* Attribute-safe: escapeHtml leaves " alone, so JSON quotes cut the onchange attribute short ("Unexpected end of input"). */
@@ -44001,13 +44041,18 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const act = app.getActiveLevels ? app.getActiveLevels() : [];
         const gameKeys = app.WORKSHEET_GAMES.map(g => g.key);
         if(mode === "perQuestion") {
-            const secOn = app.getWorksheetSections();
-            const want = gameKeys.filter(k => secOn[k]);
-            if(!want.length) { alert("Tick at least one game under On the sheet first, then choose After each question."); admin.renderWorksheetPreview(); return; }
-            act.forEach(l => { const have = app.getWorksheetGamesForLevel(l); want.forEach(k => { if(!have.includes(k)) app.setWorksheetGamePlacement(l, k, "after"); }); });
+            /* Each question gets the games ticked for its level on the Levels tab. Only when no level has any games yet
+               does it start every level from the games ticked under On the sheet, so the sheet isn't left with none. */
+            if(!act.some(l => app.getWorksheetGamesForLevel(l).length > 0)) {
+                const secOn = app.getWorksheetSections();
+                const want = gameKeys.filter(k => secOn[k]);
+                if(!want.length) { alert("No games are set yet. Tick games for each level in the Levels tab's Worksheet column (or under On the sheet), then choose After each question."); admin.renderWorksheetPreview(); return; }
+                act.forEach(l => want.forEach(k => app.setWorksheetGamePlacement(l, k, "after")));
+            }
+            appData.settings.worksheetGamesLayout = "perQuestion";
         } else {
-            const lb = appData.settings.levelBank || {};
-            Object.keys(lb).forEach(l => { if(lb[l]) { lb[l].worksheetGames = []; lb[l].worksheetGamesBefore = []; } });
+            /* Keep each level's games (Levels tab) — they come back if you switch to After each question again. */
+            appData.settings.worksheetGamesLayout = "together";
         }
         app.save();
         if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
@@ -44024,11 +44069,14 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const full = app.getWorksheetSectionOrder();
         /* In per-question mode the list hides "shortAnswer" — move among the visible entries, keep it in place. */
         const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
-        const ord = byQ ? full.filter(k => k !== "shortAnswer" && k !== "questions") : full;
+        /* v137: with question headings on, Short answer practice prints with Q1 and has no row — skip over it too. */
+        const saHidden = !byQ && !!(app.getWorksheetSections && app.getWorksheetSections().questions);
+        const ord = byQ ? full.filter(k => k !== "shortAnswer" && k !== "questions") : (saHidden ? full.filter(k => k !== "shortAnswer") : full);
         const i = ord.indexOf(key), j = i + (dir < 0 ? -1 : 1);
         if(i < 0 || j < 0 || j >= ord.length) return;
         const t = ord[i]; ord[i] = ord[j]; ord[j] = t;
         if(byQ) { ["questions", "shortAnswer"].forEach(fk => { const at = full.indexOf(fk); if(at >= 0) ord.splice(Math.min(at, ord.length), 0, fk); }); }
+        else if(saHidden) { const at = full.indexOf("shortAnswer"); if(at >= 0) ord.splice(Math.min(at, ord.length), 0, "shortAnswer"); }
         appData.settings.worksheetSectionOrder = ord;
         app.save();
         admin.renderWorksheetPreview();
@@ -44043,11 +44091,6 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const cur = appData.settings.worksheetSections && typeof appData.settings.worksheetSections === "object" ? appData.settings.worksheetSections : {};
         cur[key] = !!on;
         appData.settings.worksheetSections = cur;
-        /* v137: in the per-question layout a newly ticked game goes after each question, rather than sitting unused. */
-        if(on && app.WORKSHEET_GAMES.some(g => g.key === key) && app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive()) {
-            (app.getActiveLevels ? app.getActiveLevels() : []).forEach(l => { if(!app.getWorksheetGamesForLevel(l).includes(key)) app.setWorksheetGamePlacement(l, key, "after"); });
-            if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
-        }
         app.save();
         admin.renderWorksheetPreview();
     },
@@ -44524,7 +44567,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 const marks = (app.getExamMarksForQuestionId ? app.getExamMarksForQuestionId(q.id) : null) || (msEntry && msEntry.maxMarks) || null;
                 const lineRef = q.lineRef ? String(q.lineRef).trim() : "";
                 let heading = questionLabel;
-                if(lineRef) heading += ` — Read lines ${lineRef}`;
+                if(lineRef && !app.lineNumbersOff()) heading += ` — Read lines ${lineRef}`;
                 if(marks) heading += `   [${marks} marks]`;
                 content += `<h3 style="margin:12px 0 3px 0;font-size:11pt;">${app.escapeHtml(heading)}</h3>`;
                 if(wsSec.questionText) content += `<p style="font-size:10pt;margin:0 0 6px 0;line-height:1.35;"><strong>${app.worksheetPromptHtml(wsQclean(p))}</strong></p>`;
@@ -44908,6 +44951,16 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                 if(opts._inner) return { blocks: blocks, answerKeyHtml: answerKeyHtml };
                 const order = app.getWorksheetSectionOrder ? app.getWorksheetSectionOrder() : Object.keys(blocks);
                 let body = divOpen + order.map(k => blocks[k] || "").join("");
+                /* v137: Short answer practice belongs to Question 1 — print it straight after Q1, not after the last question. */
+                const qsSA = (wsMark.qStarts || []);
+                if(blocks.shortAnswer && wsSec.questions && qsSA.length) {
+                    const fqId = Array.isArray(appData.questions) && appData.questions[0] ? normWsQid(appData.questions[0].id) : "";
+                    let qiSA = qsSA.findIndex(x => normWsQid(x.qid) === fqId);
+                    if(qiSA < 0) qiSA = 0;
+                    const cutSA = qiSA + 1 < qsSA.length ? qsSA[qiSA + 1].at : wsMark.shortAnswer;
+                    const qBlockSA = content.slice(wsMark.questions, cutSA) + blocks.shortAnswer + content.slice(cutSA, wsMark.shortAnswer);
+                    body = divOpen + order.map(k => k === "questions" ? qBlockSA : (k === "shortAnswer" ? "" : (blocks[k] || ""))).join("");
+                }
                 /* Levels tab → Worksheet ticked on any level: lay the sheet out question by question, each question followed
                    by the games ticked for its level, built from that question's quotes only (Order of sections sets their order). */
                 const qStarts = (wsMark.qStarts || []).slice();
@@ -45134,7 +45187,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             let h = '<section class="text' + (si ? " next" : "") + '">';
             if(sec.head) h += '<div class="line-row intro"><span class="line-num"></span><span class="line-text"><span class="fit">' + sec.head + "</span></span></div>";
             if(sec.lines) h += sec.lines.map(function(l) {
-                return '<div class="line-row' + (l.para ? " para" : "") + '"><span class="line-num">' + (l.n % 5 === 0 ? l.n : "") + '</span><span class="line-text">' + l.html + "</span></div>";
+                return '<div class="line-row' + (l.para ? " para" : "") + '"><span class="line-num">' + (l.n % 5 === 0 && !app.lineNumbersOff() ? l.n : "") + '</span><span class="line-text">' + l.html + "</span></div>";
             }).join("\n");
             else h += sec.paras.map(function(p) { return '<div class="line-row prose"><span class="line-num"></span><span class="line-text">' + p + "</span></div>"; }).join("\n");
             if(sec.tail) h += '<div class="line-row author"><span class="line-num"></span><span class="line-text"><span class="fit">' + sec.tail + "</span></span></div>";
