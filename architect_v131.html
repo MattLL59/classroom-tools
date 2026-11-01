@@ -43688,6 +43688,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const byQ = app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive();
         const secOn = app.getWorksheetSections();
         h += `<details class="wsp-sec" data-k="order" ${isOpen("order", true) ? "open" : ""}><summary>Running order</summary><div class="wsp-sec-body">`;
+        /* v137: one switch for where the games go — after each question (built from that question's quotes) or all together. */
+        h += `<div class="wsp-row" style="margin:0 0 8px 0;"><label for="wsp-games-layout" style="font-weight:600;">Games</label><select id="wsp-games-layout" onchange="admin.wsPrevSetGamesLayout(this.value)">
+                <option value="perQuestion" ${byQ ? "selected" : ""}>After each question (its own quotes)</option>
+                <option value="together" ${byQ ? "" : "selected"}>All together, after all the questions</option></select></div>`;
         if(byQ) {
             /* Games attached to questions: every question in turn, with its own games above / below it. */
             h += `<div class="wsp-note">The sheet, top to bottom. For each question choose which games go <strong>before</strong> or <strong>after</strong> it and use ↑ ↓ to order them — each question keeps its own arrangement. The same settings show under <strong>Questions</strong> below and in the Levels tab’s Worksheet column. Setting every game to Off on every question returns to one block of games after all the questions.</div>`;
@@ -43721,7 +43725,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         } else {
             /* One block of games for the whole sheet: move the questions block and the games as before. */
             const ordW = app.getWorksheetSectionOrder();
-            h += `<div class="wsp-note">The sheet, top to bottom: all the questions together and the games as blocks — move them ↑ ↓ (e.g. games first). To put games between particular questions instead, set <strong>Games with this question</strong> to Before or After under <strong>Questions</strong> below (or tick the Levels tab’s Worksheet column); this list then shows each question with its own games.</div>`;
+            h += `<div class="wsp-note">The sheet, top to bottom: all the questions together and the games as blocks — move them ↑ ↓ (e.g. games first). To give each question its own games instead, choose <strong>After each question</strong> in <strong>Games</strong> above.</div>`;
             const printsW = {
                 questions: !!secOn.questions,
                 shortAnswer: !!(secOn.shortAnswer && hasShortModel),
@@ -43990,6 +43994,25 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
         admin.renderWorksheetPreview();
     },
+    /** v137: Running order → Games. "perQuestion" puts every game ticked under On the sheet after each level's question
+        (the per-question layout); "together" clears the per-question games so they print as blocks after all the questions. */
+    wsPrevSetGamesLayout: function(mode) {
+        if(!appData.settings) appData.settings = {};
+        const act = app.getActiveLevels ? app.getActiveLevels() : [];
+        const gameKeys = app.WORKSHEET_GAMES.map(g => g.key);
+        if(mode === "perQuestion") {
+            const secOn = app.getWorksheetSections();
+            const want = gameKeys.filter(k => secOn[k]);
+            if(!want.length) { alert("Tick at least one game under On the sheet first, then choose After each question."); admin.renderWorksheetPreview(); return; }
+            act.forEach(l => { const have = app.getWorksheetGamesForLevel(l); want.forEach(k => { if(!have.includes(k)) app.setWorksheetGamePlacement(l, k, "after"); }); });
+        } else {
+            const lb = appData.settings.levelBank || {};
+            Object.keys(lb).forEach(l => { if(lb[l]) { lb[l].worksheetGames = []; lb[l].worksheetGamesBefore = []; } });
+        }
+        app.save();
+        if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
+        admin.renderWorksheetPreview();
+    },
     wsPrevSetGamePlacement: function(level, key, where) {
         app.setWorksheetGamePlacement(level, key, where);
         app.save();
@@ -44020,6 +44043,11 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         const cur = appData.settings.worksheetSections && typeof appData.settings.worksheetSections === "object" ? appData.settings.worksheetSections : {};
         cur[key] = !!on;
         appData.settings.worksheetSections = cur;
+        /* v137: in the per-question layout a newly ticked game goes after each question, rather than sitting unused. */
+        if(on && app.WORKSHEET_GAMES.some(g => g.key === key) && app.worksheetGamesByQuestionActive && app.worksheetGamesByQuestionActive()) {
+            (app.getActiveLevels ? app.getActiveLevels() : []).forEach(l => { if(!app.getWorksheetGamesForLevel(l).includes(key)) app.setWorksheetGamePlacement(l, key, "after"); });
+            if(admin.renderLevelBank) { try { admin.renderLevelBank(); } catch(e) {} }
+        }
         app.save();
         admin.renderWorksheetPreview();
     },
