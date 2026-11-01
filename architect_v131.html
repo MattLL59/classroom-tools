@@ -7631,8 +7631,8 @@ const app = {
         const bank = app.getLevelBank();
         const entry = bank && bank[lvl] ? bank[lvl] : {};
         const mode = (entry.c2Source === "21st" || entry.c2Source === "19th" || entry.c2Source === "both") ? entry.c2Source : "both";
-        if(mode === "19th") return "19th-century extract";
-        if(mode === "21st") return "Modern text";
+        if(mode === "19th") return app.c2TextLabel("19th", "19th-century extract");
+        if(mode === "21st") return app.c2TextLabel("21st", "Modern text");
         if(mode === "both") return "Both passages";
         return "";
     },
@@ -12362,6 +12362,15 @@ const app = {
     /** v132: lesson built by the lesson-pack tools (meta.lessonFile) — its text is copied from Word, so it is already clean. */
     isLessonFileLesson: function() {
         return !!(appData && appData.meta && appData.meta.lessonFile && typeof appData.meta.lessonFile === "object");
+    },
+    /** v138: name of a Component 2 text slot ("21st" / "19th") on screen. A lesson file's texts are "Text 1" / "Text 2" (or the
+        names it gives in meta.c2TextLabels); past papers keep the usual names (fallback). */
+    c2TextLabel: function(view, fallback) {
+        const v = view === "19th" ? "19th" : "21st";
+        const custom = appData && appData.meta && appData.meta.c2TextLabels;
+        if(custom && typeof custom === "object" && String(custom[v] || "").trim()) return String(custom[v]).trim();
+        if(app.isLessonFileLesson()) return v === "19th" ? "Text 2" : "Text 1";
+        return fallback;
     },
     /** v132: skip the PDF glued-word repair (it splits real words: Himalayas → “Him a lay as”) for numbered C2 lessons and lesson-file lessons. */
     skipPassageGlueRepair: function() {
@@ -35444,7 +35453,7 @@ const admin = {
             btn.classList.toggle("btn-outline", !on);
         });
         const lbl = document.getElementById("c2-pooled-editor-label");
-        if(lbl) lbl.textContent = v === "19th" ? "19th C — question paper passage" : "Modern text — resource passage";
+        if(lbl) lbl.textContent = (app.isLessonFileLesson && app.isLessonFileLesson()) ? app.c2TextLabel(v, "") : (v === "19th" ? "19th C — question paper passage" : "Modern text — resource passage"); /* v138 */
     },
     bindC2SourceEditorsOnce: function() {
         const el = document.getElementById("c2-pooled-editor");
@@ -35798,7 +35807,7 @@ const admin = {
         try {
             if(!appData || appData.component !== 2) return;
             if(!admin.hasC2DualSource || !admin.hasC2DualSource()) return;
-            const label = (v) => v === "19th" ? "19th-century text" : "Modern text";
+            const label = (v) => v === "19th" ? app.c2TextLabel("19th", "19th-century text") : app.c2TextLabel("21st", "Modern text");
             const cur = (app.getEffectiveLevel && app.getEffectiveLevel()) || userState.level || 1;
             const curPassage = admin.getC2PassageForLevel(cur);
             if(curPassage === view || curPassage === "both") return;
@@ -35869,6 +35878,11 @@ const admin = {
                     btn.style.background = (btn.dataset.c2view || "") === view ? "rgba(0,150,136,0.12)" : "";
                 }
             });
+        });
+        /* v138: lesson files show Text 1 / Text 2 (app.c2TextLabel); the button's own wording is kept for past papers. */
+        document.querySelectorAll("[data-c2view], [data-c2adminview]").forEach(function(btn) {
+            if(btn.dataset.c2DefaultLabel == null) btn.dataset.c2DefaultLabel = btn.textContent;
+            btn.textContent = app.c2TextLabel(btn.dataset.c2view || btn.dataset.c2adminview, btn.dataset.c2DefaultLabel);
         });
         const lb = document.getElementById("level-bank-editor");
         const adm = document.getElementById("modal-admin");
@@ -42225,8 +42239,8 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const c2CellHtml = showC2Col
                 ? `<select data-lvl="${lvl}" data-key="c2Source" class="level-bank-input level-bank-c2-source" title="${app.escapeHtml(c2Title)}" ${dual ? "" : "disabled"}>
                         <option value="both" ${c2Val === "both" ? "selected" : ""}>Both</option>
-                        <option value="21st" ${c2Val === "21st" ? "selected" : ""}>Modern text</option>
-                        <option value="19th" ${c2Val === "19th" ? "selected" : ""}>19th C</option>
+                        <option value="21st" ${c2Val === "21st" ? "selected" : ""}>${app.escapeHtml(app.c2TextLabel("21st", "Modern text"))}</option>
+                        <option value="19th" ${c2Val === "19th" ? "selected" : ""}>${app.escapeHtml(app.c2TextLabel("19th", "19th C"))}</option>
                     </select>`
                 : "";
             /* Pts: when no override is typed, show the marks read from the question ("[5]") greyed in, so it's clear they are set. */
