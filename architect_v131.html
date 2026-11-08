@@ -8100,11 +8100,12 @@ const app = {
     },
     shouldShowCommitAnswerPanel: function() {
         const level = app.getEffectiveLevel();
-        if(app.isShortAnswerLevel && app.isShortAnswerLevel(level)) return false;
         const levelBank = app.getLevelBank();
         const levelEntry = levelBank && levelBank[level] ? levelBank[level] : {};
         const ids = app.resolveQuestionIdsForLevel(level);
         if(!ids || ids.length <= 1) return false;
+        /* v141: Short ans used to hide this panel outright; a route of short questions needs its Next / Previous buttons. */
+        if(app.isShortAnswerLevel && app.isShortAnswerLevel(level) && !app.isFreeQuestionNavigation()) return false;
         const deskQ = Array.isArray(userState.deskQueue) ? userState.deskQueue : [];
         if(deskQ.length > 0) return false;
         const shortAns = (app.isComponent2ShortAnswerQuestion && app.isComponent2ShortAnswerQuestion(level)) || levelEntry.shortAnswersOnly === true;
@@ -8213,8 +8214,21 @@ const app = {
         if(idsOnLevel.length > 1) {
             const qIdx = (userState.currentQuestionIndexByLevel && typeof userState.currentQuestionIndexByLevel[lvl] === "number")
                 ? userState.currentQuestionIndexByLevel[lvl] : 0;
+            /* v141: a route moves on (to its next question, or after its last question to the next level) only once THIS question has its own answer. */
+            {
+                const ownKeyAll = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvl) : (String(lvl) + "_" + qIdx);
+                const ownAll = String((userState.questionEssays && userState.questionEssays[ownKeyAll]) || "").replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
+                if(ownAll.length < 3) return false;
+            }
             if(qIdx < idsOnLevel.length - 1) {
                 if(!app.hasShortAnswerContentForLevel(lvl)) return false;
+                /* v141: in a route, only THIS question's own answer counts — the level-wide check also saw earlier questions'
+                   answers, so returning to Quote Select skipped a question. */
+                {
+                    const ownKey = app.getQuestionEssayStorageKey ? app.getQuestionEssayStorageKey(lvl) : (String(lvl) + "_" + qIdx);
+                    const own = String((userState.questionEssays && userState.questionEssays[ownKey]) || "").replace(/^(?:Question\s+\d+|Q\d+\s*[.:)]?\s*|\[Q\d+\]\s*)/i, "").trim();
+                    if(own.length < 3) return false;
+                }
                 return app.advanceSelectionQuestionIfComplete(Object.assign({}, opts, { afterShortAnswerQuote: true }));
             }
         }
@@ -12369,6 +12383,16 @@ const app = {
     /** v132: lesson built by the lesson-pack tools (meta.lessonFile) — its text is copied from Word, so it is already clean. */
     isLessonFileLesson: function() {
         return !!(appData && appData.meta && appData.meta.lessonFile && typeof appData.meta.lessonFile === "object");
+    },
+    /** v140: a lesson file's C2 text is already clean HTML from Word, so show it as it is (bold, italic, underline kept)
+        instead of the PDF clean-up round trip through plain text, which drops every inline tag. null = use the usual path. */
+    c2LessonFileRichHtml: function(html) {
+        if(!app.isLessonFileLesson() || app.isC2NumberedLesson()) return null;
+        const s = String(html || "").trim();
+        if(!s || !app.passageHtmlLooksLikeMarkup(s) || /source-with-line-numbers|source-line-row|<style\b/i.test(s)) return null;
+        const clean = app.sanitizeSourceHtml(s, { skipHoistRepair: true });
+        if(!clean || !String(clean).trim()) return null;
+        return String(clean).replace(/<p>/gi, '<p style="margin:0 0 16px 0;">');
     },
     /** v138: name of a Component 2 text slot ("21st" / "19th") on screen. A lesson file's texts are "Text 1" / "Text 2" (or the
         names it gives in meta.c2TextLabels); past papers keep the usual names (fallback). */
@@ -17646,6 +17670,8 @@ const app = {
                 }
             } catch(eC2) {}
         }
+        const richLf = app.c2LessonFileRichHtml(s); /* v140 */
+        if(richLf) return (headBlock ? headBlock : "") + richLf;
         const useHtmlExtract = app.passageHtmlLooksLikeMarkup(s);
         let basis = s;
         if(useHtmlExtract) {
@@ -19297,7 +19323,11 @@ const app = {
                 if(merged.indexOf(l) < 0) merged.push(l);
             });
             merged.sort(function(a, b) { return a - b; });
-            if(questions.length >= 2 && merged.length < questions.length) {
+            /* v141: only add levels when some questions have no level yet — a lesson file's routes cover all its questions on fewer levels. */
+            const coveredQ = new Set();
+            merged.forEach(function(l) { const e = bank && bank[l] ? bank[l] : {}; (Array.isArray(e.questionIds) ? e.questionIds : []).forEach(function(id) { coveredQ.add(app.normQuestionId(id)); }); });
+            const allCovered = questions.length > 0 && questions.every(function(q) { return q && q.id && coveredQ.has(app.normQuestionId(q.id)); });
+            if(!allCovered && questions.length >= 2 && merged.length < questions.length) {
                 return Array.from({ length: Math.min(questions.length, ARCHITECT_MAX_LEVEL) }, function(_, i) { return i + 1; });
             }
             return merged.length ? merged : fromSettings;
@@ -20027,7 +20057,9 @@ const app = {
                 const first = safe.questions[0] && safe.questions[0].id ? safe.questions[0].id : null;
                 questionIds = first ? [first] : [];
             }
-            questionIds = questionIds.length ? [questionIds[0]] : [];
+            /* v141: Differentiated mode keeps a lesson file's route (several questions on one level, Next/Previous between them).
+               Exam mode stays one level -> one question. */
+            if(!(safe.settings && safe.settings.examTrainingMode === false)) questionIds = questionIds.length ? [questionIds[0]] : [];
             let pointsRequired = (r.pointsRequired != null && r.pointsRequired !== "") ? parseInt(r.pointsRequired, 10) : (r.answersRequired != null && r.answersRequired !== "") ? parseInt(r.answersRequired, 10) : null;
             if((!pointsRequired || pointsRequired < 1) && questionIds.length > 0 && Array.isArray(safe.questions) && safe.questions.length) {
                 const norm = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
@@ -35403,6 +35435,8 @@ const admin = {
             }
             const isHtml = /<(?:\/?(?:p|div|br|b|strong|i|em|u))[\s>]/i.test(str) || str.indexOf("</p>") !== -1 || str.indexOf("</div>") !== -1 || str.indexOf("<br") !== -1;
             if(isHtml) {
+                const richLf = app.c2LessonFileRichHtml(str); /* v140: keep a lesson file's bold/italic in the editor too */
+                if(richLf) { el.innerHTML = richLf; return; }
                 let workHtml = str;
                 const layoutOpts = typeof app.c2PassageLayoutTightenOpts === "function" ? app.c2PassageLayoutTightenOpts() : { mergeWrapParagraphs: true };
                 if(typeof app.c2PassageHtmlLooksLikeFigureWrap === "function" && app.c2PassageHtmlLooksLikeFigureWrap(workHtml) && typeof app.collapseC2LayoutGhostsInHtml === "function") {
@@ -36439,7 +36473,7 @@ const admin = {
         const prev = Array.isArray(appData.questions) ? appData.questions : [];
         appData.questions = filtered.map((r, i) => {
             let id = r.qid;
-            if(!id || !/^q[\w-]+$/i.test(id)) id = "q" + (i + 1);
+            if(!id || !/^[a-z][\w-]*$/i.test(id)) id = "q" + (i + 1); /* v141: was q-only — renamed lesson-file ids (h1, ih) and broke their level links */
             const old = prev.find(q => q && String(q.id) === id);
             const o = { id, prompt: r.prompt };
             if(!r.prompt && old && old._justAdded) o._justAdded = true; /* v133 */
@@ -42182,9 +42216,15 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
         sel.title = cur
             ? (curPrompt ? admin.formatLevelBankQuestionShortId(cur) + ": " + curPrompt : admin.formatLevelBankQuestionShortId(cur))
             : "Choose a focus question — full wording appears in the list";
+        const routeN = parseInt(sel.dataset.routeCount, 10) || 0; /* v141 */
+        if(cur === "__route__") { const ro = sel.querySelector('option[value="__route__"]'); if(ro && ro.title) sel.title = ro.title; }
         Array.from(sel.options).forEach((opt, oi) => {
             if(!opt.value) {
                 opt.textContent = "—";
+                return;
+            }
+            if(opt.value === "__route__") {
+                opt.textContent = opt.selected ? (routeN + " questions") : (routeN + " questions — students step through them with Next / Previous");
                 return;
             }
             const q = findQ(opt.value);
@@ -42233,7 +42273,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const globalPrompt = (appData.question || (questions[0] && questions[0].prompt) || "").trim();
             const allQuestionsForDropdown = questions.slice();
             const opts = allQuestionsForDropdown.map((q, i) => {
-                const isSel = normQid(q.id) === normQid(currentQid);
+                const isSel = selectedIds.length <= 1 && normQid(q.id) === normQid(currentQid); /* v141: a route selects its own option */
                 const menuLabel = admin.levelBankQuestionMenuLabel(q, globalPrompt, i);
                 const sel = isSel ? " selected" : "";
                 const disabled = assignedElsewhere.has(normQid(q.id)) ? " disabled" : "";
@@ -42245,7 +42285,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const selectTitle = currentQid
                 ? (curPrompt ? admin.formatLevelBankQuestionShortId(currentQid) + ": " + curPrompt : admin.formatLevelBankQuestionShortId(currentQid))
                 : "Choose a focus question — full wording appears in the list";
-            const questionCellHtml = `<select class="level-bank-question-select" data-lvl="${lvl}" title="${app.escapeHtml(selectTitle.slice(0, 400))}"><option value="">—</option>${opts}</select>`;
+            /* v141: a lesson-file route (several questions on this level) — show it as one choice; picking a single question replaces it. */
+            const routeTitle = selectedIds.length > 1 ? selectedIds.map(function(id, k) { const qq = questions.find(x => normQid(x.id) === normQid(id)); return (k + 1) + ". " + (qq ? String(qq.prompt || "") : id); }).join("\n") : "";
+            const routeOpt = selectedIds.length > 1 ? `<option value="__route__" selected title="${app.escapeHtml(routeTitle.slice(0, 1200))}">${selectedIds.length} questions (Next / Previous): ${app.escapeHtml(String((curQ && curQ.prompt) || currentQid).slice(0, 40))}…</option>` : "";
+            const questionCellHtml = `<select class="level-bank-question-select" data-lvl="${lvl}" data-route-count="${selectedIds.length > 1 ? selectedIds.length : 0}" title="${app.escapeHtml((routeTitle || selectTitle).slice(0, 1200))}"><option value="">—</option>${routeOpt}${opts}</select>`;
             const c2Val = (entry.c2Source === "21st" || entry.c2Source === "19th" || entry.c2Source === "both") ? entry.c2Source : "both";
             const c2Title = dual
                 ? "Both = students switch passages with the Modern text / 19th C control (header or Quote Select). Modern or 19th only = that passage only for this level."
@@ -42399,6 +42442,10 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
                     const lvl = parseInt(t.dataset.lvl, 10);
                     const qid = (t.value || "").trim();
                     if(!lvl) return;
+                    if(qid === "__route__") return; /* v141 */
+                    const routeN = parseInt(t.dataset.routeCount, 10) || 0;
+                    if(routeN > 1 && !confirm("Level " + lvl + " has " + routeN + " questions that students step through. Replace them with just this one?")) { t.value = "__route__"; return; }
+                    if(routeN > 1) { t.dataset.routeCount = "0"; const ro = t.querySelector('option[value="__route__"]'); if(ro) ro.remove(); }
                     if(!appData.settings.levelBank) appData.settings.levelBank = JSON.parse(JSON.stringify(defaultData.settings.levelBank));
                     const entry = appData.settings.levelBank[lvl] || {};
                     const nq = (id) => String(id || "").replace(/^q0?/i, "q").toLowerCase();
@@ -44283,7 +44330,7 @@ OUTPUT: ${nWant} lines only (verbatim quotations only — no explanations).`;
             const wsQSet = new Set();
             filtered.forEach((r, i) => {
                 let id = r.qid;
-                if(!id || !/^q[\w-]+$/i.test(id)) id = "q" + (i + 1);
+                if(!id || !/^[a-z][\w-]*$/i.test(id)) id = "q" + (i + 1); /* v141 */
                 if(r.includeWS && r.prompt) {
                     wsQSet.add(normWsQid(id));
                     focusQuestions.push({ id, prompt: r.prompt });
